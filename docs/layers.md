@@ -319,7 +319,7 @@ hook (#14081), `seat()` (#14096).
 **One shape for all three.** As with `Hooks` above:
 
 - The trait and its `register` are in `sunrise-hooks` (engine; no dependencies, so it names no type from above).
-  `sunrise-platform` re-exports them as `sunrise_platform::{settings, pages, hud}`. They take plain data
+  `sunrise-platform` re-exports them as `sunrise_platform::{settings, pages, hud, title}`. They take plain data
   (strings, numbers, translation keys) and no engine type. `sunrise-platform` stays light because the launcher
   and the telemetry server build it.
 - A crate registers a `&'static` value before the game runs (`sunrise-official`'s `register()` for Sunrise,
@@ -538,6 +538,26 @@ fn draw(&self, c: &dyn Container, canvas: &mut dyn hud::Canvas);                
   Without one there is no cost, and vanilla's handling is unchanged.
 - The only text is a stack's shown name. The rest is ids and numbers, so the API names no engine type
   (`ItemStack` stays in the engine).
+
+### Title screen buttons (`sunrise_platform::title`)
+
+Full-width buttons on the title screen, each on its own row below Minecraft Realms, as NeoForge adds Mods.
+The engine's title code names none of them: the platform's mod host adds Mods (`sunrise-mod-host`'s
+`mods_button.rs`), shown while one or more mods are installed.
+
+```rust
+pub struct Title { pub mods: usize }            // what the screen knows: packages in the mods folder
+pub enum Opens { Mods }                         // the engine screen a press opens
+pub trait Button: Sync {
+    fn label(&self) -> &'static str;            // a translation key
+    fn shown(&self, title: &Title) -> bool;     // asked each time the buttons lay out
+    fn opens(&self) -> Opens;
+}
+```
+
+- Rows keep the order buttons registered in; the icon row, Options... and Quit Game move down a row for each
+  shown button, and lift on a short screen so they stay above the copyright line.
+- With no button shown the title screen is vanilla's, pixel for pixel.
 
 ### Lang files (`sunrise_platform::lang`)
 

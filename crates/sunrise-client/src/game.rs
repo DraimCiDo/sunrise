@@ -4926,6 +4926,12 @@ impl Game<'_> {
             // TitleScreen.extractRenderState, then ToastManager over it: vanilla
             // draws the toast manager on every screen, so a pack download or a
             // resource-reload failure still shows on the title (#4428).
+            // The buttons crates add show by what is installed now: the Mods
+            // page's list changes while the title is open.
+            let mods = self.settings.mods.installed.len();
+            if let Some(title) = &mut self.title {
+                title.mods = mods;
+            }
             let drawn = self.draw_title_screen_with_pre_hook(&mut batch);
             if drawn && let Some(title) = &self.title {
                 title.draw_with_items(

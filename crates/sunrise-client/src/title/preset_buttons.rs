@@ -1,5 +1,53 @@
 use super::*;
+use sunrise_hooks::title::Button as AddedButton;
+
+/// The main menu's ids for the buttons crates above the engine add (`sunrise_hooks::title`): this
+/// plus the button's place among the registered ones.
+pub(super) const ADDED_IDS: u8 = 200;
+
+#[cfg(test)]
+thread_local! {
+    /// A test's own title buttons, instead of the game's registered ones: each test runs on its
+    /// thread.
+    pub(super) static TEST_BUTTONS: std::cell::Cell<Option<&'static [&'static dyn AddedButton]>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// The buttons crates registered for the title screen.
+fn registered() -> &'static [&'static dyn AddedButton] {
+    #[cfg(test)]
+    if let Some(buttons) = TEST_BUTTONS.get() {
+        return buttons;
+    }
+    sunrise_hooks::title::engine::all()
+}
+
 impl Title {
+    /// The added buttons the main menu shows now, with their ids, in registration order.
+    fn added_buttons(&self) -> Vec<(u8, &'static dyn AddedButton)> {
+        let title = sunrise_hooks::title::Title::new(self.mods);
+        (ADDED_IDS..)
+            .zip(registered())
+            .filter(|(_, button)| button.shown(&title))
+            .map(|(id, button)| (id, *button))
+            .collect()
+    }
+    /// The added button with main menu id `id`, while it shows.
+    pub(super) fn added_button(&self, id: u8) -> Option<&'static dyn AddedButton> {
+        self.added_buttons()
+            .into_iter()
+            .find_map(|(i, button)| (i == id).then_some(button))
+    }
+    /// The main menu's first row: vanilla's `height / 4 + 48`. With `added` rows below Minecraft
+    /// Realms it lifts on short screens, so Options... and Quit Game stay clear of the copyright
+    /// line drawn at `height - 10`.
+    pub(super) fn main_menu_top(h: f32, added: usize) -> f32 {
+        let top = (h / 4.0).floor() + 48.0;
+        if added == 0 {
+            return top;
+        }
+        top.min(h - 128.0 - 24.0 * added as f32)
+    }
     pub(super) fn buttons(&self, w: f32, h: f32) -> Vec<Button> {
         // The game rules draw and press their own.
         if self.rules.borrow().is_some() {
@@ -20,7 +68,10 @@ impl Title {
         match &self.mode {
             Mode::Main => {
                 let cx = (w / 2.0).floor();
-                let y = (h / 4.0).floor() + 48.0;
+                let added = self.added_buttons();
+                // Each added button takes a row below Minecraft Realms; the rows after move down.
+                let below = 24.0 * added.len() as f32;
+                let y = Self::main_menu_top(h, added.len());
                 let mut buttons = vec![
                     b(
                         cx - 100.0,
@@ -50,7 +101,7 @@ impl Title {
                     ),
                     b(
                         cx - 100.0,
-                        y + 96.0,
+                        y + 96.0 + below,
                         98.0,
                         &lang::get_or("menu.options", "Options..."),
                         true,
@@ -59,7 +110,7 @@ impl Title {
                     .does(crate::widgets::Action::Options),
                     b(
                         cx + 2.0,
-                        y + 96.0,
+                        y + 96.0 + below,
                         98.0,
                         &lang::get_or("menu.quit", "Quit Game"),
                         true,
@@ -67,10 +118,24 @@ impl Title {
                     )
                     .does(crate::widgets::Action::Exit),
                 ];
+                // After Minecraft Realms, so they come before the icon row and Options... for
+                // the keyboard and the narrator too.
+                for (i, (id, button)) in added.into_iter().enumerate() {
+                    buttons.insert(
+                        3 + i,
+                        b(
+                            cx - 100.0,
+                            y + 72.0 + 24.0 * i as f32,
+                            200.0,
+                            &lang::get(button.label()),
+                            true,
+                            id,
+                        ),
+                    );
+                }
                 // CommonButtons' icon buttons; Sunrise's Join a Friend (an
                 // invite code) sits behind vanilla's Friends button.
                 for (i, (key, plain, id, icon)) in [
-                    ("sunrise.mods.screen.title", "Mods", 9, "icon/mods"),
                     ("gui.friends.open", "Friends", 5, "friends/friends"),
                     ("options.language", "Language...", 6, "icon/language"),
                     (
@@ -84,8 +149,8 @@ impl Title {
                 .enumerate()
                 {
                     let mut button = b(
-                        cx - 46.0 + i as f32 * 24.0,
-                        y + 72.0,
+                        cx - 34.0 + i as f32 * 24.0,
+                        y + 72.0 + below,
                         20.0,
                         &lang::get_or(key, plain),
                         id != 5 || crate::net::joins_friends(),
