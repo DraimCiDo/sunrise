@@ -64,6 +64,7 @@ def crate_problems(tree: str, sunrise: set[str], allowed: set[str]) -> list[str]
     return sorted(found)
 
 
+# Temporary gap, not a permanent exception: telemetry leaves the engine and this allowance goes in #2749.
 def allowed_targets(layers: dict) -> set[str]:
     """Sunrise crates a lower layer may still use (layers.json `allowed`, which only shrinks); never sunrise-friends."""
     out = set()
