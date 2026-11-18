@@ -31,7 +31,8 @@ log = "0.4"
 
 [features]
 default = ["sunrise-extras"]
-# Sunrise Extras: the engine's extension points and Play with Friends' hosting. Without it the engine builds as vanilla.
+# Sunrise Extras: the engine's extension points and Play with Friends' hosting. Without it those are off, but this
+# executable still links controllers and its own parts: the vanilla build is `sunrise-game --no-default-features --features audio`.
 sunrise-extras = ["sunrise-game/extension-points", "sunrise-game/friends"]
 
 [build-dependencies]

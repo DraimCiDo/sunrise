@@ -32,6 +32,8 @@ impl<T: ?Sized + 'static> Point<T> {
 
     /// Adds `value` under the toggle `id` (`<crate>.<name>`), before the game starts; dispatched in registration order.
     pub fn register(&self, id: &'static str, value: &'static T) -> Result<(), TooLate> {
+        // Held across the check and the insertion, and by `engine::seal`, so nothing is added after the seal returns.
+        let _seal = SEAL.lock().unwrap_or_else(|e| e.into_inner());
         if SEALED.load(Ordering::Acquire) {
             return Err(TooLate);
         }
@@ -46,6 +48,8 @@ impl<T: ?Sized + 'static> Default for Point<T> {
 }
 
 static SEALED: AtomicBool = AtomicBool::new(false);
+/// Orders registrations against [`engine::seal`].
+static SEAL: Mutex<()> = Mutex::new(());
 /// Toggle ids switched off.
 static INACTIVE: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 /// Bumped on every change of [`INACTIVE`].
@@ -77,6 +81,7 @@ pub mod engine {
 
     /// Refuses registrations from now on. [`crate::engine::seal`] calls it.
     pub fn seal() {
+        let _seal = SEAL.lock().unwrap_or_else(|e| e.into_inner());
         SEALED.store(true, Ordering::Release);
     }
 

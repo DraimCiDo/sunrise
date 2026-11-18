@@ -23,6 +23,7 @@ pub(super) struct Studio {
 }
 
 /// Studio's editor, a Sunrise extra, runs: the vanilla build has no extension points and plays replays without it.
+/// Temporary: this gate leaves the engine with the editor when Replay Studio moves to its own mod (#619).
 pub(super) const EDITOR: bool = cfg!(feature = "extension-points");
 
 impl Studio {
