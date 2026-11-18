@@ -29,6 +29,11 @@ sunrise-reconnect = { path = "../sunrise-reconnect", optional = true }
 sunrise-perf-overlay = { path = "../sunrise-perf-overlay", optional = true }
 log = "0.4"
 
+[features]
+default = ["sunrise-extras"]
+# Sunrise Extras: the engine's extension points and Play with Friends' hosting. Without it the engine builds as vanilla.
+sunrise-extras = ["sunrise-game/extension-points", "sunrise-game/friends"]
+
 [build-dependencies]
 # The build script runs on the host, but embeds resources based on the target OS.
 winresource = "0.1"
