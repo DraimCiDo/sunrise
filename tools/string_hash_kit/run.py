@@ -108,7 +108,7 @@ def generate(copies, fill):
     (src / "copies").mkdir(parents=True)
     (crate / "Cargo.toml").write_text(
         '[package]\nname = "string-hash-kit"\nversion = "0.0.0"\nedition = "2024"\npublish = false\n\n'
-        '[workspace]\n\n[profile.release]\nopt-level = 3\ncodegen-units = 1\nlto = "thin"\n')
+        '[dependencies]\nsafe_arch = "=1.2.0"\n\n[workspace]\n\n[profile.release]\nopt-level = 3\ncodegen-units = 1\nlto = "thin"\n')
     shutil.copyfile(HERE / "bench.rs", src / "main.rs")
     lines = ["//! Written by tools/string_hash_kit/run.py.", "#![allow(dead_code)]", "use std::hint::black_box;", ""]
     utf16, text, fillers = [], [], []
