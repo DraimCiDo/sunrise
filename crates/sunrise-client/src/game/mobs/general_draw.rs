@@ -3,8 +3,10 @@
 //! registered for its type (`register_entity_renderers`), with a frozen copy of the row's synced
 //! attachments. A general type has no look of its own: without a renderer, or
 //! with one that failed until the next resource load, its rows draw nothing.
-use super::Game;
+use super::{Game, entity_culling};
+use glam::DVec3;
 use sunrise_client::mesher::Vertex;
+use sunrise_core::geometry::Vec3;
 
 /// `EntityRenderState` for a general row: its identity, age and pose at the frame's `partial`
 /// tick, interpolated from the tick before as `Entity.getYRot(partial)` does, with no family's
@@ -47,6 +49,8 @@ impl Game<'_> {
         };
         let catalog = super::general::general_type_catalog();
         let partial = alpha as f32;
+        let view_scale = self.view_scale();
+        let now = std::time::Instant::now();
         for (&id, row) in remote
             .general
             .rows
@@ -57,22 +61,43 @@ impl Game<'_> {
             else {
                 continue;
             };
-            let at: [f64; 3] = std::array::from_fn(|k| {
-                row.previous[k] + (row.position[k] - row.previous[k]) * alpha
-            });
+            let position = DVec3::from_array(row.position);
+            let previous = DVec3::from_array(row.previous);
+            let at = previous + (position - previous) * alpha;
+            let bounds =
+                catalog.bounds(row.type_slot, Vec3::new(position.x, position.y, position.z));
+            let range =
+                entity_culling::default_range(entity_culling::at(bounds.size()), view_scale);
+            let offset = at - position;
+            if !self.entity_in_view(
+                camera,
+                position,
+                range,
+                entity_culling::at(bounds.min_position()) + offset,
+                entity_culling::at(bounds.max_position()) + offset,
+            ) {
+                continue;
+            }
+            let section_block = position.floor().as_ivec3().to_array();
+            let y = section_block[1];
+            if self.world.shape.contains_y(y)
+                && !self.renderer.as_ref().is_some_and(|renderer| {
+                    renderer.entity_section_visible(section_block, self.settings.chunk_fade, now)
+                })
+            {
+                continue;
+            }
             let entity = render_state(id as u32, row, partial);
+            let block = at.floor().as_ivec3().to_array();
             let (_, height) = catalog.dimensions(row.type_slot);
-            let eye = (at[1] + height * 0.85).floor() as i32;
-            let light = self
-                .world
-                .light(at[0].floor() as i32, eye, at[2].floor() as i32);
+            let eye = (at.y + height * 0.85).floor() as i32;
+            let light = self.world.light(block[0], eye, block[2]);
             let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
-            let block = at.map(|x| x.floor() as i32);
             self.mod_entity_renderer_geometry(
                 &resolved,
                 &entity,
                 catalog.key(row.type_slot),
-                glam::DVec3::from_array(at) - camera,
+                at - camera,
                 block,
                 packed,
                 out,

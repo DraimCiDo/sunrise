@@ -472,6 +472,16 @@ impl GeneralTypeCatalog {
         })
     }
 
+    /// The type's standing box at `at`, shared by server queries and client culling.
+    pub(super) fn bounds(&self, slot: usize, at: Vec3) -> Aabb {
+        let (width, height) = self.dimensions(slot);
+        let half = width / 2.0;
+        Aabb::new(
+            Vec3::new(at.x - half, at.y, at.z - half),
+            Vec3::new(at.x + half, at.y + height, at.z + half),
+        )
+    }
+
     /// The slot a type key resolved to, if the registry holds it.
     pub fn slot(&self, type_key: &str) -> Option<usize> {
         self.by_key.get(type_key).copied()
@@ -1046,13 +1056,7 @@ impl Entity for GeneralRow {
         self.rotation = rotation;
     }
     fn bounds(&self) -> Aabb {
-        let (width, height) = general_type_catalog().dimensions(self.type_slot);
-        let half = width / 2.0;
-        let at = self.position;
-        Aabb::new(
-            Vec3::new(at.x - half, at.y, at.z - half),
-            Vec3::new(at.x + half, at.y + height, at.z + half),
-        )
+        general_type_catalog().bounds(self.type_slot, self.position)
     }
     fn selector_target(&self) -> Option<Target> {
         // Stage 2 rows never join a world; a selector cannot name one yet.

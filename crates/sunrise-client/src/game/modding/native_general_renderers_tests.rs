@@ -175,8 +175,8 @@ impl mod_api::Hooks for Scene {
     }
 }
 
-/// The camera, south of the rows.
-const CAMERA: glam::DVec3 = glam::DVec3::new(0.0, 70.0, -5.0);
+/// The headless camera just above build height, where vanilla needs no compiled section.
+const CAMERA: glam::DVec3 = glam::DVec3::new(0.0, 321.0, -5.0);
 
 /// The server's spawn of row `id` of `key` at `at`.
 fn spawn(id: i32, key: &str, at: [f64; 3]) -> C {
@@ -227,7 +227,7 @@ fn frame(game: &mut Game<'_>, alpha: f64) -> Vec<Vertex> {
 
 /// The scene on a client (its block atlas loaded) joined to a server through memory, with its
 /// rows shown: `test:missile`
-/// (id 5) going from (0, 70, 0) to (4, 70, 0) with fuel 7, `test:bomb` (6) and `test:plain` (7).
+/// (id 5) going from (0, 321, 0) to (4, 321, 0) with fuel 7, `test:bomb` (6) and `test:plain` (7).
 /// In a child process running only `test`: the registrations are kept once per process.
 fn in_scene(test: &str, check: impl FnOnce(&mut Game<'_>, &Scene)) {
     if std::env::var_os("SUNRISE_GENERAL_RENDERERS_CHILD").is_none() {
@@ -300,7 +300,7 @@ fn in_scene(test: &str, check: impl FnOnce(&mut Game<'_>, &Scene)) {
             }))
             .unwrap();
             for (id, key) in [(5, "test:missile"), (6, "test:bomb"), (7, "test:plain")] {
-                game.handle_packet(spawn(id, key, [0.0, 70.0, 0.0]))
+                game.handle_packet(spawn(id, key, [0.0, 321.0, 0.0]))
                     .unwrap();
                 game.handle_packet(snapshot(id as u32, (id == 5).then_some(7)))
                     .unwrap();
@@ -313,7 +313,7 @@ fn in_scene(test: &str, check: impl FnOnce(&mut Game<'_>, &Scene)) {
                 .rows
                 .get_mut(&5)
                 .unwrap();
-            (row.previous, row.position) = ([0.0, 70.0, 0.0], [4.0, 70.0, 0.0]);
+            (row.previous, row.position) = ([0.0, 321.0, 0.0], [4.0, 321.0, 0.0]);
             (row.previous_rotation, row.rotation) = ([0.0, -20.0], [90.0, 20.0]);
             row.age = 40;
             check(game, &held);
@@ -329,6 +329,16 @@ fn a_row_is_drawn_by_its_types_renderer_at_the_frames_pose_reading_its_synced_fi
     in_scene(
         "a_row_is_drawn_by_its_types_renderer_at_the_frames_pose_reading_its_synced_fields",
         |game, scene| {
+            // A one-plane test frustum: +Z in camera space is in front.
+            game.view_frustum = Some(sunrise_client::gfx::test_frustum([glam::Vec4::Z; 6]));
+            for (id, at) in [
+                (8, [0.0, 321.0, -8.0]),  // behind the camera
+                (9, [0.0, 321.0, 300.0]), // beyond the draw range
+                (10, [0.0, 319.0, 0.0]),  // in build height, no compiled section
+            ] {
+                game.handle_packet(spawn(id, "test:missile", at)).unwrap();
+                game.handle_packet(snapshot(id as u32, Some(99))).unwrap();
+            }
             let out = frame(game, 0.25);
             assert_eq!(
                 out.len(),
