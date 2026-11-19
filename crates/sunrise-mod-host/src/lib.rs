@@ -9,6 +9,8 @@ pub use native_libraries::{GAME_BUILD_ID, RUSTC_VERSION, main};
 mod loading;
 pub use loading::main_with;
 
+mod mods_button;
+
 /// Settles the guest stack policy from the mod engine, then establishes main-thread stack
 /// capacity, before compiler-child handling. A refusal here is the same exit as a stack that
 /// cannot be made large enough.

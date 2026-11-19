@@ -505,6 +505,10 @@ impl Session {
         let rec = self.recorder.lock().unwrap().take()?;
         Some(rec.stop())
     }
+    /// `Connection.isConnected`: the connection is open (a replay's never is).
+    pub fn connected(&self) -> bool {
+        self.writer.lock().is_ok_and(|writer| writer.is_some())
+    }
     /// Whether recording is currently active.
     pub fn is_recording(&self) -> bool {
         self.recorder

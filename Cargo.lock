@@ -4996,6 +4996,7 @@ dependencies = [
  "sunrise-client",
  "sunrise-engine-slots",
  "sunrise-guest-stack",
+ "sunrise-hooks",
  "sunrise-mod-api",
  "sunrise-mod-package",
  "sunrise-mod-points",

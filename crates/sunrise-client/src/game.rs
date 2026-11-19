@@ -1793,6 +1793,10 @@ struct Game<'a> {
     pending_retry: Option<sunrise_hooks::connection::Retry>,
     /// A connection the Disconnected screen makes on its next frame, as that answer asked.
     retry_due: Option<sunrise_hooks::connection::Server>,
+    /// The current connection came from the LAN list (`ServerData.isLan`).
+    lan_session: bool,
+    /// What the window's title last showed: its session part and the language (window_title.rs).
+    window_title: Option<(Option<&'static str>, u64)>,
     /// Replay playback (game/replay.rs), and Sunrise Studio's editor on it (game/studio.rs).
     pub(super) replay: replay::Replay,
     pub(super) studio: studio::Studio,
@@ -4926,6 +4930,12 @@ impl Game<'_> {
             // TitleScreen.extractRenderState, then ToastManager over it: vanilla
             // draws the toast manager on every screen, so a pack download or a
             // resource-reload failure still shows on the title (#4428).
+            // The buttons crates add show by what is installed now: the Mods
+            // page's list changes while the title is open.
+            let mods = self.settings.mods.installed.len();
+            if let Some(title) = &mut self.title {
+                title.mods = mods;
+            }
             let drawn = self.draw_title_screen_with_pre_hook(&mut batch);
             if drawn && let Some(title) = &self.title {
                 title.draw_with_items(
@@ -10377,6 +10387,7 @@ impl Game<'_> {
                     self.track_toggle_screens();
                     self.heal_hold_latches();
                     sunrise_hooks::engine::published(self.is_published());
+                    self.update_window_title();
                     self.report_activity();
                     let target = self.tick_target_millis();
                     let steps = self.clock.advance(elapsed, target);
@@ -11155,6 +11166,8 @@ impl<'a> Game<'a> {
             connection_open: false,
             pending_retry: None,
             retry_due: None,
+            lan_session: false,
+            window_title: None,
             replay: Default::default(),
             studio: Default::default(),
             lan: None,

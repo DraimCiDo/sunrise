@@ -106,6 +106,20 @@ pub mod containers {
     }
 }
 
+/// The buttons a crate adds to the title screen (docs/layers.md, "Platform registries").
+pub mod title {
+    pub use sunrise_hooks::title::{Button, Opens, Refused, Title, register};
+}
+
+/// The multiplayer server list as vanilla stores it (`servers.dat`): read, write, add, remove,
+/// and the lock held while it is read and written back.
+#[cfg(feature = "protocol")]
+pub mod servers {
+    pub use sunrise_protocol::servers::{
+        ServerEntry, load, lock, parse_address, prepend, remove_where, save,
+    };
+}
+
 /// Drawing on the HUD (docs/layers.md, "Platform registries").
 pub mod hud {
     pub use sunrise_hooks::hud::{Canvas, Corner, Layer, Stage, register};

@@ -15,7 +15,8 @@
 //! The platform registries (docs/layers.md, "Platform registries") have the same shape:
 //! [`settings`] for the settings each crate keeps in its own lines, [`pages`] for its settings
 //! pages, [`hud`] for what it draws on the HUD, [`lang`] for the lang files with its text,
-//! [`mod_rows`] for the rows it adds to the Mods screen.
+//! [`mod_rows`] for the rows it adds to the Mods screen, [`title`] for the buttons it adds to
+//! the title screen.
 #![forbid(unsafe_code)]
 
 pub mod connection;
@@ -28,6 +29,7 @@ pub mod pages;
 pub mod perf;
 mod registry;
 pub mod settings;
+pub mod title;
 pub mod tunnel;
 
 use registry::Registry;
@@ -287,6 +289,7 @@ pub mod engine {
         crate::lang::all();
         crate::mod_rows::engine::all();
         crate::containers::engine::any();
+        crate::title::engine::all();
     }
 
     /// [`Hooks::started`].
