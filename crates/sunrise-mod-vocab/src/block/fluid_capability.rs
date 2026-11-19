@@ -266,7 +266,7 @@ impl ResourceHandler<FluidResource> for GameFluids {
             backend.fluid_tank_capacity(self.0, index, &resource.to_stack(1))
         })
     }
-    fn insert(
+    fn insert_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -280,7 +280,7 @@ impl ResourceHandler<FluidResource> for GameFluids {
         let rest = backend.fluid_tank_insert(self.0, index, resource.to_stack(amount), tx);
         amount - rest.map_or(0, |rest| rest.amount.min(amount))
     }
-    fn extract(
+    fn extract_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -404,7 +404,7 @@ impl ResourceHandler<FluidResource> for GameBucket {
             _ => 0,
         }
     }
-    fn insert(
+    fn insert_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -421,7 +421,7 @@ impl ResourceHandler<FluidResource> for GameBucket {
             _ => 0,
         }
     }
-    fn extract(
+    fn extract_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,

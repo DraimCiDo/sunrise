@@ -59,7 +59,7 @@ impl ResourceHandler<ItemResource> for BundleItems {
             })
         })
     }
-    fn insert(
+    fn insert_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -81,7 +81,7 @@ impl ResourceHandler<ItemResource> for BundleItems {
             went => self.rewrite(host, tx, &changed, went.min(amount)),
         }
     }
-    fn extract(
+    fn extract_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,

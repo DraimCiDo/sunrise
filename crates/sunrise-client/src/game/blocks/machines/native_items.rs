@@ -103,7 +103,7 @@ impl Game<'_> {
             game.journal_block_entity_slot(pos, index);
             // Reserve the offered item before writable insertion notices can re-enter.
             let reserved = game.take_one(source, slot).ok_or(())?;
-            let went = part.insert_any(game, tx, &resource, 1);
+            let went = part.insert(game, tx, &resource, 1);
             // A part answering more than it was offered is a broken mod: abort, undoing
             // whatever its insertion moved. A plain refusal still commits.
             let accepted = part.checked(went, 1, &at).ok_or(())? == 1;

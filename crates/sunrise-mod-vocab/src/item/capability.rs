@@ -131,7 +131,7 @@ impl ResourceHandler<ItemResource> for GameItems {
             backend.container_capacity(self.0, index, resource.as_stack())
         })
     }
-    fn insert(
+    fn insert_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -150,7 +150,7 @@ impl ResourceHandler<ItemResource> for GameItems {
         };
         amount - rest.map_or(0, |rest| rest.count().min(amount))
     }
-    fn extract(
+    fn extract_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,

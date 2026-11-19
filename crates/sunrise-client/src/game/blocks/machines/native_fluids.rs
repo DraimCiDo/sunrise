@@ -937,7 +937,7 @@ mod tests {
                         1,
                     ))
         }
-        fn insert(
+        fn insert_at(
             &self,
             host: &mut dyn ServerHost,
             _: &Transaction,
@@ -961,7 +961,7 @@ mod tests {
             entry.1 += took as i32;
             if self.write(host, &state) { took } else { 0 }
         }
-        fn extract(
+        fn extract_at(
             &self,
             host: &mut dyn ServerHost,
             _: &Transaction,

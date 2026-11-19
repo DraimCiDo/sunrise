@@ -37,7 +37,7 @@ impl ResourceHandler<ItemResource> for Empty {
     fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &ItemResource) -> u32 {
         0
     }
-    fn insert(
+    fn insert_at(
         &self,
         _: &mut dyn ServerHost,
         _: &Transaction,
@@ -47,7 +47,7 @@ impl ResourceHandler<ItemResource> for Empty {
     ) -> u32 {
         0
     }
-    fn extract(
+    fn extract_at(
         &self,
         _: &mut dyn ServerHost,
         _: &Transaction,

@@ -164,7 +164,7 @@ pub mod tests {
         fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &ItemResource) -> u32 {
             0
         }
-        fn insert(
+        fn insert_at(
             &self,
             host: &mut dyn ServerHost,
             tx: &Transaction,
@@ -183,7 +183,7 @@ pub mod tests {
             };
             next.insert(host, tx, 0, resource, amount)
         }
-        fn extract(
+        fn extract_at(
             &self,
             _: &mut dyn ServerHost,
             _: &Transaction,
@@ -210,7 +210,7 @@ pub mod tests {
         fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &ItemResource) -> u32 {
             0
         }
-        fn insert(
+        fn insert_at(
             &self,
             host: &mut dyn ServerHost,
             tx: &Transaction,
@@ -220,7 +220,7 @@ pub mod tests {
         ) -> u32 {
             Pipe(self.0).insert(host, tx, index, resource, amount) + 1
         }
-        fn extract(
+        fn extract_at(
             &self,
             _: &mut dyn ServerHost,
             _: &Transaction,
@@ -301,7 +301,7 @@ pub mod tests {
         fn capacity(&self, _: &mut dyn ServerHost, _: usize, resource: &ItemResource) -> u32 {
             if resource.matches(&stick()) { 64 } else { 0 }
         }
-        fn insert(
+        fn insert_at(
             &self,
             host: &mut dyn ServerHost,
             tx: &Transaction,
@@ -318,7 +318,7 @@ pub mod tests {
                 _ => 0,
             }
         }
-        fn extract(
+        fn extract_at(
             &self,
             _: &mut dyn ServerHost,
             _: &Transaction,
@@ -347,7 +347,7 @@ pub mod tests {
         fn capacity(&self, _: &mut dyn ServerHost, _: usize, resource: &ItemResource) -> u32 {
             u32::from(resource.item() == fixture_item_key("test:pouch"))
         }
-        fn insert(
+        fn insert_at(
             &self,
             host: &mut dyn ServerHost,
             tx: &Transaction,
@@ -368,7 +368,7 @@ pub mod tests {
                 _ => 0,
             }
         }
-        fn extract(
+        fn extract_at(
             &self,
             host: &mut dyn ServerHost,
             tx: &Transaction,
@@ -417,7 +417,7 @@ pub mod tests {
                 0
             }
         }
-        fn insert(
+        fn insert_at(
             &self,
             host: &mut dyn ServerHost,
             tx: &Transaction,
@@ -434,7 +434,7 @@ pub mod tests {
                 false => 0,
             }
         }
-        fn extract(
+        fn extract_at(
             &self,
             host: &mut dyn ServerHost,
             tx: &Transaction,
@@ -523,7 +523,7 @@ pub mod tests {
         fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &ItemResource) -> u32 {
             0
         }
-        fn insert(
+        fn insert_at(
             &self,
             _: &mut dyn ServerHost,
             _: &Transaction,
@@ -533,7 +533,7 @@ pub mod tests {
         ) -> u32 {
             0
         }
-        fn extract(
+        fn extract_at(
             &self,
             _: &mut dyn ServerHost,
             _: &Transaction,
@@ -586,7 +586,7 @@ pub mod tests {
         // empty slot.
         let host: &mut dyn ServerHost = &mut player;
         let aborted = host.transaction(|host, tx| {
-            assert_eq!(items.insert_any(host, tx, &sticks, 10), 10);
+            assert_eq!(items.insert(host, tx, &sticks, 10), 10);
             Err::<(), ()>(())
         });
         assert!(aborted.is_err());
@@ -596,7 +596,7 @@ pub mod tests {
         );
         let host: &mut dyn ServerHost = &mut player;
         let went =
-            host.transaction(|host, tx| Ok::<_, ()>(items.insert_any(host, tx, &sticks, 10)));
+            host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, &sticks, 10)));
         assert_eq!(went, Ok(10));
         assert_eq!(
             player_of(&player).slots[&5],
@@ -852,7 +852,7 @@ pub mod tests {
                 backend.container_capacity(on(SHELF, None), index, &resource.to_stack(1).unwrap())
             })
         }
-        fn insert(
+        fn insert_at(
             &self,
             _: &mut dyn ServerHost,
             _: &Transaction,
@@ -862,7 +862,7 @@ pub mod tests {
         ) -> u32 {
             amount + 5
         }
-        fn extract(
+        fn extract_at(
             &self,
             host: &mut dyn ServerHost,
             tx: &Transaction,
@@ -1155,7 +1155,7 @@ pub mod tests {
         fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &ItemResource) -> u32 {
             64
         }
-        fn insert(
+        fn insert_at(
             &self,
             _: &mut dyn ServerHost,
             _: &Transaction,
@@ -1165,7 +1165,7 @@ pub mod tests {
         ) -> u32 {
             n + 1
         }
-        fn extract(
+        fn extract_at(
             &self,
             _: &mut dyn ServerHost,
             _: &Transaction,
@@ -1611,7 +1611,7 @@ pub mod tests {
             fn capacity(&self, _: &mut dyn ServerHost, _: usize, r: &ItemResource) -> u32 {
                 u32::from(r.item() == fixture_item_key("test:bag"))
             }
-            fn insert(
+            fn insert_at(
                 &self,
                 host: &mut dyn ServerHost,
                 tx: &Transaction,
@@ -1629,7 +1629,7 @@ pub mod tests {
                     ItemResource::of(&stack("test:outer", 1, r.to_stack(1).unwrap().damage() + 1));
                 self.0.exchange(host, tx, &new, 1)
             }
-            fn extract(
+            fn extract_at(
                 &self,
                 host: &mut dyn ServerHost,
                 tx: &Transaction,
@@ -1753,8 +1753,8 @@ pub mod tests {
             let h = here().capability(host, &ITEMS, SHELF, None).unwrap();
             let r = ItemResource::of(&stick());
             host.transaction(|host, tx| {
-                assert_eq!(h.insert_any(host, tx, &r, 3), 3);
-                assert_eq!(h.extract_any(host, tx, &r, 129), 129);
+                assert_eq!(h.insert(host, tx, &r, 3), 3);
+                assert_eq!(h.extract(host, tx, &r, 129), 129);
                 Ok::<_, ()>(())
             })
             .unwrap();

@@ -45,7 +45,7 @@ impl ResourceHandler<ItemResource> for Storage {
     fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &ItemResource) -> u32 {
         64
     }
-    fn insert(
+    fn insert_at(
         &self,
         _: &mut dyn ServerHost,
         _: &Transaction,
@@ -55,7 +55,7 @@ impl ResourceHandler<ItemResource> for Storage {
     ) -> u32 {
         panic!("a hopper push must use the handler's indexless insert")
     }
-    fn insert_any(
+    fn insert(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -81,7 +81,7 @@ impl ResourceHandler<ItemResource> for Storage {
         assert_eq!(host.transaction_current().as_ref(), Some(tx));
         0
     }
-    fn extract(
+    fn extract_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,

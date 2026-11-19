@@ -200,7 +200,7 @@ pub mod tests {
         fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &Chemical) -> u32 {
             1000
         }
-        fn insert(
+        fn insert_at(
             &self,
             host: &mut dyn ServerHost,
             _: &Transaction,
@@ -219,7 +219,7 @@ pub mod tests {
             }
             went
         }
-        fn extract(
+        fn extract_at(
             &self,
             host: &mut dyn ServerHost,
             _: &Transaction,
@@ -430,7 +430,7 @@ pub mod tests {
         fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &ItemResource) -> u32 {
             0
         }
-        fn insert(
+        fn insert_at(
             &self,
             _: &mut dyn ServerHost,
             _: &Transaction,
@@ -440,7 +440,7 @@ pub mod tests {
         ) -> u32 {
             0
         }
-        fn extract(
+        fn extract_at(
             &self,
             _: &mut dyn ServerHost,
             _: &Transaction,
@@ -467,7 +467,7 @@ pub mod tests {
         fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &ItemResource) -> u32 {
             u32::MAX
         }
-        fn insert(
+        fn insert_at(
             &self,
             _: &mut dyn ServerHost,
             _: &Transaction,
@@ -477,7 +477,7 @@ pub mod tests {
         ) -> u32 {
             amount
         }
-        fn extract(
+        fn extract_at(
             &self,
             _: &mut dyn ServerHost,
             _: &Transaction,

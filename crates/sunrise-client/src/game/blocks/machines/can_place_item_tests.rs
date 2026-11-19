@@ -190,7 +190,7 @@ fn default_items_insert_checks_admission_and_overrides_the_declared_rule() {
         let resource = ItemResource::of(&stack.try_into_api().unwrap());
         assert_eq!(
             mod_api::run_transaction(game, |host, tx| {
-                let first = handler.insert_any(host, tx, &resource, 2);
+                let first = handler.insert(host, tx, &resource, 2);
                 // Slot 1's declared OnlyWhenEmpty would refuse this subsequent insert.
                 let second = handler.insert(host, tx, 1, &resource, 1);
                 Ok::<_, ()>((first, second))

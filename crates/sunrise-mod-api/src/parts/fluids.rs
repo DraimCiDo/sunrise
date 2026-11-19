@@ -158,7 +158,7 @@ pub mod tests {
                 backend.fluid_tank_capacity(self.at, index, &resource.to_stack(1))
             })
         }
-        fn insert(
+        fn insert_at(
             &self,
             host: &mut dyn ServerHost,
             tx: &Transaction,
@@ -176,7 +176,7 @@ pub mod tests {
                 _ => went,
             }
         }
-        fn extract(
+        fn extract_at(
             &self,
             host: &mut dyn ServerHost,
             tx: &Transaction,

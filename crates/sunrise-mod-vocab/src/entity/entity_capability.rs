@@ -169,7 +169,7 @@ impl ResourceHandler<ItemResource> for ContainerItems {
             None => 0,
         }
     }
-    fn insert(
+    fn insert_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -183,7 +183,7 @@ impl ResourceHandler<ItemResource> for ContainerItems {
         let limit = max_stack(host, resource);
         fill(host, tx, &place, resource, amount, limit)
     }
-    fn extract(
+    fn extract_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -257,7 +257,7 @@ impl ResourceHandler<ItemResource> for LivingEquipment {
             None => max_stack(host, resource),
         }
     }
-    fn insert(
+    fn insert_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -271,7 +271,7 @@ impl ResourceHandler<ItemResource> for LivingEquipment {
         let limit = self.capacity(host, index, resource);
         fill(host, tx, &place, resource, amount, limit)
     }
-    fn extract(
+    fn extract_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -402,7 +402,7 @@ impl ResourceHandler<ItemResource> for PlayerItems {
             _ => max_stack(host, resource),
         }
     }
-    fn insert(
+    fn insert_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -416,7 +416,7 @@ impl ResourceHandler<ItemResource> for PlayerItems {
         let limit = self.capacity(host, index, resource);
         fill(host, tx, &place, resource, amount, limit)
     }
-    fn extract(
+    fn extract_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -440,7 +440,7 @@ impl ResourceHandler<ItemResource> for PlayerItems {
     /// Where `Inventory.add` puts it: onto the same item in the selected slot, then in the off
     /// hand, then in the main inventory in order, then into its empty slots in order; never
     /// the armour.
-    fn insert_any(
+    fn insert(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,

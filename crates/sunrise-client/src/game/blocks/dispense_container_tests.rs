@@ -78,7 +78,7 @@ impl ResourceHandler<FluidResource> for Jug {
     fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &FluidResource) -> u32 {
         1000
     }
-    fn insert(
+    fn insert_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -97,7 +97,7 @@ impl ResourceHandler<FluidResource> for Jug {
             false => 0,
         }
     }
-    fn extract(
+    fn extract_at(
         &self,
         _: &mut dyn ServerHost,
         _: &Transaction,

@@ -130,7 +130,7 @@ pub mod tests {
                 0
             }
         }
-        fn insert(
+        fn insert_at(
             &self,
             host: &mut dyn ServerHost,
             _: &Transaction,
@@ -145,7 +145,7 @@ pub mod tests {
                 .unwrap();
             moved
         }
-        fn extract(
+        fn extract_at(
             &self,
             host: &mut dyn ServerHost,
             _: &Transaction,

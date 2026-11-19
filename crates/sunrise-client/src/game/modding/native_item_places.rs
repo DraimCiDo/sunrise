@@ -1801,7 +1801,7 @@ pub(super) mod tests {
             let sticks =
                 ItemResource::of(&ItemStack::new("minecraft:stick", 1).try_into_api().unwrap());
             assert_eq!(
-                host.transaction(|host, tx| Ok::<_, ()>(items.insert_any(host, tx, &sticks, 4))),
+                host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, &sticks, 4))),
                 Ok(4)
             );
             assert_eq!(
@@ -2739,7 +2739,7 @@ pub(super) mod tests {
             let sticks =
                 ItemResource::of(&ItemStack::new("minecraft:stick", 1).try_into_api().unwrap());
             let aborted = host.transaction(|host, tx| {
-                assert_eq!(items.insert_any(host, tx, &sticks, 70), 70);
+                assert_eq!(items.insert(host, tx, &sticks, 70), 70);
                 Err::<(), ()>(())
             });
             assert!(aborted.is_err());
@@ -2749,7 +2749,7 @@ pub(super) mod tests {
             // (54 more), then the first empty slot (the other 12); not onto the stone.
             let host: &mut dyn ServerHost = game;
             let went =
-                host.transaction(|host, tx| Ok::<_, ()>(items.insert_any(host, tx, &sticks, 70)));
+                host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, &sticks, 70)));
             assert_eq!(went, Ok(70));
             let after = &inventories(game)[0];
             assert_eq!(after[4], Some(ItemStack::new("minecraft:stick", 64)));
@@ -2784,7 +2784,7 @@ pub(super) mod tests {
                         && from.amount(host, *index) == stack.count;
                     if !still
                         || from.extract(host, tx, *index, &offered, stack.count) != stack.count
-                        || to.insert_any(host, tx, &offered, stack.count) != stack.count
+                        || to.insert(host, tx, &offered, stack.count) != stack.count
                     {
                         return Err(());
                     }
@@ -2939,14 +2939,14 @@ pub(super) mod tests {
             let sticks =
                 ItemResource::of(&ItemStack::new("minecraft:stick", 1).try_into_api().unwrap());
             let aborted = host.transaction(|host, tx| {
-                assert_eq!(items.insert_any(host, tx, &sticks, 70), 70);
+                assert_eq!(items.insert(host, tx, &sticks, 70), 70);
                 Err::<(), ()>(())
             });
             assert!(aborted.is_err());
             assert!(game.carts[0].items.iter().all(Option::is_none));
             let host: &mut dyn ServerHost = game;
             let went =
-                host.transaction(|host, tx| Ok::<_, ()>(items.insert_any(host, tx, &sticks, 70)));
+                host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, &sticks, 70)));
             assert_eq!(went, Ok(70));
             assert_eq!(
                 game.carts[0].items[0],
@@ -3037,7 +3037,7 @@ pub(super) mod tests {
         fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &ItemResource) -> u32 {
             64
         }
-        fn insert(
+        fn insert_at(
             &self,
             _: &mut dyn ServerHost,
             _: &mod_api::Transaction,
@@ -3063,7 +3063,7 @@ pub(super) mod tests {
                 }
             }
         }
-        fn extract(
+        fn extract_at(
             &self,
             _: &mut dyn ServerHost,
             _: &mod_api::Transaction,
@@ -3187,7 +3187,7 @@ pub(super) mod tests {
             fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &ItemResource) -> u32 {
                 64
             }
-            fn insert(
+            fn insert_at(
                 &self,
                 _: &mut dyn ServerHost,
                 _: &mod_api::Transaction,
@@ -3197,7 +3197,7 @@ pub(super) mod tests {
             ) -> u32 {
                 amount
             }
-            fn extract(
+            fn extract_at(
                 &self,
                 _: &mut dyn ServerHost,
                 _: &mod_api::Transaction,

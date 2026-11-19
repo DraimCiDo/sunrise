@@ -419,7 +419,7 @@ impl ResourceHandler<ItemResource> for GameItemItems {
             })
         })
     }
-    fn insert(
+    fn insert_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -441,7 +441,7 @@ impl ResourceHandler<ItemResource> for GameItemItems {
             went => self.rewrite(host, tx, &changed, went.min(amount)),
         }
     }
-    fn extract(
+    fn extract_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -782,7 +782,7 @@ impl ItemPlace {
                 while left > 0 {
                     let moved = match (insert, anywhere) {
                         (true, false) => handler.insert(host, tx, slot, resource, left),
-                        (true, true) => handler.insert_any(host, tx, resource, left),
+                        (true, true) => handler.insert(host, tx, resource, left),
                         (false, _) => handler.extract(host, tx, slot, resource, left),
                     };
                     match handler.checked(moved, left, self).ok_or(())? {

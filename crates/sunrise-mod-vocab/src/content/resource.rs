@@ -517,7 +517,7 @@ pub trait ResourceHandler<R> {
         self.capacity(host, index, resource) > 0
     }
     /// Puts up to `amount` of `resource` into index `index`: how much went in.
-    fn insert(
+    fn insert_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -527,7 +527,7 @@ pub trait ResourceHandler<R> {
     ) -> u32;
     /// Takes up to `amount` of `resource` out of index `index`: how much came out. None of
     /// another resource.
-    fn extract(
+    fn extract_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -551,7 +551,7 @@ pub trait ResourceHandler<R> {
     /// Puts up to `amount` of `resource` in wherever it goes (NeoForge's `insert` without an
     /// index): by default index by index from 0. How much went in; an index answering more than
     /// it was asked makes it answer more than `amount`, or 0 when asked `u32::MAX`.
-    fn insert_any(
+    fn insert(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -565,7 +565,7 @@ pub trait ResourceHandler<R> {
     /// Takes up to `amount` of `resource` out from wherever it is (`extract` without an index):
     /// by default index by index from 0. How much came out; an index answering more than it was
     /// asked makes it answer more than `amount`, or 0 when asked `u32::MAX`.
-    fn extract_any(
+    fn extract(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -579,7 +579,7 @@ pub trait ResourceHandler<R> {
 }
 
 /// Asks each of `parts` in turn, through `ask`, for what is left of `amount`, until it is all
-/// placed: the total. What adds up `insert_any`, `extract_any` and the handlers built of others.
+/// placed: the total. What adds up `insert`, `extract` and the handlers built of others.
 /// A part answering more than it was asked is a lie the total must not hide: the total is then
 /// one more than `amount`, which a move refuses as [`Overanswered`], or, asked `u32::MAX`, 0,
 /// with which a move undoes its step.
@@ -645,7 +645,7 @@ pub fn move_resources<R>(
                 },
                 want,
                 |host, tx, want| from.extract(host, tx, index, &resource, want),
-                |host, tx, out| to.insert_any(host, tx, &resource, out),
+                |host, tx, out| to.insert(host, tx, &resource, out),
             )?;
             if went == 0 {
                 break;

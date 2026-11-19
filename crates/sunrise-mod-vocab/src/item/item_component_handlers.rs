@@ -232,7 +232,7 @@ impl ResourceHandler<FluidResource> for ItemComponentFluidTank {
     fn capacity(&self, _: &mut dyn ServerHost, index: usize, _: &FluidResource) -> u32 {
         if index == 0 { self.capacity } else { 0 }
     }
-    fn insert(
+    fn insert_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
@@ -257,7 +257,7 @@ impl ResourceHandler<FluidResource> for ItemComponentFluidTank {
             went => self.rewrite(host, tx, Some(resource.to_stack(have + went)), went),
         }
     }
-    fn extract(
+    fn extract_at(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,

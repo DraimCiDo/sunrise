@@ -154,7 +154,7 @@ impl<R: StackedResource> ResourceHandler<R> for AttachedStacks<R> {
     fn is_valid(&self, _: &mut dyn ServerHost, index: usize, resource: &R) -> bool {
         index < self.size && (self.valid)(resource)
     }
-    fn insert(
+    fn insert_at(
         &self,
         host: &mut dyn ServerHost,
         _: &Transaction,
@@ -177,7 +177,7 @@ impl<R: StackedResource> ResourceHandler<R> for AttachedStacks<R> {
             _ => 0,
         }
     }
-    fn extract(
+    fn extract_at(
         &self,
         host: &mut dyn ServerHost,
         _: &Transaction,
