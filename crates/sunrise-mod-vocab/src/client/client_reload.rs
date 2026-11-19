@@ -73,6 +73,10 @@ impl ClientReloadContext {
 /// not remove the barrier. On any error all pending applies are dropped,
 /// keeping every listener's previous assets.
 pub trait ClientReloadListener: Send + Sync + 'static {
+    #[doc(hidden)]
+    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
+        __sunrise_handler_marks!(ClientReloadListener);
+    }
     /// Parse and validate new assets without changing the listener's live state.
     ///
     /// As vanilla's `SimpleJsonResourceReloadListener.scanDirectory`, a

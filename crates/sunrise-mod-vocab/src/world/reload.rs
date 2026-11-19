@@ -58,6 +58,10 @@ impl std::error::Error for ReloadResourceError {
 /// generation in place, but cannot undo this callback's own effects. One per listener per reload, never per tick;
 /// `<dyn ReloadApply>::new(move || ...)` makes one from a closure.
 pub trait ReloadApply: Send + Sync {
+    #[doc(hidden)]
+    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
+        __sunrise_handler_marks!(ReloadApply);
+    }
     /// Publish the prepared state.
     fn apply(&self);
 }

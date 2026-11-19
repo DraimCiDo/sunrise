@@ -3,6 +3,10 @@ use super::*;
 /// context (its [`EntityCapabilityKey`]'s `C`), its handler, or none to leave it to the next
 /// provider. A closure is one.
 pub trait EntityCapabilityProvider<T: ?Sized, C>: Send + Sync {
+    #[doc(hidden)]
+    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
+        __sunrise_handler_marks!(EntityCapabilityProvider);
+    }
     /// The handler for `entity`, asked with `context`, or none.
     fn provide(&self, host: &mut dyn ServerHost, entity: EntityRef, context: C) -> Option<Box<T>>;
 }

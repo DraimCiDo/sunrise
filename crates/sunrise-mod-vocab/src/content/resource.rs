@@ -489,6 +489,10 @@ impl fmt::Debug for ItemResource {
 /// the transaction `tx` a write runs in puts it back on an abort. Amounts never exceed what was
 /// asked; a handler answering more is a mod bug, and the move it was part of is aborted.
 pub trait ResourceHandler<R> {
+    #[doc(hidden)]
+    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
+        __sunrise_handler_marks!(ResourceHandler);
+    }
     /// Set the container limit transactionally, accepting 1..=99 (vanilla's upper bound).
     /// Existing oversized stacks remain extractable. The game persists this with block entity data.
     /// Unsupported handlers return false without mutation.

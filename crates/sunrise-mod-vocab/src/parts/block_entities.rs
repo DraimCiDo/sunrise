@@ -3,6 +3,10 @@ use super::*;
 /// side asked about, its handler, or none to leave it to the next provider. A closure
 /// `|host, at| Some(Box::new(Tank(at)))` is one.
 pub trait BlockCapabilityProvider<T: ?Sized>: Send + Sync {
+    #[doc(hidden)]
+    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
+        __sunrise_handler_marks!(BlockCapabilityProvider);
+    }
     /// The handler for the block entity at `at`, or none.
     fn provide(&self, host: &mut dyn ServerHost, at: BlockSide) -> Option<Box<T>>;
 }

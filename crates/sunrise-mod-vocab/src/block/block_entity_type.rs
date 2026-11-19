@@ -56,6 +56,10 @@ impl From<(crate::Identifier, String)> for TransformRefusal {
 /// (64 MiB, one million nodes, depth 512); invalid output keeps the original.
 /// Do not panic: native unwinds are caught, and wasm traps refuse the call.
 pub trait BlockEntityTransform: Send + Sync + 'static {
+    #[doc(hidden)]
+    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
+        __sunrise_handler_marks!(BlockEntityTransform);
+    }
     /// Transform saved data; no Host or world handle is supplied.
     fn transform(
         &self,

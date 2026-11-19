@@ -5,6 +5,10 @@ use crate::wire::{Reader, Wire, WireError, Writer};
 /// A registered item's dynamic slot count. The item type is bound at registration; this
 /// callback runs only for an actual runtime lookup, never to infer whether it is registered.
 pub trait ItemContainerProvider: Send + Sync {
+    #[doc(hidden)]
+    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
+        __sunrise_handler_marks!(ItemContainerProvider);
+    }
     /// The item's slot count now, or none to let the next registration answer.
     fn slots(&self, host: &dyn Host) -> Option<u32>;
 }
