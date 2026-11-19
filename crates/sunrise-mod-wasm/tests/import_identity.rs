@@ -182,12 +182,16 @@ const POINTS: &[&str] = &[
 fn every_hook_part_and_point_the_fixture_implements_is_imported_and_checked() {
     let (package, _) = fixture();
     let imports = sunrise_imports(&package.module);
+    // A handler trait the fixture sends is marked whole (the next test), not by what it writes.
     let marked: std::collections::BTreeSet<&str> = imports
         .iter()
         .filter(|name| {
             ["hook:", "part:", "point:"]
                 .iter()
                 .any(|kind| name.starts_with(kind))
+                && !name
+                    .strip_prefix("part:")
+                    .is_some_and(|rest| !rest.split("::").next().unwrap().ends_with("Part"))
         })
         // Without the hash and a hook's version: a version bump changes neither what the fixture writes
         // nor what this checks.
@@ -222,6 +226,48 @@ fn every_hook_part_and_point_the_fixture_implements_is_imported_and_checked() {
             "a changed {name} is not refused by name: {refused:?}"
         );
     }
+}
+
+/// A handler trait a mod implements is one the game may call by any method, so the mod imports
+/// every method of the trait (here `EnergyHandler`, through the API's own `ItemComponentEnergy`
+/// the fixture sends), written or not, and a changed method of it refuses the mod by name. A mod
+/// that implements no handler trait imports none: the library fixture's check, in `real_library`.
+#[test]
+#[ignore = "daily"]
+fn a_sent_handler_imports_every_method_of_its_trait() {
+    test_stack::on_guest_stack(|| {
+        mod_api::__private::initialize().unwrap();
+        let (package, std) = fixture();
+        let imports = sunrise_imports(&package.module);
+        let of = |owner: &str| -> std::collections::BTreeSet<&str> {
+            imports
+                .iter()
+                .filter_map(|name| name.strip_prefix(&format!("part:{owner}::")))
+                .map(|rest| rest.split('#').next().unwrap())
+                .collect()
+        };
+        assert_eq!(
+            of("EnergyHandler"),
+            ["amount", "capacity", "extract", "insert"].into(),
+            "{imports:?}"
+        );
+        let name = imports
+            .iter()
+            .find(|name| name.starts_with("part:EnergyHandler::capacity#"))
+            .unwrap();
+        let mut old = WasmPackage {
+            manifest: package.manifest.clone(),
+            module: changed_import(&package.module, name),
+        };
+        old.manifest.inject.clear();
+        let loaded = load(&std, vec![old]);
+        assert!(loaded.mods.is_empty());
+        let reason = loaded.refused[0].1.to_string();
+        assert!(
+            reason.contains("part:EnergyHandler::capacity") && reason.contains("changed"),
+            "{reason}"
+        );
+    })
 }
 
 /// A mod built before a method was added to the API loads on the game that has it: the table is
