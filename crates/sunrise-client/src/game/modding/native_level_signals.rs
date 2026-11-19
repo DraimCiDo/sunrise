@@ -328,16 +328,12 @@ impl LevelHost for ReadLevel<'_, '_> {
     fn is_loaded(&self, [x, y, z]: [i32; 3]) -> bool {
         self.game.world.is_loaded_at(x, y, z)
     }
-    fn is_raining_at(&self, pos: [i32; 3]) -> Option<bool> {
-        Some(
-            self.game
-                .level_is_raining_at(self.level, pos)
-                .unwrap_or(false),
-        )
+    fn is_raining_at(&self, pos: [i32; 3]) -> bool {
+        self.game
+            .level_is_raining_at(self.level, pos)
+            .unwrap_or(false)
     }
-    fn enabled_features(&self) -> Option<mod_api::FeatureFlags> {
-        Some(mod_api::FeatureFlags::new(
-            self.game.enabled_feature_ids().clone(),
-        ))
+    fn enabled_features(&self) -> mod_api::FeatureFlags {
+        mod_api::FeatureFlags::new(self.game.enabled_feature_ids().clone())
     }
 }

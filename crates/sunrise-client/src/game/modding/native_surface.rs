@@ -7,7 +7,6 @@ use mod_api::{
     BlockKey, BlockState, FeatureFlags, FluidState, LevelHost, LevelReadError, LevelRef, LightLayer,
 };
 use std::cell::RefCell;
-use sunrise_client::motion::SideLevel as _;
 use sunrise_client::{
     motion::{FrictionLevel, read_friction},
     world::World,
@@ -21,14 +20,14 @@ use sunrise_world::{
 /// mob and entity ticks that read friction. Fields borrow the game's tables one by one, so the
 /// tick's other borrows of the game stand beside it (`game_side!`).
 pub(crate) struct GameSide<'a> {
-    pub dim: super::Dim,
+    pub(in crate::game) dim: super::Dim,
     /// The level handle of the open world, absent before a world has an epoch.
-    pub level: Option<LevelRef>,
-    pub facts: &'a sunrise_client::blocks::BlockFacts,
-    pub biomes: &'a sunrise_client::biome::Biomes,
-    pub behaviours: &'a sunrise_world::level::Behaviours,
-    pub features: &'a std::sync::Arc<[String]>,
-    pub items: Option<&'a sunrise_client::items::Items>,
+    pub(in crate::game) level: Option<LevelRef>,
+    pub(in crate::game) facts: &'a sunrise_client::blocks::BlockFacts,
+    pub(in crate::game) biomes: &'a sunrise_client::biome::Biomes,
+    pub(in crate::game) behaviours: &'a sunrise_world::level::Behaviours,
+    pub(in crate::game) features: &'a std::sync::Arc<[String]>,
+    pub(in crate::game) items: Option<&'a sunrise_client::items::Items>,
 }
 
 impl sunrise_client::motion::SideLevel for GameSide<'_> {
@@ -139,7 +138,7 @@ impl super::mod_api_host::SidedLevel for FrictionView<'_> {
     }
 }
 
-super::native_tags::impl_tags!(FrictionView<'_>, _view, None);
+super::native_tags::impl_tags!(FrictionView<'_>, view, view.0.side.tag_items());
 
 impl LevelHost for FrictionView<'_> {
     fn friction(
@@ -191,8 +190,15 @@ impl LevelHost for FrictionView<'_> {
         self.0.world.shape.height
     }
 
-    fn block_in_tag(&self, _block: BlockKey, _tag: &str) -> Option<bool> {
-        None
+    fn block_in_tag(&self, block: BlockKey, tag: &str) -> Option<bool> {
+        self.0.side.tag_items()?;
+        super::native_world_read::block_in_tag(block, tag)
+    }
+
+    fn block_entity(&self, [x, y, z]: [i32; 3]) -> Option<mod_api::BlockEntityRef> {
+        self.0
+            .side
+            .block_entity(self.0.world, BlockPos::new(x, y, z))
     }
 
     fn tags(&self) -> &dyn mod_api::Tags {
@@ -210,8 +216,12 @@ impl LevelHost for FrictionView<'_> {
         self.state_fluid(state.try_into_engine(&()).ok()?)
     }
 
-    fn fluid_in_tag(&self, _fluid: &str, _tag: &str) -> Option<bool> {
-        None
+    fn fluid_in_tag(&self, fluid: &str, tag: &str) -> Option<bool> {
+        Some(super::native_world_read::fluid_in_tag(
+            self.0.side.tag_items()?,
+            fluid,
+            tag,
+        ))
     }
 
     fn state_with_property(&self, state: BlockState, key: &str, value: &str) -> Option<BlockState> {
@@ -243,12 +253,14 @@ impl LevelHost for FrictionView<'_> {
         self.0.world.is_loaded_at(x, y, z)
     }
 
-    fn is_raining_at(&self, _pos: [i32; 3]) -> Option<bool> {
-        None
+    fn is_raining_at(&self, [x, y, z]: [i32; 3]) -> bool {
+        self.0
+            .side
+            .is_raining_at(self.0.world, BlockPos::new(x, y, z))
     }
 
-    fn enabled_features(&self) -> Option<FeatureFlags> {
-        None
+    fn enabled_features(&self) -> FeatureFlags {
+        FeatureFlags::new(self.0.side.enabled_features().clone())
     }
 }
 

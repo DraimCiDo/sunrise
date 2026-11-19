@@ -95,8 +95,8 @@ impl LevelHost for JournalLevelWrite<'_, '_> {
         fn brightness(&self, layer: LightLayer, pos: [i32; 3]) -> i32;
         fn raw_brightness(&self, pos: [i32; 3], sky_darken: i32) -> i32;
         fn is_loaded(&self, pos: [i32; 3]) -> bool;
-        fn is_raining_at(&self, pos: [i32; 3]) -> Option<bool>;
-        fn enabled_features(&self) -> Option<FeatureFlags>;
+        fn is_raining_at(&self, pos: [i32; 3]) -> bool;
+        fn enabled_features(&self) -> FeatureFlags;
     }
     fn state_block(&self, state: BlockState) -> Option<&str> {
         self.game

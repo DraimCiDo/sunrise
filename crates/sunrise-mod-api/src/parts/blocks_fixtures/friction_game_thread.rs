@@ -22,10 +22,10 @@ pub fn friction_game_thread() -> Arc<std::sync::atomic::AtomicUsize> {
             };
             let pos = [event.pos.x, event.pos.y, event.pos.z];
             assert_eq!(level.block_state(pos), Some(event.state));
-            // A serialized state parses back to the state it names, and the view has no weather.
+            // A serialized state parses back to the state it names, and the dry world has no rain.
             let named = level.state_string(event.state).unwrap();
             assert_eq!(level.block_state_id(&named), Some(event.state));
-            assert_eq!(level.is_raining_at(pos), None);
+            assert!(!level.is_raining_at(pos));
             // Asking the same state cannot dispatch this part again.
             assert_eq!(level.friction(pos, event.state, event.entity), None);
             // The neighbouring state stands in for a copycat's stored material. Ask

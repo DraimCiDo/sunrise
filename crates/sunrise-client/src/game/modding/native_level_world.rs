@@ -499,16 +499,32 @@ mod tests {
             assert_eq!(game.level_is_raining_at(level, unloaded), None);
             assert_eq!(game.level_is_raining_at(level, [1, 4000, 1]), None);
             game.with_level(|_, host, _| {
-                assert_eq!(host.is_raining_at(plains), Some(true));
-                assert_eq!(host.is_raining_at(roofed), Some(false));
-                assert_eq!(host.is_raining_at(desert), Some(false));
-                assert_eq!(host.is_raining_at(snowy), Some(false));
-                assert_eq!(host.is_raining_at(unloaded), Some(false));
+                assert!(host.is_raining_at(plains));
+                assert!(!host.is_raining_at(roofed));
+                assert!(!host.is_raining_at(desert));
+                assert!(!host.is_raining_at(snowy));
+                assert!(!host.is_raining_at(unloaded));
             });
+            // The side a motion tick is lent answers the same, so a friction part sees it.
+            let side = game_side!(game);
+            for (pos, rains) in [
+                (plains, true),
+                (roofed, false),
+                (desert, false),
+                (snowy, false),
+                (unloaded, false),
+            ] {
+                let at = sunrise_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
+                assert_eq!(
+                    sunrise_client::motion::SideLevel::is_raining_at(&side, &game.world, at),
+                    rains,
+                    "{pos:?}"
+                );
+            }
 
             game.world.weather.rain_level = (0.0, 0.0);
             assert_eq!(game.level_is_raining_at(level, plains), Some(false));
-            game.with_level(|_, host, _| assert_eq!(host.is_raining_at(plains), Some(false)));
+            game.with_level(|_, host, _| assert!(!host.is_raining_at(plains)));
             assert_eq!(game.world.chunks.len(), chunks, "nothing was loaded");
         });
     }
@@ -536,10 +552,7 @@ mod tests {
             );
             let ids: Vec<String> = flags.iter().map(str::to_owned).collect();
             game.with_level(|_, host, _| {
-                assert_eq!(
-                    host.enabled_features().unwrap().iter().collect::<Vec<_>>(),
-                    ids
-                );
+                assert_eq!(host.enabled_features().iter().collect::<Vec<_>>(), ids);
             });
         });
     }

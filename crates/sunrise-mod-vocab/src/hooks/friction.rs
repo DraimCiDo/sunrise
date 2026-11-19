@@ -3,9 +3,11 @@
 pub trait Hooks {
     /// The friction of `state` at `pos` (`IBlockExtension.getFriction`), for
     /// an optional entity (its id and type). The state need not occupy that position.
-    /// The read-only level host borrows block, state, light and fluid data on the side
-    /// that made the query. It gives no block-entity handles: use the mod's own state
-    /// on each side for an answer that depends on a block entity.
+    /// The read-only level host reads the side that made the query: blocks, states, light,
+    /// fluids, weather, enabled features, tags and resident block entities, as the other
+    /// level hosts do, without loading chunks. It has no container, shape or signal view and
+    /// answers `None` for those. Block-entity handles are the side's own: a client's is not
+    /// the server's, so answer from state both sides hold.
     /// Set `event.friction` to answer; it starts at the state's own coefficient. Answers outside
     /// `0..=2` (including non-finite values) keep that coefficient.
     /// Runs on both sides, including during client replay. Keep the answer a pure
@@ -19,11 +21,10 @@ can read the level or ask for another state's answer at the same position, for e
 taking its material's friction. The queried state need not be what the level holds at that position.
 The borrowed view reads block states, their properties, fluids and light, without loading chunks.
 `block_state_id` parses a block name with properties as elsewhere.
-It has no block-entity, container, shape, signal, tag-membership, weather or feature data, and
-answers `None` for those reads (`is_raining_at`, `enabled_features`, `block_entity` and the rest). For a
-rule depending on block-entity data, answer from the mod's own state on both sides.
-Each listener gets the original `pos`, `state` and `entity`; only `friction` carries from one
-listener to the next.
+It also reads weather, enabled features, tags and the side's resident block entities, but has no
+container, shape or signal view (those answer `None`). A client's block entity is its own copy, not the
+server's: answer from state both sides hold. Each listener gets the original `pos`, `state` and `entity`;
+only `friction` carries from one listener to the next.
 
 An active query on the same level, position, state and entity id (or no entity) cannot be repeated.
 A recursive or over-deep query returns `None` (`Ok(None)` through `LevelRef`). Without a part,

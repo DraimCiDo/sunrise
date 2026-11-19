@@ -195,17 +195,14 @@ fn a_block_part_answers_fire_odds_for_one_face() {
                 plains,
             );
             let raining_live = |game: &mut super::Game<'_>| {
-                game.with_level(|_, live, _| {
-                    mod_api::LevelHost::is_raining_at(live, rain) == Some(true)
-                })
+                game.with_level(|_, live, _| mod_api::LevelHost::is_raining_at(live, rain))
             };
             assert!(raining_live(game), "the live sky is open to rain");
             game.check_dry_fire_odds_view(
                 |_, _, _| {},
                 |host| {
-                    assert_eq!(
+                    assert!(
                         host.is_raining_at(rain),
-                        Some(true),
                         "an open dry column still sees rain"
                     )
                 },
@@ -213,13 +210,7 @@ fn a_block_part_answers_fire_odds_for_one_face() {
             let roof = BlockPos::new(rain[0], rain[1] + 1, rain[2]);
             game.check_dry_fire_odds_view(
                 |b, dry, ticks| assert!(b.set_block(dry, ticks, roof, stone, 3)),
-                |host| {
-                    assert_eq!(
-                        host.is_raining_at(rain),
-                        Some(false),
-                        "the staged roof blocks rain"
-                    )
-                },
+                |host| assert!(!host.is_raining_at(rain), "the staged roof blocks rain"),
             );
             assert!(
                 raining_live(game),
