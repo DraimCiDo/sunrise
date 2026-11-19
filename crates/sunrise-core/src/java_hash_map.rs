@@ -630,7 +630,9 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
     pub fn with_expected_entries(expected: usize) -> Self {
         let wanted = expected.saturating_mul(4).div_ceil(3);
         let mut map = Self::default();
-        map.initial_capacity = wanted.min(MAX_CAPACITY).next_power_of_two() as u32;
+        // Java sizes `newHashMap(0)` to one bucket and doubles it to two on the first put; start at
+        // two, since a one-bucket table has mask 0, which here means "no table yet".
+        map.initial_capacity = wanted.clamp(2, MAX_CAPACITY).next_power_of_two() as u32;
         map
     }
     /// Reserve physical entry storage without changing the Java table's initial capacity,
@@ -1717,6 +1719,19 @@ mod tests {
         map.next_entry(cursor)
             .map(|entry| entry.map(|(k, v)| (k.id, *v)))
     }
+    /// Java: `HashMap.newHashMap(0)`, put ids 5, 3, 1 with hashes 5, 3, 1: the table grows 1, 2, 4 buckets, so
+    /// 5 and 1 share bucket 1 and 3 sits in bucket 3.
+    #[test]
+    fn a_zero_hint_map_grows_like_java() {
+        let mut map = JavaHashMap::with_expected_entries(0);
+        for id in [5, 3, 1] {
+            assert_eq!(map.put(key(id, id as i32), id), None);
+        }
+        assert_eq!(order(&map), [5, 1, 3]);
+        assert_eq!(map.get(&key(3, 3)), Some(&3));
+        assert_eq!(map.len(), 3);
+    }
+
     /// Java: `new HashMap<>()`, put ids 0, 1, 2 with hashes 17, 2, 33, then ids 3..=13 (colliders).
     fn colliders() -> JavaHashMap<Key, u32> {
         let mut map = JavaHashMap::default();
