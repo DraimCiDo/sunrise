@@ -216,9 +216,7 @@ fn hash_bucket(len: usize, key: &sunrise_core::nbt::JavaString) -> usize {
     while len > capacity * 3 / 4 {
         capacity *= 2;
     }
-    let h = string_of(key)
-        .encode_utf16()
-        .fold(0u32, |h, ch| h.wrapping_mul(31).wrapping_add(u32::from(ch)));
+    let h = sunrise_core::java_string::java_string_hash(&key.0) as u32;
     ((h ^ (h >> 16)) as usize) & (capacity - 1)
 }
 fn piston_hash_order(

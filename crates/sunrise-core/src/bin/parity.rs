@@ -165,7 +165,7 @@ fn probe(line: &str, out: &mut impl Write) -> Result<(), Box<dyn std::error::Err
                 out,
                 "seeds {} {} {} {}",
                 position_seed(position),
-                java_string_hash(name.iter().copied()),
+                java_string_hash(&name),
                 hash[0] as i64,
                 hash[1] as i64
             )?;

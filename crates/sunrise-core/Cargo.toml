@@ -54,6 +54,11 @@ path = "src/bin/density_parity.rs"
 test = false
 
 [[bin]]
+name = "sunrise-string-hash-parity"
+path = "src/bin/string_hash_parity.rs"
+test = false
+
+[[bin]]
 name = "sunrise-float-log-parity"
 path = "src/bin/float_log_parity.rs"
 test = false

@@ -24,6 +24,7 @@ pub mod java_float_parse;
 pub mod java_hash_map;
 pub mod java_hash_set;
 pub mod java_number;
+pub mod java_string;
 pub mod jmath;
 pub mod json_nbt;
 pub mod level_id;

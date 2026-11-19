@@ -2,7 +2,7 @@
 use super::{DecodeError, Object, optional, required};
 use serde_json::value::RawValue;
 use std::collections::{BTreeMap, BTreeSet};
-use sunrise_core::random::java_string_hash;
+use sunrise_core::java_string::java_string_hash_str;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TagEntry {
@@ -313,9 +313,9 @@ fn visit<'a>(
 }
 fn hash(name: &str) -> u32 {
     let (namespace, path) = name.split_once(':').expect("canonical tag identifier");
-    let raw = java_string_hash(namespace.encode_utf16())
+    let raw = java_string_hash_str(namespace)
         .wrapping_mul(31)
-        .wrapping_add(java_string_hash(path.encode_utf16())) as u32;
+        .wrapping_add(java_string_hash_str(path)) as u32;
     raw ^ (raw >> 16)
 }
 fn java_bucket_order<'a>(

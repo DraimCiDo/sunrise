@@ -1,5 +1,5 @@
 //! Java Edition NBT with lossless UTF-16 strings and 26.3 mixed-list wrappers.
-use crate::{java_hash_map::JavaKey, random::java_string_hash};
+use crate::{java_hash_map::JavaKey, java_string::java_string_hash};
 use std::{cmp::Ordering, collections::BTreeMap};
 
 /// Java strings can contain unpaired surrogates, which Rust UTF-8 strings cannot.
@@ -46,7 +46,7 @@ impl JavaString {
 
 impl JavaKey for JavaString {
     fn java_hash(&self) -> i32 {
-        java_string_hash(self.0.iter().copied())
+        java_string_hash(&self.0)
     }
 
     fn comparable_compare(&self, other: &Self) -> Option<Ordering> {

@@ -565,12 +565,10 @@ pub fn parse_seed(text: &str) -> Option<i64> {
     if t.is_empty() {
         return None;
     }
-    Some(t.parse::<i64>().unwrap_or_else(|_| {
-        i64::from(
-            t.encode_utf16()
-                .fold(0i32, |h, c| h.wrapping_mul(31).wrapping_add(i32::from(c))),
-        )
-    }))
+    Some(
+        t.parse::<i64>()
+            .unwrap_or_else(|_| i64::from(sunrise_core::java_string::java_string_hash_str(t))),
+    )
 }
 /// The latest `LastPlayed` kept: the end of year 9999, in milliseconds. A later time does not fit a
 /// Windows `SystemTime`, and adding it panics.
@@ -4083,7 +4081,7 @@ mod classic_tests {
     fn splash_selection_filters_the_forbidden_hash_and_has_no_fallback() {
         let hidden = "This message will never appear on the splash screen, isn't that weird?";
         assert_eq!(
-            sunrise_core::random::java_string_hash(hidden.encode_utf16()),
+            sunrise_core::java_string::java_string_hash_str(hidden),
             125780783
         );
         let text = format!("\n First! \r\n{hidden}\nSecond!\n");

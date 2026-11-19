@@ -1,4 +1,5 @@
 use super::{LegacyRandom, RandomSource, XoroshiroRandom, seed_from_hash, seed_from_hash_utf16};
+use crate::java_string::{java_string_hash, java_string_hash_str};
 use crate::position::BlockPos;
 
 #[allow(clippy::wrong_self_convention)] // These are seeded factories, matching Java's fromSeed/fromHashOf.
@@ -31,11 +32,11 @@ impl PositionalRandom for LegacyPositionalRandom {
         LegacyRandom::new(seed)
     }
     fn from_hash_of(&self, name: &str) -> Self::Source {
-        let h = (java_string_hash(name.encode_utf16()) as i64 as u64) & ((1 << 48) - 1);
+        let h = (java_string_hash_str(name) as i64 as u64) & ((1 << 48) - 1);
         LegacyRandom::from_state(h ^ self.base)
     }
     fn from_hash_of_utf16(&self, name: &[u16]) -> Self::Source {
-        let h = (java_string_hash(name.iter().copied()) as i64 as u64) & ((1 << 48) - 1);
+        let h = (java_string_hash(name) as i64 as u64) & ((1 << 48) - 1);
         LegacyRandom::from_state(h ^ self.base)
     }
 }
@@ -65,11 +66,6 @@ impl PositionalRandom for XoroshiroPositionalRandom {
         let [lo, hi] = seed_from_hash_utf16(name);
         XoroshiroRandom::from_state(lo ^ self.lo, hi ^ self.hi)
     }
-}
-pub fn java_string_hash(name: impl IntoIterator<Item = u16>) -> i32 {
-    name.into_iter().fold(0i32, |hash, unit| {
-        hash.wrapping_mul(31).wrapping_add(unit as i32)
-    })
 }
 /// Mth.getSeed's signed Java arithmetic, including the initial int product.
 pub const fn position_seed(position: BlockPos) -> i64 {
@@ -108,8 +104,7 @@ mod tests {
             }
 
             for name in ["minecraft:ore", "minecraft:tree", "test", ""] {
-                let mut direct =
-                    LegacyRandom::new(java_string_hash(name.encode_utf16()) as i64 ^ s);
+                let mut direct = LegacyRandom::new(java_string_hash_str(name) as i64 ^ s);
                 let mut opt = factory.from_hash_of(name);
                 for _ in 0..10 {
                     assert_eq!(direct.next_int(), opt.next_int());

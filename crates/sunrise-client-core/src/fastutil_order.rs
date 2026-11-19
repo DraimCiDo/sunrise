@@ -6,7 +6,7 @@
 //! `scoreboard.dat` saves them in fastutil's forward stream order and saves
 //! team members in Java HashSet order. `/team list <team>` sorts the members.
 
-use sunrise_core::{java_hash_set::JavaHashSet, random::java_string_hash};
+use sunrise_core::{java_hash_set::JavaHashSet, java_string::java_string_hash_str};
 
 /// The keys of a fastutil open hash map in their table slots.
 #[derive(Clone, Debug, PartialEq)]
@@ -53,7 +53,7 @@ impl OpenOrder {
         self.size == 0
     }
     fn slot(&self, key: &str) -> usize {
-        mix(java_string_hash(key.encode_utf16())) & (self.keys.len() - 1)
+        mix(java_string_hash_str(key)) & (self.keys.len() - 1)
     }
     pub fn contains(&self, key: &str) -> bool {
         let mask = self.keys.len() - 1;
@@ -133,7 +133,7 @@ impl OpenOrder {
         let mask = new_n - 1;
         // `for (int j = realSize(); j-- != 0;) { while (key[--i] == null); ... }`
         for key in old.into_iter().rev().flatten() {
-            let mut pos = mix(java_string_hash(key.encode_utf16())) & mask;
+            let mut pos = mix(java_string_hash_str(&key)) & mask;
             while self.keys[pos].is_some() {
                 pos = (pos + 1) & mask;
             }
@@ -204,7 +204,7 @@ mod tests {
     #[test]
     fn hash_and_order() {
         // String.hashCode over UTF-16 code units: the emoji is two surrogates.
-        assert_eq!(java_string_hash("\u{1F600}".encode_utf16()), 1_772_899);
+        assert_eq!(java_string_hash_str("\u{1F600}"), 1_772_899);
         let mut o = OpenOrder::new(16, 0.5);
         for k in ["harness", "harness_h"] {
             o.insert(k);

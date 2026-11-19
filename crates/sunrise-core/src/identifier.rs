@@ -26,7 +26,10 @@ impl std::error::Error for IdentifierError {}
 fn valid(c: u8) -> bool {
     c.is_ascii_lowercase() || c.is_ascii_digit() || b"_.-".contains(&c)
 }
+/// `String.hashCode` over the bytes, which are its UTF-16 units only because a valid identifier is
+/// ASCII (`valid`); `from_parts` refuses anything else before it hashes.
 fn hash(s: &str) -> i32 {
+    debug_assert!(s.is_ascii(), "identifier hashed before validation: {s:?}");
     s.bytes()
         .fold(0i32, |h, c| h.wrapping_mul(31).wrapping_add(i32::from(c)))
 }
@@ -136,6 +139,27 @@ mod tests {
         assert_eq!(
             Identifier::from_parts("a", "..").map(|id| id.to_string()),
             Ok("a:..".to_owned())
+        );
+    }
+
+    /// Non-ASCII text never reaches the byte hash, which equals `String.hashCode` only on ASCII:
+    /// it is refused first, in the namespace and in the path. A valid one hashes as vanilla's
+    /// `31 * namespace.hashCode() + path.hashCode()`.
+    #[test]
+    fn only_ascii_reaches_the_hash() {
+        for text in ["\u{e9}", "a\u{1F600}", "\u{0101}", "\u{ff}"] {
+            assert_eq!(
+                Identifier::from_parts(text, "x"),
+                Err(IdentifierError::Namespace)
+            );
+            assert_eq!(
+                Identifier::from_parts("x", text),
+                Err(IdentifierError::Path)
+            );
+        }
+        assert_eq!(
+            Identifier::parse("minecraft:stone").unwrap().hash_code(),
+            182_203_480
         );
     }
 

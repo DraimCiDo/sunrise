@@ -7,7 +7,7 @@ use super::{
 };
 use std::{cmp::Ordering, path::PathBuf};
 use sunrise_core::java_hash_map::{JavaHashMap, JavaKey};
-use sunrise_core::random::java_string_hash;
+use sunrise_core::java_string::java_string_hash_str;
 use sunrise_java_properties::{civil_from_days, days_from_civil, now_millis};
 use sunrise_protocol::crypto::uuid_string;
 
@@ -16,7 +16,7 @@ use sunrise_protocol::crypto::uuid_string;
 pub struct JKey(pub String);
 impl JavaKey for JKey {
     fn java_hash(&self) -> i32 {
-        java_string_hash(self.0.encode_utf16())
+        java_string_hash_str(&self.0)
     }
     fn comparable_compare(&self, other: &Self) -> Option<Ordering> {
         Some(self.0.encode_utf16().cmp(other.0.encode_utf16()))

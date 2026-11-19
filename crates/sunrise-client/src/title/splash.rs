@@ -22,7 +22,7 @@ pub(crate) fn choose_splash(text: &str, index: usize, date: (u32, u32)) -> Optio
 pub(super) fn splash_lines(text: &str) -> impl Iterator<Item = &str> {
     text.lines()
         .map(str::trim)
-        .filter(|s| sunrise_core::random::java_string_hash(s.encode_utf16()) != 125780783)
+        .filter(|s| sunrise_core::java_string::java_string_hash_str(s) != 125780783)
 }
 
 /// `SplashManager.getSplash`: outside the special dates, a one in `size` roll

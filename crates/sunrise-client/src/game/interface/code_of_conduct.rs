@@ -13,7 +13,7 @@ use sunrise_client::{
     text::Text,
     ui,
 };
-use sunrise_core::random::java_string_hash;
+use sunrise_core::java_string::java_string_hash_str;
 use sunrise_protocol::servers;
 
 /// The text's line height.
@@ -134,7 +134,7 @@ impl Game<'_> {
         let Some(r) = &self.remote else {
             return;
         };
-        let hash = java_string_hash(text.encode_utf16());
+        let hash = java_string_hash_str(&text);
         if self.accepted_code_of_conduct() == Some(hash) {
             r.session.accept_code_of_conduct();
             return;

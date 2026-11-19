@@ -29,7 +29,7 @@ pub trait JavaKey: Eq {
 
 impl JavaKey for str {
     fn java_hash(&self) -> i32 {
-        crate::random::java_string_hash(self.encode_utf16())
+        crate::java_string::java_string_hash_str(self)
     }
     fn comparable_compare(&self, other: &Self) -> Option<Ordering> {
         Some(self.encode_utf16().cmp(other.encode_utf16()))
