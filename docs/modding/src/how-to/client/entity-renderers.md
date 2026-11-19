@@ -79,9 +79,10 @@ impl EntityRenderer for Missile {
 }
 ```
 
-A row is eligible for extraction after its first synced fields arrive. If its snapshot exceeds the
-64 KiB render-state bound, the row is not submitted until it fits again. `yaw`, `pitch` and `age` are
-interpolated to the frame. The pose stack starts at the row's interpolated position.
+A row is eligible for extraction after its first attachment snapshot arrives. A field that could
+not fit into the bounded render snapshot reads as `None`; it does not stop the row from being
+submitted. `yaw`, `pitch` and `age` are interpolated to the frame. The pose stack starts at the row's
+interpolated position.
 
 ### A living entity's frame
 

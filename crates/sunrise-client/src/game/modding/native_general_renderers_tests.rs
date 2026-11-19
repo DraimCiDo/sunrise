@@ -108,7 +108,7 @@ impl EntityRenderer for Missile {
             .map(|value| value.copied())
             .map_err(|e| format!("{e:?}"))?;
         *self.fuel.lock().unwrap() = fuel;
-        let extent = fuel.ok_or("missing fuel")? as f32;
+        let extent = fuel.unwrap_or(1) as f32;
         let corners = [
             [0.0, 1.0, 0.0],
             [0.0, 0.0, 0.0],
@@ -209,7 +209,7 @@ fn spawn(id: i32, key: &str, at: [f64; 3]) -> C {
 
 /// The server's first snapshot of row `id`'s synced fields: `fuel`, or nothing synced.
 fn snapshot(id: u32, fuel: Option<i32>) -> C {
-    use sunrise_mod_runtime::attachments::{AttachmentSync, Holder};
+    use sunrise_mod_runtime::attachments::AttachmentSync;
     let changes = fuel.map_or_else(Vec::new, |n| {
         vec![AttachmentSync {
             namespace: "test".into(),
@@ -217,15 +217,23 @@ fn snapshot(id: u32, fuel: Option<i32>) -> C {
             value: Some([("n".into(), Tag::Int(n))].into()),
         }]
     });
+    attachment_packet(id, true, changes)
+}
+
+fn attachment_packet(
+    id: u32,
+    replace: bool,
+    changes: Vec<sunrise_mod_runtime::attachments::AttachmentSync>,
+) -> C {
+    use sunrise_mod_runtime::attachments::Holder;
+    use sunrise_protocol::attachment_sync::{CHANNEL, Message, encode};
     C::CustomPayload(sunrise_protocol::packets::configuration::CustomPayload {
-        channel: sunrise_protocol::attachment_sync::CHANNEL.into(),
-        data: sunrise_protocol::attachment_sync::encode(
-            &sunrise_protocol::attachment_sync::Message {
-                holder: Holder::Entity(id),
-                replace: true,
-                changes,
-            },
-        )
+        channel: CHANNEL.into(),
+        data: encode(&Message {
+            holder: Holder::Entity(id),
+            replace,
+            changes,
+        })
         .unwrap(),
     })
 }
@@ -359,6 +367,62 @@ fn a_row_is_drawn_by_its_types_renderer_at_the_frames_pose_reading_its_synced_fi
             assert_eq!((seen.yaw, seen.pitch), (22.5, -10.0));
             assert!(seen.living.is_none());
             assert_eq!(*scene.missile.fuel.lock().unwrap(), Some(7));
+        },
+    );
+}
+
+#[test]
+#[ignore = "daily"]
+fn an_oversized_unread_field_does_not_stop_general_submission() {
+    use sunrise_mod_runtime::attachments::{AttachmentSync, Holder};
+    in_scene(
+        "an_oversized_unread_field_does_not_stop_general_submission",
+        |game, scene| {
+            // A valid synced field too big for the render projection, ordered
+            // before the only field the renderer reads.
+            let padding_bytes = 70 * 1024;
+            game.handle_packet(attachment_packet(
+                5,
+                true,
+                vec![AttachmentSync {
+                    namespace: "test".into(),
+                    name: "a_padding".into(),
+                    value: Some([("bytes".into(), Tag::ByteArray(vec![0; padding_bytes]))].into()),
+                }],
+            ))
+            .unwrap();
+            let held = &game.remote.as_ref().unwrap().attachments[&Holder::Entity(5)];
+            let value = held
+                .entry("test", "a_padding")
+                .unwrap()
+                .unwrap()
+                .saved()
+                .unwrap();
+            assert!(matches!(value.get(&"value".into()), Some(Tag::Compound(c))
+                if matches!(c.get(&"bytes".into()), Some(Tag::ByteArray(b)) if b.len() == padding_bytes)));
+
+            let max_x = |frame: &[Vertex]| {
+                assert_eq!(frame.len(), 4);
+                frame
+                    .iter()
+                    .map(|v| v.pos[0])
+                    .fold(f32::NEG_INFINITY, f32::max)
+            };
+            assert_eq!(max_x(&frame(game, 1.0)), 5.0);
+            assert_eq!(*scene.missile.fuel.lock().unwrap(), None);
+
+            game.handle_packet(attachment_packet(
+                5,
+                false,
+                vec![AttachmentSync {
+                    namespace: "test".into(),
+                    name: "fuel".into(),
+                    value: Some([("n".into(), Tag::Int(11))].into()),
+                }],
+            ))
+            .unwrap();
+            assert_eq!(max_x(&frame(game, 1.0)), 15.0);
+            assert_eq!(*scene.missile.fuel.lock().unwrap(), Some(11));
         },
     );
 }

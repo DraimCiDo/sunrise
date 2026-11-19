@@ -26,7 +26,7 @@ pub(in crate::game) struct RemoteGeneral {
     pub age: u32,
     /// Its first attachment snapshot has arrived too: the row is shown, with its fields.
     pub shown: bool,
-    /// Frozen synced fields, rebuilt at the packet boundary; absent if the snapshot was refused.
+    /// Frozen synced fields, rebuilt at the packet boundary once the first snapshot arrives.
     pub render_attachments: Option<mod_api::EntityRenderAttachments>,
 }
 
@@ -57,7 +57,8 @@ impl RemoteGenerals {
         if let Some(row) = self.rows.get_mut(&id) {
             row.shown |= replace;
             if row.shown {
-                row.render_attachments = render_attachments(id, attachments);
+                row.render_attachments =
+                    Some(mod_api::EntityRenderAttachments::from_synced(attachments));
             }
         }
     }
@@ -116,7 +117,8 @@ impl Game<'_> {
                 previous_rotation: rotation,
                 age: 0,
                 shown,
-                render_attachments: attachments.and_then(|map| render_attachments(id, map)),
+                render_attachments: attachments
+                    .map(|map| mod_api::EntityRenderAttachments::from_synced(map)),
             },
         );
         self.persist
@@ -138,17 +140,6 @@ impl Game<'_> {
     pub(super) fn forget_remote_general(r: &mut Remote, id: i32) {
         r.general.rows.shift_remove(&id);
     }
-}
-
-fn render_attachments(
-    id: i32,
-    map: &sunrise_mod_runtime::attachments::Attachments,
-) -> Option<mod_api::EntityRenderAttachments> {
-    mod_api::EntityRenderAttachments::from_synced(map.synced())
-        .inspect_err(|e| {
-            log::debug!("Sunrise: cannot extract attachments for general entity {id}: {e}")
-        })
-        .ok()
 }
 
 /// One client tick of the rows: `setOldPosAndRot`, then a step of the non-living

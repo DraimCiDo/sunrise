@@ -66,12 +66,7 @@ impl Game<'_> {
         // Extract the visible list before invoking mod code, as LevelExtractor does. The
         // client's lookup preserves insertion order (vanilla EntityLookup's linked id map).
         let mut visible = std::mem::take(&mut *self.general_render_states.borrow_mut());
-        for (&id, row) in remote
-            .general
-            .rows
-            .iter()
-            .filter(|(_, row)| row.shown && row.render_attachments.is_some())
-        {
+        for (&id, row) in remote.general.rows.iter().filter(|(_, row)| row.shown) {
             if !renderers
                 .general(row.type_slot)
                 .is_some_and(|renderer| !renderer.failed.load(std::sync::atomic::Ordering::Relaxed))

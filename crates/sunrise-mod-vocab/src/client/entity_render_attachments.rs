@@ -3,12 +3,18 @@ use crate::wire::{Reader, Wire, WireError, Writer};
 use crate::{AttachmentError, AttachmentType};
 use std::sync::Arc;
 use sunrise_core::nbt::{self, Limits, Tag};
-use sunrise_mod_runtime::attachments::{AttachmentEntry, AttachmentSync};
+use sunrise_mod_runtime::attachments::{AttachmentEntry, Attachments};
 
-const MAX_BYTES: usize = 64 * 1024;
+// The render call carries a projection, not a replay of the sync packets.
+// Keep that projection small for guests with little linear memory.
+const RENDER_FRAME_BYTES: usize = 64 * 1024;
 
-/// A general entity's synced fields as they were at render-state extraction. The same
-/// snapshot (at most 64 KiB encoded) is available to native and Wasm renderers.
+// Namespace, name and NBT each have a Wire length prefix.
+const FIELD_PREFIX_BYTES: usize = 3 * size_of::<u32>();
+
+/// A general entity's synced fields as they were at render-state extraction. Native
+/// and Wasm renderers see the same captured values. Fields that could not be captured
+/// are unavailable through [`Self::get`]; they do not prevent submission.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, sunrise_mod_api_macros::Wire)]
 pub struct EntityRenderAttachments {
@@ -36,71 +42,60 @@ impl PartialEq for Snapshot {
 }
 
 impl EntityRenderAttachments {
-    /// Builds a bounded copy from a holder's current synced values, in key order.
+    /// Projects the holder's synced fields into a bounded render input in key order.
+    /// A field that doesn't fit doesn't use the budget or affect the synced holder.
     // Engine-side only; mods consume snapshots handed to their renderer.
     #[doc(hidden)]
-    pub fn from_synced(changes: Vec<AttachmentSync>) -> Result<Self, WireError> {
-        let mut values = Vec::with_capacity(changes.len());
-        for AttachmentSync {
-            namespace,
-            name,
-            value,
-        } in changes
-        {
-            if let Some(value) = value {
-                values.push((
-                    namespace
-                        .to_string()
-                        .map_err(|_| WireError::Invalid("attachment namespace"))?,
-                    name.to_string()
-                        .map_err(|_| WireError::Invalid("attachment name"))?,
-                    value,
-                ));
-            }
-        }
+    pub fn from_synced(attachments: &Attachments) -> Self {
+        let mut values: Vec<_> = attachments
+            .synced()
+            .into_iter()
+            .filter_map(|field| {
+                Some((
+                    field.namespace.to_string().ok()?,
+                    field.name.to_string().ok()?,
+                    field.value?,
+                ))
+            })
+            .collect();
         values.sort_unstable_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
-        if values
-            .windows(2)
-            .any(|pair| (&pair[0].0, &pair[0].1) == (&pair[1].0, &pair[1].1))
-        {
-            return Err(WireError::Invalid("duplicate attachment key"));
-        }
         let mut writer = Writer::new();
-        writer.limit(MAX_BYTES);
-        writer.put_len(values.len());
-        let mut entries = Vec::with_capacity(values.len());
+        writer.put_len(0); // Filled with the count of fields actually captured below.
+        let mut entries = Vec::new();
         for (namespace, name, value) in values {
+            let Some(budget) = (RENDER_FRAME_BYTES - writer.bytes().len())
+                .checked_sub(FIELD_PREFIX_BYTES + namespace.len() + name.len())
+            else {
+                continue;
+            };
             let tag = Tag::Compound(value);
-            let encoded = nbt::write_network(
+            let Ok(encoded) = nbt::write_network(
                 &tag,
                 Limits {
-                    max_bytes: MAX_BYTES,
+                    max_bytes: budget,
                     ..Limits::default()
                 },
-            )
-            .map_err(|_| WireError::Invalid("attachment NBT is invalid or too large"))?;
+            ) else {
+                continue;
+            };
             writer.put_str(&namespace);
             writer.put_str(&name);
             writer.put(&encoded);
-            if let Some(error) = writer.error() {
-                return Err(error);
-            }
             entries.push((
                 namespace,
                 name,
                 AttachmentEntry::from_saved([("value".into(), tag)].into()),
             ));
         }
-        Ok(Self {
-            data: Arc::new(Snapshot {
-                bytes: writer.into_bytes(),
-                entries,
-            }),
-        })
+        let mut bytes = writer.into_bytes();
+        bytes[..size_of::<u32>()].copy_from_slice(&(entries.len() as u32).to_le_bytes());
+        Self {
+            data: Arc::new(Snapshot { bytes, entries }),
+        }
     }
 
-    /// Borrows the synced value of `key`, or returns `Ok(None)` when the field is absent.
-    /// Never inserts a default and never reads the live world. A present value uses the key's
+    /// Borrows the synced value of `key`, or returns `Ok(None)` if absent or not captured.
+    /// Never inserts a default and never reads the live world. A captured value uses the key's
     /// codec, just as on the synced client holder.
     pub fn get<T: Send + Sync + 'static>(
         &self,
@@ -127,9 +122,9 @@ impl Wire for Snapshot {
     }
 
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
-        input.bounded(MAX_BYTES, |payload| {
+        input.bounded(RENDER_FRAME_BYTES, |payload| {
             let bytes = payload.rest();
-            let count = payload.take_len(12)?; // Three lengths per field.
+            let count = payload.take_len(FIELD_PREFIX_BYTES)?;
             let mut entries: Vec<(String, String, AttachmentEntry)> = Vec::with_capacity(count);
             for _ in 0..count {
                 let (namespace, name): (String, String) = (payload.take()?, payload.take()?);
@@ -164,30 +159,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn attachment_snapshot_refuses_a_payload_over_its_budget_on_both_boundaries() {
-        let value = Tag::ByteArray(vec![42; 40 * 1024]);
-        let changes = ["a", "b"].map(|name| AttachmentSync {
-            namespace: "test".into(),
-            name: name.into(),
-            value: Some([("v".into(), value.clone())].into()),
-        });
-        assert_eq!(
-            EntityRenderAttachments::from_synced(changes.to_vec()),
-            Err(WireError::Length)
-        );
-        let fields: Vec<_> = changes
-            .into_iter()
-            .map(|field| {
-                (
-                    "test".to_owned(),
-                    field.name.to_string().unwrap(),
-                    nbt::write_network(&Tag::Compound(field.value.unwrap()), Limits::default())
-                        .unwrap(),
-                )
-            })
-            .collect();
+    fn attachment_snapshot_wire_decode_refuses_more_than_one_render_frame() {
+        let encoded = nbt::write_network(
+            &Tag::Compound([("v".into(), Tag::ByteArray(vec![42; 40 * 1024]))].into()),
+            Limits::default(),
+        )
+        .unwrap();
+        let fields = ["a", "b"].map(|name| ("test".to_owned(), name.to_owned(), encoded.clone()));
         let mut writer = Writer::new();
-        writer.put(&fields);
+        writer.put(&Vec::from(fields));
         assert!(matches!(
             Snapshot::take(&mut Reader::new(writer.bytes())),
             Err(WireError::Length)
