@@ -488,6 +488,17 @@ fn commit_unloads(world: &mut World, keys: &[(i32, i32)]) -> Vec<Arc<Chunk>> {
         .collect()
 }
 
+/// `set_forced_loaded`'s load barrier: a forced column is loaded once it can
+/// tick — a locally generated one lit with its 3x3 neighbourhood resident
+/// (vanilla's ticking-chunk future); a remote server's column arrives lit
+/// with its packet, so residency suffices.
+fn forced_ready(remote: bool, world: &World, x: i32, z: i32) -> bool {
+    match world.chunks.get(&(x, z)) {
+        Some(chunk) => remote || (chunk.lit && world.chunks.surrounded((x, z))),
+        None => false,
+    }
+}
+
 /// An update paused before removing its out-of-range live chunks.
 pub struct StreamingUpdate {
     uploads: Vec<((i32, i32, i32), SectionMesh)>,
@@ -2709,11 +2720,14 @@ impl Streaming {
         changed
     }
     /// `ServerLevel.setChunkForced`: a newly forced column is present before
-    /// returning. Repeated adds and removals only report the set change.
+    /// returning, lit and with the 3x3 it ticks with (`ChunkMap.prepareTickingChunk`
+    /// demands the neighbourhood with the chunk: a saved tick restored on load
+    /// waits for all of them, and ambient passes alone can take tens of ticks to
+    /// stream them, #3341). Repeated adds and removals only report the set change.
     pub fn set_forced_loaded(&mut self, world: &mut World, x: i32, z: i32, forced: bool) -> bool {
         let changed = self.set_forced(x, z, forced);
         if forced && changed {
-            while !world.chunks.contains_key(&(x, z)) {
+            while !forced_ready(self.remote, world, x, z) {
                 assert!(!self.paused, "forced chunk load before streaming started");
                 assert!(
                     !self
@@ -2730,7 +2744,7 @@ impl Streaming {
                 let (meshes, unloaded) = self.finish_update(world, plan);
                 debug_assert!(unloaded.is_empty());
                 self.free(meshes);
-                if !world.chunks.contains_key(&(x, z)) {
+                if !forced_ready(self.remote, world, x, z) {
                     self.wait(std::time::Duration::from_millis(5));
                 }
             }
@@ -3660,6 +3674,31 @@ mod tests {
         assert!(world.chunks.contains_key(&(1, 0)));
         assert!(world.block_entities.contains_key(&(0, 64, 0)));
         assert!(Streaming::take_remote_columns(&mut world, &gone).is_empty());
+    }
+
+    /// The barrier `set_forced_loaded` holds `/forceload add` to: a locally
+    /// generated column is loaded once it can tick — lit, with the 3x3
+    /// neighbourhood vanilla's ticking-chunk future demands. A remote
+    /// server's column arrives lit with its packet; residency suffices (#3341).
+    #[test]
+    fn forced_column_is_loaded_once_it_can_tick() {
+        let mut world = World::new(sunrise_world::registry::BlockStateId(0), 0);
+        assert!(!forced_ready(false, &world, 4, 4));
+        world.chunks.insert((4, 4), Arc::new(Chunk::empty(4, 4)));
+        assert!(!forced_ready(false, &world, 4, 4));
+        assert!(forced_ready(true, &world, 4, 4));
+        Arc::make_mut(world.chunks.get_mut(&(4, 4)).unwrap()).lit = true;
+        assert!(!forced_ready(false, &world, 4, 4));
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                if (dx, dz) != (0, 0) {
+                    world
+                        .chunks
+                        .insert((4 + dx, 4 + dz), Arc::new(Chunk::empty(4 + dx, 4 + dz)));
+                }
+            }
+        }
+        assert!(forced_ready(false, &world, 4, 4));
     }
 
     #[test]
