@@ -31,6 +31,10 @@ pub trait CriterionContext {
 /// store, including in an already running group. They share the outer call's execution
 /// budget and memory limit; the context expires when the predicate returns.
 pub trait CriterionTest: Send + Sync + 'static {
+    #[doc(hidden)]
+    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
+        __sunrise_handler_marks!(CriterionTest);
+    }
     /// Whether the mod's part of this criterion passes. A callback that cannot run refuses
     /// with a typed error, rather than silently answering that the criterion did not match.
     fn test(&self, criterion: &dyn CriterionContext) -> Result<bool, CriterionTestError>;

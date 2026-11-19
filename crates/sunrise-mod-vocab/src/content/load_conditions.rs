@@ -46,6 +46,10 @@ impl From<(Identifier, String)> for ConditionError {
 /// or data map instead logs the error and skips the entire offending file.
 /// Handlers must not mutate published data.
 pub trait LoadCondition: Send + Sync + 'static {
+    #[doc(hidden)]
+    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
+        __sunrise_handler_marks!(LoadCondition);
+    }
     /// Read and validate the raw JSON arguments for one entry.
     fn test(&self, args: &serde_json::Value) -> Result<bool, ConditionError>;
 }

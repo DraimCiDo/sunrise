@@ -47,6 +47,10 @@ impl GameTestContext {
 }
 /// A function run once at the start of each attempt, with the owning server level.
 pub trait GameTestFunction: Send + Sync {
+    #[doc(hidden)]
+    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
+        __sunrise_handler_marks!(GameTestFunction);
+    }
     /// Return an outcome; the runner owns retries, timeouts and completion.
     fn run(&self, host: &mut dyn ServerHost, context: &GameTestContext) -> GameTestResult;
 }

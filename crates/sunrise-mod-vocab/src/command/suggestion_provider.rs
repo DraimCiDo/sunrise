@@ -101,6 +101,10 @@ impl SuggestionReply {
 /// The game keeps one value per registered argument type and may ask it from more than one
 /// request: implement it to be shared, without mutable state.
 pub trait SuggestionProvider: Send + Sync + 'static {
+    #[doc(hidden)]
+    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
+        __sunrise_handler_marks!(SuggestionProvider);
+    }
     /// The candidates for `request`: the text typed, the arguments before it and the sender.
     fn suggest(&self, request: &SuggestionRequest) -> SuggestionReply;
 }

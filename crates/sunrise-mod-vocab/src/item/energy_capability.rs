@@ -10,6 +10,10 @@ use std::marker::PhantomData;
 /// A block's energy (NeoForge's `EnergyHandler`): stateless, given the host, and written only in
 /// a transaction, as a [`ResourceHandler`](crate::ResourceHandler) is.
 pub trait EnergyHandler: Send + Sync {
+    #[doc(hidden)]
+    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
+        __sunrise_handler_marks!(EnergyHandler);
+    }
     /// How much it holds.
     fn amount(&self, host: &mut dyn ServerHost) -> u32;
     /// How much it holds when full.
