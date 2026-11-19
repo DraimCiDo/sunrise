@@ -4,6 +4,8 @@
 use crate::*;
 #[path = "__private/registry_installation.rs"]
 mod registry_installation;
+#[doc(hidden)]
+pub use crate::wire::wire_handlers::Sealed;
 
 /// Native libraries' launcher-to-game registration contract, not a mod-facing API.
 /// The launcher generates manifest rows independently of hook factories. The game checks
