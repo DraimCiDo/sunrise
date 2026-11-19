@@ -6,6 +6,9 @@ use crate::wire::{Reader, Wire, WireError, Writer};
 use crate::*;
 use std::sync::Arc;
 
+/// The argument of a handler trait's hidden marks method: no mod can name it.
+pub struct Sealed(());
+
 macro_rules! arc_handler {
     ($handler:ty, $name:literal) => {
         impl Wire for Arc<$handler> {
