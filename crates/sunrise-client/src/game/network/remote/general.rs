@@ -6,8 +6,10 @@
 //! never seen without its initial fields. No mod code runs here: a row's behaviour is the
 //! server's.
 use super::{Game, Lerp, Remote};
+use crate::game::general::general_type_catalog;
 use indexmap::IndexMap;
 use std::collections::HashMap;
+use sunrise_core::geometry::{Aabb, Vec3};
 use sunrise_protocol::general_entity::{self, Message};
 
 /// One general row the server shows the window.
@@ -30,6 +32,17 @@ pub(in crate::game) struct RemoteGeneral {
     pub render_attachments: Option<mod_api::EntityRenderAttachments>,
 }
 
+impl RemoteGeneral {
+    pub(in crate::game) fn bounds(&self) -> Aabb {
+        let [x, y, z] = self.position;
+        general_type_catalog().bounds(self.type_slot, Vec3::new(x, y, z))
+    }
+
+    pub(in crate::game) fn kind(&self) -> &'static str {
+        general_type_catalog().key(self.type_slot)
+    }
+}
+
 /// The rows the server shows the window, by network id, and the warnings already given.
 #[derive(Default)]
 pub(in crate::game) struct RemoteGenerals {
@@ -42,6 +55,10 @@ pub(in crate::game) struct RemoteGenerals {
 }
 
 impl RemoteGenerals {
+    pub(in crate::game) fn shown(&self, id: i32) -> Option<&RemoteGeneral> {
+        self.rows.get(&id).filter(|row| row.shown)
+    }
+
     /// Forget every row: a world change or a respawn into another dimension.
     pub fn clear(&mut self) {
         self.rows.clear();
@@ -65,6 +82,20 @@ impl RemoteGenerals {
 }
 
 impl Game<'_> {
+    /// The declared type key of general row `id`: the level's own row, or on a client the
+    /// one its server shows it.
+    pub(in crate::game) fn general_kind(&self, id: u32) -> Option<&'static str> {
+        let slot = match self.resident_entities.general.row(id) {
+            Some(row) => row.type_slot,
+            None => self.shown_remote_general(id as i32)?.type_slot,
+        };
+        Some(crate::game::general::general_type_catalog().key(slot))
+    }
+
+    pub(in crate::game) fn shown_remote_general(&self, id: i32) -> Option<&RemoteGeneral> {
+        self.remote.as_ref()?.general.shown(id)
+    }
+
     /// A `sunrise:general_entity` payload the server sent the window.
     pub(super) fn remote_general_entity(&mut self, data: &[u8]) {
         let message = match general_entity::decode(data) {
@@ -81,7 +112,7 @@ impl Game<'_> {
         } = message;
         // Both sides froze the same declarations (general types come from both-side
         // packages): a key this client lacks comes from a server that does not match it.
-        let Some(type_slot) = crate::game::general::general_type_catalog().slot(&type_key) else {
+        let Some(type_slot) = general_type_catalog().slot(&type_key) else {
             if let Some(r) = self.remote.as_mut()
                 && r.general.unknown.insert(type_key.clone())
             {
@@ -214,19 +245,22 @@ mod tests {
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for Declare {
         fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-            r.declare_general_entity(
-                "missile",
-                mod_api::GeneralEntityCategory::Misc,
-                0.5,
-                0.5,
-                mod_api::GeneralSavePolicy::Save,
-                true,
-                8,
-                1,
-                1,
-                &[],
-            )
-            .unwrap();
+            for (name, height, pickable) in [("missile", 0.5, false), ("package", 2.0, true)] {
+                r.declare_general_entity(
+                    name,
+                    mod_api::GeneralEntityCategory::Misc,
+                    0.5,
+                    height,
+                    mod_api::GeneralSavePolicy::Save,
+                    true,
+                    pickable,
+                    8,
+                    1,
+                    1,
+                    &[],
+                )
+                .unwrap();
+            }
         }
     }
 
@@ -268,6 +302,162 @@ mod tests {
             )
             .unwrap(),
         })
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn a_shown_pickable_general_row_receives_the_named_use_and_attack() {
+        use crate::game::general::{GeneralEntityRecord, GeneralTypeEnvelope};
+        use crate::game::native_entity_refs::tests::{with_client_game, with_game};
+        use crate::game::native_hotbar_slot::hotbar_slot_tests::{logged_in, sent};
+        use crate::game::native_player_death::tests::add_guest;
+        use mod_api::{Flow, HostSide, InteractionResult};
+        use std::sync::{Arc, Mutex};
+        use sunrise_client::{first_person::Hand, motion::PlayerMotion};
+        use sunrise_protocol::packets::play::Serverbound as S;
+
+        const PACKAGE: &str = "mymod:package";
+        const AT: [f64; 3] = [0.5, 65.0, 2.5];
+
+        #[derive(Debug, PartialEq)]
+        enum Event {
+            ClientUse,
+            ServerUse,
+            Attack,
+        }
+        type Events = Arc<Mutex<Vec<(Event, i32, String)>>>;
+        struct Watch(Events);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Watch {
+            fn entity_interact(
+                &self,
+                host: HostSide<'_>,
+                event: &mut mod_api::EntityInteractEvent<'_>,
+            ) -> Option<InteractionResult> {
+                let side = if matches!(host, HostSide::Client(_)) {
+                    Event::ClientUse
+                } else {
+                    Event::ServerUse
+                };
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push((side, event.entity, event.kind.to_owned()));
+                Some(InteractionResult::Consume)
+            }
+
+            fn attack_entity(
+                &self,
+                _: &mut dyn mod_api::ServerHost,
+                event: &mut mod_api::AttackEntityEvent<'_>,
+            ) -> Flow {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push((Event::Attack, event.entity, event.kind.to_owned()));
+                Flow::Continue
+            }
+        }
+
+        mod_platform::__private::initialize().unwrap();
+        let _registration =
+            mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Registration);
+        let calls = Events::default();
+        let mods = vec![
+            mod_api::ModEntry::new("mymod", Box::new(Declare)),
+            mod_api::ModEntry::new("observer", Box::new(Watch(Arc::clone(&calls)))),
+        ];
+        mod_platform::testing::with_mods(mods.into(), || {
+            with_client_game(|game| {
+                let _world =
+                    mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+                let mut pipe = logged_in(game);
+                // The two closer boxes also meet the ray: one cannot be picked, and one has
+                // not received its snapshot. Neither may win over the ready package.
+                game.handle_packet(spawn(40, "mymod:missile", [0.5, 66.5, 1.2]))
+                    .unwrap();
+                game.handle_packet(snapshot(40, None)).unwrap();
+                game.handle_packet(spawn(41, PACKAGE, [0.5, 65.0, 1.8]))
+                    .unwrap();
+                game.handle_packet(spawn(42, PACKAGE, AT)).unwrap();
+                game.handle_packet(snapshot(42, None)).unwrap();
+                game.refresh_client_pick(1.0);
+                assert!(
+                    matches!(game.stored_client_pick(), Some(mod_api::CrosshairTarget::Entity { entity, .. }) if entity.id() == 42)
+                );
+                game.remote_use(mod_api::InteractionAttempt::Press);
+                game.remote_start_attack();
+                let packets: Vec<_> = sent(&mut pipe)
+                    .into_iter()
+                    .filter_map(|packet| match packet {
+                        S::Interact(packet) => Some((Event::ClientUse, packet.id)),
+                        S::Attack(packet) => Some((Event::Attack, packet.id)),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(packets, [(Event::ClientUse, 42), (Event::Attack, 42)]);
+                assert_eq!(
+                    *calls.lock().unwrap(),
+                    [(Event::ClientUse, 42, PACKAGE.into())]
+                );
+            });
+            calls.lock().unwrap().clear();
+            with_game(|game| {
+                let record = GeneralEntityRecord {
+                    position: AT,
+                    velocity: [0.0; 3],
+                    rotation: [0.0; 2],
+                    owner: None,
+                    uuid: [1, 0, 0, 4],
+                    envelope: GeneralTypeEnvelope {
+                        type_key: PACKAGE.into(),
+                        payload_version: 1,
+                        payload_bytes: Vec::new(),
+                    },
+                    passengers: Vec::new(),
+                };
+                game.load_listed(PACKAGE, None, None, record.to_tag())
+                    .unwrap();
+                let id = game.resident_entities.general.rows[0].id as i32;
+                add_guest(game);
+                let at = Vec3::new(0.5, 65.0, 0.5);
+                let mut body = PlayerMotion::new(game.motion, at).unwrap();
+                game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                    guest.position = at.components();
+                    guest.load_timeout = 0;
+                    body.entity_id = guest.entity_id;
+                    guest.motion = Some(Box::new(body));
+                });
+                game.reset_entity_residency();
+                let _world =
+                    mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+                assert_eq!(
+                    game.guest_interact(1, 0, id, Hand::Main, [0.0, 1.65, -0.25]),
+                    Ok(true)
+                );
+                assert_eq!(
+                    game.guest_attack(1, 0, id),
+                    Ok(false),
+                    "an unclaimed hit cannot hurt a plain row"
+                );
+                assert!(game.resident_entities.general.row(id as u32).is_some());
+                game.as_guest(1, |guest| guest.player.as_mut().unwrap().position.z = -64.5)
+                    .unwrap();
+                let too_far = Err(mod_api::ActionRefused::OutOfReach);
+                assert_eq!(
+                    game.guest_interact(1, 0, id, Hand::Main, [0.0, 1.65, -0.25]),
+                    too_far
+                );
+                assert_eq!(game.guest_attack(1, 0, id), too_far);
+                assert_eq!(
+                    *calls.lock().unwrap(),
+                    [
+                        (Event::ServerUse, id, PACKAGE.into()),
+                        (Event::Attack, id, PACKAGE.into())
+                    ]
+                );
+            });
+        });
     }
 
     /// The ids of the rows shown on the window.

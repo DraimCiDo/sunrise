@@ -145,7 +145,7 @@ impl Game<'_> {
         }
     }
 
-    /// The box of a boat, minecart, armor stand, item frame or painting, and
+    /// The box of a boat, minecart, armor stand, item frame, painting or general row, and
     /// the point an interact packet's location is measured from (the
     /// client's `remote_object_hit` uses the same points).
     pub(super) fn object_target(&self, id: i32) -> Option<([f64; 3], [f64; 3], [f64; 3])> {
@@ -179,9 +179,13 @@ impl Game<'_> {
             let (lo, hi) = f.bounds();
             return Some((lo, hi, centre(f.pos)));
         }
-        let p = self.paintings.iter().find(|p| p.id == id)?;
-        let (lo, hi) = p.bounds();
-        Some((lo, hi, centre(p.pos)))
+        if let Some(p) = self.paintings.iter().find(|p| p.id == id) {
+            let (lo, hi) = p.bounds();
+            return Some((lo, hi, centre(p.pos)));
+        }
+        let row = self.resident_entities.general.row(id)?;
+        let (lo, hi) = corners(super::entity::Entity::bounds(row));
+        Some((lo, hi, at(row.position)))
     }
 
     /// The vehicles the server's players ride: they move with their riders,

@@ -200,18 +200,27 @@ impl Game<'_> {
         self.transaction_close(&seal, true);
     }
 
+    /// Whether Pick Block (middle click) can name an item for the entity: a projectile, a dragon
+    /// part, an unmodeled entity or a general row has no `Entity.getPickResult`. This is not
+    /// whether the crosshair can target it, which a general type's `pickable` decides.
+    pub(in crate::game) fn has_pick_result(target: Option<crate::game::commands::Target>) -> bool {
+        use crate::game::commands::Target;
+        !matches!(
+            target,
+            Some(
+                Target::Projectile(_)
+                    | Target::DragonPart(_)
+                    | Target::Other(_)
+                    | Target::General(_)
+            )
+        )
+    }
+
     fn publish_client_pick(&mut self, result: Option<CrosshairTarget>) {
         self.client_pick.result = result;
         self.client_pick.entity_metadata = match result {
             Some(CrosshairTarget::Entity { entity, .. }) => (
-                !matches!(
-                    self.native_client_entity_target(entity),
-                    Some(
-                        crate::game::commands::Target::Projectile(_)
-                            | crate::game::commands::Target::DragonPart(_)
-                            | crate::game::commands::Target::Other(_)
-                    )
-                ),
+                Self::has_pick_result(self.native_client_entity_target(entity)),
                 self.level_dragon_part(entity.id()).is_none(),
             ),
             _ => (false, false),

@@ -18,6 +18,7 @@ impl mod_api::Hooks for Declare {
                 0.5,
                 GeneralSavePolicy::Save,
                 true,
+                false,
                 chunks,
                 interval,
                 1,

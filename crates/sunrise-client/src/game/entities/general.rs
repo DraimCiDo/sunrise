@@ -529,6 +529,10 @@ impl GeneralTypeCatalog {
         (entry.width, entry.height)
     }
 
+    pub(in crate::game) fn pickable(&self, slot: usize) -> bool {
+        self.entries[slot].pickable
+    }
+
     /// The type's declared payload schema version, the one a fresh row starts at.
     pub fn payload_version(&self, slot: usize) -> u16 {
         self.entries[slot].payload_version
@@ -1408,6 +1412,7 @@ mod tests {
             height: 1.9,
             save_policy: mod_api::GeneralSavePolicy::Save,
             summonable: true,
+            pickable: false,
             tracking_chunks: 8,
             update_interval: 3,
             payload_version: 1,

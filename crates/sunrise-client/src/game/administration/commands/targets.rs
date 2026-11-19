@@ -137,7 +137,8 @@ impl Game<'_> {
                 .resident_entities
                 .general
                 .row(id)
-                .map(|row| [row.position.x, row.position.y, row.position.z]),
+                .map(|row| [row.position.x, row.position.y, row.position.z])
+                .or_else(|| self.shown_remote_general(id as i32).map(|row| row.position)),
         }
     }
     pub(in crate::game) fn target_type(&self, t: Target) -> String {
@@ -159,16 +160,9 @@ impl Game<'_> {
                 .find(|p| p.id == id)
                 .map_or_else(String::new, |p| p.entity_type().into()),
             Target::Stand(_) => "minecraft:armor_stand".into(),
-            Target::General(id) => {
-                self.resident_entities
-                    .general
-                    .row(id)
-                    .map_or_else(String::new, |row| {
-                        super::super::general::general_type_catalog()
-                            .key(row.type_slot)
-                            .to_owned()
-                    })
-            }
+            Target::General(id) => self
+                .general_kind(id)
+                .map_or_else(String::new, str::to_owned),
             Target::Frame(id) => {
                 if self.item_frames.iter().any(|f| f.id == id && f.glow) {
                     "minecraft:glow_item_frame".into()

@@ -80,6 +80,7 @@ pub fn register(registrar: &mut dyn Registrar) {
             1.9,
             GeneralSavePolicy::Save,
             true,
+            false,
             8,
             3,
             1,

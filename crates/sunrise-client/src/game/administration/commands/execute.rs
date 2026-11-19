@@ -161,7 +161,9 @@ impl Game<'_> {
                 .resident_entities
                 .general
                 .row(id)
-                .map_or([0.0; 2], |row| row.rotation),
+                .map(|row| row.rotation)
+                .or_else(|| self.shown_remote_general(id as i32).map(|row| row.rotation))
+                .unwrap_or([0.0; 2]),
             _ => [0.0; 2],
         }
     }

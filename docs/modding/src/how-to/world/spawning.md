@@ -234,6 +234,14 @@ Every mod is asked about every key, so a mod ignores keys it does not own. See [
 
 A general row can move to another position in its level through `EntityRef::teleport_to`. A row teleported on its own dismounts; a teleported vehicle takes its riders with it. Removing the vehicle dismounts its riders and leaves them in the level. `EntityRef::set_rotation` turns a general row without moving or dismounting it; the new angles reach clients through ordinary tracking.
 
+In `declare_general_entity`, pass `pickable` after `summonable`. Pass `false` for
+vanilla's plain `Entity.isPickable` default. With `true`, the crosshair can hit
+the declared box once the row is shown. The ordinary use and attack packets name
+that row, and the existing `entity_interact` and `attack_entity` hooks receive
+its id and declared kind. Without a listener's response, use on the row passes
+and the row declines damage. This does not make the box solid or give it a
+middle-click item.
+
 `EntityRef::owner(host)` reads the owner back (`TraceableEntity.getOwner`) for a projectile or a general row (`ProjectileRef::owner` answers the same for a projectile): a general type's own tick uses it to skip its shooter and to name the attacker of the damage it deals. A spawn is refused for a kind of another family than its body, a position, velocity or rotation that isn't finite, a position outside `Level.isInSpawnableBounds` or in an unloaded chunk, an owner that is stale, in another level, or without a collision identity for a thrown spawn, a level not in place, a client, or a mod that cancelled the spawn or kept the entity out.
 Inside a transaction the join waits for the root commit, so a spawn a mod then keeps out still returns a handle, which reads stale from the commit on. The level's spawn limits, flags and spawn rules don't apply, as they don't to `/summon`; nor does a general type's `summonable`, which is `/summon`'s alone. Items, experience and block drops have their own calls (`spawn_item`, `award_experience`, `pop_resource`), and any other entity `summon`.
 

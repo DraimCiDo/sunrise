@@ -15,6 +15,7 @@ use break_prediction::Prediction;
 mod connection;
 mod fall_sound;
 pub(in crate::game) mod general;
+pub(in crate::game) use general::RemoteGeneral;
 mod interaction_actions;
 mod interaction_prediction;
 mod level_format;
@@ -10392,6 +10393,9 @@ impl Remote {
     /// An entity the server added to this client level: its type
     /// (`minecraft:text_display`) and its position as last sent.
     pub(super) fn tracked_entity(&self, id: i32) -> Option<(&str, [f64; 3])> {
+        if let Some(row) = self.general.rows.get(&id) {
+            return row.shown.then(|| (row.kind(), row.position));
+        }
         self.entities
             .get(&id)
             .map(|t| (t.kind.as_str(), t.position))

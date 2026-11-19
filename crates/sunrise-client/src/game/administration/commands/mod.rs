@@ -829,7 +829,10 @@ impl Game<'_> {
             {
                 Some(value)
             }
-            _ => None,
+            // A client's own copy of a row its server shows it.
+            _ => self
+                .shown_remote_general(id as i32)
+                .map(|_| Target::General(id)),
         }
     }
     /// `ServerLevel.getEntityOrPart` for a part: the `EnderDragonPart` of the

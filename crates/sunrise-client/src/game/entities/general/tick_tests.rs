@@ -136,6 +136,7 @@ impl Hooks for Declare {
                     GeneralSavePolicy::NoSave
                 },
                 true,
+                false,
                 8,
                 3,
                 1,

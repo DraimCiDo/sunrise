@@ -79,8 +79,8 @@ impl Game<'_> {
                 .is_some_and(|(_, d, _)| self.before_block(d))
     }
 
-    /// The nearest boat, minecart, item frame, armor stand, painting, End crystal or dragon part
-    /// the view hits within reach; also fence knots when using.
+    /// The nearest pickable non-mob object the view hits within reach; also fence knots when
+    /// using.
     pub(super) fn remote_object_hit(&self, attacking: bool) -> Option<ObjectHit> {
         let mut pick = crate::game::pick_accumulator::PickAccumulator::new(self.entity_reach);
         self.remote_object_hit_with_pick(attacking, &mut pick)
@@ -159,6 +159,19 @@ impl Game<'_> {
             {
                 let p = i.position;
                 hit = Some((id, d, [p.x, p.y, p.z]));
+            }
+        }
+        if let Some(remote) = &self.remote {
+            let catalog = crate::game::general::general_type_catalog();
+            for (&id, row) in &remote.general.rows {
+                if row.shown
+                    && catalog.pickable(row.type_slot)
+                    && let Ok(entity) = u32::try_from(id)
+                    && let Some(distance) = ray_box(eye, dir, reach, row.bounds())
+                    && pick.consider(self, entity, distance)
+                {
+                    hit = Some((id, distance, row.position));
+                }
             }
         }
         if (!attacking || self.client_pick.ray.is_some())

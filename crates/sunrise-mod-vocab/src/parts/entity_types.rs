@@ -72,6 +72,8 @@ pub struct GeneralEntityTypeDeclaration {
     pub save_policy: GeneralSavePolicy,
     /// Whether the type may be summoned by name.
     pub summonable: bool,
+    /// Whether the client can target the row for use and attack (`Entity.isPickable`).
+    pub pickable: bool,
     /// Tracking distance in chunks, stored directly like vanilla's signed integer.
     pub tracking_chunks: i32,
     /// Update interval in ticks, stored directly like vanilla's signed integer.
@@ -96,6 +98,7 @@ impl Default for GeneralEntityTypeDeclaration {
             height: 1.8,
             save_policy: GeneralSavePolicy::Save,
             summonable: true,
+            pickable: false,
             tracking_chunks: 5,
             update_interval: 3,
             payload_version: 1,
@@ -140,8 +143,12 @@ pub trait GeneralTypesRegistrar {
     /// `EntityType` builder, NeoForge's `RegisterEvent`): `path` in the mod's
     /// namespace (`robot` of `mymod` is `mymod:robot`), its category, its
     /// finite `width` and `height` in blocks, its save and summon
-    /// policy, its signed integer tracking distance and update interval, its payload
-    /// schema version and the loaded mods it requires.
+    /// policy, whether it is pickable, its signed integer tracking distance and
+    /// update interval, its payload schema version and the loaded mods it requires.
+    ///
+    /// Pass `false` for vanilla's plain `Entity.isPickable` default. Pass `true`
+    /// to let the player's crosshair target the declared box for use and attack.
+    /// This does not make the box solid or give it a middle-click item.
     ///
     /// An id outside the mod's manifest-owned namespaces, a malformed id, a
     /// duplicate of this mod's or another's, a non-finite dimension, a required feature naming no
@@ -156,6 +163,7 @@ pub trait GeneralTypesRegistrar {
         height: f64,
         save_policy: GeneralSavePolicy,
         summonable: bool,
+        pickable: bool,
         tracking_chunks: i32,
         update_interval: i32,
         payload_version: u16,
