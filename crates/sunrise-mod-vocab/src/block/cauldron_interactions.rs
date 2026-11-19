@@ -82,6 +82,10 @@ pub enum CauldronRegistrationError {
 /// Vanilla handlers still predict locally. Matching custom builds and resource generations
 /// are not established by the current handshake.
 pub trait Interaction: Send + Sync + 'static {
+    #[doc(hidden)]
+    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
+        __sunrise_handler_marks!(Interaction);
+    }
     /// Decide through read-only host access on either side, without authoritative writes.
     fn decide(&self, host: &dyn Host, input: &CauldronUse) -> CauldronDecision;
     /// Additional server writes run inside the existing action savepoint.

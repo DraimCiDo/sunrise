@@ -225,10 +225,10 @@ fn every_hook_part_and_point_the_fixture_implements_is_imported_and_checked() {
     }
 }
 
-/// A handler the mod sends to the game (`Box<dyn EnergyHandler>`, through a capability) is one the
-/// game may call by any method, so the mod imports every method of its trait, written or not, and a
-/// changed method of it refuses the mod by name. A mod that sends no handler imports none (the
-/// library fixture's check, in `real_library`).
+/// A handler trait a mod implements is one the game may call by any method, so the mod imports
+/// every method of the trait (here `EnergyHandler`, through the API's own `ItemComponentEnergy`
+/// the fixture sends), written or not, and a changed method of it refuses the mod by name. A mod
+/// that implements no handler trait imports none: the library fixture's check, in `real_library`.
 #[test]
 #[ignore = "daily"]
 fn a_sent_handler_imports_every_method_of_its_trait() {

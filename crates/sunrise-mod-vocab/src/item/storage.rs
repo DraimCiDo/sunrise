@@ -133,6 +133,10 @@ impl StoragePage {
 /// kind and in transactions, as a [`ResourceHandler`] is written. Stateless and given the host,
 /// as every capability handler is. Amounts are 64-bit: a million items is one call.
 pub trait ItemStorage {
+    #[doc(hidden)]
+    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
+        __sunrise_handler_marks!(ItemStorage);
+    }
     /// How much of `resource` it holds.
     fn amount(
         &self,

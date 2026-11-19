@@ -61,6 +61,10 @@ pub fn tooltip_appenders() -> &'static [TooltipAppenderPart] {
 /// What answers an item capability for one item: given where the stack lives, its handler, or
 /// none to leave it to the next provider. A closure is one.
 pub trait ItemCapabilityProvider<T: ?Sized>: Send + Sync {
+    #[doc(hidden)]
+    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
+        __sunrise_handler_marks!(ItemCapabilityProvider);
+    }
     /// The handler for the stack at `at`, or none.
     fn provide(&self, host: &mut dyn ServerHost, at: &ItemPlace) -> Option<Box<T>>;
 }

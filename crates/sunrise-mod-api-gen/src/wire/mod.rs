@@ -323,6 +323,18 @@ pub(super) fn surface_reading<'a>(
         let Item::Trait(item) = types.index.item(id).clone() else {
             return Err(format!("{owner} is not a trait"));
         };
+        // A handler trait carries the hidden method that marks its methods in a mod that
+        // implements it; a Part marks through its attribute instead.
+        if exports().contains(owner)
+            && !SUBSCRIBED.iter().any(|(part, _)| part == owner)
+            && !item.items.iter().any(
+                |member| matches!(member, TraitItem::Fn(f) if f.sig.ident == "__sunrise_marks"),
+            )
+        {
+            return Err(format!(
+                "handler trait {owner} has no `__sunrise_marks` method: declare it as `EnergyHandler` does, so a mod that implements the trait imports its methods"
+            ));
+        }
         // A generic trait's instance: its parameters as the owner's arguments.
         let mut subst = Vec::new();
         for (param, arg) in item.generics.type_params().zip(&args) {
@@ -892,7 +904,7 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
     guest.push_str(&calls::dispatch(&surface.types, &surface.methods, &prepared, &names).0);
     guest.push_str(&calls::protocol_module());
     wire.push_str(&calls::mark_macro(&names));
-    wire.push_str(&calls::handler_marks(&names));
+    wire.push_str(&calls::handler_marks_macro(&names));
     let sources = surface.types.index.read.take();
     Ok(Generated {
         wire,

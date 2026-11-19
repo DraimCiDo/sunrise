@@ -6,31 +6,8 @@ use crate::wire::{Reader, Wire, WireError, Writer};
 use crate::*;
 use std::sync::Arc;
 
-/// The handler trait `T`, as the codec below sees it. The generator gives `Marks<dyn Trait>` a
-/// `mark` that imports every method of an exported handler trait (the game may call any of them,
-/// so a mod that sends one is refused at load when one changed); every other trait falls back to
-/// [`NoMarks`]: a Part or `Hooks`, whose attribute marks the methods a mod writes, and a trait
-/// the game's table does not export.
-pub(crate) struct Marks<T: ?Sized>(std::marker::PhantomData<fn() -> Box<T>>);
-impl<T: ?Sized> Marks<T> {
-    pub(crate) fn new() -> Self {
-        Self(std::marker::PhantomData)
-    }
-}
-/// What a handler trait without generated marks does when sent: nothing.
-pub(crate) trait NoMarks {
-    fn mark(&self) {}
-}
-impl<T: ?Sized> NoMarks for Marks<T> {}
-
-/// Marks the handler trait `$handler` where one is sent. Native builds mark nothing.
-macro_rules! mark_handler {
-    ($handler:ty) => {{
-        #[allow(unused_imports)]
-        use $crate::wire::wire_handlers::NoMarks as _;
-        $crate::wire::wire_handlers::Marks::<$handler>::new().mark();
-    }};
-}
+/// The argument of a handler trait's hidden marks method: no mod can name it.
+pub struct Sealed(());
 
 macro_rules! arc_handler {
     ($handler:ty, $name:literal) => {
@@ -40,7 +17,6 @@ macro_rules! arc_handler {
                 true
             }
             fn put(&self, out: &mut Writer) {
-                $crate::wire::wire_handlers::mark_handler!($handler);
                 out.put_resource(Box::new(self.clone()));
             }
             fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
@@ -61,7 +37,6 @@ macro_rules! handler {
                 out.fail(WireError::Invalid("boxed handler needs owned encoding"));
             }
             fn put_owned(self, out: &mut Writer) {
-                $crate::wire::wire_handlers::mark_handler!($handler);
                 out.put_resource(Box::new(Arc::<$handler>::from(self)));
             }
             fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
@@ -72,7 +47,7 @@ macro_rules! handler {
 }
 // New callback traits invoke this same resource codec at their declaration,
 // rather than adding another entry to this legacy shared list.
-pub(crate) use {arc_handler, handler, mark_handler};
+pub(crate) use {arc_handler, handler};
 
 handler!(dyn Hooks, "Hooks");
 handler!(dyn ReloadApply, "ReloadApply");

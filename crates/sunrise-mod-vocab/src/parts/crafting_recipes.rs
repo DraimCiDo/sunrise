@@ -134,6 +134,10 @@ pub trait CraftingRecipeKind: Send + Sync + 'static {
 // hidden: type erasure for generated native/wasm registration transport.
 #[doc(hidden)]
 pub trait CraftingRecipeHandler: Send + Sync {
+    #[doc(hidden)]
+    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
+        __sunrise_handler_marks!(CraftingRecipeHandler);
+    }
     /// Decode one recipe object.
     fn decode(&self, json: &str) -> Result<CraftingRecipeValue, String>;
     /// Write one decoded value for sync.

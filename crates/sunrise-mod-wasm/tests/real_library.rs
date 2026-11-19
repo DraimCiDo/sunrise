@@ -43,8 +43,8 @@ fn real_library_dependency() {
                 module: Package::read_wasm(path).unwrap(),
             });
         }
-        // The library implements no Part and sends no handler: its artifact imports its hooks and no
-        // `part:` name.
+        // The library implements no Part and no handler trait: its artifact imports its hooks and no
+        // `part:` name, so no handler trait's methods are linked into a mod that has no use for them.
         let mut library_imports = Vec::new();
         for payload in wasmparser::Parser::new(0).parse_all(&packages[0].module) {
             if let wasmparser::Payload::ImportSection(section) = payload.unwrap() {
