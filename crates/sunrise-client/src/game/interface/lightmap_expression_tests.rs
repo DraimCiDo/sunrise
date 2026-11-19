@@ -159,8 +159,8 @@ fn the_sky_draws_its_expression_uniform() {
         game.renderer.as_mut().unwrap().screenshot = Some(sunrise_client::gfx::ScreenshotRequest {
             path: "unused.png".into(),
             size: None,
-            scaled: false,
-            background: false,
+            scale: sunrise_client::gfx::ScreenshotScale::Window,
+            readback: sunrise_client::gfx::ScreenshotReadback::Immediate,
         });
         game.render_with(|renderer, frame| renderer.render(frame))
             .unwrap();

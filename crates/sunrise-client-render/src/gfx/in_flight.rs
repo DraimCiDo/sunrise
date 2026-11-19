@@ -109,7 +109,7 @@ impl Renderer {
                 "screenshots need a 32-bit surface format, not {:?}",
                 self.config.format
             );
-            self.screenshot_result = Some(Err(error));
+            self.fail_screenshot(request, error);
             None
         }
     }

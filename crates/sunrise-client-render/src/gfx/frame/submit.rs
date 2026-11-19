@@ -185,34 +185,28 @@ impl Renderer {
         }
         let failed = checks.and_then(GpuChecks::pop);
         if let Some((request, buffer)) = readback {
-            // Out of memory on the way: the PNG would be black; taken again at half the size.
-            if let Some(e) = failed {
-                log::warn!(
-                    "Sunrise renderer: a {}x{} screenshot failed ({e}); trying half the size",
-                    self.config.width,
-                    self.config.height
-                );
-                self.screenshot_halvings += 1;
-                self.screenshot = Some(request);
+            // An invalid target or failed submission cannot yield a valid PNG.
+            if self.device_lost() {
+                self.fail_screenshot(request, "the graphics device was lost".into());
+            } else if let Some(e) = failed {
+                self.screenshot_draw_failed(request, e.to_string());
             } else {
                 self.screenshot_halvings = 0;
                 let reader = screenshot_readback::Reader {
                     device: self.device.clone(),
                     config: self.config.clone(),
                 };
-                if request.background {
-                    if let Err(error) =
-                        self.screenshot_readbacks
-                            .start(reader, request, buffer, hdr_readback)
-                    {
-                        self.screenshot_result = Some(Err(error.to_string()));
-                    }
-                } else {
+                if matches!(request.readback, ScreenshotReadback::Immediate) {
                     self.screenshot_result = Some(
                         reader
                             .read_screenshot(&request, &buffer, hdr_readback.as_ref())
                             .map_err(|e| e.to_string()),
                     );
+                } else if let Err(error) =
+                    self.screenshot_readbacks
+                        .start(reader, request, buffer, hdr_readback)
+                {
+                    self.screenshot_result = Some(Err(error.to_string()));
                 }
             }
         }

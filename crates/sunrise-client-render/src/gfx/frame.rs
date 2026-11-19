@@ -272,17 +272,34 @@ pub struct Frame<'a> {
     /// `GameRenderer.requestedPostEffects`: the chains that run over the world.
     pub post_effects: crate::post_chain::Request<'a>,
 }
-/// A frame to save as a PNG: F2's screenshot, an agent's `game_screenshot`,
-/// or the icon the Select World list shows.
+/// The size at which to draw a frame for readback, before any icon crop.
+#[derive(Clone, Copy)]
+pub enum ScreenshotScale {
+    Window,
+    /// The game's resolution (Resolution Scale above 100%) times Screenshot Quality.
+    Configured,
+    /// A separate offscreen frame at these exact pixel dimensions.
+    Exact([u32; 2]),
+}
+
+/// Where the CPU pixels go before encoding.
+pub enum ScreenshotReadback {
+    /// Read on the frame thread into `Renderer::screenshot_result`.
+    Immediate,
+    /// Read on a worker into `Renderer::screenshot_result`.
+    Background,
+    /// Read on a worker and reply to this request alone, independent of F2 and control.
+    Reply(std::sync::mpsc::Sender<ScreenshotOutcome>),
+}
+
+pub type ScreenshotOutcome = std::result::Result<super::PendingScreenshot, String>;
+
+/// A frame to save as a PNG: a screenshot or the icon the Select World list shows.
 pub struct ScreenshotRequest {
     pub path: PathBuf,
     /// `GameRenderer.takeAutoScreenshot`: centre-crop the frame to a square
     /// and average it down to this size. `None` saves the frame as drawn.
     pub size: Option<[u32; 2]>,
-    /// F2's: drawn at the game's resolution (Resolution Scale above 100%) times
-    /// `Renderer::screenshot_quality`, not the window's.
-    pub scaled: bool,
-    /// Read back on a worker (F2 and world icons); CPU pixels arrive in
-    /// `Renderer::screenshot_result` for the owning thread's hook before encoding.
-    pub background: bool,
+    pub scale: ScreenshotScale,
+    pub readback: ScreenshotReadback,
 }

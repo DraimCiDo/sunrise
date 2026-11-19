@@ -1,6 +1,20 @@
 //! Unit and integration test suites for gfx rendering, culling, and pipelines.
 
 #[test]
+fn exact_capture_dimensions_must_fit_the_texture_and_the_padded_copy() {
+    use super::screenshot_size_fits;
+
+    assert!(screenshot_size_fits([65, 2], 65, 1024)); // 260 bytes pad to 512 per row.
+    assert!(!screenshot_size_fits([65, 2], 65, 1023));
+    assert!(!screenshot_size_fits([65, 2], 64, 1024));
+    assert!(!screenshot_size_fits([1, 66], 65, 65536));
+    assert!(!screenshot_size_fits([0, 1], 65, 1024));
+    assert!(!screenshot_size_fits([1, 0], 65, 1024));
+    assert!(!screenshot_size_fits([u32::MAX, 1], u32::MAX, u64::MAX));
+    assert!(!screenshot_size_fits([u32::MAX / 4, 1], u32::MAX, u64::MAX));
+}
+
+#[test]
 fn taa_culling_covers_jittered_view_edges_but_still_rejects_behind_the_camera() {
     use super::*;
 
@@ -1474,7 +1488,7 @@ fn cracks_multiply_instead_of_covering_the_block() {
 fn hdr_screenshots_keep_every_10_bit_step() {
     // Rgb10a2Unorm: red in the low 10 bits, then green, then blue.
     let px = |r: u32, g: u32, b: u32| (r | g << 10 | b << 20 | 3 << 30).to_le_bytes();
-    let out = super::hdr10_to_rgb16(&[px(0, 1023, 512)]);
+    let out = super::hdr10_to_rgb16(&[px(0, 1023, 512)]).unwrap();
     assert_eq!(out, [0, 0, 0xff, 0xff, 0x80, 0x20]);
     assert_eq!(
         super::hdr_screenshot_path(std::path::Path::new("screenshots/2026-10-28_12.00.00.png")),

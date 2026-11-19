@@ -831,7 +831,7 @@ pub struct Renderer {
     /// Readback outcome: CPU pixels for the game to approve before writing, or an error.
     pub screenshot_result: Option<std::result::Result<PendingScreenshot, String>>,
     screenshot_readbacks: screenshot_readback::Readbacks,
-    /// Screenshot Quality (Sunrise setting): a `scaled` screenshot's frame is this many
+    /// Screenshot Quality (Sunrise setting): a configured screenshot's frame is this many
     /// times the game's resolution (1, 2, 4 or 8).
     pub screenshot_quality: u32,
     /// How many times the pending scaled screenshot ran out of video memory: each
@@ -1339,13 +1339,15 @@ impl Renderer {
         depth_far: f32,
     ) -> JoinedFrusta {
         let views = ViewSet::single(self.screen_view(fov_degrees, yaw, pitch, depth_far));
-        let size = self
-            .world_post
-            .taa_render_size([self.config.width, self.config.height]);
+        let size = self.exact_screenshot_size().unwrap_or_else(|| {
+            self.world_post
+                .taa_render_size([self.config.width, self.config.height])
+        });
         self.asked_world_views(taa_frustum(views.cull().view_proj(bob), size))
     }
     fn screen_view(&self, fov_degrees: f32, yaw: f32, pitch: f32, far: f32) -> View {
-        let aspect = self.config.width as f32 / self.config.height.max(1) as f32;
+        let [width, height] = self.frame_size();
+        let aspect = width as f32 / height.max(1) as f32;
         View::screen(yaw, pitch, fov_degrees, aspect, far)
     }
     fn animate(&mut self, encoder: &mut wgpu::CommandEncoder, tick: u64, cull_inactive: bool) {
@@ -1427,7 +1429,9 @@ impl Renderer {
         }
         let scaled = self.screenshot_size();
         let rendered = match scaled {
-            Some(size) => self.draw_scaled_frame(frame, size),
+            Some(size) => {
+                self.draw_scaled_frame(frame, size, self.exact_screenshot_size().is_some())
+            }
             None => self.draw_frame(frame, None, self.output),
         };
         self.finish_prepared_frame();
@@ -1466,14 +1470,45 @@ impl Renderer {
     pub fn device_lost(&self) -> bool {
         self.device_lost.load(std::sync::atomic::Ordering::Relaxed)
     }
-    /// The frame size of the pending `scaled` screenshot when it is larger than the
-    /// window: the window's times the Resolution Scale (when above 100%) and
-    /// `screenshot_quality`, cut down to what one texture and one readback buffer hold,
-    /// and halved for each time it ran out of video memory.
+    /// Queue a new request, not a retry of the request it may replace.
+    pub fn replace_screenshot(&mut self, request: ScreenshotRequest) -> Option<ScreenshotRequest> {
+        self.screenshot_halvings = 0;
+        self.screenshot.replace(request)
+    }
+
+    /// The size to prepare the frame for. Configured screenshots preserve the window's layout;
+    /// exact screenshots also change the aspect and GUI layout for this frame alone.
+    pub fn frame_size(&self) -> [u32; 2] {
+        self.exact_screenshot_size()
+            .unwrap_or([self.config.width, self.config.height])
+    }
+
+    pub fn supports_screenshot_size(&self, size: [u32; 2]) -> bool {
+        let limits = self.device.limits();
+        screenshot_size_fits(
+            size,
+            limits.max_texture_dimension_2d,
+            limits.max_buffer_size,
+        )
+    }
+
+    fn exact_screenshot_size(&self) -> Option<[u32; 2]> {
+        match self.screenshot.as_ref()?.scale {
+            ScreenshotScale::Exact(size) if !self.suspended => Some(size),
+            _ => None,
+        }
+    }
+
+    /// Configured capture may be reduced for GPU limits or retried after allocation failure.
+    /// Exact capture uses its requested size without either fallback.
     fn screenshot_size(&self) -> Option<[u32; 2]> {
-        let request = self.screenshot.as_ref()?;
-        if !request.scaled || request.size.is_some() || self.suspended {
+        if self.suspended {
             return None;
+        }
+        match self.screenshot.as_ref()?.scale {
+            ScreenshotScale::Exact(size) => return Some(size),
+            ScreenshotScale::Window => return None,
+            ScreenshotScale::Configured => {}
         }
         let window = [self.config.width, self.config.height];
         let limits = self.device.limits();
@@ -1490,7 +1525,7 @@ impl Renderer {
     /// every pass sizes itself by `config`, which says `size` for this frame, the HUD
     /// keeps its layout at a larger scale, and the world is drawn at `size` (a Resolution
     /// Scale below 100% stays as low). The window keeps its last frame.
-    fn draw_scaled_frame(&mut self, frame: &Frame, size: [u32; 2]) -> Result<bool> {
+    fn draw_scaled_frame(&mut self, frame: &Frame, size: [u32; 2], exact: bool) -> Result<bool> {
         let window = [self.config.width, self.config.height];
         let mut config = self.config.clone();
         [config.width, config.height] = size;
@@ -1514,21 +1549,25 @@ impl Renderer {
         let target = (!layered).then(|| Self::offscreen_target(&self.device, &config));
         let depth = Self::depth(&self.device, &config);
         if let Some(e) = checks.pop() {
-            log::warn!(
-                "Sunrise renderer: no memory for a {}x{} screenshot ({e}); trying half the size",
-                size[0],
-                size[1]
-            );
-            self.screenshot_halvings += 1;
+            if let Some(request) = self.screenshot.take() {
+                self.screenshot_draw_failed(request, e.to_string());
+            }
             return Ok(false);
         }
-        let scale = self.world_post.scale;
-        self.world_post.scale = scale / scale.max(1.0);
-        self.hud.zoom = size[0] as f32 / window[0] as f32;
+        let (scale, upscale) = (self.world_post.scale, self.world_post.upscale);
+        if exact {
+            self.world_post.scale = 1.0;
+            self.world_post.upscale = 1.0;
+        } else {
+            self.world_post.scale = scale / scale.max(1.0);
+            self.hud.zoom = size[0] as f32 / window[0] as f32;
+        }
         [self.config.width, self.config.height] = size;
         // Frame generation's present thread shows the window's frames, not this one: it stops,
         // and the window's next frame starts it again.
         self.frame_gen.stop();
+        let frame_gen = self.frame_gen.on;
+        self.frame_gen.on &= !exact;
         let surface = self.surface.take();
         let hdr = self.hdr.take_if(|_| !layered);
         let offscreen = std::mem::replace(&mut self.offscreen, target);
@@ -1547,12 +1586,48 @@ impl Renderer {
             }
         }
         self.surface = surface;
+        self.frame_gen.on = frame_gen;
         [self.config.width, self.config.height] = window;
         self.hud.zoom = 1.0;
         self.world_post.scale = scale;
+        self.world_post.upscale = upscale;
+        if exact && let Err(error) = drawn {
+            if let Some(request) = self.screenshot.take() {
+                self.fail_screenshot(request, error.to_string());
+            }
+            return Ok(false);
+        }
         drawn
     }
+
+    fn screenshot_draw_failed(&mut self, request: ScreenshotRequest, error: String) {
+        if matches!(request.scale, ScreenshotScale::Configured) {
+            log::warn!("Sunrise renderer: screenshot failed ({error}); trying half the size");
+            self.screenshot_halvings += 1;
+            self.screenshot = Some(request);
+        } else {
+            self.fail_screenshot(request, error);
+        }
+    }
+
+    fn fail_screenshot(&mut self, request: ScreenshotRequest, error: String) {
+        if let ScreenshotReadback::Reply(reply) = request.readback {
+            let _ = reply.send(Err(error));
+        } else {
+            self.screenshot_result = Some(Err(error));
+        }
+    }
 }
+
+fn screenshot_size_fits([width, height]: [u32; 2], max_side: u32, max_buffer: u64) -> bool {
+    width != 0 && height != 0 && width.max(height) <= max_side
+        && width.checked_mul(4)
+            .and_then(|bytes| bytes.checked_next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT))
+            .is_some_and(|row| u64::from(row) * u64::from(height) <= max_buffer)
+        // The HDR PNG keeps six bytes per pixel; a CPU allocation must also fit.
+        && u64::from(width) * u64::from(height) <= (isize::MAX as u64) / 6
+}
+
 /// How many times the window's size a scaled screenshot is: the Resolution Scale
 /// `world_scale` when above 1, times `quality`, as far as a side fits in
 /// `max_side` pixels and the readback in `max_buffer` bytes.
@@ -1613,8 +1688,9 @@ fn hdr_screenshot_path(path: &std::path::Path) -> PathBuf {
 }
 /// `Rgb10a2Unorm` pixels as 16-bit RGB, big-endian as PNG stores it: each 10-bit value
 /// with its top bits repeated below, so 0 stays 0 and 1023 becomes 65535.
-fn hdr10_to_rgb16(pixels: &[[u8; 4]]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(pixels.len() * 6);
+fn hdr10_to_rgb16(pixels: &[[u8; 4]]) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    out.try_reserve_exact(pixels.len() * 6)?;
     for &px in pixels {
         let v = u32::from_le_bytes(px);
         for shift in [0, 10, 20] {
@@ -1622,7 +1698,7 @@ fn hdr10_to_rgb16(pixels: &[[u8; 4]]) -> Vec<u8> {
             out.extend_from_slice(&(c << 6 | c >> 4).to_be_bytes());
         }
     }
-    out
+    Ok(out)
 }
 /// Centre-crop the frame to a square and average it down to `size`.
 pub(crate) fn square_downscale(pixels: &[u8], width: u32, height: u32, size: [u32; 2]) -> Vec<u8> {

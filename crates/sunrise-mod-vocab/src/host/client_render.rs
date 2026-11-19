@@ -4,6 +4,14 @@ use crate::*;
 /// The client host's methods of the `client_render` area, implemented by the game and reached through [`crate::ClientHost`].
 #[sunrise_mod_api_macros::host_area]
 pub trait ClientRenderClientHost {
+    /// Queue a screenshot of the next drawable client frame. `None` uses the player's F2
+    /// capture sizing; `Some([width, height])` renders offscreen at exactly that pixel size,
+    /// without resizing the window or retrying at a smaller size.
+    ///
+    /// `Ok(())` means queued, not saved. The game names the file in the player's screenshots
+    /// folder and reports the outcome in chat. This does not fire the F2 `screenshot` hook.
+    #[access(WorldOnly)]
+    fn request_screenshot(&mut self, size: Option<[u32; 2]>) -> Result<(), ScreenshotRequestError>;
     /// Atomically overwrite retained model copies; use [`InstanceGroupRef::write`].
     #[access(PublishedResources)]
     fn instance_group_write(

@@ -316,6 +316,7 @@ pub struct UiState {
     /// F2 screenshots not written yet: each reports in chat once its PNG is.
     pub screenshot_messages: Vec<std::path::PathBuf>,
     pub screenshot_writes: Vec<super::screenshot_writer::ScreenshotWrite>,
+    pub(super) mod_screenshot: Option<super::screenshot_writer::ModScreenshot>,
     /// The options screens.
     pub options: sunrise_client::options_ui::OptionsUi,
     /// The prepared resources before resource packs are layered on.
@@ -2262,20 +2263,28 @@ impl Game<'_> {
         if std::fs::create_dir_all(&dir).is_err() {
             return None;
         }
-        let name = screenshot_name(&dir, &self.ui.screenshot_messages);
+        let name = screenshot_name(
+            &dir,
+            &self.ui.screenshot_messages,
+            self.ui
+                .mod_screenshot
+                .as_ref()
+                .map(|capture| capture.path()),
+        );
         let renderer = self.renderer.as_mut()?;
         let path = dir.join(name);
-        // A second shortcut before rendering replaces the queued frame. Release
-        // that request's name: no readback will arrive to finish it.
-        if let Some(replaced) = renderer.screenshot.as_ref() {
+        // The shortcut takes priority over a frame still queued. No readback will
+        // arrive to release the replaced request's name.
+        if let Some(replaced) =
+            renderer.replace_screenshot(sunrise_client::gfx::ScreenshotRequest {
+                path: path.clone(),
+                size: None,
+                scale: sunrise_client::gfx::ScreenshotScale::Configured,
+                readback: sunrise_client::gfx::ScreenshotReadback::Background,
+            })
+        {
             self.ui.screenshot_messages.retain(|p| *p != replaced.path);
         }
-        renderer.screenshot = Some(sunrise_client::gfx::ScreenshotRequest {
-            path: path.clone(),
-            size: None,
-            scaled: true,
-            background: true,
-        });
         self.ui.screenshot_messages.push(path.clone());
         Some(path)
     }
@@ -2358,10 +2367,18 @@ impl Game<'_> {
         result: &std::result::Result<[u32; 2], String>,
         message: Option<Text>,
     ) {
-        if self.ui.screenshot_messages.is_empty() {
-            return;
+        if !self.ui.screenshot_messages.is_empty() {
+            let path = self.ui.screenshot_messages.remove(0);
+            self.report_screenshot(&path, result, message);
         }
-        let path = self.ui.screenshot_messages.remove(0);
+    }
+
+    pub(super) fn report_screenshot(
+        &mut self,
+        path: &std::path::Path,
+        result: &std::result::Result<[u32; 2], String>,
+        message: Option<Text>,
+    ) {
         let message = match result {
             Ok(_) => {
                 log::info!("Saved screenshot to {}", path.display());
@@ -2404,7 +2421,11 @@ pub(super) fn screenshot_cancel_line(message: Option<Text>) -> Text {
     })
 }
 /// `yyyy-MM-dd_HH.mm.ss[_n].png` (Util.getFilenameFormattedDateTime, in local time).
-pub fn screenshot_name(dir: &std::path::Path, pending: &[std::path::PathBuf]) -> String {
+pub(super) fn screenshot_name(
+    dir: &std::path::Path,
+    pending: &[std::path::PathBuf],
+    mod_path: Option<&std::path::Path>,
+) -> String {
     // Util.getFilenameFormattedDateTime: the local date and time.
     let base = chrono::Local::now().format("%Y-%m-%d_%H.%M.%S").to_string();
     let mut n = 1;
@@ -2415,7 +2436,7 @@ pub fn screenshot_name(dir: &std::path::Path, pending: &[std::path::PathBuf]) ->
             format!("{base}_{n}.png")
         };
         let path = dir.join(&name);
-        if !path.exists() && !pending.contains(&path) {
+        if !path.exists() && !pending.contains(&path) && mod_path != Some(path.as_path()) {
             return name;
         }
         n += 1;
@@ -2542,8 +2563,8 @@ mod tests {
     fn a_screenshot_being_written_keeps_its_name() {
         let dir = std::env::temp_dir().join(format!("sunrise-shots-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let first = screenshot_name(&dir, &[]);
-        let second = screenshot_name(&dir, &[dir.join(&first)]);
+        let first = screenshot_name(&dir, &[], None);
+        let second = screenshot_name(&dir, &[dir.join(&first)], None);
         assert_ne!(first, second);
         // Unless the clock turned to the next second in between.
         let same_second = second.starts_with(first.trim_end_matches(".png"));

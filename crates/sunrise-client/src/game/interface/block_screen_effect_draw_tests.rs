@@ -288,8 +288,8 @@ fn drawn_frame(game: &mut Game<'_>) -> (Vec<u8>, usize) {
     game.renderer.as_mut().unwrap().screenshot = Some(ScreenshotRequest {
         path: "unused.png".into(),
         size: None,
-        scaled: false,
-        background: false,
+        scale: sunrise_client::gfx::ScreenshotScale::Window,
+        readback: sunrise_client::gfx::ScreenshotReadback::Immediate,
     });
     game.render_with(|renderer, frame| renderer.render(frame))
         .unwrap();

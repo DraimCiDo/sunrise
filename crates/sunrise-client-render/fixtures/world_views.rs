@@ -14,7 +14,7 @@
 //! without a view, with one 640 by 360 view and with four: their CPU time, visibility spans,
 //! section draws and GPU time.
 use client::{
-    gfx::{Frame, Renderer, ScreenshotRequest},
+    gfx::{Frame, Renderer, ScreenshotReadback, ScreenshotRequest, ScreenshotScale},
     graphics::GraphicsApi,
     hud::HudBatch,
     mesher::{SectionMesh, TerrainVertex, Vertex},
@@ -24,11 +24,11 @@ use client::{
     },
 };
 use glam::DVec3;
-use sunrise_client_render as client;
 use std::{
     path::Path,
     sync::{Arc, Mutex},
 };
+use sunrise_client_render as client;
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -355,8 +355,8 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         renderer.screenshot = Some(ScreenshotRequest {
             path: path.clone(),
             size: None,
-            scaled: false,
-            background: false,
+            scale: ScreenshotScale::Window,
+            readback: ScreenshotReadback::Immediate,
         });
         let asked = ASKED.load(std::sync::atomic::Ordering::Relaxed);
         for _ in 0..2 {

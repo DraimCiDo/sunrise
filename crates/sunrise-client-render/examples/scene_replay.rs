@@ -32,7 +32,7 @@ use sunrise_client_render::{
     chunk::{BIOME_STRATEGY, Chunk, ColumnLayout, Light, block_strategy},
     fast_hash::{FxHashMap, FxHashSet},
     gfx::{
-        PreparedTextures, Renderer, ScreenshotRequest,
+        PreparedTextures, Renderer, ScreenshotReadback, ScreenshotRequest, ScreenshotScale,
         capture::{self, AtlasCheck, Scene},
         pack_timing,
         panorama::Faces,
@@ -392,8 +392,8 @@ fn replay(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
             renderer.screenshot = Some(ScreenshotRequest {
                 path: path.clone(),
                 size: None,
-                scaled: false,
-                background: false,
+                scale: ScreenshotScale::Window,
+                readback: ScreenshotReadback::Immediate,
             });
             for _ in 0..32 {
                 draw(&mut renderer)?;

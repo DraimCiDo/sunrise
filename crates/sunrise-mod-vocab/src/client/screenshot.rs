@@ -1,3 +1,23 @@
+/// The reason a mod screenshot was not queued.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
+#[non_exhaustive]
+pub enum ScreenshotRequestError {
+    /// No client world frame or working renderer is available.
+    Unavailable,
+    /// The client already has a capture queued, or a mod screenshot still being saved.
+    Busy,
+    /// An explicit side is zero or does not fit the device's texture or readback limits.
+    InvalidSize,
+    /// The player's screenshots folder could not be opened or created.
+    OutputUnavailable,
+}
+
+impl crate::NoBackend for ScreenshotRequestError {
+    fn no_backend() -> Self {
+        Self::Unavailable
+    }
+}
+
 /// The in-memory F2 frame (`ScreenshotEvent.getImage`), before either file is written.
 ///
 /// RGBA8, top to bottom: `rgba.len()` is `width * height * 4`. Change the pixels, or

@@ -1,6 +1,9 @@
 //! Screenshot GPU waits happen on a worker; the owning thread receives mutable pixels.
 use super::screenshot::{HdrScreenshot, PendingScreenshot};
-use super::{Result, ScreenshotRequest, hdr10_to_rgb16, padded_row, square_downscale};
+use super::{
+    Result, ScreenshotOutcome, ScreenshotReadback, ScreenshotRequest, hdr10_to_rgb16, padded_row,
+    square_downscale,
+};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 pub(super) struct Reader {
@@ -26,7 +29,8 @@ impl Reader {
             self.config.height as usize,
             padded_row(self.config.width) as usize,
         );
-        let mut pixels = Vec::with_capacity(width * height);
+        let mut pixels = Vec::new();
+        pixels.try_reserve_exact(width * height)?;
         {
             let data = buffer.get_mapped_range(..).map_err(|e| e.to_string())?;
             for y in 0..height {
@@ -46,8 +50,10 @@ impl Reader {
             self.config.format.remove_srgb_suffix(),
             wgpu::TextureFormat::Bgra8Unorm
         );
-        let mut pixels = Vec::with_capacity((self.config.width * self.config.height * 4) as usize);
-        for px in self.read_frame(buffer)? {
+        let frame = self.read_frame(buffer)?;
+        let mut pixels = Vec::new();
+        pixels.try_reserve_exact(frame.len() * 4)?;
+        for px in frame {
             let (r, b) = if bgra { (px[2], px[0]) } else { (px[0], px[2]) };
             pixels.extend_from_slice(&[r, px[1], b, 255]);
         }
@@ -61,30 +67,33 @@ impl Reader {
             ),
             None => (self.config.width, self.config.height, pixels),
         };
-        let hdr = hdr_buffer.and_then(|buffer| match self.read_frame(buffer) {
-            Ok(pixels) => Some(HdrScreenshot {
-                size: [self.config.width, self.config.height],
-                pixels: hdr10_to_rgb16(&pixels),
-            }),
-            Err(e) => {
-                log::warn!("Sunrise renderer: HDR screenshot readback: {e}");
-                None
+        let hdr = hdr_buffer.and_then(|buffer| {
+            match self
+                .read_frame(buffer)
+                .and_then(|pixels| hdr10_to_rgb16(&pixels))
+            {
+                Ok(pixels) => Some(HdrScreenshot {
+                    size: [self.config.width, self.config.height],
+                    pixels,
+                }),
+                Err(e) => {
+                    log::warn!("Sunrise renderer: HDR screenshot readback: {e}");
+                    None
+                }
             }
         });
         Ok(PendingScreenshot {
             path: request.path.clone(),
-            background: request.background,
+            background: !matches!(request.readback, ScreenshotReadback::Immediate),
             image: mod_api::ScreenshotImage::new(width, height, pixels),
             hdr,
         })
     }
 }
 
-type Outcome = std::result::Result<PendingScreenshot, String>;
-
 #[derive(Default)]
 pub(super) struct Readbacks(
-    Vec<Receiver<Outcome>>,
+    Vec<Receiver<ScreenshotOutcome>>,
     #[cfg(test)] Vec<std::thread::JoinHandle<()>>,
 );
 impl Readbacks {
@@ -95,7 +104,13 @@ impl Readbacks {
         buffer: wgpu::Buffer,
         hdr: Option<wgpu::Buffer>,
     ) -> Result<()> {
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = match &request.readback {
+            ScreenshotReadback::Reply(sender) => (sender.clone(), None),
+            _ => {
+                let (sender, receiver) = mpsc::channel();
+                (sender, Some(receiver))
+            }
+        };
         let worker = std::thread::Builder::new()
             .name("Screenshot readback".into())
             .spawn(move || {
@@ -103,16 +118,22 @@ impl Readbacks {
                     .read_screenshot(&request, &buffer, hdr.as_ref())
                     .map_err(|e| e.to_string());
                 let _ = sender.send(result);
-            })?;
+            });
+        let worker = match worker {
+            Ok(worker) => worker,
+            Err(error) if receiver.is_some() => return Err(error.into()),
+            // The request's reply sender was dropped; its owner sees the failure.
+            Err(_) => return Ok(()),
+        };
         #[cfg(test)]
         self.1.push(worker);
         #[cfg(not(test))]
         drop(worker);
-        self.0.push(receiver);
+        self.0.extend(receiver);
         Ok(())
     }
 
-    pub fn poll(&mut self) -> Option<Outcome> {
+    pub fn poll(&mut self) -> Option<ScreenshotOutcome> {
         let outcome = match self.0.first()?.try_recv() {
             Ok(result) => result,
             Err(TryRecvError::Empty) => return None,
@@ -190,8 +211,8 @@ mod tests {
         let request = ScreenshotRequest {
             path: path.clone(),
             size: None,
-            scaled: false,
-            background: true,
+            scale: crate::gfx::ScreenshotScale::Window,
+            readback: ScreenshotReadback::Background,
         };
         let mut readbacks = Readbacks::default();
         readbacks

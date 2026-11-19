@@ -7452,6 +7452,8 @@ impl Game<'_> {
             .clone()
             .ok_or("no window for graphics recovery")?;
         log::warn!("Sunrise: rebuilding the renderer after graphics device loss");
+        // A capture admitted on the lost device must not migrate to another one.
+        self.interrupt_queued_mod_screenshot();
         // Drop the old surface and device before opening another on this window.
         let mut old = self
             .renderer
@@ -8069,6 +8071,9 @@ impl Game<'_> {
         &mut self,
         consume: impl FnOnce(&mut Renderer, &Frame<'_>) -> Result<bool>,
     ) -> Result<bool> {
+        if self.ui.mod_screenshot.is_some() && (self.title.is_some() || self.player.is_none()) {
+            self.interrupt_queued_mod_screenshot();
+        }
         self.begin_frame_draws();
         let prepare = spans::guard("prepare");
         let mut pr = spans::laps();
@@ -8213,11 +8218,8 @@ impl Game<'_> {
             }
             return Ok(false);
         }
-        let Some(size) = self
-            .renderer
-            .as_ref()
-            .map(|r| [r.config.width, r.config.height])
-        else {
+        self.stage_mod_screenshot();
+        let Some(size) = self.renderer.as_ref().map(Renderer::frame_size) else {
             return Ok(false);
         };
         pr.lap("pr_setup");
@@ -10474,6 +10476,7 @@ impl Game<'_> {
                         );
                     }
                     self.clock.end_frame(self.pause);
+                    self.poll_mod_screenshot();
                     self.poll_screenshot_writes();
                     let mut consumed = !self.ui.screenshot_messages.is_empty();
                     let finished = self

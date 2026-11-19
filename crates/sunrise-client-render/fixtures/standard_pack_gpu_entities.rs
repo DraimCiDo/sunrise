@@ -3,7 +3,7 @@
 //! `python3 tools/run_standard_pack_gpu_entities.py <output-dir>`
 use client::{
     gfx::{
-        Frame, Renderer, ScreenshotRequest,
+        Frame, Renderer, ScreenshotReadback, ScreenshotRequest, ScreenshotScale,
         entity_skin::{SkinFrame, SkinJob, SkinPart, SkinVertex},
         pack_draw::EntitySpan,
     },
@@ -212,8 +212,8 @@ fn fixture(window: Arc<Window>, out: &Path) -> Result<(), Box<dyn std::error::Er
     renderer.screenshot = Some(ScreenshotRequest {
         path: out.join("cpu.png"),
         size: None,
-        scaled: false,
-        background: false,
+        scale: ScreenshotScale::Window,
+        readback: ScreenshotReadback::Immediate,
     });
     renderer.render(&frame)?;
     renderer
@@ -262,8 +262,8 @@ fn fixture(window: Arc<Window>, out: &Path) -> Result<(), Box<dyn std::error::Er
     renderer.screenshot = Some(ScreenshotRequest {
         path: out.join("gpu.png"),
         size: None,
-        scaled: false,
-        background: false,
+        scale: ScreenshotScale::Window,
+        readback: ScreenshotReadback::Immediate,
     });
     renderer.render(&frame)?;
     renderer

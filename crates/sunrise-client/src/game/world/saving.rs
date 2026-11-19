@@ -385,9 +385,16 @@ impl Game<'_> {
         if renderer.drawn_sections <= 10 {
             return;
         }
-        if renderer.screenshot.is_some() {
-            // F2's or an agent's screenshot owns the frame this time; ours
-            // comes around again with the next attempt.
+        if renderer.screenshot.is_some()
+            || matches!(
+                self.ui.mod_screenshot,
+                Some(super::screenshot_writer::ModScreenshot::Reading {
+                    request: Some(_),
+                    ..
+                })
+            )
+        {
+            // Another screenshot owns the frame this time; try again later.
             return;
         }
         let path = icon.path.clone();
@@ -397,8 +404,8 @@ impl Game<'_> {
         renderer.screenshot = Some(sunrise_client::gfx::ScreenshotRequest {
             path,
             size: Some([64, 64]),
-            scaled: false,
-            background: true,
+            scale: sunrise_client::gfx::ScreenshotScale::Window,
+            readback: sunrise_client::gfx::ScreenshotReadback::Background,
         });
     }
 }
