@@ -326,7 +326,7 @@ lan = [
 name = "render"
 about = "rendering, models, particles, HUD and screens, audio, resource packs, options"
 paths = [
-  "crates/sunrise-client-render/*", "crates/sunrise-assets/*", "crates/sunrise-optifine/*", "crates/sunrise-polytone/*",
+  "crates/sunrise-client-render/*", "crates/sunrise-assets/*", "crates/sunrise-optifine/*", "crates/sunrise-connected/*", "crates/sunrise-polytone/*",
   "crates/sunrise-shader*", "crates/sunrise-hdr/*",
 ]
 cargo = [

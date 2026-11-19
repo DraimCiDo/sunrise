@@ -4665,6 +4665,7 @@ dependencies = [
  "sunrise-client-core",
  "sunrise-client-input",
  "sunrise-command",
+ "sunrise-connected",
  "sunrise-core",
  "sunrise-engine-slots",
  "sunrise-guest-stack",
@@ -4709,6 +4710,10 @@ dependencies = [
  "sunrise-protocol",
  "sunrise-world",
 ]
+
+[[package]]
+name = "sunrise-connected"
+version = "0.1.0"
 
 [[package]]
 name = "sunrise-core"
@@ -5237,6 +5242,7 @@ dependencies = [
  "log",
  "regex",
  "sunrise-assets",
+ "sunrise-connected",
  "sunrise-system",
  "zip",
 ]

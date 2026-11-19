@@ -38,8 +38,8 @@ pub(crate) use sides::sort_tinted;
 pub use sides::{Part, Sides, group_parts};
 use std::sync::Arc;
 use sunrise_assets::model::Direction as ModelDirection;
+use sunrise_connected::{Axes as CtmAxes, Face as CtmFace};
 use sunrise_core::{biome::BiomeZoom, geometry::Direction, position::BlockPos};
-use sunrise_optifine::ctm::connect::{Axes as CtmAxes, Face as CtmFace};
 use sunrise_world::{
     block_render::FaceVisibility,
     fluid::{FluidKind, FluidState},

@@ -8,10 +8,8 @@
 use crate::resource_source::ResourceSource;
 use crate::sprites::Sprites;
 use std::collections::HashMap;
-use sunrise_optifine::ctm::{
-    self, Connect, Method, Orient, Rule, Tile,
-    connect::{self as geometry, Axes, Axis, Face},
-};
+use sunrise_connected::{self as geometry, Axes, Axis, Face};
+use sunrise_optifine::ctm::{self, Connect, Method, Orient, Rule, Tile};
 use sunrise_world::block_state_properties::BlockProperties;
 use sunrise_world::registry::{BlockRegistry, BlockStateId};
 

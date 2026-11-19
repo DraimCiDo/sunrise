@@ -1,15 +1,14 @@
 //! Connected textures (`optifine/ctm/**/*.properties`): the rules a pack defines, which block
 //! faces each one applies to, and its replacement tiles. Choosing a tile from the neighbours is
-//! [`connect`]'s.
+//! `sunrise_connected`'s.
 //!
 //! Written from OptiFine's `ctm.properties` documentation and template images, and Continuity's
 //! wiki (its "Continuity Connected Textures Specification" page) for what OptiFine does where the
 //! documentation is silent; no mod's source was read.
 
-pub mod connect;
-
 use crate::{BlockMatch, IdList, Name, Properties, RangeList};
 use sunrise_assets::resource_source::ResourceSource;
+use sunrise_connected::Symmetry;
 
 /// In this order: the overlays last ([`Method::is_overlay`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -113,16 +112,6 @@ pub enum Tile {
     Skip,
     /// The face's own sprite.
     Default,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Symmetry {
-    #[default]
-    None,
-    /// Opposite faces share a choice.
-    Opposite,
-    /// All six faces share a choice.
-    All,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
