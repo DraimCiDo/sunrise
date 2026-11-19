@@ -85,7 +85,10 @@ fn real_library_dependency() {
             .map(|rest| rest.split("::").next().unwrap())
             .filter(|owner| !ADAPTER_BACKED.contains(owner))
             .collect();
-        assert!(unexpected.is_empty(), "{unexpected:?}");
+        assert!(
+            unexpected.is_empty(),
+            "a mod with no handler imports methods of {unexpected:?}: if the API now wraps handlers of that trait itself, add it to ADAPTER_BACKED; otherwise its marks reach mods that hold none"
+        );
         let mut replaced: Vec<_> = packages
             .iter()
             .map(|p| WasmPackage {

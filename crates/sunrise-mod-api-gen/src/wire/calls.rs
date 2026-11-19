@@ -1040,7 +1040,7 @@ pub(super) fn dispatchable(types: &Types<'_>, m: &Method) -> bool {
 }
 
 /// A statement marking one export as used: a call of a no-op import named like it, on wasm
-/// (`__sunrise_import!`, in `mod_api`, which holds the guest's unsafe code). Every name gets its
+/// (`__sunrise_import!`, in the vocabulary crate, the one macro that holds this unsafe code). Every name gets its
 /// own function, since rustc folds same-path extern items into the first one's import.
 pub(crate) fn mark_block(root: &str, name: &str) -> String {
     // The call sits where only a wasm build names the macro: a crate that holds the vocabulary

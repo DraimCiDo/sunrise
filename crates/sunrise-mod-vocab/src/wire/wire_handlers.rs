@@ -6,7 +6,9 @@ use crate::wire::{Reader, Wire, WireError, Writer};
 use crate::*;
 use std::sync::Arc;
 
-/// The argument of a handler trait's hidden marks method: no mod can name it.
+/// The argument of a handler trait's hidden marks method. Its field is private, so no mod can
+/// make one: nothing outside this crate can call the method. It has no `Wire` form because it
+/// never crosses: the method is not in the game's table, and neither side calls it.
 pub struct Sealed(());
 
 macro_rules! arc_handler {
