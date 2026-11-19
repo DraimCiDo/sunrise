@@ -53,6 +53,36 @@ macro_rules! world_biomes {
         }
     };
 }
+/// This side's level data for a tick as a field-level borrow, so it stands beside the tick's own
+/// borrows of the game. Build it before taking a field mutably.
+macro_rules! game_side {
+    ($s:expr) => {
+        $crate::game::native_surface::GameSide {
+            dim: $s.dim,
+            level: $s.native_lifecycle.epoch().and_then(|epoch| {
+                let key = $s.dim.key();
+                let id = mod_api::__private::dimension_id(key)?;
+                Some(mod_api::LevelRef::with_generation(
+                    epoch,
+                    key,
+                    $s.levels.runtime.generation_of(id),
+                ))
+            }),
+            facts: $s.res.facts(),
+            biomes: world_biomes!($s),
+            behaviours: $s.res.behaviours(),
+            features: $s
+                .remote
+                .as_ref()
+                .map_or(&$s.level.enabled_features, |remote| &remote.features),
+            items: if $s.options.execution_role.is_client() {
+                $s.remote.as_ref().and_then(|remote| remote.tags.as_ref())
+            } else {
+                $s.session_lock.is_some().then(|| $s.res.items())
+            },
+        }
+    };
+}
 /// The world's packs' content files, as a field-level borrow (see the macros).
 fn pack_files(world_tables: &Option<WorldTables>) -> sunrise_world::loot::PackOverlay<'_> {
     match world_tables {

@@ -46,6 +46,7 @@ fn walk(
     (0..20)
         .map(|_| {
             MotionWorld {
+                side: sunrise_client::motion::dry_side(),
                 entities: &[],
                 player: &mut client,
                 scene: &mut *scene,

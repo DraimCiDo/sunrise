@@ -820,7 +820,9 @@ mod tests {
             assert!(game.world.set_stored(0, 64, 0, lava));
             game.player.as_mut().unwrap().position = Vec3::new(0.5, 64.0, 0.5);
             let tick_lava = |game: &mut Game<'_>| {
+                let side = game_side!(game);
                 let mut world = MotionWorld {
+                    side: &side,
                     entities: &[],
                     player: game.player.as_mut().unwrap(),
                     scene: &mut game.world,

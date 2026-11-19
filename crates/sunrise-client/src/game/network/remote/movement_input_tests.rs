@@ -120,7 +120,9 @@ fn matrix(mods: mod_api::Mods) {
                 let sprinting = player.sprinting;
                 let replay_keys =
                     crate::game::lan_vehicles::input_keys(game.remote.as_ref().unwrap().last_input);
+                let side = game_side!(game);
                 MotionWorld {
+                    side: &side,
                     entities: &[],
                     player: &mut predicted,
                     scene: &mut game.world,

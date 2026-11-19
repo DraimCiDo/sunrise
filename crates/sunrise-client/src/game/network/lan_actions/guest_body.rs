@@ -157,7 +157,9 @@ impl Game<'_> {
             player.fluids.boat = boat;
             // The supporting-block scan for this tick's moves reads the boots.
             player.leather_boots = leather_boots;
+            let side = game_side!(game);
             let mut w = MotionWorld {
+                side: &side,
                 entities: &[],
                 player,
                 scene: &mut game.world,
@@ -321,7 +323,9 @@ impl Game<'_> {
             );
             events.append(&mut player.events);
             player.carry_client_movement(tick_movement);
+            let side = game_side!(game);
             let _ = MotionWorld {
+                side: &side,
                 entities: &[],
                 player,
                 scene: &mut game.world,

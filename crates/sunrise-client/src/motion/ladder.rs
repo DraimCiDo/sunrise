@@ -91,6 +91,7 @@ impl LivingAirWorld for MotionWorld<'_, '_, '_> {
             world: self.scene,
             registry: self.assets.registry,
             context: self.loop_context,
+            side: self.side,
             coefficient: &|id| Some(blocks.get(id).ok()?.coefficients.friction),
         };
         let player = (self.player.entity_id as u32, "minecraft:player");

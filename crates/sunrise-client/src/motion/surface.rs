@@ -8,13 +8,51 @@ use sunrise_world::{
     registry::{BlockRegistry, BlockStateId},
 };
 
-/// The engine data a subscribed friction part may read. Borrows the actual world and
-/// the caller's coefficient table; it carries no write access or entity snapshot.
+/// The side-local level data beyond the world's blocks that a read-only level view needs,
+/// which the game lends to each motion, mob and entity tick: weather needs the biome and
+/// block-behaviour tables, a block entity's handle needs the level it is in.
+pub trait SideLevel {
+    /// `Level.isRainingAt` in `world`, which this side's level owns.
+    fn is_raining_at(&self, world: &World, pos: BlockPos) -> bool;
+    /// `LevelReader.enabledFeatures` as this side knows it.
+    fn enabled_features(&self) -> &std::sync::Arc<[String]>;
+    /// The merged tag tables: the server's, a client's from the join, none before they exist.
+    fn tag_items(&self) -> Option<&crate::items::Items>;
+    /// The resident block entity at `pos` of `world`, as a handle of this side's level.
+    fn block_entity(&self, world: &World, pos: BlockPos) -> Option<mod_api::BlockEntityRef>;
+}
+
+/// The level data of a side with no weather, features, tags or block entities. Only for tests and
+/// probes that never read them: a game tick lends the real data (`game_side!`).
+#[doc(hidden)]
+pub fn dry_side() -> &'static dyn SideLevel {
+    struct Dry(std::sync::Arc<[String]>);
+    impl SideLevel for Dry {
+        fn is_raining_at(&self, _: &World, _: BlockPos) -> bool {
+            false
+        }
+        fn enabled_features(&self) -> &std::sync::Arc<[String]> {
+            &self.0
+        }
+        fn tag_items(&self) -> Option<&crate::items::Items> {
+            None
+        }
+        fn block_entity(&self, _: &World, _: BlockPos) -> Option<mod_api::BlockEntityRef> {
+            None
+        }
+    }
+    static DRY: std::sync::OnceLock<Dry> = std::sync::OnceLock::new();
+    DRY.get_or_init(|| Dry(std::sync::Arc::default()))
+}
+
+/// The engine data a subscribed friction part may read. Borrows the actual world, this side's
+/// level data and the caller's coefficient table; it carries no write access or entity snapshot.
 #[derive(Clone, Copy)]
 pub struct FrictionLevel<'a> {
     pub world: &'a World,
     pub registry: &'a BlockRegistry,
     pub context: &'a LoopContext,
+    pub side: &'a dyn SideLevel,
     pub coefficient: &'a dyn Fn(BlockStateId) -> Option<f32>,
 }
 
@@ -42,6 +80,7 @@ pub fn read_friction(
 /// The friction of the block at `pos` for the entity on it, starting at its `StateFacts` value.
 pub fn block_friction(
     context: &LoopContext,
+    side: &dyn SideLevel,
     entity: (u32, &str),
     world: &World,
     registry: &BlockRegistry,
@@ -54,6 +93,7 @@ pub fn block_friction(
         world,
         registry,
         context,
+        side,
         coefficient: &|id| facts.states.get(id.0 as usize).map(|facts| facts.friction),
     };
     read_friction(level, Some(entity), pos, state, own).unwrap_or(own)

@@ -466,7 +466,15 @@ impl ItemEntity {
             self.bounds(),
             &mut self.velocity,
         );
-        let alive = self.tick_settle(world, registry, facts, no_physics, step, context);
+        let alive = self.tick_settle(
+            world,
+            registry,
+            facts,
+            no_physics,
+            step,
+            context,
+            sunrise_client::motion::dry_side(),
+        );
         let before = self.velocity;
         let (water, _) = self.update_fluids(world, fluids, context);
         self.water_entry(water > 0.0, false, before, &mut |_| {});
@@ -608,6 +616,7 @@ impl ItemEntity {
         no_physics: bool,
         step: ItemStep,
         context: &sunrise_world::native_load_context::LoopContext,
+        side: &dyn crate::motion::SideLevel,
     ) -> bool {
         if step.movement.is_some() {
             // Entity.applyEffectsFromBlocks -> SlimeBlock.stepOn, with the
@@ -623,6 +632,7 @@ impl ItemEntity {
                     BlockPos::containing(self.position.subtract(Vec3::new(0.0, 0.999_999, 0.0)));
                 friction *= block_friction(
                     context,
+                    side,
                     (self.id, "minecraft:item"),
                     world,
                     registry,
@@ -1037,6 +1047,7 @@ impl ExperienceOrb {
         border: Option<&BorderGeometry>,
         fluids: &crate::motion::FluidResources,
         context: &sunrise_world::native_load_context::LoopContext,
+        side: &dyn crate::motion::SideLevel,
         on_sound: &mut dyn FnMut([f64; 3], f32),
     ) -> bool {
         let (stays, _) = self.tick_among(
@@ -1049,6 +1060,7 @@ impl ExperienceOrb {
             border,
             fluids,
             context,
+            side,
             on_sound,
             &[],
         );
@@ -1069,6 +1081,7 @@ impl ExperienceOrb {
         border: Option<&BorderGeometry>,
         fluids: &crate::motion::FluidResources,
         context: &sunrise_world::native_load_context::LoopContext,
+        side: &dyn crate::motion::SideLevel,
         on_sound: &mut dyn FnMut([f64; 3], f32),
         entities: &[Aabb],
     ) -> (bool, OrbMove) {
@@ -1083,6 +1096,7 @@ impl ExperienceOrb {
             border,
             fluids,
             context,
+            side,
             on_sound,
             entities,
             &mut |_| false,
@@ -1102,6 +1116,7 @@ impl ExperienceOrb {
         border: Option<&BorderGeometry>,
         fluids: &crate::motion::FluidResources,
         context: &sunrise_world::native_load_context::LoopContext,
+        side: &dyn crate::motion::SideLevel,
         on_sound: &mut dyn FnMut([f64; 3], f32),
         entities: &[Aabb],
         invulnerable: &mut dyn FnMut(&mut World) -> bool,
@@ -1116,6 +1131,7 @@ impl ExperienceOrb {
             border,
             fluids,
             context,
+            side,
             on_sound,
             entities,
             &mut |world| invulnerable(world),
@@ -1134,6 +1150,7 @@ impl ExperienceOrb {
         border: Option<&BorderGeometry>,
         fluids: &crate::motion::FluidResources,
         context: &sunrise_world::native_load_context::LoopContext,
+        side: &dyn crate::motion::SideLevel,
         on_sound: &mut dyn FnMut([f64; 3], f32),
         entities: &[Aabb],
         invulnerable: &mut dyn FnMut(&mut W) -> bool,
@@ -1284,6 +1301,7 @@ impl ExperienceOrb {
             let kind = "minecraft:experience_orb";
             friction *= block_friction(
                 context,
+                side,
                 (self.id, kind),
                 world,
                 collision.registry(),
@@ -1931,7 +1949,16 @@ impl ArmorStand {
         border: Option<&BorderGeometry>,
     ) {
         let context = crate::test_resources::server_loop_context();
-        if let Some(step) = self.tick_move(scene, facts, climbing, in_water, border, &[], context) {
+        if let Some(step) = self.tick_move(
+            scene,
+            facts,
+            climbing,
+            in_water,
+            border,
+            &[],
+            context,
+            sunrise_client::motion::dry_side(),
+        ) {
             let medium = if in_water {
                 StandMedium::Water
             } else {
@@ -2273,6 +2300,7 @@ impl ArmorStand {
         border: Option<&BorderGeometry>,
         entities: &[Aabb],
         context: &sunrise_world::native_load_context::LoopContext,
+        side: &dyn crate::motion::SideLevel,
     ) -> Option<StandStep> {
         use crate::entity_rules::EntityRules;
         self.previous = self.position;
@@ -2305,6 +2333,7 @@ impl ArmorStand {
             let kind = "minecraft:armor_stand";
             block_friction(
                 context,
+                side,
                 (self.id, kind),
                 scene.world,
                 scene.binding.registry(),
@@ -3394,6 +3423,7 @@ mod world_border_tests {
                 border,
                 &fluids,
                 crate::test_resources::server_loop_context(),
+                sunrise_client::motion::dry_side(),
                 &mut |_, _| {},
             );
             for (what, east) in [
@@ -3806,6 +3836,7 @@ mod slime_bounce_tests {
                 fall_move: None,
             },
             crate::test_resources::server_loop_context(),
+            sunrise_client::motion::dry_side(),
         );
         assert_eq!(item.velocity.x.to_bits(), 0x3fb9_1687_3333_3334);
         assert_eq!(item.velocity.y.to_bits(), 0x3fc9_1687_3333_3334);
@@ -4417,9 +4448,16 @@ mod armor_stand_motion_tests {
                     binding: collision,
                     subject: None,
                 };
-                if let Some(step) =
-                    stand.tick_move(&mut scene, facts, &climbing, false, None, boxes, context)
-                {
+                if let Some(step) = stand.tick_move(
+                    &mut scene,
+                    facts,
+                    &climbing,
+                    false,
+                    None,
+                    boxes,
+                    context,
+                    sunrise_client::motion::dry_side(),
+                ) {
                     stand.tick_settle(StandMedium::Air, step);
                 }
             }
@@ -5054,6 +5092,7 @@ mod orb_lava_tests {
                     None,
                     fluids,
                     crate::test_resources::server_loop_context(),
+                    sunrise_client::motion::dry_side(),
                     &mut |_, _| {},
                 )
             };
@@ -5110,6 +5149,7 @@ mod orb_lava_tests {
                     None,
                     fluids,
                     crate::test_resources::server_loop_context(),
+                    sunrise_client::motion::dry_side(),
                     &mut |_, _| {}
                 ));
                 assert_eq!((client.health, client.age), (5, expected_age));
@@ -5125,6 +5165,7 @@ mod orb_lava_tests {
                 None,
                 fluids,
                 crate::test_resources::server_loop_context(),
+                sunrise_client::motion::dry_side(),
                 &mut |pos, pitch| sounds.push((pos, pitch)),
             ));
             assert_eq!((orb.health, orb.age), (1, 1));
@@ -5140,6 +5181,7 @@ mod orb_lava_tests {
                 None,
                 fluids,
                 crate::test_resources::server_loop_context(),
+                sunrise_client::motion::dry_side(),
                 &mut |pos, pitch| sounds.push((pos, pitch)),
             ));
             assert_eq!((orb.health, orb.age), (-3, 2));
@@ -5167,6 +5209,7 @@ mod orb_lava_tests {
                     None,
                     fluids,
                     crate::test_resources::server_loop_context(),
+                    sunrise_client::motion::dry_side(),
                     &mut |_, _| sounds += 1,
                     &[],
                     &mut |_| {
@@ -5205,6 +5248,7 @@ mod orb_lava_tests {
                     None,
                     fluids,
                     crate::test_resources::server_loop_context(),
+                    sunrise_client::motion::dry_side(),
                     &mut |pos, pitch| sounds.push((pos, pitch)),
                 ));
                 assert!(sounds.is_empty(), "orb in air must not play burn sound");
@@ -5236,6 +5280,7 @@ mod orb_lava_tests {
                     None,
                     fluids,
                     crate::test_resources::server_loop_context(),
+                    sunrise_client::motion::dry_side(),
                     &mut |pos, pitch| sounds.push((pos, pitch)),
                 ));
                 assert!(sounds.is_empty(), "orb in water must not play burn sound");
@@ -5273,6 +5318,7 @@ mod orb_lava_tests {
                 None,
                 fluids,
                 crate::test_resources::server_loop_context(),
+                sunrise_client::motion::dry_side(),
                 &mut |pos, pitch| sounds.push((pos, pitch)),
             ));
             assert!(
@@ -5295,6 +5341,7 @@ mod orb_lava_tests {
                 None,
                 fluids,
                 crate::test_resources::server_loop_context(),
+                sunrise_client::motion::dry_side(),
                 &mut |pos, pitch| sounds.push((pos, pitch)),
             ));
             assert!(
@@ -5331,6 +5378,7 @@ mod orb_lava_tests {
                                 None,
                                 fluids,
                                 crate::test_resources::server_loop_context(),
+                                sunrise_client::motion::dry_side(),
                                 &mut |_, _| sounds += 1,
                             ),
                             damage == 0,
@@ -5366,6 +5414,7 @@ mod orb_lava_tests {
                 None,
                 fluids,
                 crate::test_resources::server_loop_context(),
+                sunrise_client::motion::dry_side(),
                 &mut |pos, pitch| sounds.push((pos, pitch)),
             );
             assert!(stays, "orb survives first contact with 1 HP");
@@ -5402,6 +5451,7 @@ mod orb_lava_tests {
                 None,
                 fluids,
                 crate::test_resources::server_loop_context(),
+                sunrise_client::motion::dry_side(),
                 &mut |pos, pitch| sounds.push((pos, pitch)),
             ));
             assert_eq!(orb.health, 1);
@@ -5420,6 +5470,7 @@ mod orb_lava_tests {
                 None,
                 fluids,
                 crate::test_resources::server_loop_context(),
+                sunrise_client::motion::dry_side(),
                 &mut |pos, pitch| sounds.push((pos, pitch)),
             ));
             assert_eq!(orb.health, -3);

@@ -2,11 +2,12 @@
 //! The `friction` Part method (`IBlockExtension.getFriction`). The client library asks through
 //! `native_client_hooks`; only a state whose block has a subscribing part is converted.
 use super::api_values::{TryIntoApi, TryIntoEngine, block_state};
-use super::{Game, boats::Boat};
+use super::{Dim, Game, boats::Boat};
 use mod_api::{
     BlockKey, BlockState, FeatureFlags, FluidState, LevelHost, LevelReadError, LevelRef, LightLayer,
 };
 use std::cell::RefCell;
+use sunrise_client::motion::SideLevel as _;
 use sunrise_client::{
     motion::{FrictionLevel, read_friction},
     world::World,
@@ -15,6 +16,69 @@ use sunrise_core::position::BlockPos;
 use sunrise_world::{
     fluid::FluidState as EngineFluidState, native_load_context::LoopSide, registry::BlockStateId,
 };
+
+/// This side's level data for one tick, built once from the game's tables and lent to the motion,
+/// mob and entity ticks that read friction. Fields borrow the game's tables one by one, so the
+/// tick's other borrows of the game stand beside it (`game_side!`).
+pub(crate) struct GameSide<'a> {
+    pub dim: super::Dim,
+    /// The level handle of the open world, absent before a world has an epoch.
+    pub level: Option<LevelRef>,
+    pub facts: &'a sunrise_client::blocks::BlockFacts,
+    pub biomes: &'a sunrise_client::biome::Biomes,
+    pub behaviours: &'a sunrise_world::level::Behaviours,
+    pub features: &'a std::sync::Arc<[String]>,
+    pub items: Option<&'a sunrise_client::items::Items>,
+}
+
+impl sunrise_client::motion::SideLevel for GameSide<'_> {
+    fn is_raining_at(&self, world: &World, pos: BlockPos) -> bool {
+        world.is_loaded_at(pos.x, pos.y, pos.z)
+            && super::native_level_world::rain_at(
+                world,
+                self.facts,
+                self.biomes,
+                self.behaviours,
+                self.dim,
+                pos,
+            )
+    }
+
+    fn enabled_features(&self) -> &std::sync::Arc<[String]> {
+        self.features
+    }
+
+    fn tag_items(&self) -> Option<&sunrise_client::items::Items> {
+        self.items
+    }
+
+    fn block_entity(&self, world: &World, pos: BlockPos) -> Option<mod_api::BlockEntityRef> {
+        super::native_block_entity_refs::world_block_entity(
+            world,
+            self.level?,
+            [pos.x, pos.y, pos.z],
+        )
+    }
+}
+
+/// The game's own side, for a tick that only reads it: each query builds the borrowed tables.
+impl sunrise_client::motion::SideLevel for Game<'_> {
+    fn is_raining_at(&self, world: &World, pos: BlockPos) -> bool {
+        game_side!(self).is_raining_at(world, pos)
+    }
+
+    fn enabled_features(&self) -> &std::sync::Arc<[String]> {
+        game_side!(self).features
+    }
+
+    fn tag_items(&self) -> Option<&sunrise_client::items::Items> {
+        game_side!(self).items
+    }
+
+    fn block_entity(&self, world: &World, pos: BlockPos) -> Option<mod_api::BlockEntityRef> {
+        game_side!(self).block_entity(world, pos)
+    }
+}
 
 type Query = (*const World, BlockPos, BlockStateId, Option<u32>);
 thread_local! {
@@ -226,6 +290,11 @@ impl Game<'_> {
             world,
             registry: self.pack.assets.registry,
             context: &self.loop_context,
+            side: &GameSide {
+                dim: Dim::from_id(level.dimension_id()),
+                level: Some(level),
+                ..game_side!(self)
+            },
             coefficient: &|id| facts.states.get(id.0 as usize).map(|facts| facts.friction),
         };
         Ok(query_friction(level, pos, state, entity))
@@ -248,6 +317,7 @@ impl Game<'_> {
             world: &self.world,
             registry: self.pack.assets.registry,
             context: &self.loop_context,
+            side: self,
             coefficient: &|id| facts.states.get(id.0 as usize).map(|facts| facts.friction),
         };
         read_friction(level, Some((b.id, b.entity_type_name())), pos, state, own).unwrap_or(own)
@@ -318,7 +388,8 @@ mod tests {
             game.res.facts(),
             false,
             step,
-            &game.loop_context
+            &game.loop_context,
+            &*game,
         ));
         let mut orb = ExperienceOrb::new(9, at, Vec3::new(0.2, 0.0, 0.0), 1);
         orb.on_ground = true;
@@ -332,6 +403,7 @@ mod tests {
             None,
             &game.motion.fluids,
             &game.loop_context,
+            &*game,
             &mut |_, _| {},
             &[],
         );
@@ -360,7 +432,9 @@ mod tests {
                 player.set_walking_speed_base(0.1).unwrap();
                 player.ground.on_ground = true;
                 player.velocity = Vec3::new(0.2, 0.0, 0.0);
+                let side = game_side!(game);
                 let mut world = MotionWorld {
+                    side: &side,
                     entities: &[],
                     player: &mut player,
                     scene: &mut game.world,
@@ -408,6 +482,7 @@ mod tests {
                         None,
                         &[],
                         &game.loop_context,
+                        &*game,
                     )
                     .unwrap();
                 stand.tick_settle(StandMedium::Air, step);

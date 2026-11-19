@@ -1027,6 +1027,7 @@ impl Game<'_> {
             no_physics,
             step,
             &self.loop_context,
+            self,
         );
         // ItemEntity.tick refreshes immersion and splashes on water entry.
         let before = item.velocity;

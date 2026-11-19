@@ -3817,7 +3817,9 @@ mod tests {
                 .update(0, |g| g.fall_flying = true);
             game.as_guest(1, |game| {
                 let player = game.player.as_mut().unwrap();
+                let side = game_side!(game);
                 MotionWorld {
+                    side: &side,
                     entities: &[],
                     player,
                     scene: &mut game.world,

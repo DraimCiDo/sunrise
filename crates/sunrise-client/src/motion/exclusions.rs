@@ -58,6 +58,7 @@ mod tests {
                     original: Some(delta),
                 });
             let mut w = MotionWorld {
+                side: sunrise_client::motion::dry_side(),
                 tag_items: None,
                 block_registries: None,
                 loop_context: crate::test_resources::server_loop_context(),

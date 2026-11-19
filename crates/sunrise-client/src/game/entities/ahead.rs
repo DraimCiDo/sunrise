@@ -30,6 +30,7 @@ pub(in crate::game) struct ItemTables<'a> {
     registry: &'a BlockRegistry,
     border: &'a BorderGeometry,
     context: &'a sunrise_world::native_load_context::LoopContext,
+    side: crate::game::native_surface::GameSide<'a>,
 }
 
 impl<'w> Game<'w> {
@@ -42,6 +43,7 @@ impl<'w> Game<'w> {
             registry: self.pack.assets.registry,
             border: self.border.geometry(),
             context: &self.loop_context,
+            side: game_side!(self),
         }
     }
 }
@@ -116,6 +118,7 @@ impl ItemTables<'_> {
             no_physics,
             step,
             self.context,
+            &self.side,
         );
         // ItemEntity.tick refreshes immersion and splashes on water entry.
         let before = item.velocity;

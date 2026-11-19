@@ -94,6 +94,7 @@ fn a_client_and_a_server_that_disagree_about_a_parts_state_get_a_correction() {
         (0..20)
             .map(|_| {
                 MotionWorld {
+                    side: sunrise_client::motion::dry_side(),
                     entities: &[],
                     player: &mut client,
                     scene: &mut walled,

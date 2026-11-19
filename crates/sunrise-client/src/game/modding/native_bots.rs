@@ -105,7 +105,9 @@ impl Game<'_> {
             self.level_suffocation(),
         );
         let sprinting = sprints(&input) && !body.item_use_slows_sprint;
+        let side = game_side!(self);
         MotionWorld {
+            side: &side,
             entities: &[],
             player: &mut body,
             scene: &mut self.world,

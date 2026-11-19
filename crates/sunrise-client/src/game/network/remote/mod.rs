@@ -6566,7 +6566,9 @@ impl Game<'_> {
                         .map(|m| (m.id, m.bounds())),
                 );
             }
+            let side = game_side!(self);
             MotionWorld {
+                side: &side,
                 entities: &entity_collisions,
                 player,
                 scene: &mut self.world,
@@ -6587,7 +6589,9 @@ impl Game<'_> {
             player.health.advance_clock();
             if riding && !dead {
                 player.client_side = true;
+                let side = game_side!(self);
                 let mut passenger = MotionWorld {
+                    side: &side,
                     entities: &entity_collisions,
                     player: &mut *player,
                     scene: &mut self.world,
@@ -7508,6 +7512,7 @@ impl Game<'_> {
                     l.steps -= 1;
                 }
                 let before = o.position;
+                let side = game_side!(self);
                 let kept = o.tick(
                     world,
                     facts,
@@ -7518,6 +7523,7 @@ impl Game<'_> {
                     border,
                     &self.res.motion().fluids,
                     &self.loop_context,
+                    &side,
                     &mut |_, _| {},
                 );
                 // `tick` set `previous` to the stepped position: keep the

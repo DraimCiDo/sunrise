@@ -439,6 +439,7 @@ fn the_off_walk_movers_fire_too() {
                 let mut world =
                     std::mem::replace(&mut game.world, sunrise_client::world::World::new(stone, 0));
                 MotionWorld {
+                    side: sunrise_client::motion::dry_side(),
                     entities: &[],
                     player: &mut player,
                     scene: &mut world,

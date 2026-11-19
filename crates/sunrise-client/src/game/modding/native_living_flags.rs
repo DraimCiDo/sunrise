@@ -1377,7 +1377,9 @@ pub(in crate::game) mod tests {
     fn player_climbs(game: &mut Game<'_>, id: i32) -> (bool, Option<BlockPos>) {
         let mut player = PlayerMotion::new(game.motion, Vec3::new(5.5, 64.0, 5.5)).unwrap();
         player.entity_id = id;
+        let side = game_side!(game);
         let mut world = MotionWorld {
+            side: &side,
             entities: &[],
             player: &mut player,
             scene: &mut game.world,

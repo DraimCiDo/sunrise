@@ -4201,6 +4201,7 @@ pub(crate) mod tests {
                     context,
                     world: &world,
                     registry: crate::test_fixtures::air_registry(),
+                    side: crate::motion::dry_side(),
                     coefficient: &|_| Some(0.6),
                 },
                 Some((1, kind)),
