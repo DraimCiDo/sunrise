@@ -99,8 +99,13 @@ impl LevelHost for FrictionView<'_> {
     }
 
     fn block_state_id(&self, name: &str) -> Option<BlockState> {
-        let name = sunrise_client::command::args::normalized(name);
-        self.0.registry.default_state(&name)?.try_into_api().ok()
+        super::native_block_states::parse(
+            &super::native_block_states::block_registries(self.0.registry),
+            self.0.registry,
+            name,
+        )?
+        .try_into_api()
+        .ok()
     }
 
     fn block_state_default(&self, block: BlockKey) -> Option<BlockState> {
@@ -174,12 +179,12 @@ impl LevelHost for FrictionView<'_> {
         self.0.world.is_loaded_at(x, y, z)
     }
 
-    fn is_raining_at(&self, _pos: [i32; 3]) -> bool {
-        false
+    fn is_raining_at(&self, _pos: [i32; 3]) -> Option<bool> {
+        None
     }
 
-    fn enabled_features(&self) -> FeatureFlags {
-        FeatureFlags::new(Default::default())
+    fn enabled_features(&self) -> Option<FeatureFlags> {
+        None
     }
 }
 
@@ -496,6 +501,20 @@ mod tests {
                 Ok(Some(0.5)),
             );
             assert_eq!(calls.load(Ordering::SeqCst), 16);
+            // Two parts on one block: the second sees the first's coefficient, but not its
+            // changes to the position, state or entity.
+            let pink = registry.default_state("minecraft:pink_wool").unwrap();
+            calls.store(0, Ordering::SeqCst);
+            assert_eq!(
+                level.friction(
+                    game,
+                    [5, 64, 5],
+                    pink.try_into_api().unwrap(),
+                    Some((100, "minecraft:player")),
+                ),
+                Ok(Some(0.9)),
+            );
+            assert_eq!(calls.load(Ordering::SeqCst), 2);
             let unknown = sunrise_world::registry::BlockStateId(u32::MAX);
             assert_eq!(
                 game.level_friction(level, [5, 64, 5], unknown, None),

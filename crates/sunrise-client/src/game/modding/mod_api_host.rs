@@ -457,7 +457,7 @@ impl mod_api::LevelHost for FireOddsLevel<'_> {
         fn brightness(layer: mod_api::LightLayer, pos: [i32; 3]) -> i32;
         fn raw_brightness(pos: [i32; 3], sky_darken: i32) -> i32;
         fn is_loaded(pos: [i32; 3]) -> bool;
-        fn enabled_features() -> mod_api::FeatureFlags;
+        fn enabled_features() -> Option<mod_api::FeatureFlags>;
     }
 
     fn block_entity(&self, pos: [i32; 3]) -> Option<mod_api::BlockEntityRef> {
@@ -541,13 +541,15 @@ impl mod_api::LevelHost for FireOddsLevel<'_> {
             },
         ))
     }
-    fn is_raining_at(&self, [x, y, z]: [i32; 3]) -> bool {
+    fn is_raining_at(&self, [x, y, z]: [i32; 3]) -> Option<bool> {
         if let Some(level) = self.prediction {
-            self.is_loaded([x, y, z])
-                && self
-                    .base
-                    .behaviours
-                    .is_raining_at(level, BlockPos::new(x, y, z))
+            Some(
+                self.is_loaded([x, y, z])
+                    && self
+                        .base
+                        .behaviours
+                        .is_raining_at(level, BlockPos::new(x, y, z)),
+            )
         } else {
             mod_api::LevelHost::is_raining_at(self.base, [x, y, z])
         }
@@ -738,14 +740,16 @@ impl mod_api::LevelHost for super::GameLevel<'_> {
     fn is_loaded(&self, pos: [i32; 3]) -> bool {
         self.world.is_loaded_at(pos[0], pos[1], pos[2])
     }
-    fn is_raining_at(&self, pos: [i32; 3]) -> bool {
-        self.world.is_loaded_at(pos[0], pos[1], pos[2])
-            && self
-                .behaviours
-                .is_raining_at(self, BlockPos::new(pos[0], pos[1], pos[2]))
+    fn is_raining_at(&self, pos: [i32; 3]) -> Option<bool> {
+        Some(
+            self.world.is_loaded_at(pos[0], pos[1], pos[2])
+                && self
+                    .behaviours
+                    .is_raining_at(self, BlockPos::new(pos[0], pos[1], pos[2])),
+        )
     }
-    fn enabled_features(&self) -> mod_api::FeatureFlags {
-        mod_api::FeatureFlags::new(self.enabled_features.clone())
+    fn enabled_features(&self) -> Option<mod_api::FeatureFlags> {
+        Some(mod_api::FeatureFlags::new(self.enabled_features.clone()))
     }
 }
 
@@ -1127,10 +1131,10 @@ impl<
     fn is_loaded(&self, pos: [i32; 3]) -> bool {
         mod_api::LevelHost::is_loaded(&*self.level, pos)
     }
-    fn is_raining_at(&self, pos: [i32; 3]) -> bool {
+    fn is_raining_at(&self, pos: [i32; 3]) -> Option<bool> {
         mod_api::LevelHost::is_raining_at(&*self.level, pos)
     }
-    fn enabled_features(&self) -> mod_api::FeatureFlags {
+    fn enabled_features(&self) -> Option<mod_api::FeatureFlags> {
         mod_api::LevelHost::enabled_features(&*self.level)
     }
     fn signal(&self, pos: [i32; 3], direction: Direction) -> Option<i32> {

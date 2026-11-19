@@ -18,10 +18,12 @@ angular friction, and for explicit `LevelRef::friction` queries. The read-only `
 can read the level or ask for another state's answer at the same position, for example a block
 taking its material's friction. The queried state need not be what the level holds at that position.
 The borrowed view reads block states, their properties, fluids and light, without loading chunks.
-`block_state_id` takes a bare block id here; use `state_with_property` to select another state.
-It has no block-entity, container, shape, signal, tag-membership, weather or feature view.
-`is_raining_at` reports false and `enabled_features` reports the vanilla default. For a rule
-depending on block-entity data, answer from the mod's own state on both sides.
+`block_state_id` parses a block name with properties as elsewhere.
+It has no block-entity, container, shape, signal, tag-membership, weather or feature data, and
+answers `None` for those reads (`is_raining_at`, `enabled_features`, `block_entity` and the rest). For a
+rule depending on block-entity data, answer from the mod's own state on both sides.
+Each listener gets the original `pos`, `state` and `entity`; only `friction` carries from one
+listener to the next.
 
 An active query on the same level, position, state and entity id (or no entity) cannot be repeated.
 A recursive or over-deep query returns `None` (`Ok(None)` through `LevelRef`). Without a part,
@@ -38,6 +40,7 @@ replay agree."#]
         host = "level",
         version = 2,
         non_exhaustive = true,
+        event_per_listener = true,
         target = "sunrise_client::game::native_hooks::friction::FrictionView<'_>::native_friction",
         neoforge = "IBlockExtension.getFriction"
     )]

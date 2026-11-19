@@ -457,7 +457,7 @@ pub(super) fn match_state_properties(
 
 /// The command registries' block table of `registry` alone, built once: what
 /// the parser checks properties against, whether a world is open or not.
-pub(super) fn block_registries(registry: &'static BlockRegistry) -> Arc<Registries> {
+pub(super) fn block_registries(registry: &BlockRegistry) -> Arc<Registries> {
     static CACHE: Mutex<Vec<(usize, Arc<Registries>)>> = Mutex::new(Vec::new());
     // Derived from the registry's data alone, so equal data across installations shares one.
     let key = registry.payload_identity();

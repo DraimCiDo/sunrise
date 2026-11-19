@@ -113,7 +113,8 @@ sunrise-client game::boats::below_world::tests::a_tick_discards_the_vehicles_und
 sunrise-client game::boats::below_world::tests::saved_deep_end_boat_loads_then_is_discarded_and_extreme_scans_terminate lib daily resources
 sunrise-client game::boats::cobweb_tests::a_boat_leaving_a_cobweb_for_powder_snow_takes_the_powder_snow lib daily resources
 sunrise-client game::boats::cobweb_tests::a_cobweb_slows_a_boat_and_resets_its_fall lib daily resources
-sunrise-client game::boats::friction_tests::ground_friction_averages_intersecting_blocks_without_allocating_a_boat_kind lib daily resources
+sunrise-client game::boats::friction_tests::a_status_refresh_asks_friction_as_the_chest_boat_it_is lib daily resources
+sunrise-client game::boats::friction_tests::ground_friction_averages_the_blocks_under_the_hull_and_asks_subscribed_parts lib daily resources
 sunrise-client game::boats::lifetime_tests::a_bound_boat_commits_the_driven_client_tick lib daily resources
 sunrise-client game::boats::lifetime_tests::a_bound_boat_keeps_its_registration_through_ticks_until_discard lib daily resources
 sunrise-client game::boats::lifetime_tests::a_bound_ridden_boat_commits_the_server_leash_tick lib daily resources

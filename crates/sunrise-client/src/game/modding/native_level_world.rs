@@ -483,16 +483,16 @@ mod tests {
             assert_eq!(game.level_is_raining_at(level, unloaded), None);
             assert_eq!(game.level_is_raining_at(level, [1, 4000, 1]), None);
             game.with_level(|_, host, _| {
-                assert!(host.is_raining_at(plains));
-                assert!(!host.is_raining_at(roofed));
-                assert!(!host.is_raining_at(desert));
-                assert!(!host.is_raining_at(snowy));
-                assert!(!host.is_raining_at(unloaded));
+                assert_eq!(host.is_raining_at(plains), Some(true));
+                assert_eq!(host.is_raining_at(roofed), Some(false));
+                assert_eq!(host.is_raining_at(desert), Some(false));
+                assert_eq!(host.is_raining_at(snowy), Some(false));
+                assert_eq!(host.is_raining_at(unloaded), Some(false));
             });
 
             game.world.weather.rain_level = (0.0, 0.0);
             assert_eq!(game.level_is_raining_at(level, plains), Some(false));
-            game.with_level(|_, host, _| assert!(!host.is_raining_at(plains)));
+            game.with_level(|_, host, _| assert_eq!(host.is_raining_at(plains), Some(false)));
             assert_eq!(game.world.chunks.len(), chunks, "nothing was loaded");
         });
     }
@@ -520,7 +520,10 @@ mod tests {
             );
             let ids: Vec<String> = flags.iter().map(str::to_owned).collect();
             game.with_level(|_, host, _| {
-                assert_eq!(host.enabled_features().iter().collect::<Vec<_>>(), ids);
+                assert_eq!(
+                    host.enabled_features().unwrap().iter().collect::<Vec<_>>(),
+                    ids
+                );
             });
         });
     }

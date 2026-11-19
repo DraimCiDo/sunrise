@@ -1535,11 +1535,13 @@ pub trait LevelHost {
     /// `Level.isRainingAt`: it rains in this level and `pos` is open to the sky (full sky light,
     /// nothing motion-blocking or fluid above it) in a biome whose precipitation there is rain,
     /// not snow or none. False where `pos` is not loaded, the chunk is never loaded for it.
-    fn is_raining_at(&self, _pos: [i32; 3]) -> bool {
+    /// None in a view that has no weather data (the borrowed one `friction` is given).
+    fn is_raining_at(&self, _pos: [i32; 3]) -> Option<bool> {
         unimplemented!("LevelHost::is_raining_at")
     }
-    /// `LevelReader.enabledFeatures`: the feature flags the world enables.
-    fn enabled_features(&self) -> FeatureFlags {
+    /// `LevelReader.enabledFeatures`: the feature flags the world enables. None in a view that
+    /// has no world data (the borrowed one `friction` is given).
+    fn enabled_features(&self) -> Option<FeatureFlags> {
         unimplemented!("LevelHost::enabled_features")
     }
     /// How strongly the block at `pos` powers its neighbour on the `direction` side, power it
