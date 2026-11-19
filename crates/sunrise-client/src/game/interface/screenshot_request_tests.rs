@@ -44,6 +44,8 @@ fn a_mod_saves_one_exact_offscreen_frame_without_f2() {
     let mods = vec![ModEntry::new("capture", Box::new(Capture))].into();
     mod_platform::testing::with_mods(mods, || {
         with_client_game(|game| {
+            use mod_api::__private::{ModPhase, PhaseOwner};
+            let _world = PhaseOwner::scope(ModPhase::World);
             let request = |host: &mut dyn ClientHost, size| host.request_screenshot(size);
             assert_eq!(
                 request(game, None),
@@ -76,6 +78,13 @@ fn a_mod_saves_one_exact_offscreen_frame_without_f2() {
                 )
                 .unwrap(),
             );
+            {
+                let _setup = PhaseOwner::scope(ModPhase::Setup);
+                assert_eq!(
+                    request(game, None),
+                    Err(ScreenshotRequestError::Unavailable)
+                );
+            }
             assert_eq!(
                 request(game, Some([0, 192])),
                 Err(ScreenshotRequestError::InvalidSize)
