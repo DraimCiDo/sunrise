@@ -1052,7 +1052,8 @@ pub(crate) fn mark_block(root: &str, name: &str) -> String {
 /// The `__sunrise_mark!` macro: one arm per export a mod can implement, each a no-op import
 /// named like the export, so a mod's import section lists exactly the hooks and Part methods it
 /// writes; `#[sunrise_mod]` and `#[sunrise_part]` call it for each method an impl overrides. A
-/// plain impl of any other handler trait calls it for nothing, so it carries no marks. The protocol module holds the three imports every guest links.
+/// plain impl of any other handler trait calls it for nothing: such a handler is marked where it
+/// is sent (`handler_marks`). The protocol module holds the three imports every guest links.
 pub(super) fn mark_macro(names: &super::Names) -> String {
     let mut out = String::from(
         "/// Marks that the mod implements one export: an import of the game's table, called for nothing.\n#[doc(hidden)]\n#[cfg(not(test))]\n#[macro_export]\nmacro_rules! __sunrise_mark {\n",
@@ -1089,6 +1090,35 @@ pub(super) fn mark_macro(names: &super::Names) -> String {
     }
     // A method the API keeps off wasm crosses nowhere and has no name.
     out.push_str("($owner:literal $method:ident) => {};\n}\n");
+    out
+}
+
+/// The `Marks<dyn Trait>::mark` of every exported handler trait: an import of each method, as the
+/// game's table names it, called when a wasm mod sends such a handler (`Wire for Arc<dyn Trait>`
+/// and `Box<dyn Trait>`). The game may call any method of a handler it stores, so a mod that
+/// sends one imports all of them. A Part (or `Hooks`) marks only the methods a mod writes,
+/// through the subscription attribute, so it has none; a trait the table does not export has
+/// none either, and `NoMarks` stands in.
+pub(super) fn handler_marks(names: &super::Names) -> String {
+    let mut owners = std::collections::BTreeMap::<&str, Vec<String>>::new();
+    for (owner, _, name) in names.marked() {
+        if !super::SUBSCRIBED.iter().any(|(part, _)| *part == owner) {
+            owners.entry(owner).or_default().push(name.text());
+        }
+    }
+    let mut out = String::new();
+    for (owner, texts) in owners {
+        let marks: String = texts
+            .iter()
+            .map(|text| mark_block("::mod_api", text))
+            .collect();
+        writeln!(
+            out,
+            "#[cfg(target_arch = \"wasm32\")]\nimpl crate::wire::wire_handlers::Marks<dyn {}> {{ pub(crate) fn mark(&self) {{ {marks} }} }}",
+            trait_path(owner)
+        )
+        .unwrap();
+    }
     out
 }
 
