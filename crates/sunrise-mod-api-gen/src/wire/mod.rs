@@ -195,6 +195,16 @@ pub(super) const SUBSCRIBED: &[(&str, &str)] = &[
     ("EntityPart", "entity_subscribed"),
 ];
 
+/// The hidden provided method every exported handler trait declares: its body marks the trait's
+/// methods (`__sunrise_handler_marks!`), so a mod that holds a handler of the trait imports them.
+const MARKS_METHOD: &str = "__sunrise_marks";
+
+fn has_marks_method(item: &syn::ItemTrait) -> bool {
+    item.items
+        .iter()
+        .any(|member| matches!(member, TraitItem::Fn(f) if f.sig.ident == MARKS_METHOD))
+}
+
 /// One trait method as it crosses.
 #[derive(Debug)]
 pub(super) struct Method {
@@ -323,6 +333,16 @@ pub(super) fn surface_reading<'a>(
         let Item::Trait(item) = types.index.item(id).clone() else {
             return Err(format!("{owner} is not a trait"));
         };
+        // A handler trait carries the hidden method that marks its methods in a mod that
+        // implements it; a Part marks through its attribute instead.
+        if exports().contains(owner)
+            && !SUBSCRIBED.iter().any(|(part, _)| part == owner)
+            && !has_marks_method(&item)
+        {
+            return Err(format!(
+                "handler trait {owner} has no `{MARKS_METHOD}` method: declare it as `EnergyHandler` does, so a mod that implements the trait imports its methods"
+            ));
+        }
         // A generic trait's instance: its parameters as the owner's arguments.
         let mut subst = Vec::new();
         for (param, arg) in item.generics.type_params().zip(&args) {
@@ -1536,5 +1556,18 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    /// A handler trait without the hidden marks method would let a mod implement it with no import
+    /// of its methods, so the generator refuses it.
+    #[test]
+    fn a_handler_trait_without_the_marks_method_is_found() {
+        let with: syn::ItemTrait = syn::parse_str(
+            "trait A { fn x(&self); #[doc(hidden)] fn __sunrise_marks(&self, _: Sealed) {} }",
+        )
+        .unwrap();
+        let without: syn::ItemTrait = syn::parse_str("trait A { fn x(&self); }").unwrap();
+        assert!(super::has_marks_method(&with));
+        assert!(!super::has_marks_method(&without));
     }
 }

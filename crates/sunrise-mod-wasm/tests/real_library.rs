@@ -43,7 +43,23 @@ fn real_library_dependency() {
                 module: Package::read_wasm(path).unwrap(),
             });
         }
-        // The library implements no Part: its artifact imports its hooks and no `part:` name.
+        // The library implements no Part and no handler trait: its artifact imports its hooks, and
+        // of handler traits only those the API wraps handlers of itself (`ADAPTER_BACKED`): a
+        // handler trait a mod implements itself is marked in that mod alone. When an adapter
+        // joins or leaves the API, the traits it names change: read them off the import section
+        // of this fixture's library (`part:<Trait>::...`) and update the list.
+        const ADAPTER_BACKED: &[&str] = &[
+            "ClientReloadListener",
+            "CraftingRecipeHandler",
+            "GlobalLootModifier",
+            "GlobalLootModifierSerializer",
+            "ModLootCondition",
+            "ModLootFunction",
+            "ReloadApply",
+            "ResourceHandler<FluidResource>",
+            "ResourceHandler<ItemResource>",
+            "ServerReloadListener",
+        ];
         let mut library_imports = Vec::new();
         for payload in wasmparser::Parser::new(0).parse_all(&packages[0].module) {
             if let wasmparser::Payload::ImportSection(section) = payload.unwrap() {
@@ -63,10 +79,13 @@ fn real_library_dependency() {
                 .any(|name| name.starts_with("hook:Hooks::subscribed#")),
             "{library_imports:?}"
         );
-        assert!(
-            !library_imports.iter().any(|name| name.starts_with("part:")),
-            "{library_imports:?}"
-        );
+        let unexpected: Vec<_> = library_imports
+            .iter()
+            .filter_map(|name| name.strip_prefix("part:"))
+            .map(|rest| rest.split("::").next().unwrap())
+            .filter(|owner| !ADAPTER_BACKED.contains(owner))
+            .collect();
+        assert!(unexpected.is_empty(), "{unexpected:?}");
         let mut replaced: Vec<_> = packages
             .iter()
             .map(|p| WasmPackage {
