@@ -4473,6 +4473,7 @@ dependencies = [
  "fs4",
  "gilrs",
  "glam",
+ "indexmap",
  "libc",
  "log",
  "miniz_oxide 0.8.9",

@@ -357,6 +357,34 @@ fn a_row_is_drawn_by_its_types_renderer_at_the_frames_pose_reading_its_synced_fi
     );
 }
 
+#[test]
+#[ignore = "daily"]
+fn general_submission_keeps_lookup_order_across_removal_and_reentry() {
+    in_scene(
+        "general_submission_keeps_lookup_order_across_removal_and_reentry",
+        |game, _| {
+            for (id, x) in [(12, 6.0), (8, 8.0)] {
+                game.handle_packet(spawn(id, "test:missile", [x, 321.0, 0.0]))
+                    .unwrap();
+                game.handle_packet(snapshot(id as u32, Some(1))).unwrap();
+            }
+            let submitted = |game: &mut Game<'_>| {
+                frame(game, 1.0)
+                    .chunks_exact(4)
+                    .map(|quad| quad.iter().map(|v| v.pos[0]).fold(f32::INFINITY, f32::min))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(submitted(game), [4.0, 6.0, 8.0]);
+            game.handle_packet(C::RemoveEntities(play::RemoveEntities { ids: vec![12] }))
+                .unwrap();
+            game.handle_packet(spawn(12, "test:missile", [6.0, 321.0, 0.0]))
+                .unwrap();
+            game.handle_packet(snapshot(12, Some(1))).unwrap();
+            assert_eq!(submitted(game), [4.0, 8.0, 6.0]);
+        },
+    );
+}
+
 /// A panicking renderer draws nothing and is asked no more until a reload resolves it again; a
 /// type with no renderer draws nothing, and neither stops the others.
 #[test]

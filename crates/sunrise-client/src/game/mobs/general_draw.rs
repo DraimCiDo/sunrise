@@ -33,6 +33,15 @@ fn render_state(
     .into()
 }
 
+/// A visible row prepared for submission. Nothing here reads live mod state.
+pub(super) struct ExtractedGeneral {
+    type_slot: usize,
+    entity: mod_api::EntityRenderState,
+    at: DVec3,
+    block: [i32; 3],
+    light: u32,
+}
+
 impl Game<'_> {
     /// Draws the general rows shown on the window at the frame's `alpha`, `camera` the eye: each
     /// from `lerp(previous, position, alpha)`, lit as the entity pass lights an entity, by its
@@ -54,18 +63,21 @@ impl Game<'_> {
         let partial = alpha as f32;
         let view_scale = self.view_scale();
         let now = std::time::Instant::now();
+        // Extract the visible list before invoking mod code, as LevelExtractor does. The
+        // client's lookup preserves insertion order (vanilla EntityLookup's linked id map).
+        let mut visible = std::mem::take(&mut *self.general_render_states.borrow_mut());
         for (&id, row) in remote
             .general
             .rows
             .iter()
             .filter(|(_, row)| row.shown && row.render_attachments.is_some())
         {
-            let Some(resolved) = renderers
+            if !renderers
                 .general(row.type_slot)
-                .filter(|renderer| !renderer.failed.load(std::sync::atomic::Ordering::Relaxed))
-            else {
+                .is_some_and(|renderer| !renderer.failed.load(std::sync::atomic::Ordering::Relaxed))
+            {
                 continue;
-            };
+            }
             let position = DVec3::from_array(row.position);
             let previous = DVec3::from_array(row.previous);
             let at = previous + (position - previous) * alpha;
@@ -98,16 +110,28 @@ impl Game<'_> {
             let eye = (at.y + height * 0.85).floor() as i32;
             let light = self.world.light(block[0], eye, block[2]);
             let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
-            self.mod_entity_renderer_geometry(
-                resolved,
-                &entity,
-                catalog.key(row.type_slot),
-                at - camera,
+            visible.push(ExtractedGeneral {
+                type_slot: row.type_slot,
+                entity,
+                at: at - camera,
                 block,
-                packed,
-                out,
-            );
+                light: packed,
+            });
         }
+        for row in visible.drain(..) {
+            if let Some(resolved) = renderers.general(row.type_slot) {
+                self.mod_entity_renderer_geometry(
+                    resolved,
+                    &row.entity,
+                    catalog.key(row.type_slot),
+                    row.at,
+                    row.block,
+                    row.light,
+                    out,
+                );
+            }
+        }
+        *self.general_render_states.borrow_mut() = visible;
     }
 }
 
