@@ -102,6 +102,7 @@ fn wire_loopback_entity_renderers_register_and_draw_alike_for_native_and_guest_m
                     orb_value: None,
                     painting: None,
                     item_frame: None,
+                    attachments: None,
                 }
                 .into();
                 for (kind, light) in [("wire_test:bolt", 307), ("wire_test:dart", 207)] {
@@ -145,6 +146,7 @@ fn wire_loopback_entity_renderers_register_and_draw_alike_for_native_and_guest_m
                     orb_value: None,
                     painting: None,
                     item_frame: None,
+                    attachments: None,
                 }
                 .into();
                 let mut draw = Draw::default();

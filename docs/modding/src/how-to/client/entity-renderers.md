@@ -56,44 +56,32 @@ here.
 
 ### A general entity's frame
 
-A general entity type (`declare_general_entity`) has no vanilla look, and its state has only the
-row's identity, age and pose: no family field is set. What makes one row look different from
-another is in its synced attachments (`register_attachment_type(id, true)`), the fields the server
-sends a client with the row ([attachments](../../concepts/attachments.md)). So its renderer is asked
-through `submit_with_host`, which has the client's `Host` to read them; its default calls `submit`,
-so a renderer that reads no field implements `submit` alone.
+A general entity type (`declare_general_entity`) has no vanilla look. Its render state carries the
+row's identity, age, pose and a frozen snapshot of its synced attachments
+([attachments](../../concepts/attachments.md)). Native and Wasm both get this same state in `submit`.
 
 ```rust,ignore
 static FUEL: AttachmentType<i32> = /* declared with sync: true */;
 
 struct Missile;
 impl EntityRenderer for Missile {
-    fn submit(&self, _: &EntityRenderState, _: &mut dyn BlockEntityDrawContext) -> Result<(), String> {
-        Ok(())
-    }
-    fn submit_with_host(
+    fn submit(
         &self,
-        host: &dyn Host,
         entity: &EntityRenderState,
         draw: &mut dyn BlockEntityDrawContext,
     ) -> Result<(), String> {
-        let row = host.entity(entity.id).ok_or("no such row")?;
-        let fuel = host
-            .attachment_query("example", "fuel")
-            .and_then(|batch| batch.query(&FUEL))
-            .ok()
-            .and_then(|query| query.get(AttachmentHolder::Entity(row)).ok().flatten())
-            .unwrap_or(0);
-        // ... draw by `fuel` ...
+        let attachments = entity.attachments.as_ref().ok_or("expected a general entity")?;
+        let fuel = attachments.get(&FUEL).map_err(|error| format!("{error:?}"))?;
+        draw.translate([0.0, fuel.copied().unwrap_or_default() as f32, 0.0]);
+        // Submit the missile's model at this pose.
         Ok(())
     }
 }
 ```
 
-A client shows a row only once its first synced fields have arrived with it, so a frame never
-sees a row without them. A wasm mod's renderer for a general type is asked through `submit` for
-now: its call crosses the wasm boundary with the state alone, without the host. `yaw`, `pitch` and `age` are interpolated to the frame, and the pose stack
-starts at the row's interpolated position.
+A row is eligible for extraction after its first synced fields arrive. If its snapshot exceeds the
+64 KiB render-state bound, the row is not submitted until it fits again. `yaw`, `pitch` and `age` are
+interpolated to the frame. The pose stack starts at the row's interpolated position.
 
 ### A living entity's frame
 
@@ -203,7 +191,7 @@ Registered renderers draw these routes:
   `Direction.get2DDataValue * 90` and pitch is 0, not interpolated (it has no previous rotation).
   Without a renderer, the quads are unchanged.
 - your general entity types (`declare_general_entity`): the renderer is their only look, asked
-  through `submit_with_host` for each row the server shows the client. A general type with no
+  through `submit` with each visible row's frozen attachment snapshot. A general type with no
   renderer draws nothing, which is logged once a resource load, naming the type; a failed
   renderer draws nothing until the next resource load.
 - item frames and glow item frames (`minecraft:item_frame`, `minecraft:glow_item_frame`): the

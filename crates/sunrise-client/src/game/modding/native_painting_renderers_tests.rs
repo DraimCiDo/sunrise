@@ -41,7 +41,7 @@ impl EntityRenderer for Paint {
         entity: &EntityRenderState,
         draw: &mut dyn BlockEntityDrawContext,
     ) -> Result<(), String> {
-        self.0.lock().unwrap().state = Some(*entity);
+        self.0.lock().unwrap().state = Some(entity.clone());
         raised_quad(draw, 100.0);
         Ok(())
     }

@@ -13,7 +13,7 @@ mod attack_target;
 mod break_prediction;
 use break_prediction::Prediction;
 mod fall_sound;
-mod general;
+pub(in crate::game) mod general;
 mod interaction_actions;
 mod interaction_prediction;
 mod level_format;

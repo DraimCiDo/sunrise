@@ -129,6 +129,7 @@ pub(super) fn entity_render_state(m: &Mob, id: u32, partial: f32) -> EntityRende
         orb_value: None,
         painting: None,
         item_frame: None,
+        attachments: None,
     }
     .into()
 }

@@ -11,8 +11,7 @@
 //! draws in place of the model and its vanilla layers, primed TNT (`minecraft:tnt`), experience
 //! orbs (`minecraft:experience_orb`), paintings (`minecraft:painting`), and item frames
 //! (`minecraft:item_frame`, `minecraft:glow_item_frame`), and a mod's general entity types (by
-//! their slot in the frozen catalog, `general_type_catalog`), which the renderer draws through
-//! `submit_with_host`. Each other entity family becomes a route
+//! their slot in the frozen catalog, `general_type_catalog`). Each other entity family becomes a route
 //! of its own; until then a registration for one of its types is kept and the type keeps its
 //! drawing.
 //! Each load also asks for the layers of the living renderers (`native_entity_layers`), which draw
@@ -357,33 +356,6 @@ impl Game<'_> {
             light,
             out,
             |draw| resolved.inner.submit(entity, draw),
-        )
-    }
-
-    /// [`Self::mod_entity_renderer_geometry`] for a general entity row: the renderer is asked
-    /// through `submit_with_host`, with this game as the host its synced attachments are read
-    /// from.
-    #[allow(clippy::too_many_arguments)]
-    pub(in crate::game) fn mod_general_renderer_geometry(
-        &self,
-        resolved: &Resolved<dyn EntityRenderer>,
-        entity: &EntityRenderState,
-        entity_type: &str,
-        at: DVec3,
-        block: [i32; 3],
-        light: u32,
-        out: &mut Vec<Vertex>,
-    ) -> bool {
-        let pose = Mat4::from_translation(at.as_vec3());
-        self.guarded_entity_draw(
-            &resolved.failed,
-            entity.partial,
-            entity_type,
-            block,
-            pose,
-            light,
-            out,
-            |draw| resolved.inner.submit_with_host(self, entity, draw),
         )
     }
 

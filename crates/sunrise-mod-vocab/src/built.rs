@@ -486,6 +486,7 @@ pub struct EntityRenderState {
     pub orb_value: Option<i32>,
     pub painting: Option<PaintingRenderState>,
     pub item_frame: Option<ItemFrameRenderState>,
+    pub attachments: Option<super::EntityRenderAttachments>,
 }
 impl From<EntityRenderState> for super::EntityRenderState {
     fn from(v: EntityRenderState) -> Self {
@@ -500,6 +501,7 @@ impl From<EntityRenderState> for super::EntityRenderState {
             orb_value,
             painting,
             item_frame,
+            attachments,
         } = v;
         Self {
             id,
@@ -512,6 +514,7 @@ impl From<EntityRenderState> for super::EntityRenderState {
             orb_value,
             painting: painting.map(Into::into),
             item_frame: item_frame.map(Into::into),
+            attachments,
         }
     }
 }

@@ -1140,7 +1140,11 @@ impl Attachments {
     pub fn apply_sync(&mut self, change: AttachmentSync) {
         let key = (change.namespace, change.name);
         let entry = change.value.map(|value| {
-            let raw = [("value".into(), Tag::Compound(value))].into();
+            let raw = [
+                ("value".into(), Tag::Compound(value)),
+                ("sync".into(), Tag::Byte(1)),
+            ]
+            .into();
             Arc::new(AttachmentEntry::raw(raw))
         });
         self.write_entry(&key, entry);

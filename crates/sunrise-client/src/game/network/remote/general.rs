@@ -25,6 +25,8 @@ pub(in crate::game) struct RemoteGeneral {
     pub age: u32,
     /// Its first attachment snapshot has arrived too: the row is shown, with its fields.
     pub shown: bool,
+    /// Frozen synced fields, rebuilt at the packet boundary; absent if the snapshot was refused.
+    pub render_attachments: Option<mod_api::EntityRenderAttachments>,
 }
 
 /// The rows the server shows the window, by network id, and the warnings already given.
@@ -44,9 +46,17 @@ impl RemoteGenerals {
     }
 
     /// A whole attachment snapshot for entity `id` arrived: a row waiting for it is shown.
-    pub fn snapshot_arrived(&mut self, id: i32) {
+    pub fn attachments_arrived(
+        &mut self,
+        id: i32,
+        replace: bool,
+        attachments: &sunrise_mod_runtime::attachments::Attachments,
+    ) {
         if let Some(row) = self.rows.get_mut(&id) {
-            row.shown = true;
+            row.shown |= replace;
+            if row.shown {
+                row.render_attachments = render_attachments(id, attachments);
+            }
         }
     }
 }
@@ -83,9 +93,10 @@ impl Game<'_> {
         };
         // The snapshot may come first: a removal drops what the client held of an id, so a
         // copy held now is this row's.
-        let shown = r
+        let attachments = r
             .attachments
-            .contains_key(&sunrise_mod_runtime::attachments::Holder::Entity(id as u32));
+            .get(&sunrise_mod_runtime::attachments::Holder::Entity(id as u32));
+        let shown = attachments.is_some();
         if r.general.rows.contains_key(&id) {
             if !std::mem::replace(&mut r.general.duplicate, true) {
                 log::warn!("Sunrise: the server sent general entity {id} twice; the first stays");
@@ -103,6 +114,7 @@ impl Game<'_> {
                 previous_rotation: rotation,
                 age: 0,
                 shown,
+                render_attachments: attachments.and_then(|map| render_attachments(id, map)),
             },
         );
         self.persist
@@ -124,6 +136,17 @@ impl Game<'_> {
     pub(super) fn forget_remote_general(r: &mut Remote, id: i32) {
         r.general.rows.remove(&id);
     }
+}
+
+fn render_attachments(
+    id: i32,
+    map: &sunrise_mod_runtime::attachments::Attachments,
+) -> Option<mod_api::EntityRenderAttachments> {
+    mod_api::EntityRenderAttachments::from_synced(map.synced())
+        .inspect_err(|e| {
+            log::debug!("Sunrise: cannot extract attachments for general entity {id}: {e}")
+        })
+        .ok()
 }
 
 /// One client tick of the rows: `setOldPosAndRot`, then a step of the non-living
@@ -167,6 +190,7 @@ mod tests {
             previous_rotation: [0.0, 0.0],
             age: 0,
             shown: true,
+            render_attachments: None,
         }
     }
 

@@ -1,7 +1,7 @@
 //! A mod's general entity rows on the window (#792, stage 5): each row the server shows, with its
 //! first synced fields here (`game/network/remote/general.rs`), drawn by the renderer a mod
-//! registered for its type (`register_entity_renderers`), through `submit_with_host` so it reads
-//! the row's synced attachments. A general type has no look of its own: without a renderer, or
+//! registered for its type (`register_entity_renderers`), with a frozen copy of the row's synced
+//! attachments. A general type has no look of its own: without a renderer, or
 //! with one that failed until the next resource load, its rows draw nothing.
 use super::Game;
 use sunrise_client::mesher::Vertex;
@@ -11,23 +11,22 @@ use sunrise_client::mesher::Vertex;
 /// fields.
 fn render_state(
     id: u32,
-    age: u32,
-    previous_rotation: [f32; 2],
-    rotation: [f32; 2],
+    row: &super::remote::general::RemoteGeneral,
     partial: f32,
 ) -> mod_api::EntityRenderState {
     let lerp = |from: f32, to: f32| from + partial * (to - from);
     mod_api::__private::built::EntityRenderState {
         id,
         partial,
-        age: age as f32 + partial,
-        yaw: lerp(previous_rotation[0], rotation[0]),
-        pitch: lerp(previous_rotation[1], rotation[1]),
+        age: row.age as f32 + partial,
+        yaw: lerp(row.previous_rotation[0], row.rotation[0]),
+        pitch: lerp(row.previous_rotation[1], row.rotation[1]),
         living: None,
         tnt_fuse: None,
         orb_value: None,
         painting: None,
         item_frame: None,
+        attachments: row.render_attachments.clone(),
     }
     .into()
 }
@@ -48,7 +47,12 @@ impl Game<'_> {
         };
         let catalog = super::general::general_type_catalog();
         let partial = alpha as f32;
-        for (&id, row) in remote.general.rows.iter().filter(|(_, row)| row.shown) {
+        for (&id, row) in remote
+            .general
+            .rows
+            .iter()
+            .filter(|(_, row)| row.shown && row.render_attachments.is_some())
+        {
             let Some(resolved) = super::native_entity_renderers::general_renderer(row.type_slot)
             else {
                 continue;
@@ -56,13 +60,7 @@ impl Game<'_> {
             let at: [f64; 3] = std::array::from_fn(|k| {
                 row.previous[k] + (row.position[k] - row.previous[k]) * alpha
             });
-            let entity = render_state(
-                id as u32,
-                row.age,
-                row.previous_rotation,
-                row.rotation,
-                partial,
-            );
+            let entity = render_state(id as u32, row, partial);
             let (_, height) = catalog.dimensions(row.type_slot);
             let eye = (at[1] + height * 0.85).floor() as i32;
             let light = self
@@ -70,7 +68,7 @@ impl Game<'_> {
                 .light(at[0].floor() as i32, eye, at[2].floor() as i32);
             let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
             let block = at.map(|x| x.floor() as i32);
-            self.mod_general_renderer_geometry(
+            self.mod_entity_renderer_geometry(
                 &resolved,
                 &entity,
                 catalog.key(row.type_slot),
@@ -91,7 +89,18 @@ mod tests {
     /// family's fields.
     #[test]
     fn a_rows_state_is_interpolated_to_the_frame() {
-        let state = render_state(9, 40, [0.0, -20.0], [90.0, 20.0], 0.25);
+        let row = super::super::remote::general::RemoteGeneral {
+            type_slot: 0,
+            uuid: 1,
+            position: [0.0; 3],
+            previous: [0.0; 3],
+            rotation: [90.0, 20.0],
+            previous_rotation: [0.0, -20.0],
+            age: 40,
+            shown: true,
+            render_attachments: None,
+        };
+        let state = render_state(9, &row, 0.25);
         assert_eq!(state.id, 9);
         assert_eq!(state.age, 40.25);
         assert_eq!((state.yaw, state.pitch), (22.5, -10.0));

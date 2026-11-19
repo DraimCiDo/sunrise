@@ -5955,6 +5955,7 @@ impl Game<'_> {
                         orb_value: Some(o.value),
                         painting: None,
                         item_frame: None,
+                        attachments: None,
                     }
                     .into();
                 let light = self.world.light(

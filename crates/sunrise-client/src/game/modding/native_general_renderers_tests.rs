@@ -1,14 +1,13 @@
 //! A mod's general entity types on the client (#792, stage 5): a renderer registered for one
 //! resolves to its catalog slot, a type with none is named; each row shown on the window is drawn
-//! by its type's renderer at the frame's interpolated pose, through `submit_with_host`, which reads
-//! the row's synced attachments; a renderer that fails is dropped until resources reload; a type
+//! by its type's renderer at the frame's interpolated pose, with its synced attachments; a renderer that fails is dropped until resources reload; a type
 //! with no renderer draws nothing.
 use super::Game;
 use super::native_entity_renderers::EntityRendererTable;
 use crate::game::general::GeneralTypeCatalog;
 use mod_api::{
-    AttachmentCodec, AttachmentError, AttachmentHolder, AttachmentType, BlockEntityDrawContext,
-    EntityRenderState, EntityRenderer, Host,
+    AttachmentCodec, AttachmentError, AttachmentType, BlockEntityDrawContext, EntityRenderState,
+    EntityRenderer,
 };
 use std::{
     collections::BTreeMap,
@@ -88,7 +87,7 @@ static FUEL: AttachmentType<i32> = AttachmentType {
 };
 
 /// `test:missile`'s renderer: draws one stone quad from its pose's origin, and keeps the last
-/// state it was handed and the fuel it read through the host.
+/// state it was handed and the fuel it read from the snapshot.
 #[derive(Default)]
 struct Missile {
     seen: Mutex<Option<EntityRenderState>>,
@@ -97,25 +96,16 @@ struct Missile {
 impl EntityRenderer for Missile {
     fn submit(
         &self,
-        _: &EntityRenderState,
-        _: &mut dyn BlockEntityDrawContext,
-    ) -> Result<(), String> {
-        Err("a general type's renderer is asked through submit_with_host".into())
-    }
-    fn submit_with_host(
-        &self,
-        host: &dyn Host,
         entity: &EntityRenderState,
         draw: &mut dyn BlockEntityDrawContext,
     ) -> Result<(), String> {
-        *self.seen.lock().unwrap() = Some(*entity);
-        let row = host.entity(entity.id).ok_or("the row has no handle")?;
-        let fuel = host
-            .attachment_query("test", "fuel")
-            .map_err(|e| format!("{e:?}"))?
-            .query(&FUEL)
-            .map_err(|e| format!("{e:?}"))?
-            .get(AttachmentHolder::Entity(row))
+        *self.seen.lock().unwrap() = Some(entity.clone());
+        let fuel = entity
+            .attachments
+            .as_ref()
+            .ok_or("no snapshot")?
+            .get(&FUEL)
+            .map(|value| value.copied())
             .map_err(|e| format!("{e:?}"))?;
         *self.fuel.lock().unwrap() = fuel;
         let corners = [
@@ -348,7 +338,7 @@ fn a_row_is_drawn_by_its_types_renderer_at_the_frames_pose_reading_its_synced_fi
             let xs: Vec<f32> = out.iter().map(|v| v.pos[0]).collect();
             let min = xs.iter().copied().fold(f32::INFINITY, f32::min);
             assert_eq!(min, 1.0 - CAMERA.x as f32);
-            let seen = scene.missile.seen.lock().unwrap().unwrap();
+            let seen = scene.missile.seen.lock().unwrap().clone().unwrap();
             assert_eq!((seen.id, seen.partial, seen.age), (5, 0.25, 40.25));
             assert_eq!((seen.yaw, seen.pitch), (22.5, -10.0));
             assert!(seen.living.is_none());

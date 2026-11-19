@@ -13,7 +13,8 @@ pub trait Hooks {
     /// experience orbs (in place of the billboarded orb quad) and of paintings (in place of the
     /// painting's quads) and of item frames and glow item frames (in place of the frame model and
     /// the item or map on its face);
-    /// the other entity families keep their own drawing.
+    /// general entity types draw only through their renderer, if registered. Other entity
+    /// families keep their own drawing.
     #[notes = r#"## Entity renderers
 
 An entity renderer (NeoForge's `EntityRenderersEvent.RegisterRenderers` and `EntityRenderer`) gives an
@@ -57,11 +58,9 @@ reference's names. What it draws replaces the type's own drawing (a thrown type'
 type's model and its vanilla layers, held items and worn blocks included); the glowing outline still
 draws around it. Entities of a type share the one
 renderer, whose `submit` has no `Host` and no level: a renderer that needs the world reads it in a
-hook. A mod's general entity type (`declare_general_entity`) is drawn by its renderer alone, asked
-through `submit_with_host` with the client's `Host`, from which it reads the row's synced
-attachments; a general type with no renderer draws nothing. The same
-for native and wasm mods: a wasm renderer is one call a frame for each entity, the state copied in and
-the drawing through the shared draw boundary.
+hook. A general entity type (`declare_general_entity`) draws only through its renderer. Its
+`EntityRenderState::attachments` holds the synced fields captured before submission. Native and Wasm
+receive the same immutable state and submit through the same draw boundary.
 
 A later registration for a type replaces the earlier one, whichever mod made it, as in NeoForge. When
 resources load, a registration for a type the game does not know is logged with the type's id and left
@@ -81,8 +80,7 @@ are its current rotation, not interpolated (it has no previous rotation). A pain
 pitch follow `ItemFrame.setDirection` and are not interpolated (it has no previous rotation). Around a living type's renderer everything else stays: `render_living_pre`
 (whose cancel skips it), the mods' layers (with no posed parts) and `render_living_post`, in the order
 the type's own model has, so it changes with #3915 and not before. Boats, displays and the other
-projectiles come in follow-ups of #860, and a mod's general entity types (#792) will register the same
-way. A renderer that returns an `Err`,
+projectiles come in follow-ups of #860. A renderer that returns an `Err`,
 panics, or (in a wasm mod) has its call refused or trapped is logged once with the error and asked no
 more until the next resource load resolves it again; what it drew that frame is dropped, and until then
 its type draws as it would without one."#]
