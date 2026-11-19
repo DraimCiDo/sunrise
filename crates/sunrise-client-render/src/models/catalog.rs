@@ -889,7 +889,7 @@ mod tests {
         );
         let connected = crate::connected::ConnectedTextures::load(
             root.source(),
-            sunrise_optifine::ctm::load(root.source()),
+            crate::pack_hooks::formats().connected(root.source()),
             &registry,
             &mut sprites,
             |_, _| Some(base),

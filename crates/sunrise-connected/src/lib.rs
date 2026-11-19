@@ -22,6 +22,10 @@ pub enum Symmetry {
     All,
 }
 
+mod rule;
+
+pub use rule::*;
+
 pub type Vec3 = [i32; 3];
 
 const fn add(a: Vec3, b: Vec3) -> Vec3 {

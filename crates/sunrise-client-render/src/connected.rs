@@ -1,15 +1,16 @@
-//! OptiFine connected textures (`optifine/ctm`) at mesh time. The active packs' rules are read
+//! Connected textures at mesh time: OptiFine's (`optifine/ctm`) and mods'. The active rules are read
 //! once at load, their tiles become sprite layers, and each block state and sprite layer gets
 //! the short list of rules that can touch it; meshing a face then walks only those lists
 //! ([`ConnectedTextures::pick`]). Without CTM files there are no rules and nothing changes.
 //!
-//! The rules and the tile geometry are `sunrise_optifine::ctm`'s.
+//! The rules and the tile geometry are `sunrise_connected`'s.
 
 use crate::resource_source::ResourceSource;
 use crate::sprites::Sprites;
 use std::collections::HashMap;
-use sunrise_connected::{self as geometry, Axes, Axis, Face};
-use sunrise_optifine::ctm::{self, Connect, Method, Orient, Rule, Tile};
+use sunrise_connected::{
+    self as geometry, Axes, Axis, Connect, Face, Layer, Method, Orient, Rule, Tile,
+};
 use sunrise_world::block_state_properties::BlockProperties;
 use sunrise_world::registry::{BlockRegistry, BlockStateId};
 
@@ -144,8 +145,6 @@ impl ConnectedTextures {
         sprites: &mut Sprites,
         mut face_layer: impl FnMut(BlockStateId, Face) -> Option<u32>,
     ) -> Self {
-        // Rules with a custom name load no tiles: section meshes see no block entity.
-        rules.retain(|r| r.name.is_none());
         // Rule indices are `u16`.
         rules.truncate(usize::from(u16::MAX));
         if rules.is_empty() {
@@ -605,7 +604,7 @@ impl ConnectedTextures {
             if let TileLayer::Layer { layer, .. } = t {
                 overlay(Overlay {
                     layer,
-                    translucent: rule.layer == ctm::Layer::Translucent,
+                    translucent: rule.layer == Layer::Translucent,
                     tint: join.tint,
                 });
             }
@@ -694,6 +693,7 @@ impl ConnectedTextures {
 mod tests {
     use super::*;
     use sunrise_optifine::Properties;
+    use sunrise_optifine::ctm::{self, Rule};
 
     /// A tile whose layer says which tile of its rule it is: rule `r`'s tile `i` is layer
     /// `1000 * (r + 1) + i`.
@@ -730,7 +730,7 @@ mod tests {
                         },
                     })
                     .collect(),
-                rule,
+                rule: rule.rule,
             })
             .collect()
     }
@@ -1376,7 +1376,7 @@ mod tests {
             ),
         ];
         assert_eq!(
-            ConnectedTextures::matched_sprites(&rules),
+            ConnectedTextures::matched_sprites(&rules.map(|r| r.rule)),
             [
                 format!("{dir}/19.png"),
                 "minecraft:block/extra/placeholder".to_owned(),
@@ -1479,7 +1479,7 @@ mod tests {
         .unwrap();
         let source = ResourceSource::directory(root.clone());
         let mut sprites = Sprites::new(source.clone());
-        let rules = vec![rule];
+        let rules = vec![rule.rule];
         sprites.keep_apart(ConnectedTextures::matched_sprites(&rules));
         let mut catalog = crate::models::StateModels::default();
         catalog
