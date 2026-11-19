@@ -5,6 +5,11 @@ use sunrise_hooks::title::{Button, Opens, Title};
 
 pub(crate) static MODS: Mods = Mods;
 
+/// The button's label, in this crate's `assets/lang`: the crate that supplies the row supplies
+/// its text (docs/layers.md, "Lang files"), registered with the button before the game starts.
+pub(crate) static LANG: &sunrise_hooks::lang::Files =
+    include!(concat!(env!("OUT_DIR"), "/locales.rs"));
+
 pub(crate) struct Mods;
 
 impl Button for Mods {

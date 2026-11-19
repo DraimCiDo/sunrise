@@ -20,6 +20,10 @@ pub fn main_with(
     if let Err(error) = sunrise_hooks::title::register(&crate::mods_button::MODS) {
         log::warn!("Sunrise: the title screen's Mods button did not register: {error}");
     }
+    // Its label travels with it: the crate that supplies the row supplies its text.
+    if let Err(error) = sunrise_hooks::lang::register(crate::mods_button::LANG) {
+        log::warn!("Sunrise: the title screen's Mods label did not register: {error}");
+    }
     // Platform instrumentation must precede registration and the first mod guard.
     if let Err(error) = mod_api::__private::initialize() {
         eprintln!("Sunrise: refusing startup because mod instrumentation is unavailable: {error}");

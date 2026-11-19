@@ -2502,12 +2502,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             }
             (Mode::Main, Some(3)) => Action::Options,
             (Mode::Main, Some(7)) => Action::Accessibility,
-            (Mode::Main, Some(id)) if id >= ADDED_IDS => {
-                match self.added_button(id).map(|button| button.opens()) {
-                    Some(sunrise_hooks::title::Opens::Mods) => Action::Mods,
-                    _ => Action::None,
-                }
-            }
+            (Mode::Main, Some(id)) if id >= ADDED_IDS => preset_buttons::added_action(id),
             (Mode::Main, Some(6)) => Action::Language,
             (Mode::Select { worlds, selected }, Some(10)) => {
                 match selected.and_then(|i| worlds.get(i)).cloned() {
@@ -4131,6 +4126,128 @@ mod classic_tests {
         // A tall screen keeps vanilla's top.
         let tall = title.buttons(960.0, 523.0);
         assert_eq!(tall.iter().find(|b| b.id == 1).unwrap().y, 178.0);
+        preset_buttons::TEST_BUTTONS.set(None);
+    }
+
+    #[test]
+    fn a_press_resolves_its_registration_without_asking_shown_again() {
+        thread_local! {
+            static SHOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+        }
+        struct Toggle;
+        impl sunrise_hooks::title::Button for Toggle {
+            fn label(&self) -> &'static str {
+                "sunrise.mods.screen.title"
+            }
+            fn shown(&self, _: &sunrise_hooks::title::Title) -> bool {
+                SHOWN.with(std::cell::Cell::get)
+            }
+            fn opens(&self) -> sunrise_hooks::title::Opens {
+                sunrise_hooks::title::Opens::Mods
+            }
+        }
+        static ADDED: [&dyn sunrise_hooks::title::Button; 1] = [&Toggle];
+        preset_buttons::TEST_BUTTONS.set(Some(&ADDED));
+        let mut title = Title::new(
+            PathBuf::new(),
+            Path::new("/nonexistent/sunrise-test-resources"),
+            "",
+        );
+        let (w, h) = (427.0_f32, 240.0_f32);
+        let cx = (w / 2.0).floor();
+        title.mods = 1;
+        // The state turns between the row's selection and its press (a mod list changes while
+        // the title is open): the row is no longer laid out, and the press still opens the
+        // screen the selected registration names.
+        SHOWN.with(|s| s.set(false));
+        assert_eq!(title.click(cx - 90.0, 190.0, (w, h)), (Action::None, false));
+        assert_eq!(preset_buttons::added_action(ADDED_IDS), Action::Mods);
+        preset_buttons::TEST_BUTTONS.set(None);
+    }
+
+    #[test]
+    fn an_added_button_keeps_its_id_while_another_stops_showing() {
+        struct Off;
+        impl sunrise_hooks::title::Button for Off {
+            fn label(&self) -> &'static str {
+                "test.title.off"
+            }
+            fn shown(&self, _: &sunrise_hooks::title::Title) -> bool {
+                false
+            }
+            fn opens(&self) -> sunrise_hooks::title::Opens {
+                sunrise_hooks::title::Opens::Mods
+            }
+        }
+        struct ModsRow;
+        impl sunrise_hooks::title::Button for ModsRow {
+            fn label(&self) -> &'static str {
+                "sunrise.mods.screen.title"
+            }
+            fn shown(&self, title: &sunrise_hooks::title::Title) -> bool {
+                title.mods > 0
+            }
+            fn opens(&self) -> sunrise_hooks::title::Opens {
+                sunrise_hooks::title::Opens::Mods
+            }
+        }
+        static ADDED: [&dyn sunrise_hooks::title::Button; 2] = [&Off, &ModsRow];
+        preset_buttons::TEST_BUTTONS.set(Some(&ADDED));
+        let mut title = Title::new(
+            PathBuf::new(),
+            Path::new("/nonexistent/sunrise-test-resources"),
+            "",
+        );
+        let (w, h) = (427.0_f32, 240.0_f32);
+        let cx = (w / 2.0).floor();
+        title.mods = 1;
+        // The ids are registrations, not places among the rows showing: the second
+        // registration keeps its own id while the first is hidden, and pressing its row opens
+        // its screen.
+        let ids: Vec<u8> = title.buttons(w, h).iter().map(|b| b.id).collect();
+        assert_eq!(ids[..4], [1, 4, 8, ADDED_IDS + 1]);
+        assert_eq!(title.click(cx - 90.0, 170.0, (w, h)), (Action::Mods, true));
+        preset_buttons::TEST_BUTTONS.set(None);
+    }
+
+    #[test]
+    fn added_rows_show_only_while_they_fit_between_banner_and_copyright() {
+        struct ModsRow;
+        impl sunrise_hooks::title::Button for ModsRow {
+            fn label(&self) -> &'static str {
+                "sunrise.mods.screen.title"
+            }
+            fn shown(&self, title: &sunrise_hooks::title::Title) -> bool {
+                title.mods > 0
+            }
+            fn opens(&self) -> sunrise_hooks::title::Opens {
+                sunrise_hooks::title::Opens::Mods
+            }
+        }
+        static ADDED: [&dyn sunrise_hooks::title::Button; 2] = [&ModsRow, &ModsRow];
+        preset_buttons::TEST_BUTTONS.set(Some(&ADDED));
+        let mut title = Title::new(
+            PathBuf::new(),
+            Path::new("/nonexistent/sunrise-test-resources"),
+            "",
+        );
+        let (w, h) = (427.0_f32, 240.0_f32);
+        title.mods = 1;
+        let laid = |h: f32| title.buttons(w, h);
+        // Two shown registrations, room for one row between the logo and edition banner
+        // (bottom y 81) and the copyright line: the first shows, the second has no row...
+        assert!(laid(h).iter().any(|b| b.id == ADDED_IDS));
+        assert!(!laid(h).iter().any(|b| b.id == ADDED_IDS + 1));
+        // ...Singleplayer stays below the banner, and Options... and Quit Game end above the
+        // copyright line (h - 10).
+        assert!(laid(h).iter().find(|b| b.id == 1).unwrap().y >= 81.0);
+        assert!(laid(h).iter().find(|b| b.id == 3).unwrap().y + 20.0 <= h - 10.0);
+        // The boundary: at 233 the lifted top lands on the banner's bottom and one row still
+        // fits; at 232 none does and the rows sit where vanilla puts them.
+        assert_eq!(laid(233.0).iter().find(|b| b.id == 1).unwrap().y, 81.0);
+        assert!(laid(233.0).iter().any(|b| b.id == ADDED_IDS));
+        assert!(!laid(232.0).iter().any(|b| b.id == ADDED_IDS));
+        assert_eq!(laid(232.0).iter().find(|b| b.id == 1).unwrap().y, 106.0);
         preset_buttons::TEST_BUTTONS.set(None);
     }
 

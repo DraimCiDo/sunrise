@@ -108,7 +108,7 @@ pub mod containers {
 
 /// The buttons a crate adds to the title screen (docs/layers.md, "Platform registries").
 pub mod title {
-    pub use sunrise_hooks::title::{Button, Opens, Title, register};
+    pub use sunrise_hooks::title::{Button, Opens, Refused, Title, register};
 }
 
 /// The multiplayer server list as vanilla stores it (`servers.dat`): read, write, add, remove,
