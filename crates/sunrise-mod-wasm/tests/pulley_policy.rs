@@ -1,6 +1,8 @@
 //! A host that builds the Pulley interpreter enters a guest from an ordinary thread without any
 //! caller having installed the stack policy first: the runtime settles it where it builds the
 //! engine. A fresh process, since the policy is decided once per process.
+#[path = "support/no_hooks.rs"]
+mod no_hooks;
 use std::process::Command;
 
 fn module() -> Vec<u8> {
