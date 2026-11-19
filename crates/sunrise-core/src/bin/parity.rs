@@ -1,11 +1,11 @@
 //! Line-based differential probe. Not a game client or server.
 use std::io::{self, BufRead, BufWriter, Write};
 use sunrise_core::{
+    java_string::java_string_hash,
     position::{BlockPos, ChunkPos, SectionPos},
     random::{
         LegacyPositionalRandom, LegacyRandom, PositionalRandom, RandomSource,
-        XoroshiroPositionalRandom, XoroshiroRandom, java_string_hash, position_seed,
-        seed_from_hash_utf16,
+        XoroshiroPositionalRandom, XoroshiroRandom, position_seed, seed_from_hash_utf16,
     },
     storage::PackedStorage,
 };
