@@ -1,10 +1,10 @@
 use super::*;
 use std::sync::atomic::Ordering;
-thread_local! { pub(super) static TYPE_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+thread_local! { pub(super) static OWNED_TYPE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 
 #[test]
 #[ignore = "daily"]
-fn ground_friction_averages_intersecting_blocks_and_only_builds_a_kind_for_listeners() {
+fn ground_friction_averages_intersecting_blocks_without_allocating_a_boat_kind() {
     let calls = mod_platform::__private::part_tests::friction_game_thread();
     crate::entry::install_client_hooks();
     crate::game::native_entity_refs::tests::with_game(|game| {
@@ -25,14 +25,13 @@ fn ground_friction_averages_intersecting_blocks_and_only_builds_a_kind_for_liste
             let state = registry.default_state(block).unwrap();
             game.world.set(6, 64, 5, state).unwrap();
             calls.store(0, Ordering::SeqCst);
-            TYPE_BUILDS.with(|n| n.set(0));
+            OWNED_TYPE_READS.with(|n| n.set(0));
             assert!(
                 (game.boat_ground_friction(&boat, bounds) - expected).abs() < 1.0e-7,
                 "{block}"
             );
             assert_eq!(calls.load(Ordering::SeqCst), reads);
-            TYPE_BUILDS
-                .with(|n| assert_eq!(n.get(), reads, "only subscribed blocks build a boat kind"));
+            OWNED_TYPE_READS.with(|n| assert_eq!(n.get(), 0, "friction borrows the boat kind"));
         }
     });
 }

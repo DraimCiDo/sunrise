@@ -1447,6 +1447,17 @@ pub trait LevelHost {
     fn block_state(&self, _pos: [i32; 3]) -> Option<BlockState> {
         None
     }
+    /// Read a state's contextual friction in this view, as `LevelRef::friction` does.
+    /// The queried state need not occupy `pos`. None if the view cannot answer, the
+    /// state is unknown or recursion was refused.
+    fn friction(
+        &self,
+        _pos: [i32; 3],
+        _state: BlockState,
+        _entity: Option<(u32, &str)>,
+    ) -> Option<f32> {
+        None
+    }
     /// The block `state` is a state of (`BlockState.getBlock()`): `mymod:shaft`. None for an
     /// unknown state.
     fn state_block(&self, _state: BlockState) -> Option<&str> {

@@ -1022,6 +1022,7 @@ impl Game<'_> {
         );
         let alive = item.tick_settle(
             &self.world,
+            self.pack.assets.registry,
             self.res.facts(),
             no_physics,
             step,

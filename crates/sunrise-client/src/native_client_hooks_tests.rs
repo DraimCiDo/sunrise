@@ -194,14 +194,15 @@ pub(crate) fn install() {
             makes_open_trapdoor_above_climbable: |context, _, _, _, climbable| {
                 *climbable |= context.setting("rules_mod", "stack").is_some();
             },
-            friction: |context, _, kind, _, _, friction| {
-                if context.setting("rules_mod", "stack").is_some() {
-                    *friction = match kind {
-                        "minecraft:player" => 0.98,
-                        "minecraft:cow" => f32::NAN,
+            friction: |level, entity, _, _, friction| {
+                if level.context.setting("rules_mod", "stack").is_some() {
+                    *friction = match entity.map(|(_, kind)| kind) {
+                        Some("minecraft:player") => 0.98,
+                        Some("minecraft:cow") => f32::NAN,
                         _ => 3.0,
                     };
                 }
+                true
             },
             collision_shape: |_, _, state, query, shape| {
                 if COLLISION_REFUSED.with_borrow(|refused| refused.contains(&state.0)) {

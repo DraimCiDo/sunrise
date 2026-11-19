@@ -7,6 +7,21 @@ use crate::*;
 #[sunrise_mod_api_macros::host_area]
 pub trait LevelBlocksBackend {
     /// Side: both.
+    /// The contextual friction of `state` at `pos` (`IBlockExtension.getFriction`).
+    /// The state need not occupy the position. `entity` is the optional id and type
+    /// passed to the block's part. Returns `Ok(None)` for a nested query that repeats
+    /// an active read or exceeds the nesting bound. A stale level, unknown state, or
+    /// unavailable host or phase returns a typed read error.
+    /// The query never loads chunks or changes the world.
+    #[access(WorldOnly)]
+    fn level_friction(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockState,
+        entity: Option<(u32, &str)>,
+    ) -> Result<Option<f32>, LevelReadError>;
+    /// Side: both.
     /// How fast `tool` (None is an empty hand) mines the block at `pos`: the tool's own mining
     /// speed on that block (`ItemStack.getDestroySpeed`, 1.0 for no tool; for a block it has no
     /// rule for, the tool's default mining speed), before the player's enchantments, attributes, water, ground and

@@ -367,9 +367,7 @@ pub(crate) fn install_client_hooks() {
         },
         makes_open_trapdoor_above_climbable:
             crate::game::native_trapdoor_ladder::makes_open_trapdoor_above_climbable,
-        friction: |context, entity, kind, pos, state, friction| {
-            crate::game::native_surface::friction(context, entity, kind, pos, state, friction);
-        },
+        friction: crate::game::native_surface::friction,
         collision_shape: |context, pos, state, query, shape| {
             crate::game::native_collision_shape::collision_shape(context, pos, state, query, shape);
         },

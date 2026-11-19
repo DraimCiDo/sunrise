@@ -466,7 +466,7 @@ impl ItemEntity {
             self.bounds(),
             &mut self.velocity,
         );
-        let alive = self.tick_settle(world, facts, no_physics, step, context);
+        let alive = self.tick_settle(world, registry, facts, no_physics, step, context);
         let before = self.velocity;
         let (water, _) = self.update_fluids(world, fluids, context);
         self.water_entry(water > 0.0, false, before, &mut |_| {});
@@ -603,6 +603,7 @@ impl ItemEntity {
     pub fn tick_settle(
         &mut self,
         world: &World,
+        registry: &sunrise_world::registry::BlockRegistry,
         facts: &BlockFacts,
         no_physics: bool,
         step: ItemStep,
@@ -620,7 +621,14 @@ impl ItemEntity {
             if self.on_ground {
                 let below =
                     BlockPos::containing(self.position.subtract(Vec3::new(0.0, 0.999_999, 0.0)));
-                friction *= block_friction(context, self.id, "minecraft:item", world, facts, below);
+                friction *= block_friction(
+                    context,
+                    (self.id, "minecraft:item"),
+                    world,
+                    registry,
+                    facts,
+                    below,
+                );
             }
             let friction = f64::from(friction);
             let air = f64::from(0.98_f32);
@@ -1274,7 +1282,14 @@ impl ExperienceOrb {
             let below =
                 BlockPos::containing(self.position.subtract(Vec3::new(0.0, 0.999_999, 0.0)));
             let kind = "minecraft:experience_orb";
-            friction *= block_friction(context, self.id, kind, world, facts, below);
+            friction *= block_friction(
+                context,
+                (self.id, kind),
+                world,
+                collision.registry(),
+                facts,
+                below,
+            );
         }
         let friction = f64::from(friction);
         // The drag scales every axis by the same friction, the ground's
@@ -2288,7 +2303,14 @@ impl ArmorStand {
             let below =
                 BlockPos::containing(self.position.subtract(Vec3::new(0.0, 0.500_001, 0.0)));
             let kind = "minecraft:armor_stand";
-            block_friction(context, self.id, kind, scene.world, facts, below)
+            block_friction(
+                context,
+                (self.id, kind),
+                scene.world,
+                scene.binding.registry(),
+                facts,
+                below,
+            )
         } else {
             1.0
         };
@@ -3772,6 +3794,7 @@ mod slime_bounce_tests {
         };
         item.tick_settle(
             &world,
+            crate::test_resources::air_registry(),
             &facts,
             true,
             ItemStep {

@@ -31,6 +31,23 @@ position).
 
 Queries return `None` for an unknown state or block, including an invalid local ordinal, and on a host with no game behind it (a mod's test double). The ordinal order is defined by the complete canonical property constraints, not by the engine's numeric enumeration.
 
+## Contextual friction
+
+`host.block_states().friction(state)` is the static coefficient. To ask the state's friction parts,
+use `level.friction(host, pos, state, entity)` on either side. Pass `None` if no entity is asking,
+or `Some((id, kind))` to forward the caller's entity. The queried state need not be the block at
+`pos`. The read never loads chunks or writes blocks. It returns `Ok(None)` for a repeated active
+query or a query beyond the nesting bound, and a read error for a stale or unavailable level
+or an unknown state.
+
+Inside `BlockPart::friction`, match `LevelSide` to borrow the read-only level. The view can read
+states, fluids and light, including neighboring blocks, but cannot read block-entity handles or
+unsynced server data. If a block's friction depends on its block entity, use the mod's own
+synchronized state on both sides. For a block that takes its material's friction, pass that
+material to `view.friction(pos, material, event.entity)` at the **same position** and keep the
+original coefficient if the query returns `None`. Use the same rule on both sides, including
+client prediction and replay.
+
 ## Copper weathering and wax
 
 - `weathering_age(state) -> Option<WeatheringAge>` reads `WeatheringCopper.getAge`:

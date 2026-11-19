@@ -1687,9 +1687,9 @@ impl Mob {
     pub(super) fn friction_at(&self, w: &MobWorld, [x, y, z]: [i32; 3]) -> f32 {
         crate::motion::block_friction(
             w.loop_context,
-            self.id,
-            &self.kind.id,
+            (self.id, &self.kind.id),
             w.world,
+            w.registry,
             w.facts,
             BlockPos::new(x, y, z),
         )

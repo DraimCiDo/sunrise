@@ -127,8 +127,8 @@ pub use fluids::{
 };
 pub(crate) use surface::ModBlockFactors;
 pub use surface::{
-    block_friction, native_block_jump_factor, native_block_speed_factor, native_friction,
-    native_is_ladder,
+    FrictionLevel, block_friction, native_block_jump_factor, native_block_speed_factor,
+    native_is_ladder, read_friction,
 };
 
 pub struct MotionResources {

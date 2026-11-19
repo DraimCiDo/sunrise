@@ -3,43 +3,60 @@
 use crate::{blocks::BlockFacts, world::World};
 use sunrise_core::position::BlockPos;
 use sunrise_world::{
-    movement_properties::BlockFactorEdits, native_load_context::LoopContext, registry::BlockStateId,
+    movement_properties::BlockFactorEdits,
+    native_load_context::LoopContext,
+    registry::{BlockRegistry, BlockStateId},
 };
 
-/// A block state's friction (`IBlockExtension.getFriction`) is being read for an entity on it.
-/// `friction` starts at the block's own value and the block's parts may change it; an answer that
-/// is not within `0..=2` (NaN included) is dropped for the block's own value. Fires on replayed
-/// ticks too, so a listener must be a pure function of its inputs.
-#[inline(never)]
-pub fn native_friction(
-    context: &LoopContext,
-    entity: u32,
-    kind: &str,
-    pos: BlockPos,
-    state: BlockStateId,
-    friction: &mut f32,
-) {
-    let own = *friction;
-    crate::native_client_hooks::friction(context, entity, kind, pos, state, friction);
-    if !(0.0..=2.0).contains(&*friction) {
-        *friction = own;
-    }
+/// The engine data a subscribed friction part may read. Borrows the actual world and
+/// the caller's coefficient table; it carries no write access or entity snapshot.
+#[derive(Clone, Copy)]
+pub struct FrictionLevel<'a> {
+    pub world: &'a World,
+    pub registry: &'a BlockRegistry,
+    pub context: &'a LoopContext,
+    pub coefficient: &'a dyn Fn(BlockStateId) -> Option<f32>,
 }
 
-/// The friction of the block at `pos` for the entity `entity` of `kind` on it: the block's own
-/// `StateFacts` value, through [`native_friction`].
+/// `IBlockExtension.getFriction` of a state at a position. A cyclic or over-deep mod
+/// query gets no answer. An out-of-range answer keeps the state's own coefficient.
+#[inline(never)]
+pub fn read_friction(
+    level: FrictionLevel<'_>,
+    entity: Option<(u32, &str)>,
+    pos: BlockPos,
+    state: BlockStateId,
+    own: f32,
+) -> Option<f32> {
+    let mut friction = own;
+    if !crate::native_client_hooks::friction(level, entity, pos, state, &mut friction) {
+        return None;
+    }
+    Some(if (0.0..=2.0).contains(&friction) {
+        friction
+    } else {
+        own
+    })
+}
+
+/// The friction of the block at `pos` for the entity on it, starting at its `StateFacts` value.
 pub fn block_friction(
     context: &LoopContext,
-    entity: u32,
-    kind: &str,
+    entity: (u32, &str),
     world: &World,
+    registry: &BlockRegistry,
     facts: &BlockFacts,
     pos: BlockPos,
 ) -> f32 {
     let state = world.block(pos.x, pos.y, pos.z);
-    let mut friction = facts.get(state).friction;
-    native_friction(context, entity, kind, pos, state, &mut friction);
-    friction
+    let own = facts.get(state).friction;
+    let level = FrictionLevel {
+        world,
+        registry,
+        context,
+        coefficient: &|id| facts.states.get(id.0 as usize).map(|facts| facts.friction),
+    };
+    read_friction(level, Some(entity), pos, state, own).unwrap_or(own)
 }
 
 /// A block state's jump factor (`Block.getJumpFactor`) is being read (beyond NeoForge: no event).

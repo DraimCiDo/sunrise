@@ -54,6 +54,7 @@ pub(super) struct Boat {
     pub id: u32,
     /// Wood type (`oak`, `bamboo` for the raft).
     pub wood: Arc<str>,
+    type_names: [Arc<str>; 2],
     pub position: Vec3,
     pub previous: Vec3,
     pub velocity: Vec3,
@@ -255,12 +256,18 @@ impl Boat {
     }
 
     pub fn new(id: u32, wood: Arc<str>, position: Vec3, yaw: f32) -> Self {
+        let suffix = if &*wood == "bamboo" { "raft" } else { "boat" };
+        let type_names = [
+            format!("minecraft:{wood}_{suffix}").into(),
+            format!("minecraft:{wood}_chest_{suffix}").into(),
+        ];
         Self {
             pitch: 0.0,
             join: Default::default(),
             attachment_lifetime: Default::default(),
             id,
             wood,
+            type_names,
             position,
             previous: position,
             velocity: Vec3::ZERO,
@@ -510,13 +517,12 @@ impl Boat {
     /// the item it drops.
     pub(super) fn entity_type(&self) -> String {
         #[cfg(test)]
-        friction_tests::TYPE_BUILDS.with(|n| n.set(n.get() + 1));
-        let chest = if self.chest { "chest_" } else { "" };
-        if &*self.wood == "bamboo" {
-            format!("minecraft:bamboo_{chest}raft")
-        } else {
-            format!("minecraft:{}_{chest}boat", self.wood)
-        }
+        friction_tests::OWNED_TYPE_READS.with(|n| n.set(n.get() + 1));
+        self.entity_type_name().to_owned()
+    }
+
+    pub(super) fn entity_type_name(&self) -> &str {
+        &self.type_names[usize::from(self.chest)]
     }
 }
 /// The wood of a boat or chest boat item or entity type, and whether it
