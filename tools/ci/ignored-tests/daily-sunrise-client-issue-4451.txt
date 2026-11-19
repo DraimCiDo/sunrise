@@ -1965,6 +1965,7 @@ sunrise-client game::native_state_shapes::tests::supplied_shape_state_does_not_r
 sunrise-client game::native_surface::tests::a_block_part_answers_the_friction_an_entity_reads lib daily resources
 sunrise-client game::native_surface::tests::mob_travel_and_both_leash_sites_use_the_parts_answer_once lib daily resources
 sunrise-client game::native_surface::tests::nested_friction_queries_stop_at_the_depth_bound_and_unknown_states_are_refused lib daily resources
+sunrise-client game::native_surface::tests::the_friction_view_reads_tags_and_resident_block_entities_of_its_side lib daily resources
 sunrise-client game::native_tick_time::tests::a_client_level_always_has_time lib daily resources
 sunrise-client game::native_tick_time::tests::a_server_has_time_until_its_tick_deadline_passes lib daily resources
 sunrise-client game::native_tick_time::tests::the_tick_listeners_see_the_deadline_through_the_host lib daily resources

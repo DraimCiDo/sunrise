@@ -126,9 +126,11 @@ pub use fluids::{
     bubble_column_at, bubble_column_push, bubble_column_push_over, bubble_column_surfaces,
 };
 pub(crate) use surface::ModBlockFactors;
+#[cfg(any(test, feature = "test-dry-side"))]
+pub use surface::dry_side;
 pub use surface::{
-    FrictionLevel, SideLevel, block_friction, dry_side, native_block_jump_factor,
-    native_block_speed_factor, native_is_ladder, read_friction,
+    FrictionLevel, SideLevel, block_friction, native_block_jump_factor, native_block_speed_factor,
+    native_is_ladder, read_friction,
 };
 
 pub struct MotionResources {

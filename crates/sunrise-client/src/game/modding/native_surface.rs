@@ -611,6 +611,61 @@ mod tests {
     }
     #[test]
     #[ignore = "daily"]
+    fn the_friction_view_reads_tags_and_resident_block_entities_of_its_side() {
+        use super::super::native_entity_refs::tests::with_game;
+        use super::{FrictionLevel, FrictionView};
+        use mod_api::LevelHost;
+        let _parts = mod_platform::__private::part_tests::friction_game_thread();
+        with_game(|game| {
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+            );
+            let dir = std::env::temp_dir()
+                .join(format!("sunrise-friction-view-tags-{}", std::process::id()));
+            game.session_lock = Some(sunrise_client::save::SessionLock::acquire(&dir).unwrap());
+            game.world.block_entities.insert(
+                (3, 64, 3),
+                sunrise_client::containers::BlockEntity::Chest(vec![None; 27]),
+            );
+            let side = game_side!(game);
+            let coefficient = |_: sunrise_world::registry::BlockStateId| None;
+            let view = FrictionView(FrictionLevel {
+                world: &game.world,
+                registry: game.pack.assets.registry,
+                context: &game.loop_context,
+                side: &side,
+                coefficient: &coefficient,
+            });
+            // A tagged block, an untagged one and a fluid tag answer as the game's own host does.
+            let stone = mod_platform::__private::part_tests::block_key("stone");
+            assert_eq!(view.block_in_tag(stone, "base_stone_overworld"), Some(true));
+            assert_eq!(
+                view.block_in_tag(stone, "base_stone_overworld"),
+                game.block_in_tag(stone, "base_stone_overworld")
+            );
+            assert_eq!(view.block_in_tag(stone, "minecraft:climbable"), Some(false));
+            assert_eq!(
+                view.fluid_in_tag("minecraft:water", "minecraft:water"),
+                Some(true)
+            );
+            // A resident block entity has the handle of this side's level; an empty position none.
+            let level = game.level_ref(game.native_lifecycle.epoch().unwrap(), game.dim.key());
+            let found = view.block_entity([3, 64, 3]);
+            assert!(found.is_some());
+            assert_eq!(found, game.block_entity(level, [3, 64, 3]));
+            assert_eq!(view.block_entity([4, 64, 3]), None);
+            assert_eq!(
+                view.enabled_features().iter().collect::<Vec<_>>(),
+                game.enabled_feature_ids()
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+            );
+        });
+    }
+    #[test]
+    #[ignore = "daily"]
     fn mob_travel_and_both_leash_sites_use_the_parts_answer_once() {
         use super::super::boats::Boat;
         use sunrise_client::mobs::{Mob, leash};

@@ -24,7 +24,7 @@ pub trait SideLevel {
 
 /// The level data of a side with no weather, features, tags or block entities. Only for tests and
 /// probes that never read them: a game tick lends the real data (`game_side!`).
-#[doc(hidden)]
+#[cfg(any(test, feature = "test-dry-side"))]
 pub fn dry_side() -> &'static dyn SideLevel {
     struct Dry(std::sync::Arc<[String]>);
     impl SideLevel for Dry {

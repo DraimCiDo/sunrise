@@ -4599,6 +4599,7 @@ dependencies = [
  "sunrise-bench",
  "sunrise-client-core",
  "sunrise-client-input",
+ "sunrise-client-lib",
  "sunrise-client-render",
  "sunrise-command",
  "sunrise-core",
