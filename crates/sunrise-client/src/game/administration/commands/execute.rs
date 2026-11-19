@@ -103,8 +103,11 @@ impl Game<'_> {
             cart: None,
         }
     }
-    /// The server as a source (function ticks and schedules): the world spawn.
+    /// The server as a source (function ticks and schedules,
+    /// `MinecraftServer.createCommandSourceStack`): the world spawn, in its level
+    /// (`findRespawnDimension`), whichever level is in place.
     pub(in crate::game) fn server_source(&self) -> Source {
+        let level = self.world_spawn_level();
         Source {
             entity: None,
             pos: self.server_position(),
@@ -112,8 +115,8 @@ impl Game<'_> {
             eyes: false,
             silent: true,
             store: None,
-            dimension: self.dim,
-            origin_dimension: self.dim,
+            dimension: level,
+            origin_dimension: level,
             origin_player: false,
             level: None,
             block: None,

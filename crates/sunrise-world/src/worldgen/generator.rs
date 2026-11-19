@@ -2392,13 +2392,12 @@ where
             if lowest > highest {
                 (min, min + height)
             } else {
-                let lowest = lowest.max(min);
-                (
-                    min + (lowest - min) / step_y * step_y,
-                    highest
-                        .max(self.settings.sea_level + COARSE)
-                        .min(min + height),
-                )
+                let bottom = min + (lowest.max(min) - min) / step_y * step_y;
+                // Up to COARSE above the picker's highest fluid in these columns.
+                let far = [ox + (nx - 1) * step_xz, oz + (nz - 1) * step_xz];
+                let top = self.picker.level_bound([ox, oz], far);
+                let top = top.map_or(min + height, |l| highest.max(l.saturating_add(COARSE)));
+                (bottom, top.min(min + height))
             }
         } else {
             (min, min + height)

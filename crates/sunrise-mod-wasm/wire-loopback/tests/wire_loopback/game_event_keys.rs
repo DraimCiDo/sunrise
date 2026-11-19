@@ -32,7 +32,7 @@ impl mod_api::prelude::DataMapsBackend for Registry {
         assert_eq!(registry, "minecraft:game_event");
         assert_eq!(map, "neoforge:vibration_frequencies");
         Ok((entry == "minecraft:step").then(|| {
-            mod_api::Tag::Compound(std::collections::BTreeMap::from([(
+            mod_api::Tag::Compound(mod_api::Compound::from([(
                 "frequency".into(),
                 mod_api::Tag::Int(7),
             )]))
@@ -86,9 +86,10 @@ fn game_event_key_lookup_and_id_cross_the_wire() {
             assert_eq!(host.game_event_key("test:nope"), None);
             assert_eq!(
                 step.data(host, &Frequencies),
-                Ok(Some(mod_api::Tag::Compound(
-                    std::collections::BTreeMap::from([("frequency".into(), mod_api::Tag::Int(7))])
-                )))
+                Ok(Some(mod_api::Tag::Compound(mod_api::Compound::from([(
+                    "frequency".into(),
+                    mod_api::Tag::Int(7)
+                )]))))
             );
             assert_eq!(
                 host.game_event_key("minecraft:swim")

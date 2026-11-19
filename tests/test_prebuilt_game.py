@@ -634,6 +634,7 @@ class AllocatorSelectionTests(unittest.TestCase):
             self.assertEqual(kwargs["env"]["SUNRISE_GAME_BUILD_ID"], "fixture-commit")
             self.assertIn("-C prefer-dynamic", kwargs["env"]["RUSTFLAGS"])
             self.assertNotIn("CARGO_ENCODED_RUSTFLAGS", kwargs["env"])
+            self.assertEqual(kwargs["env"]["CARGO_PROFILE_RELEASE_CODEGEN_UNITS"], "16")
             raise Captured
 
         with tempfile.TemporaryDirectory() as target, \

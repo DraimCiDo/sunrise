@@ -3519,18 +3519,25 @@ impl Game<'_> {
     /// moves to `pos`, its yaw wrapped and its pitch clamped, and `spawn_change` fires.
     pub(in crate::game) fn set_world_spawn(
         &mut self,
+        dimension: Dim,
         pos: [i32; 3],
         [yaw, pitch]: [f32; 2],
     ) -> [f32; 2] {
         let rot = [wrap_degrees(yaw), pitch.clamp(-90.0, 90.0)];
         let previous_point = self.world_spawn_position().map(|v| v.floor() as i32);
         let old_angle = self.level.world_spawn_angle;
+        let old_level = self.world_spawn_level();
         let old = self.level.world_spawn.replace(pos);
         self.level.world_spawn_angle = rot;
-        if previous_point != pos || old_angle.map(f32::to_bits) != rot.map(f32::to_bits) {
+        self.level.world_spawn_dimension =
+            (dimension != Dim::Overworld).then(|| dimension.id().to_owned());
+        if previous_point != pos
+            || old_angle.map(f32::to_bits) != rot.map(f32::to_bits)
+            || old_level != dimension
+        {
             self.lan_broadcast_world_spawn();
         }
-        self.native_spawn_change(pos, rot);
+        self.native_spawn_change(dimension.id(), pos, rot);
         // A player whose fallback is the world spawn (no spawnpoint of its
         // own; a bed or an anchor that is gone falls back to it) respawns at
         // the new one.
@@ -3545,8 +3552,9 @@ impl Game<'_> {
         rot
     }
     fn cmd_setworldspawn(&mut self, ctx: &Context) -> R<i32> {
+        // SetWorldSpawnCommand: BlockPosArgument.getSpawnablePos, in the source's level.
         let pos = if ctx.get("pos").is_some() {
-            self.block_pos_arg(ctx, "pos")?
+            self.spawnable_pos_arg(ctx, "pos")?
         } else {
             let p = self.source_position();
             [
@@ -3559,14 +3567,15 @@ impl Game<'_> {
             Some(Arg::Coords(c)) => c.rotation(self.source_rotation()),
             _ => [0.0, 0.0],
         };
-        let [yaw, pitch] = self.set_world_spawn(pos, rot);
+        let dimension = self.command_source.map_or(self.dim, |s| s.dimension);
+        let [yaw, pitch] = self.set_world_spawn(dimension, pos, rot);
         let args = [
             Text::literal(pos[0].to_string()),
             Text::literal(pos[1].to_string()),
             Text::literal(pos[2].to_string()),
             Text::literal(float_to_string(yaw)),
             Text::literal(float_to_string(pitch)),
-            Text::literal(self.dim.id()),
+            Text::literal(dimension.id()),
         ];
         self.feedback(Text::translate("commands.setworldspawn.success", &args));
         Ok(1)

@@ -126,9 +126,9 @@ must be converted to the fork's hook catalog before being advertised as availabl
 - Dedicated-server settings describe the live listener: account authentication
   and bound port. They are unavailable before listening or on integrated/LAN
   servers. Secure-profile enforcement and hardcore are not part of this read.
-- Vehicle and passenger reads use entity handles (`entity_vehicle` and
-  `entity_passengers` on `Host`), not parallel numeric-ID helpers. Passenger order
-  follows vanilla, with the controlling passenger first. These are read-only.
+- Vehicle and passenger reads use `EntityRef::vehicle` and `EntityRef::passengers` with the
+  shared `Host`, not parallel numeric-ID helpers. On the client these reads use the server's
+  passenger packets, preserving their order. These are read-only.
 - UUID lookup from a read-only context must not swap levels. A mutable lookup can
   reach other loaded levels; entity NBT reads there must refuse unloaded levels,
   missing entities and client-side use rather than load a level implicitly.

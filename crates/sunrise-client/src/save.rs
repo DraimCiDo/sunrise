@@ -672,38 +672,14 @@ pub fn block_entity_id<'a>(e: &'a crate::containers::BlockEntity, block: &'a str
 fn merge_block_entity(original: &Tag, loaded: &Tag, current: &Tag) -> Tag {
     let mut merged = crate::block_entity_nbt::overlay(original, loaded, current);
     let has_items = matches!(current.get("Items"), Some(Tag::List(items)) if !items.is_empty());
-    if has_items && let Tag::Compound(map) = &mut merged {
+    if has_items
+        && current.get("LootTable").is_none()
+        && let Tag::Compound(map) = &mut merged
+    {
         map.remove(&"LootTable".into());
         map.remove(&"LootTableSeed".into());
     }
     merged
-}
-/// `BlockDataAccessor.getData` (`BlockEntity.saveWithFullMetadata`): the tag
-/// `data get block` shows and `data merge block` changes, without the
-/// chunk-only `keepPacked`, and with the fields Sunrise keeps outside its
-/// model: a container's `lock` (`LockCode`), from the tag it was loaded or set
-/// with.
-/// Command-visible block-entity data, saved against loaded item prototypes.
-pub fn block_entity_data(
-    p: (i32, i32, i32),
-    e: &crate::containers::BlockEntity,
-    block: &str,
-    lock: Option<&Tag>,
-    items: &crate::items::Items,
-) -> Tag {
-    let tag = block_entity_encode::encode(p, e, block, items);
-    command_block_entity_data(tag, lock)
-}
-
-/// Apply the command data view to an encoded block entity.
-pub fn command_block_entity_data(mut tag: Tag, lock: Option<&Tag>) -> Tag {
-    if let Tag::Compound(map) = &mut tag {
-        map.remove(&"keepPacked".into());
-        if let Some(lock) = lock {
-            map.insert("lock".into(), lock.clone());
-        }
-    }
-    tag
 }
 /// `BannerBlockEntity.loadAdditional` (and the `components` a block entity keeps).
 pub fn decode_banner(tag: &Tag) -> crate::containers::Banner {
@@ -1094,12 +1070,12 @@ fn keep_claims(saved: &mut NamedTag, old: &NamedTag) {
     let Some(Tag::Compound(sections)) = root.get_mut(&"Sections".into()) else {
         return;
     };
-    for section in sections.values_mut() {
+    sections.for_each_mut(|_, section| {
         let Tag::Compound(section) = section else {
-            continue;
+            return;
         };
         let Some(Tag::List(records)) = section.get_mut(&"Records".into()) else {
-            continue;
+            return;
         };
         for r in records {
             let Some(&tickets) = key(r).and_then(|k| claims.get(&k)) else {
@@ -1113,7 +1089,7 @@ fn keep_claims(saved: &mut NamedTag, old: &NamedTag) {
                 }
             }
         }
-    }
+    });
 }
 fn poi_root(sections: Compound) -> NamedTag {
     NamedTag {
@@ -1409,63 +1385,119 @@ fn encode_full(
         .filter(|(_, e)| !block_entity_placeholder(e))
         .map(|(p, e)| {
             let block = block_name(p);
-            let mut current = block_entity_encode::encode_with(*p, e, &block, items, |_, _| {
-                if apply_block_entity_edits {
-                    extras?.block_entity_save_edits.as_ref()?.get(p).cloned()
-                } else {
-                    None
-                }
-            });
-            if let Some((_, name)) = chunk.block_names.iter().find(|(q, _)| q == p)
-                && let Tag::Compound(map) = &mut current
-            {
-                map.insert("CustomName".into(), name.clone());
-            }
-            let source = extras
+            let stored = extras
                 .and_then(|x| x.block_entity_sources.iter().find(|(q, _)| q == p))
-                .map(|(_, tag)| tag)
-                .filter(|tag| {
-                    crate::block_entity_nbt::id(tag) == crate::block_entity_nbt::id(&current)
-                });
-            let merged = match source {
+                .map(|(_, tag)| tag);
+            let source = stored.filter(|tag| {
+                crate::block_entity_nbt::id(tag).as_deref() == Some(block_entity_id(e, &block))
+            });
+            let pending = extras.and_then(|x| x.pending_loot.get(p));
+            let lock = source.and_then(|tag| tag.get("lock"));
+            let hopper_cooldown = (block == "minecraft:hopper").then(|| {
+                source
+                    .and_then(|tag| number(tag.get("TransferCooldown")))
+                    .unwrap_or(-1) as i32
+            });
+            let current = block_entity_encode::encode_with(
+                *p,
+                e,
+                &block,
+                block_entity_encode::DataFields {
+                    lock,
+                    custom_name: chunk
+                        .block_names
+                        .iter()
+                        .find(|(q, _)| q == p)
+                        .map(|(_, name)| name),
+                    pending,
+                    hopper_cooldown,
+                },
+                items,
+                |_, _| {
+                    if apply_block_entity_edits {
+                        extras?.block_entity_save_edits.as_ref()?.get(p).cloned()
+                    } else {
+                        None
+                    }
+                },
+            );
+            let mut saved = match source {
                 Some(original) => {
                     let loaded = decode_block_entity(original).map_or_else(
                         || current.clone(),
                         |(q, e)| {
-                            let mut loaded = block_entity_encode::encode(q, &e, &block, items);
-                            if !matches!(
+                            // External name removal must win over the source overlay.
+                            let custom_name = (!matches!(
                                 e,
                                 crate::containers::BlockEntity::Banner(_)
                                     | crate::containers::BlockEntity::Sign(_)
                                     | crate::containers::BlockEntity::Mod(_)
-                            ) && let Some(name) = original
-                                .get("CustomName")
-                                .and_then(crate::block_entity_nbt::component)
-                                && let Tag::Compound(map) = &mut loaded
-                            {
-                                // BaseContainerBlockEntity.loadAdditional: the
-                                // external name is also part of the loaded model.
-                                // Its removal must win over the source overlay.
-                                map.insert("CustomName".into(), name);
-                            }
-                            loaded
+                            ))
+                            .then(|| {
+                                original
+                                    .get("CustomName")
+                                    .and_then(crate::block_entity_nbt::component)
+                            })
+                            .flatten();
+                            block_entity_encode::encode_with(
+                                q,
+                                &e,
+                                &block,
+                                block_entity_encode::DataFields {
+                                    lock,
+                                    custom_name: custom_name.as_ref(),
+                                    pending: PendingContainerLoot::from_tag(original).as_ref(),
+                                    hopper_cooldown,
+                                },
+                                items,
+                                |_, _| None,
+                            )
                         },
                     );
                     merge_block_entity(original, &loaded, &current)
                 }
                 None => current,
             };
-            // The source overlay may restore an unchanged stack's original patch.
-            // Apply the loaded catalog after merging, without rebuilding opaque metadata.
-            let mut saved = crate::block_entity_nbt::canonical_with_stack(&merged, &|tag| {
-                crate::block_entity_nbt::stack(tag)
-                    .and_then(|tag| item_from_nbt(&tag))
-                    .map(|stack| item_to_nbt(&stack, items))
-            })
-            .unwrap_or(merged);
-            if let Some(limit) = extras
-                .and_then(|x| x.block_entity_sources.iter().find(|(q, _)| q == p))
-                .and_then(|(_, tag)| tag.get("sunrise:stack_limit"))
+            // A consumed loot table must not be restored from an opaque source.
+            let chest = matches!(e, crate::containers::BlockEntity::Chest(_));
+            if chest
+                && pending.is_none()
+                && let Tag::Compound(map) = &mut saved
+            {
+                map.remove(&"LootTable".into());
+                map.remove(&"LootTableSeed".into());
+            }
+            // The overlay may restore an unchanged stack's original patch. Apply
+            // catalog validation without rebuilding the Java table when replacing or
+            // dropping fields. If normalization supplies missing defaults, use its
+            // fresh field order, including the common metadata tail.
+            let live_items = (chest && pending.is_some() && e.slots().iter().any(Option::is_some))
+                .then(|| encode_items(e.slots(), items));
+            if let Some(mut canonical) = crate::block_entity_nbt::canonical_with_stack(
+                &saved,
+                &|tag| {
+                    crate::block_entity_nbt::stack(tag)
+                        .and_then(|tag| item_from_nbt(&tag))
+                        .map(|stack| item_to_nbt(&stack, items))
+                },
+                live_items,
+            ) {
+                if let Tag::Compound(map) = &mut saved
+                    && canonical.keys().all(|key| map.contains_key(key))
+                {
+                    map.retain(|key, value| {
+                        if let Some(admitted) = canonical.remove(key) {
+                            *value = admitted;
+                            true
+                        } else {
+                            false
+                        }
+                    });
+                } else {
+                    saved = Tag::Compound(canonical);
+                }
+            }
+            if let Some(limit) = stored.and_then(|tag| tag.get("sunrise:stack_limit"))
                 && let Tag::Compound(map) = &mut saved
             {
                 map.insert("sunrise:stack_limit".into(), limit.clone());
@@ -1480,18 +1512,6 @@ fn encode_full(
                     map.remove(&ATTACHMENTS_KEY.into());
                 } else {
                     map.insert(ATTACHMENTS_KEY.into(), Tag::Compound(data));
-                }
-            }
-            if matches!(e, crate::containers::BlockEntity::Chest(_))
-                && let Tag::Compound(map) = &mut saved
-            {
-                map.remove(&"LootTable".into());
-                map.remove(&"LootTableSeed".into());
-                if let Some(pending) = extras.and_then(|x| x.pending_loot.get(p)) {
-                    pending.write_tags(map);
-                    if e.slots().iter().any(Option::is_some) {
-                        map.insert("Items".into(), encode_items(e.slots(), items));
-                    }
                 }
             }
             saved
@@ -3263,20 +3283,77 @@ fn write_dat_as(path: &Path, tag: Tag, durable: bool) -> Result<()> {
 }
 mod saved_data;
 use saved_data::{read_saved_data, saved_data_path, write_saved_data};
-/// The world's generator settings: world_gen_settings.dat (26.3) or
-/// level.dat's Data.WorldGenSettings.
-pub fn world_gen_settings(world: &Path) -> Option<Tag> {
-    // A world still to be file-fixed has them in level.dat in an older shape: they are read as
-    // the fixes would leave them, so the questions on opening it are the same ones.
-    if let Ok(Some(settings)) = sunrise_world::datafix::files::current_world_gen_settings(world) {
-        return Some(settings);
+/// The generator settings used for this world session. A replacement from
+/// enabled packs is kept in memory until the first save.
+#[derive(Clone, Debug)]
+pub struct WorldGenerator {
+    data: Tag,
+    recovered: bool,
+}
+
+impl WorldGenerator {
+    pub fn settings(&self) -> &Tag {
+        &self.data
     }
-    read_saved_data(world, "world_gen_settings").or_else(|| {
-        read_dat(&world.join("level.dat"))?
-            .get("Data")?
-            .get("WorldGenSettings")
-            .cloned()
-    })
+
+    fn read(world: &Path, level_data: Option<&Tag>) -> (Option<Self>, i64) {
+        use sunrise_world::datafix::{files, schema::Ty, update_saved_data};
+        // Before file fixes (world previews), project the old settings into the
+        // current layout. During startup the migration has already run.
+        let old = level_data
+            .and_then(|data| number(data.get("DataVersion")))
+            .and_then(|version| i32::try_from(version).ok())
+            .is_some_and(files::requires_file_fixing);
+        let candidates = [
+            old.then(|| files::current_world_gen_settings(world).ok().flatten())
+                .flatten(),
+            read_dat(&saved_data_path(world, "world_gen_settings")).map(|mut root| {
+                update_saved_data(Ty::SavedWorldGenSettings, &mut root);
+                root.get("data")
+                    .cloned()
+                    .unwrap_or(Tag::Compound(Default::default()))
+            }),
+            level_data.and_then(|data| data.get("WorldGenSettings").cloned()),
+        ];
+        let usable = |s: &Tag| {
+            number(s.get("seed")).is_some()
+                && s.get("dimensions").is_some_and(valid_world_gen_dimensions)
+        };
+        // Old summaries may still display a seed from level.dat even if its
+        // settings are unusable. A dedicated world only uses a validated generator.
+        let displayed_seed = candidates
+            .iter()
+            .flatten()
+            .find_map(|s| number(s.get("seed")))
+            .unwrap_or(0);
+        let generator = candidates
+            .into_iter()
+            .flatten()
+            .find(usable)
+            .map(|data| Self {
+                data,
+                recovered: false,
+            });
+        let seed = generator
+            .as_ref()
+            .and_then(|g| number(g.data.get("seed")))
+            .unwrap_or(displayed_seed);
+        (generator, seed)
+    }
+
+    /// Read the prepared settings for a newly created world, which does not
+    /// have level.dat yet.
+    pub fn read_new(world: &Path) -> Option<Self> {
+        Self::read(world, None).0
+    }
+}
+
+/// The world's usable generator settings, for previews outside the world session.
+pub fn world_gen_settings(world: &Path) -> Option<Tag> {
+    let root = read_level_dat(world);
+    WorldGenerator::read(world, root.as_ref().and_then(|r| r.get("Data")))
+        .0
+        .map(|generator| generator.data)
 }
 include!("save/preset_saved.rs");
 pub use sunrise_client_core::uuid::uuid_from_text;
@@ -3470,27 +3547,29 @@ pub struct WorldGen {
 impl WorldGen {
     /// A saved world's choices, from its `world_gen_settings`.
     pub fn read(world: &Path) -> Option<Self> {
-        let settings = world_gen_settings(world)?;
+        world_gen_settings(world).as_ref().map(Self::from_settings)
+    }
+
+    /// Options of the generator selected by the world loader.
+    pub fn from_settings(settings: &Tag) -> Self {
         let flag = |key: &str, default: bool| number(settings.get(key)).map_or(default, |v| v != 0);
         let generator = settings
             .get("dimensions")
             .and_then(|d| d.get("minecraft:overworld"))
             .and_then(|o| o.get("generator"));
-        Some(Self {
+        Self {
             preset: generator.map_or(WorldPreset::Normal, WorldPreset::of_generator),
             structures: flag("generate_structures", true),
             bonus_chest: flag("bonus_chest", false),
-        })
+        }
     }
     /// The bundled world preset a saved world's overworld was generated
     /// with, from its generator: `minecraft:amplified` and
     /// `minecraft:large_biomes` by their noise settings, and
     /// `minecraft:single_biome_surface` by a fixed biome source. Anything
     /// else (and any world without settings) is `minecraft:normal`.
-    pub fn preset(world: &Path) -> &'static str {
-        let settings = world_gen_settings(world);
+    pub fn noise_preset(settings: Option<&Tag>) -> &'static str {
         let generator = settings
-            .as_ref()
             .and_then(|s| s.get("dimensions"))
             .and_then(|d| d.get("minecraft:overworld"))
             .and_then(|o| o.get("generator"));
@@ -3525,6 +3604,9 @@ include!("save/preset_generation.rs");
 pub struct Level {
     pub name: String,
     pub seed: i64,
+    /// The generator selected for the session, including any replacement settings.
+    #[doc(hidden)]
+    pub generator: Option<WorldGenerator>,
     pub creative: bool,
     /// The game mode id (0 survival, 1 creative, 2 adventure, 3 spectator);
     /// `creative` wins when the two disagree.
@@ -3581,6 +3663,9 @@ pub struct Level {
     pub world_spawn: Option<[i32; 3]>,
     /// The world spawn's yaw and pitch (`setworldspawn`'s rotation).
     pub world_spawn_angle: [f32; 2],
+    /// The level the world spawn is in (`spawn.dimension`, `RespawnData.dimension`); None for
+    /// the Overworld.
+    pub world_spawn_dimension: Option<String>,
     pub difficulty: String,
     pub hardcore: bool,
     /// `difficulty_settings.locked` (LevelData.isDifficultyLocked).
@@ -3690,7 +3775,7 @@ impl Level {
         }
     }
     pub fn read(dir: &Path) -> Option<Self> {
-        Self::read_root(dir, read_level_dat(dir)?, Default::default())
+        Self::read_with_registry(dir, Default::default())
     }
     /// Load a world using its session rule definitions.
     pub fn read_with_registry(
@@ -3698,6 +3783,40 @@ impl Level {
         registry: std::sync::Arc<crate::gamerules::RuleRegistry>,
     ) -> Option<Self> {
         Self::read_root(dir, read_level_dat(dir)?, registry)
+    }
+    /// Select a generator for an existing dedicated world with unusable settings.
+    pub fn recover_world_generator(
+        &mut self,
+        overrides: &sunrise_world::worldgen::overrides::WorldgenOverrides,
+        random_seed: impl FnOnce() -> i64,
+    ) -> Result<()> {
+        use sunrise_world::worldgen::overrides::DIMENSIONS;
+        if self.generator.is_some() {
+            return Ok(());
+        }
+        log::warn!(
+            "Sunrise: world generator settings do not read; using a random world seed and datapack dimensions"
+        );
+        self.seed = random_seed();
+        let mut data = new_world_gen_settings(self.seed, WorldGen::default(), None, None);
+        let dimensions = data.get_mut("dimensions").expect("default dimension map");
+        let Tag::Compound(stems) = dimensions else {
+            unreachable!()
+        };
+        for (id, stem) in overrides.entries(DIMENSIONS) {
+            stems.insert(
+                id.into(),
+                crate::scoreboard::json_to_tag(&serde_json::from_str(stem)?),
+            );
+        }
+        if !valid_world_gen_dimensions(dimensions) {
+            return Err("invalid datapack dimensions for generator recovery".into());
+        }
+        self.generator = Some(WorldGenerator {
+            data,
+            recovered: true,
+        });
+        Ok(())
     }
     /// `read` from level.dat alone, without the level.dat_old fallback: what
     /// `LevelStorageSource.readLevelSummary` reads for the world list.
@@ -3740,6 +3859,8 @@ impl Level {
             _ => 0.0,
         };
         level.world_spawn_angle = [angle("yaw"), angle("pitch")];
+        level.world_spawn_dimension = text(data.get("spawn").and_then(|s| s.get("dimension")))
+            .filter(|d| d != "minecraft:overworld");
         if let Some(d) = data.get("difficulty_settings") {
             level.difficulty = text(d.get("difficulty")).unwrap_or_else(|| "normal".into());
             level.hardcore = n(d.get("hardcore")) != 0;
@@ -3808,11 +3929,7 @@ impl Level {
             rules.remove(&minecart_rule.name);
         }
         level.game_rules = rules;
-        // Seed: world_gen_settings.dat (26.3) or Data.WorldGenSettings.
-        level.seed = read_saved_data(dir, "world_gen_settings")
-            .and_then(|w| number(w.get("seed")))
-            .or_else(|| number(data.get("WorldGenSettings").and_then(|w| w.get("seed"))))
-            .unwrap_or(0);
+        (level.generator, level.seed) = WorldGenerator::read(dir, Some(data));
         // Day time: the overworld clock (26.3) or Data.DayTime.
         level.day_time = read_saved_data(dir, "world_clocks")
             .and_then(|c| {
@@ -4433,7 +4550,14 @@ impl Level {
                 "spawn",
                 Tag::compound([
                     ("pos", Tag::IntArray(spawn.to_vec())),
-                    ("dimension", string("minecraft:overworld")),
+                    (
+                        "dimension",
+                        string(
+                            self.world_spawn_dimension
+                                .as_deref()
+                                .unwrap_or("minecraft:overworld"),
+                        ),
+                    ),
                     ("yaw", Tag::Float(self.world_spawn_angle[0].to_bits())),
                     ("pitch", Tag::Float(self.world_spawn_angle[1].to_bits())),
                 ]),
@@ -4510,7 +4634,10 @@ impl Level {
             put(&mut clocks, "minecraft:the_end", end);
             write_saved_data(dir, "world_clocks", clocks)?;
         }
-        if legacy || !saved_data_path(dir, "world_gen_settings").exists() {
+        if let Some(generator) = self.generator.as_mut().filter(|g| g.recovered) {
+            write_saved_data(dir, "world_gen_settings", generator.data.clone())?;
+            generator.recovered = false;
+        } else if legacy || !saved_data_path(dir, "world_gen_settings").exists() {
             write_world_gen_settings(dir, self.seed, WorldGen::default())?;
         }
         if !saved_data_path(dir, "game_rules").exists() || !self.game_rules.is_empty() {
@@ -5264,8 +5391,9 @@ mod tests {
         }));
         write_world_gen_settings_with(&dir, 1, WorldGen::default(), None, None, Some(dimensions))
             .unwrap();
+        let generator = WorldGenerator::read_new(&dir).unwrap();
         let mut overrides = WorldgenOverrides::default();
-        merge_saved_world_gen_dimensions(&dir, &mut overrides);
+        generator.merge_dimensions(&mut overrides);
         let overworld = overrides.level_height("minecraft:overworld").unwrap();
         assert_eq!((overworld.min_y, overworld.height), (0, 256));
         assert!(overworld.has_ceiling && !overworld.has_skylight);
@@ -5284,7 +5412,7 @@ mod tests {
         );
         let pack_stem = r#"{"type":"minecraft:overworld","generator":{"type":"minecraft:debug"}}"#;
         overrides.set(DIMENSIONS, "minecraft:overworld", pack_stem.into());
-        merge_saved_world_gen_dimensions(&dir, &mut overrides);
+        generator.merge_dimensions(&mut overrides);
         assert_eq!(
             overrides
                 .entries(DIMENSIONS)
@@ -5366,6 +5494,74 @@ mod tests {
         assert_eq!(returned.game_rules.get("example:enabled"), Some(&0));
         returned.write(&dir, &Default::default()).unwrap();
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn dedicated_generator_recovery_uses_a_new_seed_and_persists_pack_dimensions() {
+        use super::*;
+        use sunrise_world::worldgen::overrides::{DIMENSIONS, WorldgenOverrides};
+
+        const RECOVERY_SEED: i64 = -546_172;
+        let scratch = tempfile::tempdir().unwrap();
+        let world = scratch.path();
+        let settings = saved_data_path(world, "world_gen_settings");
+        Level::default().write_without_player(world).unwrap();
+        let mut overrides = WorldgenOverrides::default();
+        overrides.set(
+            DIMENSIONS,
+            "minecraft:overworld",
+            r#"{"type":"test:tall","generator":{"type":"minecraft:noise","settings":"minecraft:overworld","biome_source":{"type":"minecraft:fixed","biome":"minecraft:plains"}}}"#.to_owned(),
+        );
+
+        for case in ["missing", "unreadable", "seedless", "no-dimensions"] {
+            match case {
+                "missing" => fs::remove_file(&settings).unwrap(),
+                "unreadable" => fs::write(&settings, b"unreadable generator settings").unwrap(),
+                "seedless" | "no-dimensions" => {
+                    let Tag::Compound(mut invalid) =
+                        read_saved_data(world, "world_gen_settings").unwrap()
+                    else {
+                        panic!("expected saved settings")
+                    };
+                    let missing = if case == "seedless" {
+                        "seed"
+                    } else {
+                        invalid.insert("seed".into(), Tag::Long(13_579));
+                        "dimensions"
+                    };
+                    invalid.remove(&missing.into());
+                    write_saved_data(world, "world_gen_settings", Tag::Compound(invalid)).unwrap();
+                }
+                _ => unreachable!(),
+            }
+            let before = fs::read(&settings).ok();
+            let mut recovered = Level::read(world).unwrap();
+            recovered
+                .recover_world_generator(&overrides, || RECOVERY_SEED)
+                .unwrap();
+            assert_eq!(recovered.seed, RECOVERY_SEED, "{case}");
+            assert!(world_gen_settings(world).is_none(), "{case}");
+            assert_eq!(fs::read(&settings).ok(), before, "{case}");
+            recovered.write_without_player(world).unwrap();
+            let saved = read_saved_data(world, "world_gen_settings").unwrap();
+            assert_eq!(saved.get("seed"), Some(&Tag::Long(RECOVERY_SEED)));
+            assert_eq!(
+                saved
+                    .get("dimensions")
+                    .and_then(|d| d.get("minecraft:overworld"))
+                    .and_then(|d| d.get("type")),
+                Some(&Tag::String("test:tall".into())),
+            );
+        }
+
+        write_world_gen_settings(world, 0, WorldGen::default()).unwrap();
+        let mut valid = Level::read(world).unwrap();
+        valid
+            .recover_world_generator(&overrides, || {
+                panic!("a valid saved zero must not draw a new seed")
+            })
+            .unwrap();
+        assert_eq!(valid.seed, 0);
     }
 
     #[test]
@@ -7170,17 +7366,16 @@ mod tests {
         // The command path keeps an empty inventory and the pending table/seed
         // for data get and saving. No loot resources are needed to keep that state.
         let pending = PendingContainerLoot::from_tag(&saved).unwrap();
-        let mut stored = block_entity_data(
+        let stored = block_entity_encode::data(
             (1, 2, 3),
             &chest,
             "minecraft:chest",
-            None,
+            block_entity_encode::DataFields {
+                pending: Some(&pending),
+                ..Default::default()
+            },
             &Default::default(),
         );
-        let Tag::Compound(fields) = &mut stored else {
-            panic!("compound");
-        };
-        pending.write_tags(fields);
         assert_eq!(stored.get("LootTable"), saved.get("LootTable"));
         assert_eq!(stored.get("LootTableSeed"), saved.get("LootTableSeed"));
         assert!(stored.get("Items").is_none());
@@ -7219,12 +7414,16 @@ mod tests {
                 "{id}: loadAdditional ignores Items when a loot table loads"
             );
             let pending = PendingContainerLoot::from_tag(&saved).unwrap();
-            let mut stored =
-                block_entity_data((1, 2, 3), &container, id, None, &Default::default());
-            let Tag::Compound(fields) = &mut stored else {
-                panic!("compound");
-            };
-            pending.write_tags(fields);
+            let stored = block_entity_encode::data(
+                (1, 2, 3),
+                &container,
+                id,
+                block_entity_encode::DataFields {
+                    pending: Some(&pending),
+                    ..Default::default()
+                },
+                &Default::default(),
+            );
             assert_eq!(stored.get("LootTable"), saved.get("LootTable"), "{id}");
             assert_eq!(
                 stored.get("LootTableSeed"),
@@ -7287,11 +7486,14 @@ mod tests {
             block_entity_encode::encode(pos, &chest, "minecraft:chest", &Default::default());
         assert!(plain.get("lock").is_none());
         // ...so `data get` puts back the one it was loaded with.
-        let data = block_entity_data(
+        let data = block_entity_encode::data(
             pos,
             &chest,
             "minecraft:chest",
-            saved.get("lock"),
+            block_entity_encode::DataFields {
+                lock: saved.get("lock"),
+                ..Default::default()
+            },
             &Default::default(),
         );
         let lock = sunrise_core::nbt::parse_snbt(r#"{items:"minecraft:gold_ingot"}"#)
@@ -8570,6 +8772,8 @@ mod tests {
             dimension: "minecraft:the_nether".into(),
             world_spawn: Some([8, 64, 8]),
             world_spawn_angle: [45.0, -10.0],
+            // The world spawn's level is the world's, not the player's.
+            world_spawn_dimension: Some("minecraft:the_end".into()),
             spawn: Some([20.0, 70.0, 20.0]),
             difficulty_locked: true,
             flying: true,
@@ -8581,6 +8785,13 @@ mod tests {
             .game_rules
             .insert("minecraft:keep_inventory".into(), 1);
         level.write(&dir, &Default::default()).unwrap();
+        let saved = read_dat(&dir.join("level.dat")).unwrap();
+        let spawn = saved.get("Data").and_then(|d| d.get("spawn"));
+        assert_eq!(
+            text(spawn.and_then(|s| s.get("dimension"))).as_deref(),
+            Some("minecraft:the_end"),
+            "level.dat's spawn.dimension"
+        );
         let back = Level::read(&dir).unwrap();
         assert_eq!(back.name, "Test");
         assert_eq!(back.seed, -42);
@@ -8608,6 +8819,10 @@ mod tests {
         assert_eq!(back.dimension, "minecraft:the_nether");
         assert_eq!(back.world_spawn, Some([8, 64, 8]));
         assert_eq!(back.world_spawn_angle, [45.0, -10.0]);
+        assert_eq!(
+            back.world_spawn_dimension.as_deref(),
+            Some("minecraft:the_end")
+        );
         assert_eq!(back.spawn, Some([8.0, 64.0, 8.0]));
         assert_eq!(
             back.respawn_elsewhere,
@@ -9411,6 +9626,30 @@ mod tests {
         let read = world_gen_settings(&dir).expect("settings");
         assert!(read.get("dimensions").is_some());
         assert!(!world_gen_unstable(&dir));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Settings that fail validation in the old layout do not hide valid saved data.
+    #[test]
+    fn invalid_projected_settings_fall_through_to_saved_data() {
+        let dir = gen_world("stem-prefix");
+        write_world_gen_settings(&dir, 7, WorldGen::default()).unwrap();
+        write_dat(
+            &dir.join("level.dat"),
+            Tag::compound([(
+                "Data",
+                Tag::compound([
+                    ("DataVersion", Tag::Int(4700)),
+                    ("WorldGenSettings", Tag::compound([("seed", Tag::Long(5))])),
+                ]),
+            )]),
+        )
+        .unwrap();
+        assert!(needs_file_fixes(&dir));
+        assert_eq!(
+            number(world_gen_settings(&dir).unwrap().get("seed")),
+            Some(7)
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -10255,8 +10494,13 @@ mod jukebox_song_clock_tests {
             assert_eq!(j.loaded_clock, clock.is_some());
             let saved =
                 block_entity_encode::encode(pos, &model, "minecraft:jukebox", &Default::default());
-            let command =
-                block_entity_data(pos, &model, "minecraft:jukebox", None, &Default::default());
+            let command = block_entity_encode::data(
+                pos,
+                &model,
+                "minecraft:jukebox",
+                Default::default(),
+                &Default::default(),
+            );
             check(label, &saved, clock);
             check(label, &command, clock);
             if with_record {

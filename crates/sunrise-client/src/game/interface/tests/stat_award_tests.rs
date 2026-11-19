@@ -298,7 +298,9 @@ fn real_integrated_stone_break_updates_counter_score_and_dirty_award() {
             {
                 let player = game.player.as_mut().unwrap();
                 player.ground.on_ground = true;
+                let side = game_side!(game);
                 let mut world = sunrise_client::motion::MotionWorld {
+                    side: &side,
                     entities: &[],
                     player,
                     scene: &mut game.world,

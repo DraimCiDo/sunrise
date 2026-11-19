@@ -7,6 +7,10 @@ use super::*;
 #[path = "incoming_tests/resource_load_scope.rs"]
 mod scope_tests;
 
+#[cfg(test)]
+#[path = "resource_load/facts_memo.rs"]
+mod facts_memo;
+
 pub(super) const STAGE_LINES: [&str; 10] = [
     "Loading menu",
     "Loading assets",
@@ -334,9 +338,13 @@ pub(super) fn gameplay_tables(
     let behaviour_json: serde_json::Value =
         sunrise_world::json_file::read(&root.join("block-behaviours.json"))
             .map_err(|e| e.to_string())?;
+    #[cfg(not(test))]
     let (facts, gameplay_projection) =
         BlockFacts::load_with_projection(root, assets.registry, &behaviour_json, parallel)
             .map_err(|e| e.to_string())?;
+    #[cfg(test)]
+    let (facts, gameplay_projection) =
+        facts_memo::load(root, assets.registry, &behaviour_json, parallel)?;
     drop(facts_step);
     progress.set(2);
     let (light, motion) = std::thread::scope(|scope| {

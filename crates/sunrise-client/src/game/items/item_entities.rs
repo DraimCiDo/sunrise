@@ -242,6 +242,12 @@ impl Game<'_> {
                         cells.remove(i, to);
                         break 'tick;
                     }
+                } else {
+                    self.entity_section_entered(
+                        item.id,
+                        [from.x, from.y, from.z],
+                        [to.x, to.y, to.z],
+                    );
                 }
                 let item_id = item.id;
                 let saved = native_components::ITEM_ENVIRONMENT_DAMAGE

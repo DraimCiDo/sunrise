@@ -20,6 +20,9 @@ thread_local! {
     /// The asks the installed `menu_still_valid` heard on this thread, per thread for the same
     /// reason.
     pub(crate) static STILL_VALID_ASKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The position the installed `menu_still_valid` last heard on this thread.
+    pub(crate) static STILL_VALID_POS: std::cell::Cell<Option<[i32; 3]>> =
+        const { std::cell::Cell::new(None) };
     /// How many times this thread asked the installed `collision_shape`.
     pub(crate) static COLLISION_ASKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// The states whose answers the installed `collision_shape_refused` heard on this thread, in
@@ -110,8 +113,9 @@ pub(crate) fn install() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         let installed = super::install(NativeClientHooks {
-            menu_still_valid: |context, player, menu, _, eye, valid| {
+            menu_still_valid: |context, player, menu, pos, eye, valid| {
                 STILL_VALID_ASKED.set(STILL_VALID_ASKED.get() + 1);
+                STILL_VALID_POS.set(pos);
                 if menu == "test:rules" && player == 2 && eye[2] == 0.0 {
                     *valid = context.setting("rules_mod", "stack").is_some();
                 }
@@ -194,14 +198,15 @@ pub(crate) fn install() {
             makes_open_trapdoor_above_climbable: |context, _, _, _, climbable| {
                 *climbable |= context.setting("rules_mod", "stack").is_some();
             },
-            friction: |context, _, kind, _, _, friction| {
-                if context.setting("rules_mod", "stack").is_some() {
-                    *friction = match kind {
-                        "minecraft:player" => 0.98,
-                        "minecraft:cow" => f32::NAN,
+            friction: |level, entity, _, _, friction| {
+                if level.context.setting("rules_mod", "stack").is_some() {
+                    *friction = match entity.map(|(_, kind)| kind) {
+                        Some("minecraft:player") => 0.98,
+                        Some("minecraft:cow") => f32::NAN,
                         _ => 3.0,
                     };
                 }
+                true
             },
             collision_shape: |_, _, state, query, shape| {
                 if COLLISION_REFUSED.with_borrow(|refused| refused.contains(&state.0)) {

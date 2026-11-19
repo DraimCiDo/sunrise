@@ -63,6 +63,12 @@ pub mod pages {
     pub use sunrise_hooks::pages::{Act, Label, Page, Place, Row, connect, register};
 }
 
+/// The volume of the audio mods make themselves (`sunrise_hooks::sound`): a crate's setting can turn
+/// it down or off.
+pub mod sound {
+    pub use sunrise_hooks::sound::set_mod_stream_gain;
+}
+
 /// The lang files with a crate's text, loaded with the game's own (docs/layers.md, "Platform
 /// registries").
 pub mod lang {
@@ -104,6 +110,11 @@ pub mod containers {
 
         const _: &dyn ContainerHooks = &PickOnRelease;
     }
+}
+
+/// The buttons a crate adds to the title screen (docs/layers.md, "Platform registries").
+pub mod title {
+    pub use sunrise_hooks::title::{Button, Opens, Refused, Title, register};
 }
 
 /// Drawing on the HUD (docs/layers.md, "Platform registries").

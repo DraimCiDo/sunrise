@@ -2216,6 +2216,7 @@ mod tests {
                 category: mod_api::GeneralEntityCategory::Misc,
                 width: 0.5,
                 height: 1.0,
+                passenger_attachment: None,
                 save_policy: mod_api::GeneralSavePolicy::Save,
                 summonable: true,
                 pickable: false,

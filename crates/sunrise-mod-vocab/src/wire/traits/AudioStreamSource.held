@@ -1,0 +1,1 @@
+The game's side of one open audio stream, handed to the mod by open_audio_stream and held by id: the mod calls it to push samples and steer the stream, and dropping it stops the stream.

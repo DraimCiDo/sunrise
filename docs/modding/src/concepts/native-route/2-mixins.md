@@ -143,6 +143,22 @@ The one generic function you can target is a [published loop's body](3-loops.md#
 
 The tool plans against what the patch library compiles. The mod builder gives it the build's cfg set (the target's options and the features the prebuilt game was built with), and it drops the items, statements, fields, variants, parameters and match arms under an inactive `cfg` and expands `cfg_attr`. A function with an inner `#[cfg(test)] fn helper()` or a `#[cfg(feature = "x")]` statement takes its mixins like any other. The features are the game crate's: a `feature` predicate is decided only in the game crate's own functions. In a function of a crate below it (`sunrise_world`, say) it stays undecided, since that crate's resolved features are not the game's, and is refused. `unix`, `target_os` and the other options hold for every crate. The tool decides only what the signed build vouches for: `feature` in the game crate (from the game's feature list), `test` (the patch library is not a test build, so it is off), and the target facts that follow from the validated target (`target_os`, `target_family`, `unix`, `windows`, `target_arch`, `target_pointer_width`, `target_endian`, `target_env`, `target_vendor`, `target_abi`), read from the printed set and compared on their full values. Everything that depends on compiler flags (`debug_assertions`, `overflow_checks`, `panic`, `target_feature`, `relocation_model`, `sanitize*`, `doc`, `miri`) or on the original build's build script (any custom name) is undecided in both directions, listed or not. A `cfg` the set cannot decide (`version(..)`, `accessible(..)`, an expression-level attribute, a `feature` outside the game crate, a flag-dependent or custom name) is refused with `E_UNSUPPORTED_CFG`. This reduces the source inside a function the route already lets a row target; a function that carries a `cfg` or `cfg_attr` of its own is still not replaceable, active or not.
 
+## Replacing the global fluid picker
+
+The world generator's fluid picker (the sea and the lava below it) has two targets in `sunrise_world`:
+
+- `sunrise_world::worldgen::aquifer::GlobalFluidPicker::compute`: the fluid level and state at one block position
+  `[x, y, z]`;
+- `sunrise_world::worldgen::aquifer::GlobalFluidPicker::level_bound`: the highest level `compute` returns for the
+  block columns `min..=max` (`[x, z]`), or `None` when you cannot bound it.
+
+**Replace the two together.** The terrain fill skips `compute` above the height `level_bound` gives, and writes air
+there. A `compute` that raises the fluid in some columns, with the vanilla `level_bound` left in place, has its
+fluid dropped above the sea: the water you asked for is missing from the chunk and from far terrain. Make
+`level_bound` return at least the highest level your `compute` can return over the columns it is given. A higher
+value is allowed and only costs a `compute` call per block; `None` makes every block ask `compute`. Neither
+replacement is given coordinates beyond the columns of the chunk or tile being generated.
+
 ## What a mixin cannot target
 
 | If the row is refused because… | Use this instead |

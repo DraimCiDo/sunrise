@@ -29,7 +29,16 @@ pub(super) struct StartupClientHost;
 impl Host for StartupClientHost {}
 mod_api::impl_host_areas!(StartupClientHost);
 impl ClientHost for StartupClientHost {}
-mod_api::impl_client_host_areas!(StartupClientHost);
+mod_api::impl_client_host_areas!(StartupClientHost, except(audio));
+// A startup reload opens no audio stream.
+impl mod_api::prelude::AudioClientHost for StartupClientHost {
+    fn open_audio_stream(
+        &self,
+        _: &mod_api::StreamSpec,
+    ) -> Result<mod_api::AudioStreamRef, mod_api::AudioRefusal> {
+        Err(mod_api::AudioRefusal::Unavailable)
+    }
+}
 
 impl Game<'_> {
     /// Registers a later reload's client listeners through the game

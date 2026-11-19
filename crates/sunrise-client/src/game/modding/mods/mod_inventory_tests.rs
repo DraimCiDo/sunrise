@@ -224,7 +224,11 @@ fn code_only_reload_publishes_one_new_inventory_after_prepare_and_preserves_old_
                     ),
                     (
                         "enchantment",
-                        serde_json::json!({"description":"condition test","max_level":3}),
+                        serde_json::json!({
+                            "description":"condition test", "supported_items":"minecraft:stick", "weight":1, "max_level":3,
+                            "min_cost":{"base":1,"per_level_above_first":0}, "max_cost":{"base":1,"per_level_above_first":0},
+                            "anvil_cost":1, "slots":["mainhand"]
+                        }),
                     ),
                 ] {
                     value["neoforge:conditions"] = serde_json::json!([{"type":"neoforge:mod_loaded","modid":"machine_sample"}]);
@@ -233,10 +237,11 @@ fn code_only_reload_publishes_one_new_inventory_after_prepare_and_preserves_old_
                     std::fs::write(dir.join("requires_code.json"), value.to_string()).unwrap();
                     std::fs::write(
                         dir.join("unsupported.json"),
-                        br#"{"neoforge:conditions":[{"type":"unsupported"}]}"#,
+                        br#"{"neoforge:conditions":[{"type":"neoforge:never"}]}"#,
                     )
                     .unwrap();
                 }
+                game.ui.registries.sounds = game.audio.event_names();
                 game.reload_datapacks(true, &[]).unwrap();
                 let loaded = |game: &Game<'_>, id: &str| {
                     let items = game.items();
@@ -302,9 +307,11 @@ fn code_only_reload_publishes_one_new_inventory_after_prepare_and_preserves_old_
                 game.reload_datapacks(true, &[]).unwrap();
                 assert_eq!(game.options.resources, original);
                 assert!(!has_recipe(&read(game)));
+                // Instruments and enchantments are world registries, frozen at world open: a
+                // reload re-evaluates the reloadable data (loot, songs, predicates, modifiers).
                 assert_eq!(
                     loaded(game, "inventorytest:requires_code"),
-                    (false, false, false, false, false, false)
+                    (false, false, true, true, false, false)
                 );
                 assert!(old_songs.contains_key("inventorytest:requires_code"));
                 // Tag files ignore load conditions, including mod_loaded.

@@ -76,6 +76,9 @@ macro_rules! read_level {
 }
 
 impl LevelHost for JournalLevelWrite<'_, '_> {
+    fn block_states(&self) -> mod_api::BlockStates<'_> {
+        mod_api::BlockStates::of(&*self.game)
+    }
     read_level! {
         fn block_entity(&self, pos: [i32; 3]) -> Option<BlockEntityRef>;
         fn container_size(&self, at: BlockSide) -> Option<usize>;

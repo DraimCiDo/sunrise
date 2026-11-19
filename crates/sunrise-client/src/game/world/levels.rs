@@ -726,7 +726,7 @@ impl Game<'_> {
             dim,
             self.level_shapes.get(dim.id()),
             seed,
-            &self.level.enabled_features,
+            &self.level,
             self.world_biomes
                 .as_ref()
                 .unwrap_or_else(|| self.res.biomes())
@@ -1273,7 +1273,11 @@ impl Game<'_> {
             let history = self
                 .collider_history(&colliders)
                 .map(sunrise_client_render::moving_colliders::HistoryScope::enter);
-            result = sunrise_client_render::moving_colliders::in_level(colliders.clone(), || {
+            result = {
+                let _scope = sunrise_client_render::moving_colliders::Scope::enter_level(
+                    self.collider_level(),
+                    colliders.clone(),
+                );
                 sunrise_client::block_contact::in_level(
                     self.tick,
                     (self.serving.is_some() || self.options.dedicated.is_some())
@@ -1292,7 +1296,7 @@ impl Game<'_> {
                         }
                     },
                 )
-            });
+            };
             drop(history);
             // Then the bodies standing on a collider that moved are carried with it.
             if result.is_ok() && !paused {

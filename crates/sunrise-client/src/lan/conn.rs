@@ -1193,10 +1193,10 @@ fn login_and_configure(
     let mut payload_negotiation = sunrise_protocol::payload_negotiation::Negotiation::new(
         payload_transport.local.manifest.clone(),
     );
-    // Only a mod's declaration opens negotiation before the client is known, as
-    // the client does: with the engine's alone a vanilla client is sent nothing
-    // vanilla's server would not send it. A Sunrise client is asked once it names
-    // itself, and answers before the barrier at its known-packs reply.
+    // Only a mod's declaration opens negotiation before the client is known: with the
+    // engine's alone a vanilla client is sent nothing vanilla's server would not send it.
+    // A Sunrise client is asked once it names itself, and answers before the barrier at its
+    // known-packs reply.
     if payload_transport.local.has_mod_declarations()
         && let Some(control) = payload_negotiation.initial()
     {

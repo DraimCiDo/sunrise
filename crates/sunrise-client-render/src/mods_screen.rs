@@ -1144,56 +1144,10 @@ impl ModsScreen {
     }
 }
 
-/// The atlas sprite of the main menu's Mods button, as the icons beside it are named.
-pub const ICON_SPRITE: &str = "icon/mods";
-/// A cube, drawn in three greys for its top and two sides: `#` light, `o` middle, `x` dark.
-const ICON_ART: [&str; 15] = [
-    ".......#.......",
-    ".....#####.....",
-    "...#########...",
-    ".#############.",
-    "...#########...",
-    ".....#####.....",
-    ".......#.......",
-    ".oooooo#xxxxxx.",
-    ".oooooo#xxxxxx.",
-    ".oooooo#xxxxxx.",
-    ".oooooo#xxxxxx.",
-    "..ooooo#xxxxx..",
-    "...oooo#xxxx...",
-    ".....oo#xx.....",
-    ".......#.......",
-];
-
-/// The Mods button's icon for the atlas: `(sprite, width, height, RGBA texels)`.
-pub fn icon_image() -> (String, u32, u32, Vec<u8>) {
-    let pixels = ICON_ART
-        .iter()
-        .flat_map(|row| row.chars())
-        .flat_map(|c| match c {
-            '#' => [255, 255, 255, 255],
-            'o' => [176, 176, 176, 255],
-            'x' => [112, 112, 112, 255],
-            _ => [0, 0, 0, 0],
-        })
-        .collect();
-    (ICON_SPRITE.to_owned(), 15, 15, pixels)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::mod_list::{Installed, ModInfo, NativePage};
-
-    #[test]
-    fn the_mods_icon_is_a_fifteen_pixel_square_with_a_clear_corner() {
-        assert!(ICON_ART.iter().all(|row| row.chars().count() == 15));
-        let (name, w, h, pixels) = icon_image();
-        assert_eq!((name.as_str(), w, h), (ICON_SPRITE, 15, 15));
-        assert_eq!(pixels.len(), 15 * 15 * 4);
-        assert_eq!(pixels[3], 0, "the corner is clear");
-        assert_eq!(pixels[(7 * 4) + 3], 255, "the cube's top point is drawn");
-    }
 
     fn atlas() -> HudAtlas {
         HudAtlas::build(&sunrise_assets::resource_source::ResourceSource::directory(

@@ -122,6 +122,14 @@
   {
     "package": "sunrise-client",
     "target": "lib",
+    "test": "game::block_entity_reach_draw_tests::block_entity_draws_match_the_vanilla_cases",
+    "path": "crates/sunrise-client/src/game/blocks/block_entity_reach_draw_tests.rs",
+    "reason": "run through tools/test_block_entity_reach_parity.py",
+    "rationale": "Parity-harness step in tools/ci/ignored-tests/parity-harness.txt; tools/test_block_entity_reach_parity.py writes the cases and the vanilla oracle's answers and passes them in SUNRISE_REACH_DRAW_CASES and SUNRISE_REACH_DRAW_OUT. Run bare as a daily test it has no cases and panics."
+  },
+  {
+    "package": "sunrise-client",
+    "target": "lib",
     "test": "game::minecarts::cart_cost_bench::tick_carts_with_many_parked_carts",
     "path": "crates/sunrise-client/src/game/entities/minecarts.rs",
     "reason": "a timing, needs prepared resources in SUNRISE_TEST_RESOURCES",

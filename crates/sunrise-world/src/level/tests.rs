@@ -1638,6 +1638,90 @@ fn wire_connects_only_to_the_block_that_answers_should_redstone_wire_connect_to(
     assert_eq!(connection(&mut w), before);
 }
 
+/// `affectNeighborsAfterRemoval` calls `updatePowerStrength` with the wire's
+/// REMOVED state: the power that state still carries decides whether the
+/// position's six neighbours are updated again (the write itself already
+/// updated them once). Reading the level's power — air by then — skipped that
+/// fan-out inside a neighbour-update run's wire cache (#3230).
+#[test]
+fn a_dropped_wire_notifies_its_neighbours_from_its_removed_state() {
+    use std::cell::RefCell;
+    struct Observer {
+        inner: TestLevel,
+        seen: RefCell<Vec<BlockPos>>,
+    }
+    impl crate::level::BlockEntityNeighbors for Observer {}
+    impl LevelAccess for Observer {
+        fn block_state(&self, pos: BlockPos) -> BlockStateId {
+            self.inner.block_state(pos)
+        }
+        fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId> {
+            self.inner.set_raw(pos, state)
+        }
+        fn is_loaded(&self, pos: BlockPos) -> bool {
+            self.inner.is_loaded(pos)
+        }
+        fn random(&mut self) -> &mut LegacyRandom {
+            self.inner.random()
+        }
+        fn game_time(&self) -> i64 {
+            self.inner.game_time()
+        }
+        fn observe_neighbor_changed(
+            &self,
+            _: &mut Ticks,
+            pos: BlockPos,
+            _: BlockStateId,
+            _: BlockId,
+            _: bool,
+        ) {
+            self.seen.borrow_mut().push(pos);
+        }
+    }
+    let Some(f) = fixture() else {
+        return;
+    };
+    let b = &f.behaviours;
+    let mut level = Observer {
+        inner: TestLevel::new(b),
+        seen: RefCell::new(Vec::new()),
+    };
+    let mut ticks = Ticks::new(0);
+    let pos = BlockPos::new(0, 1, 0);
+    let support = BlockPos::new(0, 0, 0);
+    let stone = f.registry.default_state("minecraft:stone").unwrap();
+    let wire = b.table.set_int(
+        f.registry.default_state("minecraft:redstone_wire").unwrap(),
+        b.props.power,
+        7,
+    );
+    level.set_raw(support, stone);
+    level.set_raw(pos, wire);
+    // Removing the support drops the wire mid-run, so the removal cascade is
+    // processed with the run's wire cache open.
+    b.set_block(&mut level, &mut ticks, support, b.air(), flags::UPDATE_ALL);
+    assert_eq!(
+        level.block_state(pos),
+        b.air(),
+        "the unsupported wire drops"
+    );
+    let heard = |at: BlockPos| level.seen.borrow().iter().filter(|&&pos| pos == at).count();
+    for (dx, dy, dz) in [
+        (0, -1, 0),
+        (0, 1, 0),
+        (0, 0, -1),
+        (0, 0, 1),
+        (-1, 0, 0),
+        (1, 0, 0),
+    ] {
+        assert_eq!(
+            heard(BlockPos::new(pos.x + dx, pos.y + dy, pos.z + dz)),
+            2,
+            "heard at ({dx}, {dy}, {dz}) of the wire"
+        );
+    }
+}
+
 #[test]
 fn connections_follow_connects_to_both_ways() {
     // Each kind with its block and the side values for connected and not.

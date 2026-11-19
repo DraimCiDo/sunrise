@@ -156,24 +156,28 @@ impl Game<'_> {
         {
             return;
         }
+        // The window a packet names is the open one, as in vanilla's handlers. With no menu open
+        // this is 0, so a container-0 packet asks the validity of no menu.
+        let open_window = |host: &LanHost| {
+            super::super::native_menus::open_menu_of(host, conn).map_or(0, |(window, _, _)| window)
+        };
+        let may_act_in =
+            |container| container == open_window(host) && !host.hub.guests[gi].spectator();
         let validate_menu = match &packet {
             S::ContainerClick(click) => {
                 // handleContainerClick ignores another window's click. A spectator's
                 // click goes straight to the menu's resync path, without a validity ask.
-                let window = super::super::native_menus::open_menu_of(host, conn)
-                    .map_or(0, |(window, _, _)| window);
-                if click.container != window {
+                if click.container != open_window(host) {
                     return;
                 }
                 !host.hub.guests[gi].spectator()
             }
-            S::ContainerButtonClick(_)
-            | S::ContainerSlotStateChanged(_)
-            | S::RenameItem(_)
-            | S::SetBeacon(_)
-            | S::SelectTrade(_)
-            | S::SelectBundleItem(_)
-            | S::PlaceRecipe(_) => true,
+            // handleContainerButtonClick, handleContainerSlotStateChanged and handlePlaceRecipe
+            // act only for the open window and a player who isn't a spectator.
+            S::ContainerButtonClick(p) => may_act_in(p.container),
+            S::ContainerSlotStateChanged(p) => may_act_in(p.container),
+            S::PlaceRecipe(p) => may_act_in(p.container),
+            S::RenameItem(_) | S::SetBeacon(_) | S::SelectTrade(_) | S::SelectBundleItem(_) => true,
             _ => false,
         };
         if validate_menu && !self.guest_validate_menu(conn) {

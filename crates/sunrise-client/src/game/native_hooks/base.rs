@@ -2726,9 +2726,14 @@ impl Game<'_> {
     ) {
         self.fire_time_skip(dimension, from, to, cause, cancel);
     }
-    /// The world's spawn point changed to `pos` and `angle`.
-    pub(in crate::game) fn native_spawn_change(&mut self, pos: [i32; 3], angle: [f32; 2]) {
-        self.fire_spawn_change(pos, angle);
+    /// The world's spawn point changed to `pos` in level `dimension`, facing `angle`.
+    pub(in crate::game) fn native_spawn_change(
+        &mut self,
+        dimension: &str,
+        pos: [i32; 3],
+        angle: [f32; 2],
+    ) {
+        self.fire_spawn_change(dimension, pos, angle);
     }
 
     /// The server world's border bounds changed, either immediately or when

@@ -22,6 +22,7 @@ impl mod_api::Hooks for Declare {
                 mod_api::GeneralEntityCategory::Misc,
                 0.8,
                 1.9,
+                Some([1.0, 1.25, 0.0]),
                 if save {
                     mod_api::GeneralSavePolicy::Save
                 } else {
@@ -128,6 +129,111 @@ fn general_tree_loads_joins_and_saves_one_record() {
             saved[0].get(format::UUID),
             Some(&Tag::IntArray(vec![1, 2, 3, 4]))
         );
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn mixed_passengers_sit_and_unload_with_their_actual_root() {
+    use crate::game::commands::Target;
+    use mod_api::StartRidingRefusal;
+    with_types(|game| {
+        let root_uuid = [1, 2, 3, 4];
+        let pig_uuid = [2, 3, 4, 5];
+        let leaf_uuid = [3, 4, 5, 6];
+        let mut root = record_tag("mymod:robot", root_uuid, b"root", Vec::new());
+        if let Tag::Compound(map) = &mut root {
+            map.insert(
+                format::POSITION.into(),
+                Tag::List(
+                    [2.5_f64, 64.0, 0.5]
+                        .map(|part| Tag::Double(part.to_bits()))
+                        .to_vec(),
+                ),
+            );
+            map.insert(
+                format::ROTATION.into(),
+                Tag::List(vec![Tag::Float(90_f32.to_bits()), Tag::Float(0)]),
+            );
+        }
+        game.load_listed("mymod:robot", None, None, root).unwrap();
+        game.load_listed(
+            "mymod:robot",
+            None,
+            None,
+            record_tag("mymod:robot", leaf_uuid, b"leaf", Vec::new()),
+        )
+        .unwrap();
+        let root = game.resident_entities.general.rows[0].id;
+        let leaf = game.resident_entities.general.rows[1].id;
+        let pig = game
+            .load_mob(
+                Tag::Compound(
+                    [
+                        ("id".into(), Tag::String("minecraft:pig".into())),
+                        ("UUID".into(), Tag::IntArray(pig_uuid.to_vec())),
+                        (
+                            "Pos".into(),
+                            Tag::List(
+                                [0.5_f64, 64.0, 0.5]
+                                    .map(|part| Tag::Double(part.to_bits()))
+                                    .to_vec(),
+                            ),
+                        ),
+                    ]
+                    .into(),
+                ),
+                None,
+            )
+            .unwrap();
+        let [root_ref, pig_ref, leaf_ref] = [root, pig, leaf].map(|id| game.entity(id).unwrap());
+        assert_eq!(game.entity_start_riding(pig_ref, root_ref, false), Ok(()));
+        assert_eq!(game.entity_start_riding(leaf_ref, pig_ref, false), Ok(()));
+        assert_eq!(
+            game.entity_start_riding(root_ref, leaf_ref, true),
+            Err(StartRidingRefusal::Cycle)
+        );
+        game.tickets.update(None);
+        game.begin_ordered_ticks();
+        game.tick_general().unwrap();
+        assert_eq!(pig_ref.position(game), Some([2.5, 65.25, 1.5]));
+        assert_eq!(
+            leaf_ref.position(game),
+            Some([2.5, 65.25 + f64::from(0.86875_f32), 1.5])
+        );
+        assert_eq!(leaf_ref.root_vehicle(game), Some(root_ref));
+
+        // The leaf's and the intermediate mob's chunks do not own the tree.
+        game.mob_object_mut(pig).unwrap().position.x = 18.5;
+        game.resident_entities.general.rows[1].position.x = 33.5;
+        let own = game.entity_chunks(&HashSet::from([(1, 0), (2, 0)]), true);
+        assert!(own.iter().all(|(_, tags)| tags.is_empty()));
+        assert!(game.entity(pig).is_some() && game.entity(leaf).is_some());
+        let mut saved = game.entity_chunks(&HashSet::from([(0, 0)]), true);
+        assert_eq!(saved[0].1.len(), 1);
+        let saved = saved[0].1.pop().unwrap();
+        let Some(Tag::List(pigs)) = saved.get("Passengers") else {
+            panic!("missing nested pig")
+        };
+        assert_eq!(pigs.len(), 1);
+        assert_eq!(sunrise_client::entity_nbt::uuid(&pigs[0]), Some(pig_uuid));
+        let Some(Tag::List(leaves)) = pigs[0].get("Passengers") else {
+            panic!("missing nested general row")
+        };
+        assert_eq!(leaves.len(), 1);
+        assert_eq!(
+            leaves[0].get(format::PAYLOAD),
+            Some(&Tag::ByteArray(b"leaf".to_vec()))
+        );
+        for id in [root, pig, leaf] {
+            assert!(game.entity(id).is_none());
+        }
+
+        game.load_listed("mymod:robot", None, None, saved).unwrap();
+        let [root, pig, leaf] =
+            [root_uuid, pig_uuid, leaf_uuid].map(|uuid| game.vehicle_by_uuid(uuid).unwrap());
+        assert_eq!(game.native_vehicle_id(Target::General(leaf)), Some(pig));
+        assert_eq!(game.native_vehicle_id(Target::Mob(pig)), Some(root));
     });
 }
 

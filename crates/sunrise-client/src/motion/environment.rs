@@ -461,6 +461,7 @@ mod below_world_tests {
         scene.shape = shape;
         let mut player = PlayerMotion::new(&resources, Vec3::new(0.5, y, 0.5)).unwrap();
         MotionWorld {
+            side: sunrise_client::motion::dry_side(),
             tag_items: None,
             block_registries: None,
             loop_context: crate::test_resources::server_loop_context(),

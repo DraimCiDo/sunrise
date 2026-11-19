@@ -1076,15 +1076,20 @@ impl Game<'_> {
             })
     }
 
+    /// MinecraftServer.findRespawnDimension: the world spawn's level.
+    pub(super) fn world_spawn_level(&self) -> super::Dim {
+        super::Dim::of_world_spawn(&self.level)
+    }
+
     /// MinecraftServer.setRespawnData: every placed player hears a changed world spawn.
     pub(super) fn lan_broadcast_world_spawn(&self) {
         if let Some(host) = &self.lan {
             for guest in host.hub.guests.iter().filter(|guest| guest.placed) {
-                guest.send(
-                    &host
-                        .hub
-                        .default_spawn(self.world_spawn_position(), self.level.world_spawn_angle),
-                );
+                guest.send(&host.hub.default_spawn(
+                    self.world_spawn_position(),
+                    self.level.world_spawn_angle,
+                    self.world_spawn_level().id(),
+                ));
             }
         }
     }
@@ -2459,6 +2464,7 @@ impl Game<'_> {
                 next_entity: &mut self.next_entity,
                 spawn,
                 spawn_angle: self.level.world_spawn_angle,
+                spawn_dimension: crate::game::Dim::of_world_spawn(&self.level).id(),
                 difficulty: i32::from(self.ui.difficulty),
                 difficulty_locked: self.level.difficulty_locked,
                 clock_rate,
@@ -2807,6 +2813,7 @@ impl Game<'_> {
                     next_entity: &mut self.next_entity,
                     spawn,
                     spawn_angle: self.level.world_spawn_angle,
+                    spawn_dimension: crate::game::Dim::of_world_spawn(&self.level).id(),
                     difficulty: i32::from(self.ui.difficulty),
                     difficulty_locked: self.level.difficulty_locked,
                     clock_rate,
@@ -2949,6 +2956,7 @@ impl Game<'_> {
         entities: &[EntityState],
         spawn: [f64; 3],
     ) {
+        let spawn_level = self.world_spawn_level();
         let Some(host) = self.lan.as_mut() else {
             return;
         };
@@ -2965,9 +2973,11 @@ impl Game<'_> {
                 Some(o) => playerdata::load_owner(g, &root, o.saved.take().as_deref()),
                 None => playerdata::load(g, &root),
             };
-            // `PlayerList.placeNewPlayer`: a saved level the world no longer has is the Overworld.
+            // `PrepareSpawnTask.start`: a saved level the world no longer has is the world
+            // spawn's (the Overworld when that one is gone too); the saved position and
+            // rotation stay.
             if !levels.has(&g.dimension) {
-                g.dimension = "minecraft:overworld".to_owned();
+                g.dimension = spawn_level.id().to_owned();
             }
             // PlayerEvent.LoadFromFile: the player's data is read and applied,
             // the player not yet placed.
@@ -3000,12 +3010,23 @@ impl Game<'_> {
             // ServerPlayer.adjustSpawnLocation: a player new to the world
             // stands where PlayerSpawnFinder puts them, not all on one spot
             // (it reads the loaded level, which holds the spawn when it is
-            // the overworld).
-            let feet = if self.dim == super::Dim::Overworld {
+            // the world spawn's). PrepareSpawnTask puts them in that level, so
+            // the search reads that one, opened for it.
+            let back = self.dim;
+            let opened = back != spawn_level
+                && self
+                    .enter_level(spawn_level)
+                    .inspect_err(|e| log::error!("could not open {}: {e}", spawn_level.id()))
+                    .is_ok();
+            let feet = if self.dim == spawn_level {
                 self.server_player_spawn(spawn)
             } else {
                 spawn
             };
+            if opened && let Err(e) = self.enter_level(back) {
+                log::error!("could not reopen {}: {e}", back.id());
+                return;
+            }
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
@@ -3019,7 +3040,7 @@ impl Game<'_> {
                     g.head_yaw = g.yaw;
                     g.health = 20.0;
                     g.food = 20;
-                    g.dimension = super::Dim::Overworld.id().to_owned();
+                    g.dimension = spawn_level.id().to_owned();
                 })
                 .is_none()
             {
@@ -3046,15 +3067,20 @@ impl Game<'_> {
         self.prepare_recipe_join(conn);
         // A level that will not open, its generator gone with a mod, is one the
         // world no longer has: left in it, the player would fail the next tick.
+        // It goes to the world spawn's, as one missing from the world does.
         if elsewhere && let Err(e) = self.enter_level(level) {
             log::error!("could not open {}: {e}", level.id());
-            let overworld = super::Dim::Overworld;
+            let fallback = if spawn_level == level {
+                super::Dim::Overworld
+            } else {
+                spawn_level
+            };
             let moved = self.lan.as_mut().and_then(|host| {
                 host.hub
-                    .update_guest(conn, |g| g.dimension = overworld.id().to_owned())
+                    .update_guest(conn, |g| g.dimension = fallback.id().to_owned())
             });
-            elsewhere = back != overworld;
-            if moved.is_none() || (elsewhere && self.enter_level(overworld).is_err()) {
+            elsewhere = back != fallback;
+            if moved.is_none() || (elsewhere && self.enter_level(fallback).is_err()) {
                 return;
             }
         }
@@ -3076,6 +3102,7 @@ impl Game<'_> {
             next_entity: &mut self.next_entity,
             spawn,
             spawn_angle: self.level.world_spawn_angle,
+            spawn_dimension: crate::game::Dim::of_world_spawn(&self.level).id(),
             difficulty: i32::from(self.ui.difficulty),
             difficulty_locked: self.level.difficulty_locked,
             clock_rate,
@@ -3816,7 +3843,9 @@ mod tests {
                 .update(0, |g| g.fall_flying = true);
             game.as_guest(1, |game| {
                 let player = game.player.as_mut().unwrap();
+                let side = game_side!(game);
                 MotionWorld {
+                    side: &side,
                     entities: &[],
                     player,
                     scene: &mut game.world,
@@ -5073,6 +5102,18 @@ mod sources_tests {
     include!("sulfur_cube_meta_tests.rs");
 }
 
+impl super::Dim {
+    /// The level `level`'s world spawn is in (MinecraftServer.findRespawnDimension), the
+    /// Overworld when the world has no such level. It borrows only the level data, so a
+    /// `TickCtx` can name it beside the world it borrows mutably.
+    pub(super) fn of_world_spawn(level: &sunrise_client::save::Level) -> Self {
+        level
+            .world_spawn_dimension
+            .as_deref()
+            .map_or(Self::Overworld, Self::from_id)
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod world_spawn_sync_tests {
     use super::*;
@@ -5176,7 +5217,7 @@ pub(crate) mod world_spawn_sync_tests {
 
     #[test]
     #[ignore = "daily"]
-    fn setworldspawn_reaches_guests_in_other_dimensions_and_keeps_compass_overrides() {
+    fn setworldspawn_reaches_guests_with_the_dimension_it_ran_in() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.build_registries();
             game.level.world_spawn = None;
@@ -5213,6 +5254,22 @@ pub(crate) mod world_spawn_sync_tests {
             assert!(
                 spawns(&rx).is_empty(),
                 "unchanged respawn data is not broadcast again"
+            );
+            // SetWorldSpawnCommand keeps the level it runs in (RespawnData.of(level.dimension(), ..)):
+            // the same block in another dimension is changed respawn data, and reaches the guests
+            // with that dimension.
+            game.as_console(|game| {
+                assert!(
+                    game.run_command("execute in minecraft:the_end run setworldspawn 100 140 -20")
+                )
+            });
+            let sent = spawns(&rx);
+            assert_eq!(sent.len(), 1);
+            assert_eq!(sent[0].pos.dimension, "minecraft:the_end");
+            assert_eq!(sent[0].pos.pos, [100, 140, -20]);
+            println!(
+                "world-spawn\tother_dimension\t{}\t{}\t{}\t{}",
+                sent[0].pos.dimension, sent[0].pos.pos[0], sent[0].pos.pos[1], sent[0].pos.pos[2]
             );
             game.as_console(|game| assert!(game.run_command("setworldspawn -7 90 12")));
             let sent = spawns(&rx);
@@ -5326,6 +5383,39 @@ pub(crate) mod world_spawn_sync_tests {
                 sent[0].yaw,
                 sent[0].pitch
             );
+        });
+    }
+}
+
+#[cfg(test)]
+mod world_spawn_join_tests {
+    /// `PrepareSpawnTask.start`: a returning player whose saved level the world no longer has
+    /// joins in the world spawn's level (`respawnData.dimension()`), at its saved position and
+    /// rotation, not in the Overworld.
+    #[test]
+    #[ignore = "daily"]
+    fn a_returning_player_from_a_missing_level_joins_in_the_world_spawn_level() {
+        crate::game::native_guest_turn_tests::with_guests(|game| {
+            game.world_root = game.save.root.clone();
+            game.level.world_spawn_dimension = Some("minecraft:the_nether".into());
+            let guests = &mut game.lan.as_mut().unwrap().hub.guests;
+            guests.update(0, |g| {
+                g.dimension = "example:gone".into();
+                g.position = [40.5, 70.0, -12.5];
+                g.yaw = 135.0;
+                g.pitch = -20.0;
+            });
+            sunrise_client::lan::playerdata::save(
+                &guests[0],
+                &game.world_root,
+                &Default::default(),
+            );
+            guests.update(0, |g| g.placed = false);
+            game.lan_guest_joined(12, &[], [0.5, 64.0, 0.5]);
+            let g = &game.lan.as_ref().unwrap().hub.guests[0];
+            assert_eq!(g.dimension, "minecraft:the_nether");
+            assert_eq!(g.position, [40.5, 70.0, -12.5]);
+            assert_eq!((g.yaw, g.pitch), (135.0, -20.0));
         });
     }
 }

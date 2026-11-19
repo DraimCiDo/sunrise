@@ -119,6 +119,8 @@ test-payload-probe = []
 test-publication-scope = []
 # Non-consuming residency journal observation for game fixtures only.
 test-residency-observer = []
+# A level side with no weather, tags or block entities, for tests and probes that never read them.
+test-dry-side = []
 default = ["audio", "controllers"]
 # Dev-only: the ignored tracker-send benchmark uses the executable's allocator.
 tracker-send-bench = []
@@ -136,6 +138,7 @@ windows-segment-heap = []
 workspace = true
 
 [dev-dependencies]
+sunrise-client-lib = { path = ".", default-features = false, features = ["test-dry-side"] }
 sunrise-threads = { path = "../sunrise-threads", features = ["test-allocation-probe", "test-game-dir"] }
 sunrise-mod-wasm = { path = "../sunrise-mod-wasm", features = ["listener-fixture", "test-copy-probe"] }
 tempfile = "3"
@@ -257,6 +260,10 @@ path = "../sunrise-client/tests/tall_column.rs"
 [[test]]
 name = "wide_states"
 path = "../sunrise-client/tests/wide_states.rs"
+
+[[test]]
+name = "transient_component_data"
+path = "../sunrise-client/tests/transient_component_data.rs"
 
 [[example]]
 name = "chunk_encoding_bench"

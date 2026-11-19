@@ -36,6 +36,15 @@ pub trait NoBackend {
     fn no_backend() -> Self;
 }
 
+/// The error a gated Host method refuses with when it is called outside the side or phase that
+/// allows it, in place of unwinding: `Result<_, E>` with `E: AccessRefusal` is what the game-side
+/// forwarder generator accepts for an `#[access]` method (it finds the `impl`s in this crate, so
+/// the impl is the marker), and it answers `Err(E::unavailable())` before the call runs.
+pub trait AccessRefusal {
+    /// The refusal for a call outside its allowed phase.
+    fn unavailable() -> Self;
+}
+
 impl NoBackend for ActionRefused {
     /// No game: as for a handle whose fake is gone.
     fn no_backend() -> Self {

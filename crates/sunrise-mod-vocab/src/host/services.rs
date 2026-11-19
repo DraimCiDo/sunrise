@@ -136,7 +136,7 @@ pub trait Commands {
     }
     /// Side: server.
     /// Runs `line` (no slash) as the server's console does: permission
-    /// level 4, from the overworld's spawn, with no output. A teleport to
+    /// level 4, from the world spawn in its level, with no output. A teleport to
     /// another level (`execute in minecraft:the_nether run tp Alex 0 70 0`)
     /// happens at the next tick's start, as the console's. Whether it ran
     /// without failing. During a guest's turn, live players (including the

@@ -733,6 +733,7 @@ mod tests {
             assert_eq!(free.position, Vec3::new(20.5, 0.0, 0.5), "no border");
 
             let w = MobWorld {
+                side: sunrise_client::motion::dry_side(),
                 goal_host: None,
                 border: Some(&border),
                 ..w.clone()

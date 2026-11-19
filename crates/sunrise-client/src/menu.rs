@@ -4194,16 +4194,22 @@ pub(crate) mod tests {
         // A block's friction reads it too; an answer that is NaN or outside 0..=2 keeps the
         // block's own.
         let friction = |context: &LoopContext, kind: &str| {
-            let mut friction = 0.6;
-            crate::motion::native_friction(
-                context,
-                1,
-                kind,
+            use sunrise_world::registry::BlockStateId;
+            let world = crate::world::World::new(BlockStateId(0), 0);
+            crate::motion::read_friction(
+                crate::motion::FrictionLevel {
+                    context,
+                    world: &world,
+                    registry: crate::test_fixtures::air_registry(),
+                    side: crate::motion::dry_side(),
+                    coefficient: &|_| Some(0.6),
+                },
+                Some((1, kind)),
                 sunrise_core::position::BlockPos::new(0, 0, 0),
-                sunrise_world::registry::BlockStateId(0),
-                &mut friction,
-            );
-            friction
+                BlockStateId(0),
+                0.6,
+            )
+            .unwrap()
         };
         assert_eq!(friction(&before, "minecraft:player"), 0.6);
         assert_eq!(friction(&after, "minecraft:player"), 0.98);
@@ -4441,6 +4447,37 @@ pub(crate) mod tests {
             false
         ));
         assert_eq!(asked(), 2);
+        // A mod menu with no backing block (`Slots::Native`) is asked too, with no position even
+        // though its opener supplied a screen position, and the part's answer decides.
+        let blockless = |context: &LoopContext| {
+            let world = crate::world::World::new(sunrise_world::registry::BlockStateId(0), 0);
+            let guest = crate::lan::menu::tests::guest();
+            let menu = crate::lan::menu::Menu {
+                window: 1,
+                kind: 2,
+                pos: Some(far),
+                slots: crate::lan::menu::Slots::Native,
+                size: 27,
+                state: 0,
+                sent: Vec::new(),
+                drag: None,
+                sent_data: Vec::new(),
+                hidden: Vec::new(),
+                mod_type: Some(mod_type),
+                registry_id: "test:rules".into(),
+                craft: None,
+                links: Vec::new(),
+                asks_still_valid: crate::lan::menu::asks_still_valid(Some(mod_type), "test:rules"),
+            };
+            menu.still_valid(context, &world, &guest)
+        };
+        assert!(blockless(&after));
+        assert!(!blockless(&before));
+        assert_eq!(asked(), 4);
+        assert_eq!(
+            crate::native_client_hooks::test_hooks::STILL_VALID_POS.get(),
+            None
+        );
         std::fs::remove_dir_all(&settings).unwrap();
     }
 

@@ -156,7 +156,9 @@ that output. If the region writer cannot encode or admit the complete chunk
 record, it retries with the stored block-entity payloads from the same snapshot. Other changes in
 the snapshot are kept. The read-only level host cannot write to the world or request another save.
 During unload or a removed block's loot roll, the entity
-may no longer be readable through the host; the event still carries its payload and identity.
+may no longer be readable through the host; the event still carries its payload, identity and its
+position and level (`event.pos`, `event.level`), so a mod that keeps live state per dimension and
+position can look it up and write it into `event.tag`.
 `block_drops` and `player_destroyed_block` read the stored data, not the loot copy.
 Changing output does not mark a chunk dirty: mark the entity changed when the live state changes.
 
@@ -173,7 +175,7 @@ load or an unchanged result.
 
 Implement `BlockEntityPart::block_entity_load_additional` to refresh mod-owned state after the server
 applies a saved payload, including `/data merge` and `/data modify`, cloning, structure and item
-placement, falling-block landing, and chunk load. `event.tag` is the applied mod payload and the
+placement, falling-block landing, and chunk load. `event.tag` is the applied mod payload, `event.pos` and `event.level` name the instance, and the
 read-only level host already sees the updated instance. `block_entity_on_load` follows when that
 instance is new; it also fires for a fresh placement that had no saved data.
 

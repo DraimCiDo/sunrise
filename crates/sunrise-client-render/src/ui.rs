@@ -675,7 +675,7 @@ fn slider_sprites(hover: bool, active: bool, dragging: bool) -> (&'static str, &
 /// flipped by Enter (`setFocused`, `keyPressed`): Sunrise's `can_change_value`
 /// for the keyboard, and a drag for the mouse, which focuses it with the value
 /// free to change. So a dragged slider keeps its plain track.
-fn slider_sprites_ext(
+pub(crate) fn slider_sprites_ext(
     hover: bool,
     active: bool,
     focused: bool,

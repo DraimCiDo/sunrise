@@ -154,11 +154,6 @@ jobs:
           echo "source=$source" | tee -a "$GITHUB_OUTPUT"
       - name: Server SDK, warnings denied (hand dispatch)
         if: steps.sdk.outputs.source == 'build'
-        # Release with ThinLTO as published, but 16 codegen units instead of 1: the same features,
-        # flags, exports and link, built in parallel. A fault only one unit's inlining shows first
-        # appears at the prebuilt-game publish.
-        env:
-          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 16
         run: |
           python3 tools/prebuilt_game.py build "$FNR_SCRATCH/prebuilt" --server
           python3 tools/prebuilt_game.py pack "$FNR_SCRATCH/prebuilt" "$FNR_SCRATCH/legs/sdk-leg-server" --with-tool

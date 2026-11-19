@@ -240,5 +240,4 @@ sunrise-client game::wind::wind_charged_tests::a_silent_wind_charge_bursts_witho
 sunrise-client game::wind::wind_charged_tests::a_wind_charged_mob_bursts_with_the_breezes_sound_unless_it_is_silent lib daily game-boot
 sunrise-client game::wither_star_tests::a_withers_nether_star_lives_12000_ticks lib daily game-boot
 sunrise-client game::beacon_cull_tests::a_beam_draws_inside_the_render_distance_only_and_leaves_with_its_column lib daily resources
-sunrise-client game::block_entity_reach_draw_tests::block_entity_draws_match_the_vanilla_cases lib daily resources
 sunrise-client game::mod_raycast_tests::mod_raycasts_hit_loaded_blocks_only_with_far_terrain_on_or_off lib daily resources

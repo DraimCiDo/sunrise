@@ -415,7 +415,9 @@ impl Game<'_> {
             player.position = Vec3::new(from[0], from[1], from[2]);
             player.yaw = yaw;
             player.ground.on_ground = true;
+            let side = game_side!(game);
             let mut w = MotionWorld {
+                side: &side,
                 entities: &[],
                 player,
                 scene: &mut game.world,

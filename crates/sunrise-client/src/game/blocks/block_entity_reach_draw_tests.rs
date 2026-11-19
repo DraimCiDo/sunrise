@@ -127,7 +127,7 @@ fn drawn(game: &mut Game<'_>, block: &str, pos: [i32; 3], camera: glam::DVec3) -
 }
 
 #[test]
-#[ignore = "daily"]
+#[ignore = "run through tools/test_block_entity_reach_parity.py"]
 fn block_entity_draws_match_the_vanilla_cases() {
     let (Ok(cases), Ok(out)) = (
         std::env::var("SUNRISE_REACH_DRAW_CASES"),
