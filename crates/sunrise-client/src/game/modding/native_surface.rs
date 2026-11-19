@@ -214,6 +214,9 @@ impl Game<'_> {
             }
         })?;
         let facts = self.res.facts();
+        if facts.states.get(state.0 as usize).is_none() {
+            return Err(LevelReadError::Unavailable);
+        }
         let level = FrictionLevel {
             world,
             registry: self.pack.assets.registry,
@@ -464,6 +467,40 @@ mod tests {
                 assert!((item_x - expected).abs() < 1.0e-7, "item {block}: {item_x}");
                 assert!((orb_x - expected).abs() < 1.0e-7, "orb {block}: {orb_x}");
             }
+        });
+    }
+    #[test]
+    #[ignore = "daily"]
+    fn nested_friction_queries_stop_at_the_depth_bound_and_unknown_states_are_refused() {
+        let calls = mod_platform::__private::part_tests::friction_game_thread();
+        crate::entry::install_client_hooks();
+        with_game(|game| {
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+            );
+            let registry = game.pack.assets.registry;
+            let lime = registry.default_state("minecraft:lime_wool").unwrap();
+            let level = game.level_ref(game.native_lifecycle.epoch().unwrap(), game.dim.key());
+            let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+            calls.store(0, Ordering::SeqCst);
+            // Each nested ask names another entity id, so no query repeats: only the bound stops
+            // the chain. The innermost part is refused and answers 0.5, which every part above passes on.
+            assert_eq!(
+                level.friction(
+                    game,
+                    [5, 64, 5],
+                    lime.try_into_api().unwrap(),
+                    Some((100, "minecraft:player")),
+                ),
+                Ok(Some(0.5)),
+            );
+            assert_eq!(calls.load(Ordering::SeqCst), 16);
+            let unknown = sunrise_world::registry::BlockStateId(u32::MAX);
+            assert_eq!(
+                game.level_friction(level, [5, 64, 5], unknown, None),
+                Err(mod_api::LevelReadError::Unavailable),
+            );
         });
     }
     #[test]

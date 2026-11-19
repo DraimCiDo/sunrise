@@ -33,12 +33,32 @@ pub fn friction_game_thread() -> Arc<std::sync::atomic::AtomicUsize> {
             }
         }
     }
+    // Asks the same state for the next entity id until the engine refuses a nested query.
+    struct Chain(Arc<AtomicUsize>);
+    #[mod_api::sunrise_part]
+    impl BlockPart for Chain {
+        fn friction(&self, side: crate::LevelSide<'_>, event: &mut FrictionEvent<'_>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            let Some((id, kind)) = event.entity else {
+                return;
+            };
+            let level = match side {
+                crate::LevelSide::Server(level) | crate::LevelSide::Client(level) => level,
+            };
+            let pos = [event.pos.x, event.pos.y, event.pos.z];
+            event.friction = level
+                .friction(pos, event.state, Some((id + 1, kind)))
+                .unwrap_or(0.5);
+        }
+    }
     struct FrictionMod(Arc<AtomicUsize>);
     #[mod_api::__subscriptions]
     impl Hooks for FrictionMod {
         fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
             let copycat = r.block_key("minecraft:glass");
             r.block_part(copycat, CopyMaterial(self.0.clone()));
+            let chain = r.block_key("minecraft:lime_wool");
+            r.block_part(chain, Chain(self.0.clone()));
             for (block, answer) in [
                 ("minecraft:white_wool", 0.98),
                 ("minecraft:red_wool", f32::NAN),

@@ -3794,7 +3794,7 @@ mod slime_bounce_tests {
         };
         item.tick_settle(
             &world,
-            crate::test_resources::air_registry(),
+            crate::test_fixtures::air_registry(),
             &facts,
             true,
             ItemStep {

@@ -4200,7 +4200,7 @@ pub(crate) mod tests {
                 crate::motion::FrictionLevel {
                     context,
                     world: &world,
-                    registry: crate::test_resources::air_registry(),
+                    registry: crate::test_fixtures::air_registry(),
                     coefficient: &|_| Some(0.6),
                 },
                 Some((1, kind)),
