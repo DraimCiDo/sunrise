@@ -67,6 +67,9 @@ Use one dense general-entity store per level, with constant-time identity-to-slo
 
 EntityPart is shared behavior, not mutable per-instance storage. Follow [PR #2328](https://github.com/arismoko/horizon/pull/2328), the provisional #796 state design: existing attachments are the sole Part-data store, with typed authoring erased at registration, snapshot reads and checked transactional edits. Do not introduce a parallel entity data map. #779 supplies entity scope and scoped moments; it does not by itself supply entity ownership. Generate new methods only for named verified moments, with ServerHost or ClientHost and the existing dependency dispatch order. No Game references escape.
 
+Content entity types and general entity types share one key space. A package that declares the same
+key through both routes is refused when its content loads.
+
 ## Tick and residency
 
 At the authoritative entity phase, walk eligible general rows once in stable join order, with an indexed iteration schedule maintained on mutation rather than sorting each tick. For each root run common bookkeeping, its subscribed server behavior, then its passenger subtree. A passenger is not also ticked as a root. Newly committed spawns first tick next phase; a row removed before its turn receives no tick. Buffer structural edits until safe boundaries. Revalidate deferred operations after listener writes and refuse stale decisions without recomputing.

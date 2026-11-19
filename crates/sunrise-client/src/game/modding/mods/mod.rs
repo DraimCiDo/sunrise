@@ -902,6 +902,7 @@ pub(super) fn content_overlay(
             log::warn!("Sunrise: {e}");
         }
     }
+    validate_entity_type_families(&mods, super::general::general_type_catalog())?;
     // Content validation may refuse a package. Revalidate against what really
     // loaded so dependents cannot start with a missing required content mod.
     let loaded: Vec<_> = manifests
@@ -1311,6 +1312,25 @@ fn register_mob_effects(mods: &[sunrise_client::mod_content::ContentMod]) {
     {
         log::warn!("Sunrise: the mods' mob effects changed; restart the game to use them");
     }
+}
+
+/// Content and general types share the entity-type key space even though their definitions
+/// enter through different paths. Refuse the collision before building the content root.
+fn validate_entity_type_families(
+    mods: &[sunrise_client::mod_content::ContentMod],
+    general: &super::general::GeneralTypeCatalog,
+) -> Result<(), String> {
+    for package in mods {
+        for entity in &package.content.entity_types {
+            if general.slot(&entity.id).is_some() {
+                return Err(format!(
+                    "mod {} declares entity type {} as both a content and a general entity type",
+                    package.id, entity.id,
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// the mods' entity types' templates, which the tracker reads their settings
@@ -2168,6 +2188,42 @@ mod tests {
             .unwrap();
         std::fs::remove_dir_all(&cwd).unwrap();
         assert!(status.success());
+    }
+
+    #[test]
+    fn a_package_cannot_declare_one_type_in_both_entity_families() {
+        let general = crate::game::general::GeneralTypeCatalog::freeze(&[
+            mod_api::__private::GeneralEntityTypeDeclaration {
+                mod_id: "ruby".into(),
+                id: "ruby:robot".into(),
+                category: mod_api::GeneralEntityCategory::Misc,
+                width: 0.5,
+                height: 1.0,
+                save_policy: mod_api::GeneralSavePolicy::Save,
+                summonable: true,
+                tracking_chunks: 8,
+                update_interval: 3,
+                payload_version: 1,
+                required_features: Vec::new(),
+            },
+        ])
+        .unwrap();
+        let mut content = sunrise_mod_package::content::Content::declared("ruby");
+        let mut entity: sunrise_mod_package::content::EntityType =
+            serde_json::from_str(r#"{"template":"minecraft:zombie"}"#).unwrap();
+        entity.id = "ruby:robot".into();
+        content.entity_types.push(entity);
+        let mut package = sunrise_client::mod_content::ContentMod {
+            id: "ruby".into(),
+            content,
+            jars: Vec::new(),
+        };
+        assert_eq!(
+            validate_entity_type_families(std::slice::from_ref(&package), &general),
+            Err("mod ruby declares entity type ruby:robot as both a content and a general entity type".into()),
+        );
+        package.content.entity_types[0].id = "ruby:zombie".into();
+        assert_eq!(validate_entity_type_families(&[package], &general), Ok(()));
     }
 
     /// A content mod's living type is a mob of its template's species under
