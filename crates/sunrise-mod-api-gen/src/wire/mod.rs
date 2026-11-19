@@ -892,6 +892,7 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
     guest.push_str(&calls::dispatch(&surface.types, &surface.methods, &prepared, &names).0);
     guest.push_str(&calls::protocol_module());
     wire.push_str(&calls::mark_macro(&names));
+    wire.push_str(&calls::handler_marks_macro(&names));
     let sources = surface.types.index.read.take();
     Ok(Generated {
         wire,

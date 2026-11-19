@@ -286,6 +286,8 @@ pub(super) fn guest(
             trait_path(owner)
         )
         .unwrap();
+        // The proxy is the game's handler, not one the mod sends: it has nothing to mark.
+        out.push_str("fn __sunrise_marks(&self, _: crate::__private::Sealed) {}\n");
         for m in held_methods(methods)
             .into_iter()
             .filter(|m| m.owner == *owner)
@@ -1049,10 +1051,20 @@ pub(crate) fn mark_block(root: &str, name: &str) -> String {
     )
 }
 
+/// A statement marking one export as used in place (`__sunrise_import!`'s `direct` form): the
+/// import is declared in the statement, not in a function of its own.
+fn direct_mark_block(root: &str, name: &str) -> String {
+    format!(
+        "{root}::__sunrise_import!(direct __sunrise_mark_{}, \"{name}\");",
+        mod_call::digest(name)
+    )
+}
+
 /// The `__sunrise_mark!` macro: one arm per export a mod can implement, each a no-op import
 /// named like the export, so a mod's import section lists exactly the hooks and Part methods it
 /// writes; `#[sunrise_mod]` and `#[sunrise_part]` call it for each method an impl overrides. A
-/// plain impl of any other handler trait calls it for nothing, so it carries no marks. The protocol module holds the three imports every guest links.
+/// plain impl of any other handler trait calls it for nothing: its trait's hidden `__sunrise_marks`
+/// method marks it (`handler_marks_macro`). The protocol module holds the three imports every guest links.
 pub(super) fn mark_macro(names: &super::Names) -> String {
     let mut out = String::from(
         "/// Marks that the mod implements one export: an import of the game's table, called for nothing.\n#[doc(hidden)]\n#[cfg(not(test))]\n#[macro_export]\nmacro_rules! __sunrise_mark {\n",
@@ -1089,6 +1101,35 @@ pub(super) fn mark_macro(names: &super::Names) -> String {
     }
     // A method the API keeps off wasm crosses nowhere and has no name.
     out.push_str("($owner:literal $method:ident) => {};\n}\n");
+    out
+}
+
+/// The `__sunrise_handler_marks!` macro: one arm per exported handler trait, marking every method
+/// of it as the game's table names them, for the hidden `__sunrise_marks` method each such trait
+/// declares. A mod that implements the trait (and so has it in a vtable of its own module) imports
+/// them all: the game may call any method of a handler it stores, so a mod built before one of
+/// them changed is refused at load. A Part (or `Hooks`) marks only the methods a mod writes,
+/// through the subscription attribute, and has no arm. A generic trait's arm marks every
+/// instance it has: a method body cannot tell which one it is instantiated for.
+pub(super) fn handler_marks_macro(names: &super::Names) -> String {
+    let mut traits = std::collections::BTreeMap::<&str, Vec<String>>::new();
+    for (owner, _, name) in names.marked() {
+        if !super::SUBSCRIBED.iter().any(|(part, _)| *part == owner) {
+            let base = owner.split('<').next().unwrap();
+            let marks = traits.entry(base).or_default();
+            let mark = direct_mark_block("crate", &name.text());
+            if !marks.contains(&mark) {
+                marks.push(mark);
+            }
+        }
+    }
+    let mut out = String::from(
+        "// A generic trait's arm marks the methods of every instance of it, which over-marks a mod that holds one: a method body cannot tell which instance it is instantiated for.\nmacro_rules! __sunrise_handler_marks {\n",
+    );
+    for (base, marks) in traits {
+        writeln!(out, "({base}) => {{ {} }};", marks.join(" ")).unwrap();
+    }
+    out.push_str("}\n");
     out
 }
 
