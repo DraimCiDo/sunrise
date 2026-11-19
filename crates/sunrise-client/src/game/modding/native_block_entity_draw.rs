@@ -222,7 +222,8 @@ pub struct BlockEntityDraw {
     light: u32,
     /// The block drawn, for `native_draw_item`'s owner.
     block: [i32; 3],
-    poses: Vec<Mat4>,
+    pose: Mat4,
+    parent_poses: Vec<Mat4>,
     lights: (Vec3, Vec3),
     vertices: Vec<Vertex>,
     kept: bool,
@@ -367,7 +368,8 @@ impl BlockEntityDraw {
             animation: 0.0,
             light,
             block,
-            poses: vec![pose],
+            pose,
+            parent_poses: Vec::new(),
             lights,
             vertices,
             kept: false,
@@ -472,13 +474,12 @@ impl BlockEntityDraw {
     }
     /// `PoseStack.pushPose`: `pop` comes back to the pose as it is now.
     fn push(&mut self) {
-        let pose = self.pose();
-        self.poses.push(pose);
+        self.parent_poses.push(self.pose);
     }
     /// `PoseStack.popPose`; the block's own pose is never popped.
     fn pop(&mut self) {
-        if self.poses.len() > 1 {
-            self.poses.pop();
+        if let Some(parent) = self.parent_poses.pop() {
+            self.pose = parent;
         }
     }
     /// Moves what is drawn next by `by`, in blocks.
@@ -549,12 +550,10 @@ impl BlockEntityDraw {
         self.spins.push((self.vertices.len(), None));
     }
     fn apply(&mut self, m: Mat4) {
-        if let Some(pose) = self.poses.last_mut() {
-            *pose *= m;
-        }
+        self.pose *= m;
     }
     pub(super) fn pose(&self) -> Mat4 {
-        self.poses.last().copied().unwrap_or(Mat4::IDENTITY)
+        self.pose
     }
     pub(super) fn vertices_mut(&mut self) -> &mut Vec<Vertex> {
         &mut self.vertices
@@ -775,7 +774,8 @@ impl Game<'_> {
             animation: self.animation_time(),
             light: 0,
             block: [0; 3],
-            poses: Vec::new(),
+            pose: Mat4::IDENTITY,
+            parent_poses: Vec::new(),
             lights: diffuse_lights(self.nether_lighting()),
             vertices: std::mem::take(out),
             kept: false,
@@ -847,8 +847,8 @@ impl Game<'_> {
             // Drawn relative to the block, then moved to the camera, so what
             // is kept can be moved again.
             draw.block = pos;
-            draw.poses.clear();
-            draw.poses.push(Mat4::IDENTITY);
+            draw.pose = Mat4::IDENTITY;
+            draw.parent_poses.clear();
             draw.light = light;
             draw.kept = false;
             draw.spins.clear();
@@ -1385,7 +1385,8 @@ mod tests {
             animation: 0.0,
             light: 0xF0F0,
             block: [0; 3],
-            poses: vec![Mat4::from_translation(Vec3::new(10.0, 0.0, 0.0))],
+            pose: Mat4::from_translation(Vec3::new(10.0, 0.0, 0.0)),
+            parent_poses: Vec::new(),
             lights: diffuse_lights(false),
             vertices: Vec::new(),
             kept: false,
@@ -1632,7 +1633,7 @@ mod tests {
                 .position(|face| face.facing == Direction::South && face.tint_index >= 0)
                 .unwrap();
             let mut surface = draw();
-            surface.poses = vec![Mat4::from_rotation_z(0.25)];
+            surface.pose = Mat4::from_rotation_z(0.25);
             surface.light = 0x7030;
             game.native_draw_model(&mut surface, model, 0xFF80_C040)
                 .unwrap();
@@ -1742,7 +1743,7 @@ mod tests {
                         draw.vertices.extend(std::iter::repeat_n(marker(*x), 4));
                     } else {
                         draw.light = *light;
-                        draw.poses = vec![Mat4::from_translation(Vec3::new(*x, 0.0, 0.0))];
+                        draw.pose = Mat4::from_translation(Vec3::new(*x, 0.0, 0.0));
                         assert!(draw.defer_model(0, 1, *tint));
                     }
                 }
@@ -1822,7 +1823,7 @@ mod tests {
             let camera = DVec3::new(8_000_000.0, 70.2, -4_000_000.0);
             let pose = sunrise_client::gfx::camera_matrix(local, origin, camera);
             let mut surface = draw();
-            surface.poses = vec![pose];
+            surface.pose = pose;
             surface.light = 0xF030;
             game.native_draw_model(&mut surface, model, 0xFF80_C040)
                 .unwrap();
@@ -1947,11 +1948,11 @@ mod tests {
                 Err(ModelError::UnknownModel)
             );
             let mut surface = draw();
-            surface.poses.push(Mat4::from_scale_rotation_translation(
+            surface.pose = Mat4::from_scale_rotation_translation(
                 Vec3::new(2.0, 0.5, 1.5),
                 Quat::from_rotation_y(0.7) * Quat::from_rotation_x(0.3),
                 Vec3::new(8.0, -4.0, 3.0),
-            ));
+            );
             surface.light = 0x7030;
             // Compare the consumer with the existing shared emitter, under the same pose,
             // tint, atlas and light: handle resolution must not change any vertex bytes.
@@ -2157,7 +2158,7 @@ mod tests {
             let mut spun = draw();
             spun.prepared = true;
             spun.light = 0xF0F0;
-            spun.poses = vec![local];
+            spun.pose = local;
             spun.spin([0.0, 1.0, 0.0], [0.5; 3], 0.0, 0.0);
             {
                 let mut ctx = GameBlockEntityDrawContext {
@@ -2169,7 +2170,7 @@ mod tests {
             let mut kept = draw();
             kept.prepared = true;
             kept.light = 0xF0F0;
-            kept.poses = vec![local];
+            kept.pose = local;
             {
                 let mut ctx = GameBlockEntityDrawContext {
                     game,
@@ -2207,7 +2208,7 @@ mod tests {
             let mut deferred = draw();
             deferred.prepared = true;
             deferred.light = 0xF0F0;
-            deferred.poses = vec![local];
+            deferred.pose = local;
             {
                 let mut ctx = GameBlockEntityDrawContext {
                     game,
@@ -2336,7 +2337,7 @@ mod tests {
             game.pack_ids = Some(Default::default());
             // What `mod_block_entity_geometry` does around a mod's `model()` call.
             let mut per_copy = draw();
-            per_copy.poses = vec![local];
+            per_copy.pose = local;
             per_copy.light = 0x30F0;
             game.mark_block_entity(0, 1);
             GameBlockEntityDrawContext {

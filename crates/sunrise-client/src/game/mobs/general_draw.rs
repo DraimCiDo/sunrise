@@ -44,6 +44,9 @@ impl Game<'_> {
         alpha: f64,
         out: &mut Vec<Vertex>,
     ) {
+        let Some(renderers) = super::native_entity_renderers::general_renderers() else {
+            return;
+        };
         let Some(remote) = self.remote.as_ref() else {
             return;
         };
@@ -57,7 +60,9 @@ impl Game<'_> {
             .iter()
             .filter(|(_, row)| row.shown && row.render_attachments.is_some())
         {
-            let Some(resolved) = super::native_entity_renderers::general_renderer(row.type_slot)
+            let Some(resolved) = renderers
+                .general(row.type_slot)
+                .filter(|renderer| !renderer.failed.load(std::sync::atomic::Ordering::Relaxed))
             else {
                 continue;
             };
@@ -94,7 +99,7 @@ impl Game<'_> {
             let light = self.world.light(block[0], eye, block[2]);
             let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
             self.mod_entity_renderer_geometry(
-                &resolved,
+                resolved,
                 &entity,
                 catalog.key(row.type_slot),
                 at - camera,

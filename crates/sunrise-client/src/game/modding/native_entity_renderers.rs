@@ -44,7 +44,7 @@ static REGISTERED: OnceLock<BTreeMap<String, Arc<dyn EntityRenderer>>> = OnceLoc
 static NO_RENDERERS: BTreeMap<String, Arc<dyn EntityRenderer>> = BTreeMap::new();
 
 /// The table the last resource load resolved; none before the first.
-static TABLE: RwLock<Option<EntityRendererTable>> = RwLock::new(None);
+static TABLE: RwLock<Option<Arc<EntityRendererTable>>> = RwLock::new(None);
 
 /// Whether the last load resolved a renderer for any living type: a frame checks only this for
 /// each mob when none was registered.
@@ -280,14 +280,12 @@ pub(in crate::game) fn item_frame_renderer(
     table.as_ref()?.item_frame(glow).cloned()
 }
 
-/// The renderer the last resource load resolved for the general type in catalog slot `slot`, when
-/// a mod registered one: with none registered for any general type, one flag check, with no lock.
-pub(in crate::game) fn general_renderer(slot: usize) -> Option<Arc<Resolved<dyn EntityRenderer>>> {
+/// A frame's immutable renderer table. Capture it once, releasing the lock before calling mods.
+pub(in crate::game) fn general_renderers() -> Option<Arc<EntityRendererTable>> {
     if !ANY_GENERAL.load(Ordering::Relaxed) {
         return None;
     }
-    let table = TABLE.read().unwrap_or_else(PoisonError::into_inner);
-    table.as_ref()?.general(slot).cloned()
+    TABLE.read().unwrap_or_else(PoisonError::into_inner).clone()
 }
 
 impl Game<'_> {
@@ -322,7 +320,7 @@ impl Game<'_> {
         let any_painting = table.painting.is_some();
         let any_item_frame = table.item_frame.is_some() || table.glow_item_frame.is_some();
         let any_general = table.general.iter().any(Option::is_some);
-        *TABLE.write().unwrap_or_else(PoisonError::into_inner) = Some(table);
+        *TABLE.write().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(table));
         ANY_LIVING.store(any_living, Ordering::Relaxed);
         ANY_TNT.store(any_tnt, Ordering::Relaxed);
         ANY_EXPERIENCE_ORB.store(any_experience_orb, Ordering::Relaxed);
