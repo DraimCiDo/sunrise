@@ -79,8 +79,8 @@ impl Queue {
             .name("Render submit".into())
             .spawn(move || {
                 for job in job_rx {
-                    let commands = job.encoder.finish();
-                    let submission = queue.submit([commands]);
+                    let commands = crate::hitch::t("S_finish", || job.encoder.finish());
+                    let submission = crate::hitch::t("S_submit", || queue.submit([commands]));
                     let lost = || {
                         job.lost
                             .as_ref()
@@ -89,14 +89,14 @@ impl Queue {
                     if !lost()
                         && let Some(after) = job.after
                     {
-                        after();
+                        crate::hitch::t("S_after", after);
                     }
                     // A readback can find the loss too. Drop the unpresented texture before
                     // telling the render thread this submission has landed.
                     if let Some(surface) = job.surface
                         && !lost()
                     {
-                        queue.present(surface);
+                        crate::hitch::t("S_present", || queue.present(surface));
                     }
                     if done_tx.send(submission).is_err() {
                         break;
@@ -150,6 +150,7 @@ impl Queue {
         }
         if let Some(l) = landing.as_mut() {
             let started = Instant::now();
+            let _bt = Bt(started);
             // A thread that died (a wgpu panic on it) panics here, as it would have in place.
             let submission = l
                 .done
@@ -256,3 +257,6 @@ mod tests {
         }
     }
 }
+
+struct Bt(Instant);
+impl Drop for Bt { fn drop(&mut self) { crate::hitch::bt("queue_wait", self.0); } }

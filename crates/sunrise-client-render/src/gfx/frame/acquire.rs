@@ -83,7 +83,7 @@ impl Renderer {
         let acquired = if fg {
             None
         } else {
-            self.surface.as_ref().map(|s| s.get_current_texture())
+            self.surface.as_ref().map(|s| crate::hitch::t("get_current_texture", || s.get_current_texture()))
         };
         self.last_wait = landed + queued + acquire.elapsed();
         // Inside the acquire's time already.

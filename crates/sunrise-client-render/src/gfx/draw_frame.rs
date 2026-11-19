@@ -27,15 +27,22 @@ impl Renderer {
         debug_assert_eq!(output.encoding, self.hdr.as_ref().map(|hdr| hdr.output));
         // Its steps as spans (SUNRISE_SPIKES): each lap names the step that just ended.
         let mut laps = crate::spans::laps();
+        {
+            static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let now = self.uploaded_bytes;
+            let d = now - LAST.swap(now, std::sync::atomic::Ordering::Relaxed);
+            if d >= 1 << 20 {
+                eprintln!("HITCH @{:.0} UPLOAD {} KiB sections_resident={}", crate::hitch::now(), d >> 10, self.sections.len());
+            }
+        }
         let landing = Instant::now();
-        self.land_frame();
+        crate::hitch::t("land_frame", || self.land_frame());
         // The frame's one poll takes in what earlier frames read back (GPU times, GPU
         // culling's statistics, occlusion results, a shader pack's centre depth); their
         // collectors don't poll. It, or the previous frame's submission, is often where a
         // device loss shows: this frame then touches the device no more and holds no surface
         // texture, and `render` leaves recovery to its caller.
-        let polled =
-            super::in_flight::poll_live(&self.device, &self.device_lost, wgpu::PollType::Poll);
+        let polled = crate::hitch::t("poll", || super::in_flight::poll_live(&self.device, &self.device_lost, wgpu::PollType::Poll));
         if self.device_lost() {
             return Err(super::in_flight::LOST.into());
         }
@@ -52,18 +59,18 @@ impl Renderer {
         // through a pack dropped (Shader Options) or not loaded yet (`Renderer::new`),
         // so the next world's sections, which the level loading screen uploads, stay.
         if !frame.title {
-            self.follow_translucent_layout();
-            self.follow_packed_layout();
+            crate::hitch::t("follow_layout", || {self.follow_translucent_layout();
+            self.follow_packed_layout();});
         }
         let released = self.arena.trim();
         self.graveyard.add(released);
-        let left = self.compact_arena();
+        let left = crate::hitch::t("compact_arena", || self.compact_arena());
         if let Some(arena) = &mut self.translucent_arena {
             self.graveyard.add(arena.trim());
         }
         self.graveyard.add(self.sorted_indices.trim());
-        arena::free_later(self.graveyard.advance());
-        self.shrink_translucent(left);
+        crate::hitch::t("free_later", || arena::free_later(self.graveyard.advance()));
+        crate::hitch::t("shrink_translucent", || self.shrink_translucent(left));
         if let Some(flat) = &mut self.flat {
             let translucent = self.translucent_arena.as_ref();
             flat.trim(|key| match key.checked_sub(flat::TRANSLUCENT_KEYS) {

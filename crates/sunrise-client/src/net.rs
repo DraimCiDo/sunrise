@@ -1147,6 +1147,7 @@ fn receive_play(
             play::Clientbound::ChunkBatchStart(_) => batch.on_batch_start(),
             play::Clientbound::ChunkBatchFinished(p) => {
                 batch.on_batch_finished(p.size);
+                eprintln!("HITCH @{:.0} BATCH {}", sunrise_client_render::hitch::now(), p.size);
                 reply(play::Serverbound::ChunkBatchReceived(
                     play::ChunkBatchReceived {
                         chunks_per_tick: batch.desired_chunks_per_tick(),

@@ -10455,6 +10455,9 @@ impl Game<'_> {
                     let ticked = Instant::now();
                     let rendered = self.render_and_flip(elapsed)?;
                     self.native_frame_end()?;
+                    if now.elapsed().as_millis() >= 50 || elapsed.as_millis() >= 50 {
+                        eprintln!("HITCH @{:.0} frame gap {:?} total {:?} update {:?} ticks {:?} render {:?} steps {}", sunrise_client_render::hitch::now(), elapsed, now.elapsed(), updated - now, ticked - updated, ticked.elapsed(), steps);
+                    }
                     // The frame's spans, taken every frame they are recorded so they never
                     // pile up: the slow-frame line's.
                     let frame_spans = if sunrise_client::spans::recording_here() {

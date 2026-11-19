@@ -148,6 +148,7 @@ pub mod sound_engine;
 pub mod sound_events;
 pub mod sound_preview;
 pub mod spans;
+pub mod hitch;
 mod sprite_cache;
 pub mod sprites;
 pub mod streaming;

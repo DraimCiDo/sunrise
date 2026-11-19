@@ -1433,7 +1433,7 @@ impl Renderer {
             Some(size) => self.draw_scaled_frame(frame, size),
             None => self.draw_frame(frame, None, self.output),
         };
-        self.finish_prepared_frame();
+        crate::hitch::t("finish_prepared", || self.finish_prepared_frame());
         // A frame that was not drawn still submits the section copies and
         // atlas patches (glyphs, skins, maps, mods' dynamic textures), which the caller
         // already took.

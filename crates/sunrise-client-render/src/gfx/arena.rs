@@ -404,6 +404,7 @@ impl Arena {
             None if capacity > len => (self.create(device, len, true)?, len),
             None => return None,
         };
+        eprintln!("HITCH @{:.0} ARENA_NEWPAGE {} MiB", crate::hitch::now(), capacity * self.stride >> 20);
         let mut free = FreeList::new(capacity);
         let start = free.take(len).expect("a new page fits one section");
         let page = Page {
@@ -639,6 +640,7 @@ impl Arena {
             .sources_enabled
             .then(|| Self::source_buffer(device, capacity))
             .flatten();
+        eprintln!("HITCH @{:.0} ARENA_GROW page {page} to {} MiB", crate::hitch::now(), capacity * self.stride >> 20);
         let old = self.pages[page].as_mut().expect("live arena page");
         // Copies recorded for the old buffer run before this one.
         encoder.copy_buffer_to_buffer(&old.buffer, 0, &buffer, 0, old.capacity * self.stride);
