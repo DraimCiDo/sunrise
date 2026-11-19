@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use sunrise_core::java_string::{java_string_hash, java_string_hash_str};
 
 const EXHAUSTIVE_CHUNKS: u64 = 1 + 65_536;
-const MAX_LEN: usize = 64;
+const MAX_LEN: usize = 600;
 
 struct SplitMix(u64);
 impl SplitMix {
@@ -35,7 +35,7 @@ impl SplitMix {
     }
 }
 
-/// One random string into `out`, its length returned: 0 to 64 units, all ASCII, all Latin-1, any
+/// One random string into `out`, its length returned: 0 to 600 units, all ASCII, all Latin-1, any
 /// 16-bit units, or a mix of ASCII, Latin-1, BMP, surrogate pairs and lone surrogates.
 fn random_string(rng: &mut SplitMix, out: &mut [u16; MAX_LEN]) -> usize {
     let len = (rng.next() % (MAX_LEN as u64 + 1)) as usize;

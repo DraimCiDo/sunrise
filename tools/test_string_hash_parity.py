@@ -2,7 +2,7 @@
 """`java_string_hash` against JDK 25's String.hashCode, bit for bit.
 
 Every string of one and of two UTF-16 units (all 2^32 pairs, surrogates included), then seeded random
-strings of 0 to 64 units mixing ASCII, Latin-1, BMP, surrogate pairs and lone surrogates (`--billions`).
+strings of 0 to 600 units mixing ASCII, Latin-1, BMP, surrogate pairs and lone surrogates (`--billions`).
 The oracle (VanillaStringHashOracle, JDK only: no game jar) and the Rust probe (sunrise-core's
 `sunrise-string-hash-parity`) generate the same strings from the same seed and print a streaming digest
 per chunk; a chunk whose digests differ is dumped on both sides and its first difference written to

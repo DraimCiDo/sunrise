@@ -19,7 +19,7 @@ import java.util.concurrent.Future;
  */
 public final class VanillaStringHashOracle {
     static final int EXHAUSTIVE_CHUNKS = 1 + 65_536;
-    static final int MAX_LEN = 64;
+    static final int MAX_LEN = 600;
 
     interface Each { void accept(char[] units, int len, int hash); }
 
