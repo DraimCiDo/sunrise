@@ -12,11 +12,8 @@ pub mod limits {
     /// entity.
     pub const PAYLOAD_LIMIT: usize = 65_536;
     /// The deepest nesting of a general entity's decoded data. The
-    /// payload decode checks it; the record tree itself has the stricter
-    /// passenger-depth bound.
+    /// payload decode checks it.
     pub const MAX_NESTING: u32 = 32;
-    /// The deepest chain of passengers a general entity tree may carry.
-    pub const MAX_PASSENGER_DEPTH: u32 = 16;
     /// The largest record a missing mod's quarantined general entity may
     /// occupy, as its encoded NBT size. A larger record is skipped with a
     /// warning rather than preserved. There is no vanilla analogue:
@@ -68,6 +65,9 @@ pub struct GeneralEntityTypeDeclaration {
     pub width: f64,
     /// The type's finite height in blocks, as supplied to the vanilla builder.
     pub height: f64,
+    /// Optional finite vehicle-local passenger point in blocks (`[x, y, z]`).
+    /// `None` uses the top center of the box.
+    pub passenger_attachment: Option<[f64; 3]>,
     /// Whether instances of the type persist.
     pub save_policy: GeneralSavePolicy,
     /// Whether the type may be summoned by name.
@@ -94,6 +94,7 @@ impl Default for GeneralEntityTypeDeclaration {
             category: GeneralEntityCategory::Misc,
             width: 0.6,
             height: 1.8,
+            passenger_attachment: None,
             save_policy: GeneralSavePolicy::Save,
             summonable: true,
             tracking_chunks: 5,
@@ -122,7 +123,7 @@ pub enum GeneralEntityRegistrationError {
     InvalidId,
     /// Another declaration already covers the type.
     Duplicate,
-    /// A dimension is NaN or infinite.
+    /// A dimension or passenger attachment component is NaN or infinite.
     NotFinite,
     /// A required feature names no loaded mod.
     UnknownDependency,
@@ -139,13 +140,16 @@ pub trait GeneralTypesRegistrar {
     /// Declare a general entity type of the mod's own (vanilla's
     /// `EntityType` builder, NeoForge's `RegisterEvent`): `path` in the mod's
     /// namespace (`robot` of `mymod` is `mymod:robot`), its category, its
-    /// finite `width` and `height` in blocks, its save and summon
-    /// policy, its signed integer tracking distance and update interval, its payload
+    /// finite `width` and `height` in blocks, its passenger attachment, its save and
+    /// summon policy, its signed integer tracking distance and update interval, its payload
     /// schema version and the loaded mods it requires.
     ///
+    /// `passenger_attachment` is the finite `[x, y, z]` passenger point in vehicle-local
+    /// blocks, rotated with the vehicle's yaw. `None` uses `[0.0, height, 0.0]`.
+    ///
     /// An id outside the mod's manifest-owned namespaces, a malformed id, a
-    /// duplicate of this mod's or another's, a non-finite dimension, a required feature naming no
-    /// loaded mod, or a declaration after the registry froze (the
+    /// duplicate of this mod's or another's, a non-finite dimension or attachment, a required
+    /// feature naming no loaded mod, or a declaration after the registry froze (the
     /// registration phase has ended) refuses, naming the mod, without
     /// panicking. Invalid input is refused, never clamped.
     fn declare_general_entity(
@@ -154,6 +158,7 @@ pub trait GeneralTypesRegistrar {
         category: GeneralEntityCategory,
         width: f64,
         height: f64,
+        passenger_attachment: Option<[f64; 3]>,
         save_policy: GeneralSavePolicy,
         summonable: bool,
         tracking_chunks: i32,

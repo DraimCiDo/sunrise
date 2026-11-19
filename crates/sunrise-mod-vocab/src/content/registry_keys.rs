@@ -222,7 +222,7 @@ fn ordered_slot_is_live(
         .unwrap_or(false)
 }
 
-/// Complete the built-in entity-type registry in `ids`' registration order.
+/// Complete the entity-type registry in the order supplied by the game.
 pub fn resolve_entity_types<'a>(ids: impl IntoIterator<Item = &'a str>) -> Result<(), Vec<String>> {
     let names = crate::parts::requested_keys()
         .entity_types
@@ -280,7 +280,7 @@ pub fn resolved_entity_type_key_parts(parts: &[&str]) -> Option<EntityTypeKey> {
     })
 }
 
-/// Every built-in entity-type key in registry order.
+/// Every entity-type key in registry order, with native general types last.
 pub fn entity_type_keys() -> Vec<EntityTypeKey> {
     resolved_entity_types()
         .get()

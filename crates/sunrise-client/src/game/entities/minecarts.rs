@@ -419,6 +419,11 @@ fn cart_seat(cart: Vec3, seat_offset: f64) -> Vec3 {
     Vec3::new(cart.x, cart.y + seat_offset, cart.z)
 }
 
+/// A general rider's seat on a cart: the cart's passenger attachment with no vehicle attachment of its own.
+pub(super) fn cart_general_seat(cart: Vec3) -> Vec3 {
+    cart_seat(cart, PASSENGER_Y)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Shape {
     NorthSouth,
@@ -2028,14 +2033,8 @@ impl Game<'_> {
             }
             let p = self.carts[i].position;
             let kind = self.carts[i].kind.id();
-            let source = sunrise_client::health::HurtSource {
-                damage_type: "minecraft:lava",
-                causing: 0,
-                direct: 0,
-                position: None,
-            };
             let vanilla = self.saved_refuses_damage(id, "minecraft:lava", false);
-            if !self.native_nonliving_invulnerable(id, kind, source, vanilla) {
+            if !self.refuses_lava_hurt(id, kind, vanilla) {
                 self.hurt_cart(i, 4.0, false, true, CartHit::default());
             }
             self.lava_hurt_sound([p.x, p.y, p.z]);

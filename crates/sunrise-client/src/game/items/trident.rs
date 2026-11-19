@@ -591,7 +591,9 @@ impl Game<'_> {
             if self.player.as_ref().is_some_and(|p| p.ground.on_ground) {
                 let entities = self.entity_collisions(Mover::Player);
                 if let Some(player) = self.player.as_mut() {
+                    let side = game_side!(self);
                     let _ = MotionWorld {
+                        side: &side,
                         entities: &entities,
                         player,
                         scene: &mut self.world,

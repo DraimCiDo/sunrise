@@ -21,6 +21,7 @@ use super::{
     Game,
     commands::Target,
     entity::{Entity as _, entity_lists_of, for_each_entity},
+    remote::Remote,
     transactions::After,
 };
 use mod_api::{
@@ -82,13 +83,17 @@ fn entity_ray_hits(
 }
 
 impl Game<'_> {
+    /// The logged-in window and network id for an entity handle in its current world.
+    pub(super) fn native_client_entity_context(&self, entity: EntityRef) -> Option<(&Remote, i32)> {
+        let remote = self.remote.as_ref().filter(|r| r.logged_in)?;
+        (self.native_lifecycle.epoch() == Some(entity.epoch())).then_some(())?;
+        Some((remote, i32::try_from(entity.id()).ok()?))
+    }
+
     /// An entity tracked by the remote client but absent from local entity lists.
     pub(super) fn native_client_tracked(&self, entity: EntityRef) -> Option<(&str, [f64; 3])> {
-        let remote = self.remote.as_ref()?;
-        if !remote.logged_in || self.native_lifecycle.epoch() != Some(entity.epoch()) {
-            return None;
-        }
-        remote.tracked_entity(i32::try_from(entity.id()).ok()?)
+        let (remote, id) = self.native_client_entity_context(entity)?;
+        remote.tracked_entity(id)
     }
 
     /// What a handle names now, or None for a stale or foreign one.
@@ -103,9 +108,7 @@ impl Game<'_> {
     /// the ones the server tracks to it). None for a stale handle, with no
     /// login, or for an entity the client doesn't have.
     pub(super) fn native_client_entity_target(&self, entity: EntityRef) -> Option<Target> {
-        let remote = self.remote.as_ref().filter(|r| r.logged_in)?;
-        (self.native_lifecycle.epoch() == Some(entity.epoch())).then_some(())?;
-        let id = i32::try_from(entity.id()).ok()?;
+        let (remote, id) = self.native_client_entity_context(entity)?;
         if id == remote.entity_id {
             return self.player.as_ref().map(|_| Target::Player);
         }
@@ -840,7 +843,16 @@ impl Game<'_> {
     /// The entity's yaw and pitch in degrees (`Entity.getYRot`, `getXRot`); 0
     /// for the kinds that don't turn. API 373.
     pub(super) fn entity_rotation(&self, entity: EntityRef) -> Option<[f32; 2]> {
-        Some(self.target_rotation(self.native_entity_read_target(entity)?))
+        if let Some(target) = self.native_entity_read_target(entity) {
+            return Some(self.target_rotation(target));
+        }
+        let (remote, id) = self.native_client_entity_context(entity)?;
+        remote
+            .general
+            .rows
+            .get(&id)
+            .filter(|row| row.shown)
+            .map(|row| row.rotation)
     }
     /// The entity's type (`Entity.getType`): `minecraft:zombie`. API
     /// 373.

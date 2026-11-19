@@ -538,8 +538,9 @@ static BLOCK_PROPERTIES: Mutex<Vec<(usize, Arc<BlockProperties>)>> = Mutex::new(
 /// `BlockProperties` of a block registry, listed once: a registry never
 /// changes once built, and walking its tens of thousands of states took
 /// about 30 ms of every world opening.
-pub(super) fn block_properties(registry: &'static BlockRegistry) -> Arc<BlockProperties> {
-    let key = std::ptr::from_ref(registry) as usize;
+pub(super) fn block_properties(registry: &BlockRegistry) -> Arc<BlockProperties> {
+    // The payload is retained for the process, so equal data shares one table whatever borrows it.
+    let key = registry.payload_identity();
     let mut cache = BLOCK_PROPERTIES.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((_, properties)) = cache.iter().find(|(cached, _)| *cached == key) {
         return properties.clone();
@@ -879,6 +880,11 @@ impl Game<'_> {
             types = reg.summonable.clone();
             types.push("minecraft:player".into());
             types.sort();
+        }
+        for key in super::general::general_type_catalog().keys() {
+            if !types.iter().any(|id| id == key) {
+                types.push(key.to_owned());
+            }
         }
         reg.entity_types = types;
         // The mob effect registry: every effect `/effect` and the

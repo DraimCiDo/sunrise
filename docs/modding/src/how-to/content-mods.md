@@ -599,7 +599,7 @@ was made: `entity()` (the entity's id, `None` for the empty, position and cache 
 - **No re-entry.** The query holds the entity's state from before the move, and a collision query
   made inside the callback gets the empty-context answer, never a nested call.
 - **No `Host`.** A move holds the level's collision data and cannot lend a `Host`, as for
-  `entity_move` and `friction`. The part answers from the query and from state it keeps itself. A
+  `entity_move`. The part answers from the query and from state it keeps itself. A
   rule that needs more (a belt's set of carried entities; powder snow's fall distance) tracks that
   state in the mod, keyed by `query.entity()`. If a mod needs an entity read it cannot track, one
   captured field is added to `CollisionQuery`; the `Host` is not reopened.

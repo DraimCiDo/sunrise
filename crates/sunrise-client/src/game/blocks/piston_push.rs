@@ -378,7 +378,7 @@ impl Game<'_> {
     /// at the blocks, the world border and the entities a body collides
     /// with), without a piston's per-tick travel limit or its noclip; a
     /// `noPhysics` body moves the whole way. The local player takes the
-    /// client's own move (`block_push_player`), an armor stand its own
+    /// client's own move (`move_local_player`), an armor stand its own
     /// (`shoves_armor_stand`), and a painting, an item frame or a cushion
     /// breaks (`lid_breaks_attached`).
     ///
@@ -431,7 +431,7 @@ impl Game<'_> {
         if self.lid_spares(lid, self.lid_root(lid), MoveWho::Player, false) {
             return;
         }
-        self.block_push_player(lid.mover(), movement);
+        let _ = self.move_local_player(lid.mover(), movement);
     }
 
     /// [`Self::lid_push_local`] for this tick's shulker box lids.
@@ -548,7 +548,7 @@ impl Game<'_> {
         stand_grid: &mut Option<sunrise_client::entities::ObstacleGrid>,
     ) {
         if target == MoveWho::Player {
-            self.block_push_player(mover, movement);
+            let _ = self.move_local_player(mover, movement);
             return;
         }
         // Armor stands arm their gate in their own collided shove.
@@ -642,29 +642,37 @@ impl Game<'_> {
         with_entity!(self, handle, entity => entity.position()).subtract(from)
     }
 
-    /// `Entity.move(mover, …)` for the local player, pushed by a lid or a
-    /// piston: an ordinary move, so the collision scan stops and steps it and
-    /// its end writes the ground state (`Entity.setOnGroundWithMovement`). A
-    /// push lifting the body off the ground leaves it airborne, and the next
-    /// tick's gravity lands it instead of a stale ground flag holding it.
-    fn block_push_player(&mut self, mover: MoverType, movement: Vec3) {
+    /// The local player's ordinary `Entity.move(mover, …)`: the collision scan stops
+    /// and steps it, and the end of the move updates its ground, fall and velocity state.
+    pub(in crate::game) fn move_local_player(
+        &mut self,
+        mover: MoverType,
+        movement: Vec3,
+    ) -> sunrise_client::Result<Option<Vec3>> {
         let entities = self.entity_collisions(Mover::Player);
-        if let Some(player) = self.player.as_mut() {
-            let _ = MotionWorld {
-                entities: &entities,
-                player,
-                scene: &mut self.world,
-                assets: &self.pack.assets,
-                collision_binding: self.collision,
-                resources: self.motion,
-                health: &self.health_resources,
-                loop_context: &self.loop_context,
-                damage_hooks: &self.damage_hooks,
-                tag_items: Some(world_items!(self)),
-                block_registries: Some(&self.pack.block_registries),
-            }
-            .block_push(mover, movement);
+        let section_scope = self.player_section_scope();
+        let Some(player) = self.player.as_mut() else {
+            return Ok(None);
+        };
+        let side = game_side!(self);
+        let _sections = section_scope.map(|scope| scope.begin(&mut self.native_lifecycle));
+        let before = player.position;
+        MotionWorld {
+            side: &side,
+            entities: &entities,
+            player,
+            scene: &mut self.world,
+            assets: &self.pack.assets,
+            collision_binding: self.collision,
+            resources: self.motion,
+            health: &self.health_resources,
+            loop_context: &self.loop_context,
+            damage_hooks: &self.damage_hooks,
+            tag_items: Some(world_items!(self)),
+            block_registries: Some(&self.pack.block_registries),
         }
+        .move_with_cause(mover, movement)?;
+        Ok(Some(player.position.subtract(before)))
     }
 
     fn push_for_piston(
@@ -995,15 +1003,9 @@ impl Game<'_> {
         // check, restitution and block speed).
         if target == MoveWho::Player {
             with_piston_noclip(piston_direction, || {
-                self.block_push_player(cause, movement);
+                let _ = self.move_local_player(cause, movement);
             });
             let after = self.player.as_ref().map_or(before, |p| p.bounds());
-            if after != before
-                && let Ok(id) = u32::try_from(self.own_entity_id())
-            {
-                self.entity_section_moved_id(id);
-                self.tell_entity_sections();
-            }
             self.piston_block_triggers(before, after);
             self.piston_cactus_contact(target, before, after, pricked);
             return;

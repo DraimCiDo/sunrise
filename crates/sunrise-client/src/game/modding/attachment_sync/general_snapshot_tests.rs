@@ -20,6 +20,7 @@ impl mod_api::Hooks for Declare {
             GeneralEntityCategory::Misc,
             0.8,
             1.9,
+            None,
             GeneralSavePolicy::Save,
             true,
             8,

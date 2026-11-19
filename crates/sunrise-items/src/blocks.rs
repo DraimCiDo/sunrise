@@ -181,7 +181,11 @@ impl StateFacts {
     }
 }
 /// Compact, owned behaviour inputs retained until the normal behaviour startup stage.
-/// No borrowed gameplay JSON or process-wide cache survives the fact loader.
+/// No borrowed gameplay JSON survives the fact loader. Test resource loads may
+/// memoize these owned tables; normal game builds retain no process-wide fact cache.
+/// That memo bypasses itself only for the one registration-dependent input today, mod
+/// fluids: a new input that depends on registrations must join its key or its bypass.
+#[derive(Clone, Debug, PartialEq)]
 pub struct GameplayProjection {
     flags: u16,
     emission: u64,
@@ -289,6 +293,7 @@ impl GameplayStateSource for GameplayProjection {
     }
 }
 
+#[derive(Clone)]
 pub struct BlockFacts {
     pub states: Vec<StateFacts>,
     pub air: BlockStateId,

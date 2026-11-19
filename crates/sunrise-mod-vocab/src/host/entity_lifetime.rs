@@ -54,6 +54,7 @@ pub trait EntityLifetimeBackendMut {
     /// removal (Oozing's slimes, Weaving's cobwebs, Wind Charged's burst),
     /// still with no death and no loot. False for a player, a dragon part (it
     /// leaves with its dragon), or a stale handle.
+    /// Removing a general entity dismounts its passengers without removing them.
     /// Dropped items share `entity_discard`'s block-entity tick staging;
     /// non-item removal is deliberately immediate.
     #[access(WorldOnly)]

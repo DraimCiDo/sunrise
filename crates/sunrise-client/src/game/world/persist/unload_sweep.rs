@@ -12,8 +12,38 @@ impl Game<'_> {
         let gone = |p: Vec3| keys.contains(&chunk_of(p));
         let mut removed: Vec<u32> = Vec::new();
         let riding = self.riding;
+        let ridden_roots: HashSet<_> = self
+            .lan
+            .iter()
+            .flat_map(|host| host.hub.guests.iter())
+            .filter(|guest| guest.placed && guest.dimension == self.dim.id())
+            .filter_map(|guest| guest.vehicle)
+            .chain(riding)
+            .filter_map(|vehicle| self.riding_root(vehicle))
+            .collect();
+        // Resolve every passenger before any family is removed, so the real
+        // root's chunk controls the whole tree even across storage families.
+        let leaves = |id, at, mount: Option<u32>| {
+            let Some(root) = mount.and_then(|vehicle| self.riding_root(vehicle)) else {
+                return !ridden_roots.contains(&id) && gone(at);
+            };
+            !ridden_roots.contains(&root) && gone(self.saved_vehicle_position(root).unwrap_or(at))
+        };
+        let leaving: HashSet<u32> = self
+            .mob_objects()
+            .filter(|m| leaves(m.id, m.position, m.extra.mount))
+            .map(|m| m.id)
+            .chain(
+                self.resident_entities
+                    .general
+                    .rows
+                    .iter()
+                    .filter(|r| leaves(r.id, r.position, r.mount))
+                    .map(|r| r.id),
+            )
+            .collect();
         self.boats.retain(|b| {
-            let keep = !gone(b.position) || Some(b.id) == riding;
+            let keep = !gone(b.position) || ridden_roots.contains(&b.id);
             if !keep {
                 removed.push(b.id);
             }
@@ -31,7 +61,7 @@ impl Game<'_> {
             self.discard_resident_dragon();
         }
         self.carts.retain(|c| {
-            let keep = !gone(c.position) || Some(c.id) == riding;
+            let keep = !gone(c.position) || ridden_roots.contains(&c.id);
             if !keep {
                 removed.push(c.id);
             }
@@ -45,14 +75,14 @@ impl Game<'_> {
             keep
         });
         self.others.retain(|o| {
-            let keep = !gone(o.position);
+            let keep = !gone(o.position) || ridden_roots.contains(&o.id);
             if !keep {
                 removed.push(o.id);
             }
             keep
         });
         self.armor_stands.retain(|a| {
-            let keep = !gone(a.position);
+            let keep = !gone(a.position) || ridden_roots.contains(&a.id);
             if !keep {
                 removed.push(a.id);
             }
@@ -93,19 +123,6 @@ impl Game<'_> {
             }
             keep
         });
-        // Riders leave with their root vehicle, a boat's with the boat.
-        let leaving: HashSet<u32> = self
-            .mob_object_slots()
-            .filter(|&object| {
-                let root = self.mob_at(self.mob_root(object));
-                match root.extra.mount {
-                    Some(v) if removed.contains(&v) => true,
-                    Some(v) if self.boats.iter().any(|b| b.id == v) => false,
-                    _ => gone(root.position),
-                }
-            })
-            .map(|object| self.mob_at(object).id)
-            .collect();
         self.mobs.retain(|m| {
             let keep = !leaving.contains(&m.id);
             if !keep {
@@ -126,7 +143,15 @@ impl Game<'_> {
             let ridden: HashSet<u32> = self
                 .mob_objects()
                 .filter_map(|m| m.extra.mount)
-                .chain(riding)
+                .chain(
+                    self.resident_entities
+                        .general
+                        .rows
+                        .iter()
+                        .filter(|row| !leaving.contains(&row.id))
+                        .filter_map(|row| row.mount),
+                )
+                .chain(ridden_roots.iter().copied())
                 .collect();
             self.persist.off_level.retain(|id, object| {
                 let keep = object.as_mob().is_some() || ridden.contains(id);
@@ -159,36 +184,8 @@ impl Game<'_> {
         self.rockets.retain(|r| !gone(r.position));
         self.tridents.retain(|t| !gone(t.position));
         self.tnts.retain(|t| !gone(t.position));
-        // A general row leaves with its chunk, its riders with it: a rider's
-        // record saved inside its root's, a rider goes when its root's chunk
-        // goes and stays while the root stays, whatever its own position.
-        let mut gone_general_roots: HashSet<u32> = self
-            .resident_entities
-            .general
-            .rows
-            .iter()
-            .filter(|row| row.mount.is_none() && gone(row.position))
-            .map(|row| row.id)
-            .collect();
-        loop {
-            let before = gone_general_roots.len();
-            for row in &self.resident_entities.general.rows {
-                if row
-                    .mount
-                    .is_some_and(|mount| gone_general_roots.contains(&mount))
-                {
-                    gone_general_roots.insert(row.id);
-                }
-            }
-            if gone_general_roots.len() == before {
-                break;
-            }
-        }
         self.resident_entities.general.rows.retain(|row| {
-            let keep = match row.mount {
-                None => !gone(row.position),
-                Some(root) => !gone_general_roots.contains(&root),
-            };
+            let keep = !leaving.contains(&row.id);
             if !keep {
                 removed.push(row.id);
             }

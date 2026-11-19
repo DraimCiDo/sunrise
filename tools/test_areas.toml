@@ -83,7 +83,7 @@ harnesses = [
   "server_player_sculk", "shrieker_local_capture", "vibration_source", "kill_die_vibration", "server_wool_vibration",
   "pot_hopper", "random_tick*", "simple_block", "fluid*", "liquid_collision", "cauldron", "lava_cauldron_item",
   "composter", "furnace*", "brewing*", "vault", "jukebox_saved_clock", "cushion_placement", "face_support",
-  "ground_support", "dynamic_support", "falling_*", "clone_block_ticks", "wet_fire", "fire_starter_sound",
+  "ground_support", "dynamic_support", "falling_*", "clone_block_ticks", "wet_fire", "lava_fire", "fire_starter_sound",
   "dripleaf_projectiles", "geyser_*", "sulfur_bucket", "nether_portal", "portal_*", "gateway_*", "level_place",
   "level_shape", "flat_place", "geometry", "chest_*", "anvil_turtle_egg", "hive_default_patch", "lodestone_default",
   "structure_blocks", "sign_literal", "cuboid_model", "tick_order", "tick", "tick_step_network", "frozen_first_tick_water",
@@ -326,7 +326,7 @@ lan = [
 name = "render"
 about = "rendering, models, particles, HUD and screens, audio, resource packs, options"
 paths = [
-  "crates/sunrise-client-render/*", "crates/sunrise-assets/*", "crates/sunrise-optifine/*", "crates/sunrise-polytone/*",
+  "crates/sunrise-client-render/*", "crates/sunrise-assets/*", "crates/sunrise-optifine/*", "crates/sunrise-connected/*", "crates/sunrise-polytone/*",
   "crates/sunrise-shader*", "crates/sunrise-hdr/*",
 ]
 cargo = [

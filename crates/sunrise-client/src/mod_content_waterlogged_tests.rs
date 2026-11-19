@@ -161,6 +161,15 @@ fn declared_waterlogged_blocks_keep_their_class_and_gain_liquid_defaults() {
     assert_ne!(mobs.state(dry_plant).flags & VALID_EMPTY_SPAWN, 0);
     assert_eq!(mobs.path_type(wet_stone), PathType::Blocked);
     assert_eq!(b.fluid(stairs), FluidState::WATER);
+    // A mod block on the stair template is of the stair class, as `BlockStates::block_class` reads it.
+    assert!(
+        b.data(stairs)
+            .is(sunrise_world::level::classes::Class::Stair)
+    );
+    assert!(
+        !b.data(stone)
+            .is(sunrise_world::level::classes::Class::Stair)
+    );
     assert!(!mobs.pathfindable(stairs, PathComputationType::Water));
 
     let is_waterlogged = |state| b.table.bool(state, b.props.waterlogged);

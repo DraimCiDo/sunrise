@@ -3237,6 +3237,7 @@ mod breeding_variant_tests {
             let partner = [mate.seen(None, &crate::items::Items::empty())];
             for asks_baby_spawn in [false, true] {
                 let w = MobWorld {
+                    side: sunrise_client::motion::dry_side(),
                     goal_host: None,
                     asks_baby_spawn,
                     mob_drops: false,
@@ -3299,6 +3300,7 @@ mod breeding_variant_tests {
                     [(false, true), (false, false), (true, true), (true, false)]
                 {
                     let world = MobWorld {
+                        side: sunrise_client::motion::dry_side(),
                         goal_host: None,
                         asks_baby_spawn: ask_mods,
                         mob_drops,

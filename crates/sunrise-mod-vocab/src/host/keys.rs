@@ -53,8 +53,9 @@ pub trait KeysHost {
     #[access(Metadata)]
     fn item_keys(&self) -> Vec<ItemKey>;
     /// Side: both.
-    /// Every built-in entity-type key in registry order (`BuiltInRegistries.ENTITY_TYPE`
-    /// order): vanilla's first, then mod types in the order they registered.
+    /// Every entity-type key: built-in and content types in registry order
+    /// (`BuiltInRegistries.ENTITY_TYPE`), then native general types ordered by
+    /// declaring mod and type id.
     #[access(Metadata)]
     fn entity_type_keys(&self) -> Vec<EntityTypeKey>;
     /// Side: both.

@@ -34,7 +34,7 @@ impl mod_api::prelude::DataMapsBackend for Biomes {
         assert_eq!(registry, "minecraft:worldgen/biome");
         assert_eq!(map, "neoforge:villager_types");
         Ok((entry == "minecraft:plains").then(|| {
-            Tag::Compound(std::collections::BTreeMap::from([(
+            Tag::Compound(mod_api::Compound::from([(
                 "villager_type".into(),
                 Tag::String(self.value.into()),
             )]))
@@ -84,7 +84,7 @@ fn assert_biomes(host: &dyn Host, value: &str) {
     assert_eq!(host.biome_key("test:nope"), None);
     assert_eq!(
         plains.data(host, &VillagerTypes),
-        Ok(Some(Tag::Compound(std::collections::BTreeMap::from([(
+        Ok(Some(Tag::Compound(mod_api::Compound::from([(
             "villager_type".into(),
             Tag::String(value.into())
         )]))))

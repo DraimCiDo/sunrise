@@ -1294,18 +1294,9 @@ fn configure(
             None => Err(Reason::plain("Disconnected")),
         }
     };
-    // With only engine declarations the client waits for the server's query, so a vanilla
-    // server is sent nothing new.
-    if payloads.local.has_mod_declarations()
-        && let Some(control) = negotiation.initial()
-    {
-        reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
-            channel: sunrise_protocol::payload_negotiation::CHANNEL.into(),
-            data: control
-                .encode()
-                .map_err(|error| Reason::plain(error.to_string()))?,
-        }))?;
-    }
+    // Nothing goes out before the server has spoken on the channel (its Query or Offer) or
+    // named itself Sunrise by brand: a vanilla server is sent what vanilla's client sends,
+    // whatever mods are installed.
     loop {
         let (id, payload) = reader
             .recv()
@@ -1816,6 +1807,105 @@ mod tests {
             } else {
                 "missing response"
             }));
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    /// A client with a mod's payload declaration, joined to a server that offers nothing: the
+    /// configuration phase carries no `sunrise:payloads` packet, as vanilla's carries none. When
+    /// the server Queries the channel, the client answers with its Offer, mod declaration included.
+    #[test]
+    fn mod_client_offers_payloads_only_when_the_server_asks() {
+        use sunrise_protocol::payload_negotiation::{CHANNEL, Control};
+        for server_asks in [false, true] {
+            let (root, data) = empty_item_data(&format!("mod-client-{server_asks}"));
+            let sent = crate::raw_payloads::test_support::with_client(|transport| {
+                assert!(transport.local.has_mod_declarations());
+                let (client, server) = sunrise_protocol::connection::Pipe::pair();
+                let (mut reader, writer) = Connection::local(client).split();
+                reader
+                    .set_read_timeout(Some(Duration::from_secs(10)))
+                    .unwrap();
+                let data = data.clone();
+                let thread = std::thread::spawn(move || {
+                    let (send, _events) = event_channel();
+                    configure(
+                        &mut reader,
+                        &Arc::new(Mutex::new(Some(QueuedWriter::new(writer).unwrap()))),
+                        &Arc::new(AtomicBool::new(true)),
+                        &Language::new(),
+                        &send,
+                        &Cookies::default(),
+                        &data,
+                        &transport,
+                    )
+                });
+                let mut server = Connection::local(server);
+                let mut brand = sunrise_protocol::buf::Writer::new();
+                brand.string("vanilla");
+                let mut to_client = vec![cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                    channel: "minecraft:brand".into(),
+                    data: brand.data,
+                })];
+                if server_asks {
+                    to_client.push(cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                        channel: CHANNEL.into(),
+                        data: Control::Query.encode().unwrap(),
+                    }));
+                }
+                to_client.push(cfg::Clientbound::SelectKnownPacks(cfg::SelectKnownPacks {
+                    packs: vec![],
+                }));
+                for packet in to_client {
+                    server.send(&packet.encode()).unwrap();
+                }
+                // The known packs reply comes after any offer: the server's Query is read first.
+                let mut sent = Vec::new();
+                loop {
+                    let (id, body) = server.recv().unwrap();
+                    let packet = cfg::Serverbound::decode(id, &body).unwrap();
+                    let done = matches!(packet, cfg::Serverbound::SelectKnownPacks(_));
+                    sent.push(packet);
+                    if done {
+                        break;
+                    }
+                }
+                server
+                    .send(&cfg::Clientbound::FinishConfiguration(Empty).encode())
+                    .unwrap();
+                // A required mod channel the server lacks refuses the join at the barrier
+                // (`Missing`), as before: the join's end is not what this test pins.
+                let _ = thread.join().unwrap();
+                sent
+            });
+            let offers: Vec<_> = sent
+                .iter()
+                .filter_map(|packet| match packet {
+                    cfg::Serverbound::CustomPayload(p) if p.channel == CHANNEL => {
+                        Some(Control::decode(&p.data).unwrap())
+                    }
+                    _ => None,
+                })
+                .collect();
+            if server_asks {
+                let [Control::Offer(manifest)] = offers.as_slice() else {
+                    panic!("one Offer expected, got {offers:?}");
+                };
+                assert!(
+                    manifest
+                        .entries()
+                        .iter()
+                        .any(|e| e.id() == crate::raw_payloads::test_support::CHANNEL),
+                    "the Offer lists the mod's channel"
+                );
+            } else {
+                assert_eq!(offers, [], "nothing on the channel unasked");
+                assert_eq!(
+                    sent.len(),
+                    1,
+                    "only the known packs reply, as vanilla's client answers: {sent:?}"
+                );
+            }
             std::fs::remove_dir_all(root).unwrap();
         }
     }

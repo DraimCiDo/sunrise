@@ -1052,6 +1052,7 @@ impl Game<'_> {
                 subject: None,
             };
             let mut tops: Vec<BlockPos> = Vec::new();
+            let side = game_side!(self);
             if let Some(step) = a.tick_move(
                 &mut scene,
                 facts,
@@ -1060,6 +1061,7 @@ impl Game<'_> {
                 Some(self.border.geometry()),
                 &nearby,
                 &self.loop_context,
+                &side,
             ) {
                 // LivingEntity.aiStep: `travel` first, then the blocks' push.
                 a.tick_settle(medium, step);

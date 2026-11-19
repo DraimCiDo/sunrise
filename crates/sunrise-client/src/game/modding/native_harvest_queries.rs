@@ -3,24 +3,9 @@
 //! breaks use, `Game::acting_can_harvest`).
 use super::Game;
 use mod_api::{LevelRef, PlayerRef};
-use sunrise_client::items::ItemStack;
 use sunrise_world::registry::BlockStateId;
 
 impl Game<'_> {
-    /// `ItemStack.isCorrectToolForDrops(state)`: the stack's own tool rules, with no block
-    /// requirement, player, position or hook. None for an unknown state.
-    pub(super) fn block_state_correct_tool_for_drops(
-        &self,
-        stack: &ItemStack,
-        state: BlockStateId,
-    ) -> Option<bool> {
-        self.pack.assets.registry.state(state)?;
-        Some(
-            self.items()
-                .correct_for_drops(Some(stack), &self.res.facts().get(state).name),
-        )
-    }
-
     /// `Player.hasCorrectToolForDrops(state, level, pos)` and `canHarvestBlock`: the player's
     /// selected slot against `state`, then the mods' `can_harvest_block` and
     /// `player_harvest_check`. A server asks any online player (their state swapped in); a
@@ -56,6 +41,7 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::native_block_tables::BlockTables;
     use super::super::native_guest_turn_tests::with_guests;
     use mod_api::__private::game::*;
     use mod_api::{Hooks, HostSide, PlayerHarvestCheckEvent};
@@ -74,26 +60,26 @@ mod tests {
             let shovel = ItemStack::new("minecraft:iron_shovel", 1);
             // The stack alone: dirt needs no tool, yet a pickaxe is not its correct tool.
             assert_eq!(
-                game.block_state_correct_tool_for_drops(&pickaxe, stone),
+                BlockTables::of(game).block_state_correct_tool_for_drops(&pickaxe, stone),
                 Some(true)
             );
             assert_eq!(
-                game.block_state_correct_tool_for_drops(&shovel, stone),
+                BlockTables::of(game).block_state_correct_tool_for_drops(&shovel, stone),
                 Some(false)
             );
             assert_eq!(
-                game.block_state_correct_tool_for_drops(&pickaxe, dirt),
+                BlockTables::of(game).block_state_correct_tool_for_drops(&pickaxe, dirt),
                 Some(false)
             );
             assert_eq!(
-                game.block_state_correct_tool_for_drops(
+                BlockTables::of(game).block_state_correct_tool_for_drops(
                     &ItemStack::new("minecraft:stick", 1),
                     stone
                 ),
                 Some(false)
             );
             assert_eq!(
-                game.block_state_correct_tool_for_drops(
+                BlockTables::of(game).block_state_correct_tool_for_drops(
                     &pickaxe,
                     sunrise_world::registry::BlockStateId(u32::MAX)
                 ),

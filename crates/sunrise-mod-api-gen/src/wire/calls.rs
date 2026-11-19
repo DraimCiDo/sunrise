@@ -116,6 +116,12 @@ pub(super) fn rust_sig(types: &Types<'_>, method: &Method) -> String {
     }
     let ret = match &method.ret {
         Ty::Unit => String::new(),
+        // A borrowing type names its elided lifetime, as the API's own signature does.
+        Ty::Named(def) if types.defs[*def].lifetimes > 0 => format!(
+            " -> {}<{}>",
+            types.defs[*def].rust,
+            vec!["'_"; types.defs[*def].lifetimes].join(", ")
+        ),
         ty => format!(" -> {}", rust_ty(types, ty, true)),
     };
     format!("fn {}({}){ret}", method.name, params.join(", "))

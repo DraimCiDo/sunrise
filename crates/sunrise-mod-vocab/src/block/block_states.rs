@@ -2,8 +2,8 @@
 //! Queries consume owned API block states, never world numeric IDs. Both sides read the
 //! game's published tables; definitions are copied out and property values are borrowed.
 use crate::{
-    Backend, BackendRef, BlockKey, BlockMetadata, BlockSoundType, BlockState, BlockStateError,
-    BlockStateRange, BlockStateRecord, Host,
+    BlockKey, BlockMetadata, BlockSoundType, BlockState, BlockStateError, BlockStateRange,
+    BlockStateRecord, Host, LevelReadError, host::block_states::BlockStatesBackend,
 };
 
 /// One property and its legal values in a state definition.
@@ -60,6 +60,25 @@ pub enum WeatheringAge {
     Oxidized,
 }
 
+/// A vanilla block class, as Java's `instanceof` asks it of a block, subclasses included. Read it
+/// with [`BlockStates::block_class`]: it is the engine's own classification of the block, not a
+/// tag, so a datapack that edits `minecraft:stairs` does not change it. A mod block declared on
+/// a vanilla behaviour template belongs to that template's classes.
+// exhaustive: the engine matches every class; adding one is a deliberate API change
+#[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
+pub enum BlockClass {
+    /// `StairBlock`.
+    Stair,
+    /// `EntityBlock`: the blocks that own a block entity by class (a chest, a furnace).
+    Entity,
+    /// `IronBarsBlock`, which includes glass panes and stained glass panes.
+    IronBars,
+    /// `StainedGlassPaneBlock`, a subclass of `IronBarsBlock`.
+    StainedGlassPane,
+    /// `TrapDoorBlock`.
+    TrapDoor,
+}
+
 /// An invalid constraint, identifying its index in the supplied list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -75,7 +94,7 @@ pub enum StateMatchError {
 /// The block-state facts service: `host.block_states()`.
 // exhaustive: its field is private; only `host.block_states()` builds one
 pub struct BlockStates<'a> {
-    backend: Option<&'a dyn Backend>,
+    backend: Option<&'a dyn BlockStatesBackend>,
 }
 
 /// Reaches [`BlockStates`] from any host.
@@ -87,8 +106,26 @@ pub trait HostBlockStates {
 impl<H: Host + ?Sized> HostBlockStates for H {
     fn block_states(&self) -> BlockStates<'_> {
         BlockStates {
-            backend: self.backend().map(BackendRef::open),
+            backend: self
+                .backend()
+                .map(|backend| backend.open() as &dyn BlockStatesBackend),
         }
+    }
+}
+
+impl<'a> BlockStates<'a> {
+    /// The facts of a game-side table view, as a level view hands them out.
+    // hidden: a game-side constructor, as `BackendRef::of`; mods reach the facts through a host or a level view
+    #[doc(hidden)]
+    pub fn of(backend: &'a dyn BlockStatesBackend) -> Self {
+        Self {
+            backend: Some(backend),
+        }
+    }
+
+    /// The service of a level view with no tables: every fact answers `None` or `Unavailable`.
+    pub(crate) fn unavailable() -> Self {
+        Self { backend: None }
     }
 }
 
@@ -240,6 +277,19 @@ impl BlockStates<'_> {
     /// None as for `replaceable`.
     pub fn is_solid_render(&self, state: BlockState) -> Option<bool> {
         self.backend?.block_state_is_solid_render(state)
+    }
+    /// Whether `state`'s block is of vanilla class `class`, subclasses included (Java's
+    /// `instanceof`). It reads the engine's class of the block, never a tag, so it does not move
+    /// when a pack edits a tag. `Ok(None)` for an unknown state; the refusal the read met
+    /// otherwise (`Unavailable`: a host with no game behind it, or a phase that cannot read).
+    pub fn block_class(
+        &self,
+        state: BlockState,
+        class: BlockClass,
+    ) -> Result<Option<bool>, LevelReadError> {
+        self.backend
+            .ok_or(LevelReadError::Unavailable)?
+            .block_state_class(state, class)
     }
     /// `BlockState.isRedstoneConductor` when vanilla decides from `state` alone. None for an
     /// unknown state, no game backend, or a context-dependent predicate (such as shulker boxes).

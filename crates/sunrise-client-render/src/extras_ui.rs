@@ -342,6 +342,26 @@ mod tests {
         assert_eq!(s.extras.sort_key, key);
     }
 
+    /// The shader pack key binds the same way, without cycling: a click waits for its key.
+    #[test]
+    fn the_shader_pack_key_row_waits_for_a_key() {
+        use crate::settings_shell::Capture;
+        let mut s = Settings::default();
+        let mut shell = Shell::<ExtrasScreen>::default();
+        let row = ExtraRow::Item(Item::ShaderPackKey);
+        let key = s.extras.shader_pack_key.clone();
+        let at = shell.point_at(&s, SIZE, row);
+        assert_eq!(
+            shell.click(&mut s, at, SIZE, false, false, false),
+            vec![
+                Output::Event(Event::ButtonClick),
+                Output::Bind(Capture::Key(extras::SHADER_PACK_KEY))
+            ]
+        );
+        ExtrasScreen.wheel_step(&mut s, row, true);
+        assert_eq!(s.extras.shader_pack_key, key);
+    }
+
     #[test]
     fn the_wheel_flips_a_switch_and_leaves_the_mod_to_scroll() {
         let mut s = Settings::default();

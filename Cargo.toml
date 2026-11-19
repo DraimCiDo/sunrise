@@ -75,6 +75,7 @@ members = [
     "crates/cargo-sunrise-mod",
     "crates/sunrise-port-pack",
     "crates/sunrise-shaders",
+    "crates/sunrise-connected",
     "crates/sunrise-optifine",
     "crates/sunrise-polytone",
     "crates/sunrise-shader-api",

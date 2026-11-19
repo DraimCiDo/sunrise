@@ -53,6 +53,36 @@ macro_rules! world_biomes {
         }
     };
 }
+/// This side's level data for a tick as a field-level borrow, so it stands beside the tick's own
+/// borrows of the game. Build it before taking a field mutably.
+macro_rules! game_side {
+    ($s:expr) => {
+        $crate::game::native_surface::GameSide {
+            dim: $s.dim,
+            level: $s.native_lifecycle.epoch().and_then(|epoch| {
+                let key = $s.dim.key();
+                let id = mod_api::__private::dimension_id(key)?;
+                Some(mod_api::LevelRef::with_generation(
+                    epoch,
+                    key,
+                    $s.levels.runtime.generation_of(id),
+                ))
+            }),
+            facts: $s.res.facts(),
+            biomes: world_biomes!($s),
+            behaviours: $s.res.behaviours(),
+            features: $s
+                .remote
+                .as_ref()
+                .map_or(&$s.level.enabled_features, |remote| &remote.features),
+            items: if $s.options.execution_role.is_client() {
+                $s.remote.as_ref().and_then(|remote| remote.tags.as_ref())
+            } else {
+                $s.session_lock.is_some().then(|| $s.res.items())
+            },
+        }
+    };
+}
 /// The world's packs' content files, as a field-level borrow (see the macros).
 fn pack_files(world_tables: &Option<WorldTables>) -> sunrise_world::loot::PackOverlay<'_> {
     match world_tables {
@@ -401,6 +431,8 @@ struct GameLevel<'w> {
     command_block_transition: Option<command_blocks::CommandBlockTransition>,
     redstone_experiments: bool,
     facts: &'w BlockFacts,
+    /// The block-state facts a part reads through `LevelHost::block_states`.
+    tables: native_block_tables::BlockTables<'w>,
     collision: &'w BlockCollisionRegistry<'w>,
     events: &'w mut Vec<LevelEvent>,
     dimension: LevelDimension,
@@ -647,6 +679,12 @@ struct FallingBlock {
     fall_distance: f64,
     /// `Entity.onGround`: whether its last move was stopped going down.
     on_ground: bool,
+    /// `Entity.remainingFireTicks` (`Fire`): lava sets it, and it never counts
+    /// down, as `FallingBlockEntity.tick` runs no `baseTick`.
+    fire_ticks: i32,
+    /// `Entity.syncVelocity`, set by `markHurt` (lava's hurt): a server sends
+    /// its motion to the clients tracking it after its next update.
+    sync_velocity: bool,
     /// `Entity.stuckSpeedMultiplier`: a cobweb it is in scales its next move.
     stuck: Vec3,
     damage: sunrise_client::falling_block::Damage,
@@ -3148,6 +3186,7 @@ impl Game<'_> {
             trigger_extras,
             world: &mut self.world,
             facts: self.res.facts(),
+            tables: native_block_tables::BlockTables::new(&self.res, &self.pack),
             collision: self.collision,
             events: &mut self.level_events,
             dimension,
@@ -3878,6 +3917,8 @@ impl Game<'_> {
                         drop_item: true,
                         fall_distance: 0.0,
                         on_ground: false,
+                        fire_ticks: 0,
+                        sync_velocity: false,
                         stuck: Vec3::ZERO,
                         damage,
                         saved: None,
@@ -4768,9 +4809,12 @@ impl Game<'_> {
         // A client's tick of the level it shows holds the colliders as it began, then carries
         // its own player with the one it stands on; a server's level tick holds its own scope.
         let start = (!self.is_logical_server()).then(|| self.placed_moving_colliders());
-        let scope = start
-            .clone()
-            .map(sunrise_client_render::moving_colliders::Scope::enter);
+        let scope = start.clone().map(|placed| {
+            sunrise_client_render::moving_colliders::Scope::enter_level(
+                self.collider_level(),
+                placed,
+            )
+        });
         let result = self.tick_body();
         drop(scope);
         if let (Some(start), Ok(())) = (&start, &result) {
@@ -6572,7 +6616,7 @@ impl Game<'_> {
             .level
             .respawn_elsewhere
             .as_ref()
-            .map(respawn_anchor::RespawnConfig::from_saved);
+            .and_then(respawn_anchor::RespawnConfig::from_saved);
         self.spawn_origin = None;
         self.spawn_hook_fired = false;
         self.spawn_hook_cancelled = false;
@@ -6619,7 +6663,7 @@ impl Game<'_> {
         // updateLevelInEngines(null): every sound stops; the music manager
         // lets go of its track.
         self.music.stop_playing(None, &mut self.audio);
-        self.audio.stop_all();
+        self.audio.leave_level();
         if self.remote.is_some() {
             self.world_icon = None;
             return self.leave_server(None);
@@ -7883,7 +7927,10 @@ impl Game<'_> {
         level.game_mode = mode;
         level.previous_game_mode = self.previous_mode.map(mod_api::GameMode::id);
         level.spawn = self.spawn.map(|s| [s.x, s.y, s.z]);
-        level.respawn_elsewhere = self.respawn_config.map(|c| c.saved());
+        level.respawn_elsewhere = respawn_anchor::RespawnConfig::kept(
+            level.respawn_elsewhere.take(),
+            self.respawn_config,
+        );
         level.rotation = [self.yaw, self.pitch];
         level.xp_level = self.experience.level;
         level.xp_progress = self.experience.progress;
@@ -8269,6 +8316,7 @@ impl Game<'_> {
         pr.lap("pr_camera");
         self.audio
             .set_listener([camera.x, camera.y, camera.z], view_yaw, view_pitch);
+        self.follow_audio_stream_entities();
         pr.lap("pr_listener");
         let block = [
             camera.x.floor() as i32,
@@ -11846,6 +11894,12 @@ impl Game<'_> {
             PresenceStatus::Online
         }
     }
+
+    /// How far the block entity of a block state is drawn: its `BlockEntityRenderer`'s reach, which
+    /// every block entity draw and the frame's block entity selection ask.
+    pub(super) fn block_entity_reach(&self, state: u32) -> Reach {
+        Reach::of(&self.res.facts().get(BlockStateId(state)).name)
+    }
 }
 
 #[cfg(test)]
@@ -11855,11 +11909,3 @@ mod sign_chain_tests;
 #[cfg(test)]
 #[path = "game/interface/tests/sign_use_tests.rs"]
 mod sign_use_tests;
-
-impl Game<'_> {
-    /// How far the block entity of a block state is drawn: its `BlockEntityRenderer`'s reach, which
-    /// every block entity draw and the frame's block entity selection ask.
-    pub(super) fn block_entity_reach(&self, state: u32) -> Reach {
-        Reach::of(&self.res.facts().get(BlockStateId(state)).name)
-    }
-}

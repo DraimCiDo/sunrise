@@ -3285,6 +3285,8 @@ pub struct MobWorld<'a> {
     /// What the motion value hooks are given: the loop context of the side that
     /// ticks these mobs.
     pub loop_context: &'a sunrise_world::native_load_context::LoopContext,
+    /// The side's level data beyond blocks: weather, features, tags and block entities.
+    pub side: &'a dyn crate::motion::SideLevel,
     pub world: &'a World,
     pub registry: &'a sunrise_world::registry::BlockRegistry,
     pub facts: &'a BlockFacts,

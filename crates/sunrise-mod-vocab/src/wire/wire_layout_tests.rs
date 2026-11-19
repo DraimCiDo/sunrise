@@ -623,10 +623,8 @@ fn particle_record_has_declared_field_bytes() {
             [4.0, 5.0, 6.0],
             23,
         )),
-        legacy_entity_effect: Some(true),
-        legacy_trail_lifetime: true,
     };
-    // Nested tuples add no framing: two groups allow all twelve fields to be decoded
+    // Nested tuples add no framing: two groups allow all ten fields to be decoded
     // with the same declared types despite Wire's six-element tuple limit.
     fields(
         particle,
@@ -651,8 +649,6 @@ fn particle_record_has_declared_field_bytes() {
                     [4.0f64, 5.0, 6.0],
                     23i32,
                 )),
-                Some(true),
-                true,
             ),
         ),
     );

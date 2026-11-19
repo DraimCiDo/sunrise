@@ -38,8 +38,8 @@ pub(crate) use sides::sort_tinted;
 pub use sides::{Part, Sides, group_parts};
 use std::sync::Arc;
 use sunrise_assets::model::Direction as ModelDirection;
+use sunrise_connected::{Axes as CtmAxes, Face as CtmFace};
 use sunrise_core::{biome::BiomeZoom, geometry::Direction, position::BlockPos};
-use sunrise_optifine::ctm::connect::{Axes as CtmAxes, Face as CtmFace};
 pub use sunrise_render_core::UV_STEPS;
 use sunrise_world::{
     block_render::FaceVisibility,
@@ -2491,6 +2491,7 @@ impl Mesher<'_> {
                 CtmFace::ALL[q.facing as usize],
                 [world.x, world.y, world.z],
                 neighbour,
+                |s| self.tables.full_faces[s as usize],
                 || Some(tints.biome(pos[0], pos[1], pos[2])),
                 // A pane's tiles are drawn with the cube's UVs (below), so that is its texture.
                 || {

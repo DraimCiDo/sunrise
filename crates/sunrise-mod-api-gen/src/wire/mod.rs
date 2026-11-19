@@ -247,6 +247,8 @@ pub(super) struct Surface<'a> {
     pub(super) excused: Vec<(&'static str, String)>,
     /// Each imported trait with the area traits that are parts of it.
     pub(super) parts: Vec<(&'static str, String)>,
+    /// The error types a gated method refuses a wrong-phase call with (`AccessRefusal` impls).
+    pub(super) access_refusals: std::collections::BTreeSet<String>,
 }
 
 /// The line on a method's doc that keeps it off wasm, and says why.
@@ -462,6 +464,7 @@ pub(super) fn surface_reading<'a>(
         unbound,
         excused,
         parts,
+        access_refusals: crate::host::refusal_errors(root)?,
     })
 }
 

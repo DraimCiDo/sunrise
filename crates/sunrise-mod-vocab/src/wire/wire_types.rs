@@ -930,6 +930,37 @@ mod depth_tests {
     }
 }
 
+// Compound is defined in sunrise-core and cannot carry the vocabulary's Wire
+// derive there. Encode the public map (length, then key/value pairs in traversal
+// order), not the private hash table's storage.
+impl Wire for sunrise_core::nbt::Compound {
+    layout_via!(std::collections::BTreeMap<sunrise_core::nbt::JavaString, crate::Tag>);
+    const MIN: usize = 4;
+    fn put(&self, out: &mut Writer) {
+        out.put_len(self.len());
+        for (key, value) in self {
+            out.put(key);
+            out.put(value);
+        }
+    }
+    fn put_owned(self, out: &mut Writer) {
+        out.put_len(self.len());
+        for (key, value) in self {
+            out.put_owned(key);
+            out.put_owned(value);
+        }
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        let len = input.take_len(sunrise_core::nbt::JavaString::MIN + crate::Tag::MIN)?;
+        let mut map = Self::new();
+        for _ in 0..len {
+            let key = input.take()?;
+            map.insert(key, input.take()?);
+        }
+        Ok(map)
+    }
+}
+
 // Re-exported types cannot carry a local derive. Keep their encoding explicit here.
 impl crate::wire::Wire for crate::Tag {
     layout_fields!("tag" => u32, "0:End" => (), "1:Byte" => i8, "2:Short" => i16, "3:Int" => i32, "4:Long" => i64, "5:Float" => f32, "6:Double" => f64, "7:ByteArray" => Vec<u8>, "8:String" => sunrise_core::nbt::JavaString, "9:List" => Vec<crate::Tag>, "10:Compound" => sunrise_core::nbt::Compound, "11:IntArray" => Vec<i32>, "12:LongArray" => Vec<i64>);
@@ -1505,11 +1536,10 @@ impl crate::wire::Wire for crate::Holder {
 #[allow(unreachable_patterns, unused_variables)]
 impl crate::wire::Wire for crate::AttachmentForm {
     layout_fields!("encoded" => Option<sunrise_core::nbt::Compound>, "policy" => crate::AttachmentPolicy, "write" => crate::AttachmentWrite);
-    const MIN: usize = <::std::option::Option<
-        std::collections::BTreeMap<sunrise_core::nbt::JavaString, crate::Tag>,
-    > as crate::wire::Wire>::MIN
-        + <crate::AttachmentPolicy as crate::wire::Wire>::MIN
-        + <crate::AttachmentWrite as crate::wire::Wire>::MIN;
+    const MIN: usize =
+        <::std::option::Option<sunrise_core::nbt::Compound> as crate::wire::Wire>::MIN
+            + <crate::AttachmentPolicy as crate::wire::Wire>::MIN
+            + <crate::AttachmentWrite as crate::wire::Wire>::MIN;
     fn put(&self, out: &mut crate::wire::Writer) {
         out.put(&self.encoded);
         out.put(&self.policy);

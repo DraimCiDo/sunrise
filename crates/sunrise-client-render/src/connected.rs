@@ -1,19 +1,32 @@
-//! OptiFine connected textures (`optifine/ctm`) at mesh time. The active packs' rules are read
+//! Connected textures at mesh time: OptiFine's (`optifine/ctm`) and mods'. The active rules are read
 //! once at load, their tiles become sprite layers, and each block state and sprite layer gets
 //! the short list of rules that can touch it; meshing a face then walks only those lists
 //! ([`ConnectedTextures::pick`]). Without CTM files there are no rules and nothing changes.
 //!
-//! The rules and the tile geometry are `sunrise_optifine::ctm`'s.
+//! The rules and the tile geometry are `sunrise_connected`'s.
+
+mod files;
 
 use crate::resource_source::ResourceSource;
 use crate::sprites::Sprites;
 use std::collections::HashMap;
-use sunrise_optifine::ctm::{
-    self, Connect, Method, Orient, Rule, Tile,
-    connect::{self as geometry, Axes, Axis, Face},
+use sunrise_connected::{
+    self as geometry, Axes, Axis, BlockSel, Connect, Face, Layer, Method, Orient, Rule, Tile,
 };
 use sunrise_world::block_state_properties::BlockProperties;
 use sunrise_world::registry::{BlockRegistry, BlockStateId};
+
+/// The rules to load for `root`: those the installed pack formats read, then the mods' asset
+/// files, in the order they are tried.
+pub fn read_rules(root: &ResourceSource) -> Vec<Rule> {
+    let mut rules = crate::pack_hooks::formats().connected(root);
+    let files = files::read(root);
+    if !files.is_empty() {
+        rules.extend(files);
+        geometry::sort(&mut rules);
+    }
+    rules
+}
 
 /// A tile as the mesher draws it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,6 +70,12 @@ pub struct Overlay {
 struct LoadedRule {
     rule: Rule,
     tiles: Vec<TileLayer>,
+    /// `Method::Table`: the tiles of the sheet, by cell; `None` for a cell with nothing in it.
+    cells: Vec<Option<TileLayer>>,
+    /// `connect=Blocks`: the states of `connect_blocks` (sorted).
+    listed: Vec<u32>,
+    /// `Connect::Properties`: by state, which block and values it has (equal keys join).
+    keys: Vec<u32>,
     /// By tile: the rules whose `matchTiles` name it (a range of `lists`), which chain on it.
     chain: Vec<(u32, u32)>,
     overlay: OverlayJoin,
@@ -113,6 +132,15 @@ fn push_list(lists: &mut Vec<u16>, list: &[u16]) -> (u32, u32) {
     (start, list.len() as u32)
 }
 
+/// A sprite layer as the mesher draws it.
+fn tile_layer(sprites: &Sprites, layer: u32) -> crate::Result<TileLayer> {
+    Ok(TileLayer::Layer {
+        layer: u16::try_from(layer)?,
+        translucent: sprites.translucent[layer as usize],
+        opaque: sprites.opaque[layer as usize],
+    })
+}
+
 /// The sprite name of a texture resource path: `ns:path` under `textures/`, else the path
 /// itself (as [`Sprites::insert_file`] names a tile).
 fn sprite_name(resource: &str) -> String {
@@ -146,8 +174,6 @@ impl ConnectedTextures {
         sprites: &mut Sprites,
         mut face_layer: impl FnMut(BlockStateId, Face) -> Option<u32>,
     ) -> Self {
-        // Rules with a custom name load no tiles: section meshes see no block entity.
-        rules.retain(|r| r.name.is_none());
         // Rule indices are `u16`.
         rules.truncate(usize::from(u16::MAX));
         if rules.is_empty() {
@@ -164,6 +190,9 @@ impl ConnectedTextures {
             })
             .collect();
         sprites.prefetch(tiles.iter().map(String::as_str));
+        // A sheet shared by rules is cut once: by sprite and grid.
+        let mut sheets: HashMap<(String, (u32, u32)), crate::Result<Vec<Option<TileLayer>>>> =
+            HashMap::new();
         let loaded = rules
             .into_iter()
             .filter_map(|rule| {
@@ -179,26 +208,51 @@ impl ConnectedTextures {
                                 name if name != *path => sprites.insert(&name)?,
                                 _ => sprites.insert_file(path)?,
                             };
-                            Ok(TileLayer::Layer {
-                                layer: u16::try_from(layer)?,
-                                translucent: sprites.translucent[layer as usize],
-                                opaque: sprites.opaque[layer as usize],
-                            })
+                            tile_layer(sprites, layer)
                         }
                     })
                     .collect::<crate::Result<Vec<_>>>();
-                match tiles {
-                    Ok(tiles) => Some(LoadedRule {
-                        rule,
-                        tiles,
-                        chain: Vec::new(),
-                        overlay: OverlayJoin::default(),
-                    }),
+                let tiles = match tiles {
+                    Ok(tiles) => tiles,
                     Err(e) => {
                         log::warn!("Sunrise: connected textures {}: a tile: {e}", rule.path);
-                        None
+                        return None;
                     }
-                }
+                };
+                // A table's sheet, cut into one sprite per cell.
+                let cells = match &rule.table {
+                    None => Vec::new(),
+                    Some(sheet) => {
+                        let key = (sheet.sprite.clone(), sheet.table.grid());
+                        let cut = sheets.entry(key).or_insert_with_key(|(sprite, grid)| {
+                            sprites
+                                .insert_tiles(sprite, *grid, false)?
+                                .into_iter()
+                                .map(|l| l.map(|l| tile_layer(sprites, l)).transpose())
+                                .collect()
+                        });
+                        match cut {
+                            Ok(cells) => cells.clone(),
+                            Err(e) => {
+                                log::warn!(
+                                    "Sunrise: connected textures {}: sheet {}: {e}",
+                                    rule.path,
+                                    sheet.sprite
+                                );
+                                return None;
+                            }
+                        }
+                    }
+                };
+                Some(LoadedRule {
+                    rule,
+                    tiles,
+                    cells,
+                    listed: Vec::new(),
+                    keys: Vec::new(),
+                    chain: Vec::new(),
+                    overlay: OverlayJoin::default(),
+                })
             })
             .collect();
         let states = (0..registry.len() as u32).map(|id| {
@@ -253,29 +307,66 @@ impl ConnectedTextures {
         let states: Vec<_> = states.collect();
         // Each block's states, for `connectBlocks` and `tintBlock`.
         let mut block_states: HashMap<&str, Vec<u32>> = HashMap::new();
-        if out.rules.iter().any(|r| r.rule.method.is_overlay()) {
+        if out
+            .rules
+            .iter()
+            .any(|r| r.rule.method.is_overlay() || r.rule.connect == Connect::Blocks)
+        {
             for (id, state) in states.iter().enumerate() {
                 if let Some((name, _)) = state {
                     block_states.entry(name).or_default().push(id as u32);
                 }
             }
         }
+        // The sorted states some entries name.
+        let listed = |entries: &[BlockSel]| {
+            let mut ids = Vec::new();
+            for m in entries {
+                let candidates = block_states
+                    .get(m.id.as_str())
+                    .map_or(&[][..], Vec::as_slice);
+                ids.extend(candidates.iter().filter(|&&id| {
+                    states[id as usize].is_some_and(|(name, props)| {
+                        m.matches(name, |k| props.get(k).map(String::as_str))
+                    })
+                }));
+            }
+            ids.sort_unstable();
+            ids.dedup();
+            ids
+        };
+        for r in out.rules.iter_mut() {
+            match r.rule.connect {
+                Connect::Blocks => r.listed = listed(&r.rule.connect_blocks),
+                Connect::Properties => {
+                    // States are alike when they are one block with the same values of the
+                    // properties the rule names.
+                    let mut keys = HashMap::new();
+                    r.keys = states
+                        .iter()
+                        .map(|state| {
+                            let Some((name, props)) = state else {
+                                return u32::MAX;
+                            };
+                            let values: Vec<_> = r
+                                .rule
+                                .connect_properties
+                                .iter()
+                                .map(|k| props.get(k).map(String::as_str))
+                                .collect();
+                            let next = keys.len() as u32;
+                            *keys.entry((*name, values)).or_insert(next)
+                        })
+                        .collect();
+                }
+                _ => {}
+            }
+        }
         for r in out.rules.iter_mut().filter(|r| r.rule.method.is_overlay()) {
             let rule = &r.rule;
             // `connectBlocks` and `connectTiles` are "only for method overlay".
             if rule.method == Method::Overlay {
-                for m in &rule.connect_blocks {
-                    let candidates = block_states
-                        .get(m.id.as_str())
-                        .map_or(&[][..], Vec::as_slice);
-                    r.overlay.states.extend(candidates.iter().filter(|&&id| {
-                        states[id as usize].is_some_and(|(name, props)| {
-                            m.matches(name, |k| props.get(k).map(String::as_str))
-                        })
-                    }));
-                }
-                r.overlay.states.sort_unstable();
-                r.overlay.states.dedup();
+                r.overlay.states = listed(&rule.connect_blocks);
                 r.overlay.tiles = rule
                     .connect_tiles
                     .iter()
@@ -450,6 +541,7 @@ impl ConnectedTextures {
         face: Face,
         pos: [i32; 3],
         neighbour: impl Fn([i32; 3]) -> u32,
+        full_faces: impl Fn(u32) -> u8,
         biome: impl Fn() -> Option<&'b str>,
         texture: impl Fn() -> Option<Axes>,
         mut overlay: impl FnMut(Overlay),
@@ -490,6 +582,7 @@ impl ConnectedTextures {
                     face,
                     pos,
                     &neighbour,
+                    &full_faces,
                     &biome,
                     &texture,
                     &mut overlay,
@@ -526,6 +619,7 @@ impl ConnectedTextures {
                         face,
                         pos,
                         &neighbour,
+                        &full_faces,
                         &biome,
                         &texture,
                         &mut overlay,
@@ -551,6 +645,7 @@ impl ConnectedTextures {
         face: Face,
         pos: [i32; 3],
         neighbour: &impl Fn([i32; 3]) -> u32,
+        full_faces: &impl Fn(u32) -> u8,
         biome: &impl Fn() -> Option<&'b str>,
         texture: &impl Fn() -> Option<Axes>,
         overlay: &mut impl FnMut(Overlay),
@@ -585,6 +680,11 @@ impl ConnectedTextures {
                     self.states.get(other as usize).map(|s| s.block) == Some(info.block)
                 }
                 Connect::State => other == state,
+                Connect::Blocks => r.listed.binary_search(&other).is_ok(),
+                Connect::Properties => r
+                    .keys
+                    .get(other as usize)
+                    .is_some_and(|&k| k != u32::MAX && Some(&k) == r.keys.get(state as usize)),
                 Connect::Tile => self
                     .face_layers
                     .get(other as usize)
@@ -607,7 +707,7 @@ impl ConnectedTextures {
             if let TileLayer::Layer { layer, .. } = t {
                 overlay(Overlay {
                     layer,
-                    translucent: rule.layer == ctm::Layer::Translucent,
+                    translucent: rule.layer == Layer::Translucent,
                     tint: join.tint,
                 });
             }
@@ -633,6 +733,36 @@ impl ConnectedTextures {
             m => m,
         };
         let index = match method {
+            Method::Table => {
+                let sheet = rule.table.as_ref()?;
+                let axes = axes(face);
+                let normal = face.normal();
+                // Only the neighbours the table tests are probed, the cover check included. With
+                // `cover`, a neighbour does not join when the block in front of it, on the
+                // face's side, joins too and has a full face toward it.
+                let tested = sheet.table.tested();
+                let toward = 1 << (face as u8 ^ 1);
+                let mut mask = 0;
+                for (bit, offset) in geometry::offsets(axes) {
+                    if tested & bit == 0 || !joins(offset) {
+                        continue;
+                    }
+                    let front = [0, 1, 2].map(|k| offset[k] + normal[k]);
+                    if sheet.table.cover()
+                        && joins(front)
+                        && full_faces(neighbour(front)) & toward != 0
+                    {
+                        continue;
+                    }
+                    mask |= bit;
+                }
+                return Some(
+                    match r.cells.get(sheet.table.tile(mask)).copied().flatten() {
+                        Some(tile) => (Pick::Tile(tile), 0),
+                        None => (Pick::Nothing, 0),
+                    },
+                );
+            }
             Method::Ctm => geometry::ctm_index(mask()),
             Method::CtmCompact => {
                 let mask = mask();
@@ -695,7 +825,9 @@ impl ConnectedTextures {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sunrise_connected::{Table, TableSheet};
     use sunrise_optifine::Properties;
+    use sunrise_optifine::ctm::{self, Rule};
 
     /// A tile whose layer says which tile of its rule it is: rule `r`'s tile `i` is layer
     /// `1000 * (r + 1) + i`.
@@ -716,6 +848,9 @@ mod tests {
             .into_iter()
             .enumerate()
             .map(|(n, rule)| LoadedRule {
+                cells: Vec::new(),
+                listed: Vec::new(),
+                keys: Vec::new(),
                 overlay: OverlayJoin::default(),
                 chain: Vec::new(),
                 tiles: rule
@@ -732,7 +867,7 @@ mod tests {
                         },
                     })
                     .collect(),
-                rule,
+                rule: rule.rule,
             })
             .collect()
     }
@@ -791,7 +926,172 @@ mod tests {
         blocks: &[([i32; 3], u32)],
     ) -> Pick {
         let at = |o: [i32; 3]| blocks.iter().find(|(p, _)| *p == o).map_or(0, |b| b.1);
-        ctm.pick(state, layer, face, [0, 64, 0], at, || None, || None, |_| {})
+        // Glass is a full cube; stone, here, is not.
+        let full = |s: u32| if s == 1 { 0x3f } else { 0 };
+        ctm.pick(
+            state,
+            layer,
+            face,
+            [0, 64, 0],
+            at,
+            full,
+            || None,
+            || None,
+            |_| {},
+        )
+    }
+
+    /// Glass (state 1) with a `table` rule of `tests` over a sheet whose cell `i` is layer
+    /// `500 + i` (`cells[0]` is empty when `clear`), joining `connect`.
+    fn table_world(
+        table: Table,
+        clear: bool,
+        connect: Connect,
+        connect_blocks: Vec<BlockSel>,
+    ) -> ConnectedTextures {
+        table_rule_world(
+            table,
+            clear,
+            "minecraft:glass",
+            connect,
+            connect_blocks,
+            &[],
+        )
+    }
+
+    fn table_rule_world(
+        table: Table,
+        clear: bool,
+        block: &str,
+        connect: Connect,
+        connect_blocks: Vec<BlockSel>,
+        connect_properties: &[&str],
+    ) -> ConnectedTextures {
+        let (columns, rows) = table.grid();
+        let mut rule = sunrise_connected::Rule::table(
+            "assets/demo/sunrise/connected/glass.json".to_owned(),
+            TableSheet {
+                sprite: "demo:block/sheet".to_owned(),
+                table: std::sync::Arc::new(table),
+            },
+        );
+        let block_id = block;
+        let block = |id: &str| BlockSel {
+            id: id.to_owned(),
+            states: Vec::new(),
+        };
+        rule.match_blocks = vec![block(block_id)];
+        rule.connect_properties = connect_properties.iter().map(|k| k.to_string()).collect();
+        rule.connect = connect;
+        rule.connect_blocks = connect_blocks;
+        let cells = (0..columns * rows)
+            .map(|i| {
+                (!(clear && i == 0)).then_some(TileLayer::Layer {
+                    layer: 500 + i as u16,
+                    translucent: false,
+                    opaque: false,
+                })
+            })
+            .collect();
+        let rules = vec![LoadedRule {
+            rule,
+            tiles: Vec::new(),
+            cells,
+            listed: Vec::new(),
+            keys: Vec::new(),
+            chain: Vec::new(),
+            overlay: OverlayJoin::default(),
+        }];
+        let none = BlockProperties::default();
+        let axis = |v: &str| BlockProperties::from([("axis".to_owned(), v.to_owned())]);
+        let (y, x) = (axis("y"), axis("x"));
+        let states = [
+            ("minecraft:air", &none),
+            ("minecraft:glass", &none),
+            ("minecraft:stone", &none),
+            ("minecraft:oak_log", &y),
+            ("minecraft:oak_log", &x),
+        ];
+        ConnectedTextures::build(rules, states.iter().map(|s| Some(*s)), |_| None)
+    }
+
+    #[test]
+    fn a_table_reads_its_tile_off_the_masks_of_its_tests() {
+        use geometry::{L, R};
+        // Left and right: the outcome is left + 2 * right; its tiles, by outcome: 3 alone, 2 left
+        // only, 0 right only, 1 both. A north face's right is west, its left east.
+        let row = |cover| Table::new(vec![L, R], cover, (4, 1), vec![3, 2, 0, 1]).unwrap();
+        let ctm = table_world(row(false), false, Connect::Block, Vec::new());
+        let pick = |blocks: &[([i32; 3], u32)]| pick_in(&ctm, 1, 3, Face::North, blocks);
+        assert_eq!(pick(&[]), tile(503));
+        assert_eq!(pick(&[([-1, 0, 0], 1)]), tile(500));
+        assert_eq!(pick(&[([1, 0, 0], 1)]), tile(502));
+        assert_eq!(pick(&[([-1, 0, 0], 1), ([1, 0, 0], 1)]), tile(501));
+        // Stone is another block; the glass above and below is not tested; the other faces
+        // read their own directions (the south face's right is east).
+        assert_eq!(pick(&[([-1, 0, 0], 2), ([0, 1, 0], 1)]), tile(503));
+        assert_eq!(
+            pick_in(&ctm, 1, 3, Face::South, &[([1, 0, 0], 1)]),
+            tile(500)
+        );
+        // A neighbour with a glass block in front of it (north) does not join with `cover`.
+        let covered = [([-1, 0, 0], 1), ([-1, 0, -1], 1)];
+        assert_eq!(pick(&covered), tile(500));
+        let ctm = table_world(row(true), false, Connect::Block, Vec::new());
+        assert_eq!(pick_in(&ctm, 1, 3, Face::North, &covered), tile(503));
+        // A front block that joins but has no full face toward the neighbour does not cover it.
+        let stone = BlockSel {
+            id: "minecraft:stone".to_owned(),
+            states: Vec::new(),
+        };
+        let ctm = table_world(row(true), false, Connect::Blocks, vec![stone]);
+        let front = [([-1, 0, 0], 2), ([-1, 0, -1], 2)];
+        assert_eq!(pick_in(&ctm, 1, 3, Face::North, &front), tile(500));
+        // An empty cell draws nothing.
+        let ctm = table_world(row(false), true, Connect::Block, Vec::new());
+        assert_eq!(
+            pick_in(&ctm, 1, 3, Face::North, &[([-1, 0, 0], 1)]),
+            Pick::Nothing
+        );
+    }
+
+    #[test]
+    fn a_table_can_join_the_blocks_of_a_list() {
+        use geometry::R;
+        let stone = BlockSel {
+            id: "minecraft:stone".to_owned(),
+            states: Vec::new(),
+        };
+        let table = Table::new(vec![R], false, (2, 1), vec![1, 0]).unwrap();
+        let ctm = table_world(table, false, Connect::Blocks, vec![stone]);
+        // Stone (2) joins, glass (1) does not: the rule's own block is not in the list.
+        assert_eq!(
+            pick_in(&ctm, 1, 3, Face::North, &[([-1, 0, 0], 2)]),
+            tile(500)
+        );
+        assert_eq!(
+            pick_in(&ctm, 1, 3, Face::North, &[([-1, 0, 0], 1)]),
+            tile(501)
+        );
+    }
+
+    #[test]
+    fn a_table_can_join_by_equal_properties() {
+        use geometry::R;
+        let table = Table::new(vec![R], false, (2, 1), vec![1, 0]).unwrap();
+        let ctm = table_rule_world(
+            table,
+            false,
+            "minecraft:oak_log",
+            Connect::Properties,
+            Vec::new(),
+            &["axis"],
+        );
+        // Logs (3 along y, 4 along x): a y log joins a y log beside it, not an x log.
+        let at = |other| pick_in(&ctm, 3, 3, Face::North, &[([-1, 0, 0], other)]);
+        assert_eq!(at(3), tile(500));
+        assert_eq!(at(4), tile(501));
+        assert_eq!(at(2), tile(501));
     }
 
     const GLASS: &str = "matchBlocks=glass\nmethod=ctm\ntiles=0-46";
@@ -920,6 +1220,7 @@ mod tests {
                 Face::North,
                 [x, 64, 0],
                 |_| 0,
+                |_| 0,
                 || None,
                 || None,
                 |_| {},
@@ -929,6 +1230,7 @@ mod tests {
                 3,
                 Face::North,
                 [x, 65, 0],
+                |_| 0,
                 |_| 0,
                 || None,
                 || None,
@@ -952,6 +1254,7 @@ mod tests {
                 3,
                 Face::Up,
                 [0, y, 0],
+                |_| 0,
                 |_| 0,
                 || Some(biome),
                 || None,
@@ -991,7 +1294,19 @@ mod tests {
             "glass.properties",
             "matchBlocks=glass\nmethod=repeat\nwidth=2\nheight=2\ntiles=0-3",
         )]);
-        let at = |pos| ctm.pick(1, 3, Face::North, pos, |_| 0, || None, || None, |_| {});
+        let at = |pos| {
+            ctm.pick(
+                1,
+                3,
+                Face::North,
+                pos,
+                |_| 0,
+                |_| 0,
+                || None,
+                || None,
+                |_| {},
+            )
+        };
         assert_eq!(at([0, 64, 0]), tile(1000));
         // The north face's right is west; rows run down.
         assert_eq!(at([-1, 64, 0]), tile(1001));
@@ -1071,6 +1386,7 @@ mod tests {
             face,
             [0, 64, 0],
             at,
+            |_| 0,
             || None,
             || None,
             |o| out.push(o.layer),
@@ -1109,6 +1425,7 @@ mod tests {
             Face::Up,
             [0, 64, 0],
             |o| if o == [0, 0, -1] { 1 } else { 0 },
+            |_| 0,
             || None,
             || None,
             |o| {
@@ -1147,6 +1464,7 @@ mod tests {
             Face::Up,
             [0, 64, 0],
             door_north,
+            |_| 0,
             || None,
             || None,
             |o| got.push(o),
@@ -1271,6 +1589,7 @@ mod tests {
                 Face::North,
                 [0, 64, 0],
                 east,
+                |_| 0,
                 || None,
                 mirrored,
                 |_| {},
@@ -1300,6 +1619,7 @@ mod tests {
             Face::Up,
             [0, 64, 0],
             north,
+            |_| 0,
             || None,
             turned,
             |o| got.push(o.layer),
@@ -1378,7 +1698,7 @@ mod tests {
             ),
         ];
         assert_eq!(
-            ConnectedTextures::matched_sprites(&rules),
+            ConnectedTextures::matched_sprites(&rules.map(|r| r.rule)),
             [
                 format!("{dir}/19.png"),
                 "minecraft:block/extra/placeholder".to_owned(),
@@ -1481,7 +1801,7 @@ mod tests {
         .unwrap();
         let source = ResourceSource::directory(root.clone());
         let mut sprites = Sprites::new(source.clone());
-        let rules = vec![rule];
+        let rules = vec![rule.rule];
         sprites.keep_apart(ConnectedTextures::matched_sprites(&rules));
         let mut catalog = crate::models::StateModels::default();
         catalog
@@ -1501,6 +1821,7 @@ mod tests {
             Face::North,
             [0; 3],
             |_| 0,
+            |_| 0,
             || None,
             || None,
             |_| {},
@@ -1510,6 +1831,72 @@ mod tests {
         sprites.finish();
         let at = layer as usize * (sprites.size * sprites.size * 4) as usize;
         assert_eq!(sprites.pixels[at..at + 4], [0, 255, 0, 255]);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_table_rule_cuts_its_sheet_into_cells_and_a_non_grid_sheet_is_refused() {
+        let root = std::env::temp_dir().join(format!("sunrise-ct-table-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let textures = root.join("assets/demo/textures/block");
+        std::fs::create_dir_all(&textures).unwrap();
+        let write = |name: &str, (width, height): (u32, u32)| {
+            let mut encoder = png::Encoder::new(
+                std::fs::File::create(textures.join(name)).unwrap(),
+                width,
+                height,
+            );
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&[255, 0, 0, 255].repeat((width * height) as usize))
+                .unwrap();
+        };
+        // Two 2 x 2 tiles side by side, and a sheet 3 wide that two columns cannot cut.
+        write("row.png", (4, 2));
+        write("odd.png", (3, 2));
+        let registry = BlockRegistry::from_facts_json(
+            &br#"{"defaults":{"minecraft:air":0},"states":[["air",true,false,"","minecraft:air"]]}"#[..],
+        )
+        .unwrap();
+        let rule = |sprite: &str| {
+            use std::sync::Arc;
+            let table = sunrise_connected::Table::new(
+                vec![sunrise_connected::R],
+                false,
+                (2, 1),
+                vec![0, 1],
+            )
+            .unwrap();
+            let sheet = sunrise_connected::TableSheet {
+                sprite: sprite.into(),
+                table: Arc::new(table),
+            };
+            let mut rule = sunrise_connected::Rule::table(format!("{sprite}.json"), sheet);
+            rule.match_blocks = vec![sunrise_connected::BlockSel {
+                id: "demo:casing".into(),
+                states: Vec::new(),
+            }];
+            rule
+        };
+        let load = |sprite: &str| {
+            let source = ResourceSource::directory(root.clone());
+            let mut sprites = Sprites::new(source.clone());
+            ConnectedTextures::load(
+                &source,
+                vec![rule(sprite)],
+                &registry,
+                &mut sprites,
+                |_, _| None,
+            )
+        };
+        assert!(!load("demo:block/row").is_empty());
+        assert!(
+            load("demo:block/odd").is_empty(),
+            "a sheet that is not a grid of square tiles drops its rule"
+        );
         std::fs::remove_dir_all(&root).unwrap();
     }
 }

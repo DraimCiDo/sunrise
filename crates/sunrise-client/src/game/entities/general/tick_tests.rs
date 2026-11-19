@@ -130,6 +130,7 @@ impl Hooks for Declare {
                 GeneralEntityCategory::Misc,
                 0.8,
                 1.9,
+                None,
                 if save {
                     GeneralSavePolicy::Save
                 } else {
@@ -1046,9 +1047,7 @@ fn spawn_entity_inserts_a_general_row_with_its_owner() {
         assert_eq!(row.owner, Some(owner_uuid));
         assert_eq!(game.entity_owner(missile), Some(turret));
         // The save keeps the owner, and a load reads it back.
-        let record = game
-            .general_row_record(missile.id(), &mut std::collections::HashSet::new())
-            .unwrap();
+        let record = game.general_row_record(missile.id(), false).unwrap();
         let tag = record.to_tag();
         assert_eq!(tag.get("Owner"), Some(&Tag::IntArray(owner_uuid.to_vec())));
         assert_eq!(record_from_compound(&tag).unwrap().owner, Some(owner_uuid));
@@ -1062,9 +1061,7 @@ fn spawn_entity_inserts_a_general_row_with_its_owner() {
             )
             .unwrap();
         assert_eq!(game.entity_owner(alone), None);
-        let record = game
-            .general_row_record(alone.id(), &mut std::collections::HashSet::new())
-            .unwrap();
+        let record = game.general_row_record(alone.id(), false).unwrap();
         assert_eq!(record.to_tag().get("Owner"), None);
         // Bodies of another family, and a general body for a mob, refuse.
         let rows = game.resident_entities.general.rows.len();

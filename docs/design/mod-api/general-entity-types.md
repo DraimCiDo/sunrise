@@ -6,20 +6,23 @@ Provisional answer to [#792](https://github.com/arismoko/horizon/issues/792): re
 
 `Hooks::register` receives `&mut dyn Registrar`, whose `GeneralTypesRegistrar`
 supertrait provides `declare_general_entity(path, category, width, height,
-save_policy, summonable, tracking_chunks, update_interval, payload_version,
-required_features)`. Use `GeneralEntityCategory::Misc` and
+passenger_attachment, save_policy, summonable, tracking_chunks, update_interval,
+payload_version, required_features)`. Use `GeneralEntityCategory::Misc` and
 `GeneralSavePolicy::{Save, NoSave}`. The path must belong to the declaring
 mod's namespace. Registration is only available during the registration phase,
 requires a both-side package, and refuses duplicates and unavailable required
 mods with `GeneralEntityRegistrationError` while recording a refusal.
 
-Dimensions must be finite. Tracking distance and interval use signed `i32`
+Dimensions and passenger attachment coordinates must be finite. A passenger
+attachment is a vehicle-local point in blocks, rotated with the vehicle's yaw.
+Use `None` for `[0.0, height, 0.0]`, the top center of the box.
+Tracking distance and interval use signed `i32`
 values directly, matching the vanilla builder; `i32::MAX` means no update
 interval. There is no 64-block, 32-chunk or 1200-tick ceiling.
 
 The engine freezes declarations in mod-id/type-id order into non-narrowed
 catalog indices. The record validator preserves the general-record policies
-of 65,536 payload bytes, passenger depth 16 and decoded payload nesting 32.
+of 65,536 payload bytes and decoded payload nesting 32. A passenger chain has no bound of its own, as in vanilla: only the saved NBT nesting limit applies.
 A record of a namespace no loaded mod owns is quarantined: kept byte for
 byte as it loaded, never ticked or visible to the mod API, and written back
 unchanged on save, up to 69,632 encoded bytes per record and 256 records
@@ -125,7 +128,7 @@ Every creation source must reach the general insertion coordinator: summon, mod/
 
 Native and wasm use the same registry, dependencies, state model and generated contract. Native exact-build checks and wasm interface linking remain loader concerns. Existing native-only registration is not evidence of wasm parity; enable this feature only when both adapters implement registration, tick, codecs and client handoff.
 
-Treat registration, callback results, serialized input and packets as untrusted. Reject NaN/infinite positions or dimensions, negative/overflowed lengths, unknown owned type ids, duplicate UUIDs and stale handles before writes. Unrelated unknown ids retain their existing behavior. Propose payload limit 64 KiB per entity, nesting 32, passenger depth 16, positive dimensions at most 64 blocks, tracking at most 32 chunks and update interval 1–1200 ticks; confirm these provisional limits before implementation. Quarantined records of a missing mod are bounded too — 69 632 encoded bytes per record, 256 records per chunk; both provisional, with no vanilla analogue (vanilla deletes such entities rather than preserving them). Bound aggregate decoding and outgoing bytes per connection too.
+Treat registration, callback results, serialized input and packets as untrusted. Reject NaN/infinite positions or dimensions, negative/overflowed lengths, unknown owned type ids, duplicate UUIDs and stale handles before writes. Unrelated unknown ids retain their existing behavior. Propose payload limit 64 KiB per entity, nesting 32, positive dimensions at most 64 blocks, tracking at most 32 chunks and update interval 1–1200 ticks; confirm these provisional limits before implementation. Quarantined records of a missing mod are bounded too — 69 632 encoded bytes per record, 256 records per chunk; both provisional, with no vanilla analogue (vanilla deletes such entities rather than preserving them). Bound aggregate decoding and outgoing bytes per connection too.
 
 Catch native unwinding and wasm traps at dispatch: abort the callback transaction, discard buffered effects, restore lifts, disable the failing subscriber and report it. A native process-aborting panic cannot be recovered. No irreversible external I/O inside transactional callbacks. A subsequent built-in action must still succeed.
 

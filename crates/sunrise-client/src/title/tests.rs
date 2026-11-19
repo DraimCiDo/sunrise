@@ -24,6 +24,9 @@ impl Fixture {
         }
     }
     pub(super) fn world(&self, folder: &str, name: &str) {
+        let generated = self.root.join("generated").join(folder);
+        crate::save::write_world_gen_settings(&generated, 123456, Default::default()).unwrap();
+        let settings = crate::save::world_gen_settings(&generated).unwrap();
         crate::save::write_dat(
             &self.title.saves.join(folder).join("level.dat"),
             Tag::compound([
@@ -34,10 +37,7 @@ impl Fixture {
                         ("DataVersion", Tag::Int(sunrise_world::DATA_VERSION)),
                         ("GameType", Tag::Int(1)),
                         ("allowCommands", Tag::Byte(1)),
-                        (
-                            "WorldGenSettings",
-                            Tag::compound([("seed", Tag::Long(123456))]),
-                        ),
+                        ("WorldGenSettings", settings),
                         (
                             "Version",
                             Tag::compound([("Name", Tag::String("26.3".into()))]),
@@ -2092,7 +2092,13 @@ fn an_experimental_world_is_backed_up_then_opened_without_asking_again() {
                 ]),
             ),
         ]);
-        let overworld = Tag::compound([("type", Tag::String("minecraft:overworld".into()))]);
+        let overworld = Tag::compound([
+            ("type", Tag::String("minecraft:overworld".into())),
+            (
+                "generator",
+                Tag::compound([("type", Tag::String("minecraft:noise".into()))]),
+            ),
+        ]);
         let end = Tag::compound([
             ("type", Tag::String("minecraft:the_end".into())),
             (

@@ -128,7 +128,6 @@ sunrise-client game::boats::below_world::tests::a_tick_discards_the_vehicles_und
 sunrise-client game::boats::below_world::tests::saved_deep_end_boat_loads_then_is_discarded_and_extreme_scans_terminate lib daily resources
 sunrise-client game::boats::cobweb_tests::a_boat_leaving_a_cobweb_for_powder_snow_takes_the_powder_snow lib daily resources
 sunrise-client game::boats::cobweb_tests::a_cobweb_slows_a_boat_and_resets_its_fall lib daily resources
-sunrise-client game::boats::friction_tests::ground_friction_averages_intersecting_blocks_and_only_builds_a_kind_for_listeners lib daily resources
 sunrise-client game::boats::lifetime_tests::a_bound_boat_commits_the_driven_client_tick lib daily resources
 sunrise-client game::boats::lifetime_tests::a_bound_boat_keeps_its_registration_through_ticks_until_discard lib daily resources
 sunrise-client game::boats::lifetime_tests::a_bound_ridden_boat_commits_the_server_leash_tick lib daily resources
@@ -850,7 +849,7 @@ sunrise-client game::lan::tests::guest_climbable_glide lib daily resources
 sunrise-client game::lan::tests::server_chat_replies_reach_the_sender_alone lib daily resources
 sunrise-client game::lan::world_spawn_sync_tests::guest_respawn_without_a_known_world_spawn_never_advertises_the_hosts_personal_point lib daily resources
 sunrise-client game::lan::world_spawn_sync_tests::join_and_respawn_contexts_use_world_spawn_not_a_personal_spawn lib daily resources
-sunrise-client game::lan::world_spawn_sync_tests::setworldspawn_reaches_guests_in_other_dimensions_and_keeps_compass_overrides lib daily resources
+sunrise-client game::lan::world_spawn_sync_tests::setworldspawn_reaches_guests_with_the_dimension_it_ran_in lib daily resources
 sunrise-client game::lan_actions::attack_checks::tests::attacking_an_item_an_orb_oneself_or_an_arrow_kicks_the_player lib daily resources
 sunrise-client game::lan_actions::boat_holder_movement_tests::boat_tick_uses_stopped_players_known_movement lib daily resources
 sunrise-client game::lan_actions::boat_holder_movement_tests::empty_markers_preserve_actual_walk_and_still_movement_bookkeeping lib daily resources

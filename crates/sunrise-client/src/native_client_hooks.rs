@@ -1,5 +1,5 @@
 //! Callbacks into the executable for native trait mods' client-library hooks.
-use crate::items::ItemStack;
+use crate::{items::ItemStack, motion::FrictionLevel};
 use mod_api::{BlockSoundCause, BlockSoundType};
 use std::sync::OnceLock;
 use sunrise_core::position::BlockPos;
@@ -29,7 +29,8 @@ pub struct NativeClientHooks {
     pub is_ladder: fn(&LoopContext, u32, BlockPos, BlockStateId, &mut bool),
     pub makes_open_trapdoor_above_climbable:
         fn(&LoopContext, BlockStateId, BlockPos, BlockStateId, &mut bool),
-    pub friction: fn(&LoopContext, u32, &str, BlockPos, BlockStateId, &mut f32),
+    pub friction:
+        fn(FrictionLevel<'_>, Option<(u32, &str)>, BlockPos, BlockStateId, &mut f32) -> bool,
     /// `BlockPart::collision_shape` of the state's block, for one collision query; `shape`
     /// arrives `None` and leaves checked.
     pub collision_shape: fn(
@@ -283,16 +284,15 @@ pub(crate) fn makes_open_trapdoor_above_climbable(
 }
 
 pub(crate) fn friction(
-    context: &LoopContext,
-    entity: u32,
-    kind: &str,
+    level: FrictionLevel<'_>,
+    entity: Option<(u32, &str)>,
     pos: BlockPos,
     state: BlockStateId,
     friction: &mut f32,
-) {
-    if let Some(hooks) = HOOKS.get() {
-        (hooks.friction)(context, entity, kind, pos, state, friction);
-    }
+) -> bool {
+    HOOKS
+        .get()
+        .is_none_or(|hooks| (hooks.friction)(level, entity, pos, state, friction))
 }
 
 pub(crate) fn collision_shape(

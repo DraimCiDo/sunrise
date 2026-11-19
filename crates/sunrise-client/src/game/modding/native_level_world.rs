@@ -37,6 +37,26 @@ fn weather_flags((rain, thunder): (f32, f32)) -> (bool, bool) {
     (rain > 0.2, thunder > 0.9)
 }
 
+/// `Level.isRainingAt` over `world`, the column of the level in dimension `dim`.
+pub(super) fn rain_at(
+    world: &World,
+    facts: &sunrise_client::blocks::BlockFacts,
+    biomes: &sunrise_client::biome::Biomes,
+    behaviours: &sunrise_world::level::Behaviours,
+    dim: Dim,
+    pos: BlockPos,
+) -> bool {
+    let view = RainView {
+        world,
+        facts,
+        biomes,
+        dimension: dim.level(),
+        raining: weather_flags(weather_for_world(world, dim == Dim::End)).0,
+        random: LegacyRandom::new(0),
+    };
+    behaviours.is_raining_at(&view, pos)
+}
+
 /// A read-only view of one level's column for `Level.isRainingAt`, so a level parked
 /// while the server ticks another answers like the one in place.
 struct RainView<'a> {
@@ -357,19 +377,15 @@ impl Game<'_> {
         if !world.is_loaded_at(pos[0], pos[1], pos[2]) {
             return None;
         }
-        let view = RainView {
+        self.level_is_raining(level)?;
+        Some(rain_at(
             world,
-            facts: self.res.facts(),
-            biomes: world_biomes!(self),
-            dimension: Dim::from_id(level.dimension_id()).level(),
-            raining: self.level_is_raining(level)?,
-            random: LegacyRandom::new(0),
-        };
-        Some(
-            self.res
-                .behaviours()
-                .is_raining_at(&view, BlockPos::new(pos[0], pos[1], pos[2])),
-        )
+            self.res.facts(),
+            world_biomes!(self),
+            self.res.behaviours(),
+            Dim::from_id(level.dimension_id()),
+            BlockPos::new(pos[0], pos[1], pos[2]),
+        ))
     }
     /// `LevelReader.enabledFeatures` of the level a handle names. Every level of a world shares
     /// the world's flags. None for a stale handle and on a client.
@@ -489,6 +505,22 @@ mod tests {
                 assert!(!host.is_raining_at(snowy));
                 assert!(!host.is_raining_at(unloaded));
             });
+            // The side a motion tick is lent answers the same, so a friction part sees it.
+            let side = game_side!(game);
+            for (pos, rains) in [
+                (plains, true),
+                (roofed, false),
+                (desert, false),
+                (snowy, false),
+                (unloaded, false),
+            ] {
+                let at = sunrise_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
+                assert_eq!(
+                    sunrise_client::motion::SideLevel::is_raining_at(&side, &game.world, at),
+                    rains,
+                    "{pos:?}"
+                );
+            }
 
             game.world.weather.rain_level = (0.0, 0.0);
             assert_eq!(game.level_is_raining_at(level, plains), Some(false));

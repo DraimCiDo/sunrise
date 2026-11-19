@@ -31,6 +31,7 @@ pub fn register(registrar: &mut dyn Registrar) {
             GeneralEntityCategory::Misc,
             0.5,
             0.5,
+            None,
             GeneralSavePolicy::Save,
             true,
             8,

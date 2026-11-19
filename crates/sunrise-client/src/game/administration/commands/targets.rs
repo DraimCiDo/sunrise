@@ -133,13 +133,10 @@ impl Game<'_> {
                 let p = sunrise_client::mobs::leash::knot_state(fence).position;
                 [p.x, p.y, p.z]
             }),
-            // Stage 3's insertion joins live rows; a selector cannot find one yet.
             Target::General(id) => self
                 .resident_entities
                 .general
-                .rows
-                .iter()
-                .find(|row| row.id == id)
+                .row(id)
                 .map(|row| [row.position.x, row.position.y, row.position.z]),
         }
     }
@@ -162,7 +159,16 @@ impl Game<'_> {
                 .find(|p| p.id == id)
                 .map_or_else(String::new, |p| p.entity_type().into()),
             Target::Stand(_) => "minecraft:armor_stand".into(),
-            Target::General(_) => String::new(),
+            Target::General(id) => {
+                self.resident_entities
+                    .general
+                    .row(id)
+                    .map_or_else(String::new, |row| {
+                        super::super::general::general_type_catalog()
+                            .key(row.type_slot)
+                            .to_owned()
+                    })
+            }
             Target::Frame(id) => {
                 if self.item_frames.iter().any(|f| f.id == id && f.glow) {
                     "minecraft:glow_item_frame".into()

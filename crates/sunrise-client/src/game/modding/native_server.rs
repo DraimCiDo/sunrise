@@ -1715,7 +1715,7 @@ impl Game<'_> {
         ))
     }
     /// Runs `line` (no slash) as the server's console does: permission
-    /// level 4, from the overworld's spawn, with no output. A teleport to
+    /// level 4, from the world spawn in its level, with no output. A teleport to
     /// another level (`execute in minecraft:the_nether run tp Alex 0 70 0`)
     /// happens at the next tick's start, as the console's. Whether it ran
     /// without failing. During a guest's turn, live players (including the
@@ -1725,7 +1725,7 @@ impl Game<'_> {
         self.run_console_command(line, false).0
     }
     /// The one path `native_run_command` and `native_run_command_with_output` run a line
-    /// by: the console's source from the overworld's spawn, the native command filter on,
+    /// by: the console's source from the world spawn in its level, the native command filter on,
     /// and the running command's own chat capture, so a call inside another capture leaves
     /// the outer one as it was. With `capture`, the source is not silent and the feedback
     /// comes back as the second value.
@@ -1739,7 +1739,6 @@ impl Game<'_> {
         }
         let base = self.server_source();
         let server = execute::Source {
-            dimension: Dim::Overworld,
             silent: base.silent && !capture,
             ..base
         };
@@ -2221,7 +2220,7 @@ impl Game<'_> {
         if self.lan.is_none() || self.native_commands.level(line).is_none() {
             return false;
         }
-        self.as_console_in_overworld(|game| {
+        self.as_console_in_spawn_level(|game| {
             let previous = game
                 .command_source
                 .replace(super::commands::execute::Source {

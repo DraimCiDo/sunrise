@@ -68,6 +68,7 @@ impl Hooks for StateMod {
             mod_api::GeneralEntityCategory::Misc,
             0.8,
             1.9,
+            None,
             mod_api::GeneralSavePolicy::Save,
             true,
             8,

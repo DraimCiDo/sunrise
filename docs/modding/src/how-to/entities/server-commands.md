@@ -64,7 +64,7 @@ as vanilla's parser so `~`, `^` and the dimension list complete as in a vanilla 
 listener runs. A `vec3` and a `vec3_uncentered` cannot share a position in one command's
 usages, as they look the same to a client.
 A player's source is their position and rotation. The console has no source
-entity and uses the Overworld spawn's block corner with zero rotation, so `@s`
+entity and uses the world spawn's block corner, in the level the spawn is in, with zero rotation, so `@s`
 cannot resolve there. Every source receives the same owned data, on native and wasm.
 
 `event.source` is a non-exhaustive `CommandSource`: `Player { player, .. }`,

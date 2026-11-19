@@ -1113,9 +1113,9 @@ pub(in crate::game) fn content_root(
     Ok(overlay.root)
 }
 
-/// Publish the built-in registry orders mods iterate. The report already
-/// includes the types and menus the content overlay registered, in registration
-/// order (`BuiltInRegistries` protocol ids).
+/// Publish the registry orders mods iterate. The report includes built-in
+/// and content names in protocol order; native general types come after them
+/// in the public entity-type registry, not in the protocol ID table.
 pub(in crate::game) fn register_iterated_registries(
     root: &std::path::Path,
 ) -> sunrise_client::Result<()> {
@@ -1123,8 +1123,13 @@ pub(in crate::game) fn register_iterated_registries(
     let path = Builtin::find(root).ok_or("registries.json not found")?;
     let builtin = Builtin::load(&path)?;
     if let Some(ids) = builtin.get("minecraft:entity_type") {
-        mod_api::__private::resolve_entity_types(ids.names.iter().map(String::as_str))
-            .map_err(|errors| errors.join("\n"))?;
+        mod_api::__private::resolve_entity_types(
+            ids.names
+                .iter()
+                .map(String::as_str)
+                .chain(super::general::general_type_catalog().keys()),
+        )
+        .map_err(|errors| errors.join("\n"))?;
     }
     if let Some(ids) = builtin.get("minecraft:game_event") {
         mod_api::__private::resolve_game_events(ids.names.iter().map(String::as_str))
@@ -2211,6 +2216,7 @@ mod tests {
                 category: mod_api::GeneralEntityCategory::Misc,
                 width: 0.5,
                 height: 1.0,
+                passenger_attachment: None,
                 save_policy: mod_api::GeneralSavePolicy::Save,
                 summonable: true,
                 tracking_chunks: 8,

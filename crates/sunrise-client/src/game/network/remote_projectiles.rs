@@ -439,6 +439,8 @@ impl Game<'_> {
                 drop_item: false,
                 fall_distance: 0.0,
                 on_ground: false,
+                fire_ticks: 0,
+                sync_velocity: false,
                 stuck: Vec3::ZERO,
                 damage: Default::default(),
                 saved: None,

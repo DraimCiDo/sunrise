@@ -4107,6 +4107,7 @@ mod despawn_tests {
     fn a_named_fish_or_axolotl_never_despawns() {
         crate::mobs::world::with_test_world(&[], |w, types| {
             let far = MobWorld {
+                side: sunrise_client::motion::dry_side(),
                 // 200 blocks from the player: past the 128 a monster loses.
                 nearest_player: Some(Vec3::new(200.0, 64.0, 0.0)),
                 ..w.clone()
@@ -7637,6 +7638,7 @@ mod trader_llama_no_ai_tests {
                 ];
                 assert_eq!(seen[0].delay, 13);
                 let view = MobWorld {
+                    side: sunrise_client::motion::dry_side(),
                     others: &seen,
                     ..w.clone()
                 };

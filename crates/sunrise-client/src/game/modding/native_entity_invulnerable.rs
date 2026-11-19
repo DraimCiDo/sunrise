@@ -36,6 +36,23 @@ impl Game<'_> {
                 vanilla,
             )
     }
+    /// `Entity.isInvulnerableToBase` for lava's `lavaHurt` of a non-living
+    /// entity: `vanilla` (its saved invulnerability, which lava does not
+    /// bypass), as the mods' check answers it.
+    pub(in crate::game) fn refuses_lava_hurt(
+        &mut self,
+        id: u32,
+        kind: &str,
+        vanilla: bool,
+    ) -> bool {
+        let source = sunrise_client::health::HurtSource {
+            damage_type: "minecraft:lava",
+            causing: 0,
+            direct: 0,
+            position: None,
+        };
+        self.native_nonliving_invulnerable(id, kind, source, vanilla)
+    }
     /// A player's body, where it is kept now.
     pub(super) fn native_player_body(
         &self,
@@ -122,7 +139,7 @@ impl Game<'_> {
         };
         let mut compound = match self.persist.raw.get(&id) {
             Some(Tag::Compound(map)) => map.clone(),
-            _ => std::collections::BTreeMap::new(),
+            _ => sunrise_core::nbt::Compound::new(),
         };
         compound.insert("Invulnerable".into(), Tag::Byte(i8::from(invulnerable)));
         self.persist.raw.insert(id, Tag::Compound(compound));
@@ -233,7 +250,7 @@ impl Game<'_> {
         };
         let mut compound = match self.persist.raw.get(&id) {
             Some(Tag::Compound(map)) => map.clone(),
-            _ => std::collections::BTreeMap::new(),
+            _ => sunrise_core::nbt::Compound::new(),
         };
         compound.insert("invulnerable_time".into(), Tag::Int(ticks.max(0)));
         self.persist.raw.insert(id, Tag::Compound(compound));
@@ -252,7 +269,7 @@ impl Game<'_> {
         let ticks = ticks - 1;
         let mut compound = match self.persist.raw.get(&id) {
             Some(Tag::Compound(map)) => map.clone(),
-            _ => std::collections::BTreeMap::new(),
+            _ => sunrise_core::nbt::Compound::new(),
         };
         compound.insert("invulnerable_time".into(), Tag::Int(ticks));
         self.persist.raw.insert(id, Tag::Compound(compound));

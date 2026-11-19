@@ -314,6 +314,9 @@ fn decode_definition(
     let encoded = match registry {
         "minecraft:dialog" => {
             use crate::dialog::{AfterAction, Dialog, Kind};
+            // RegistryDataLoader refuses the load on one bad entry, so a transient
+            // component inside a dialog joins the other collected registry errors.
+            sunrise_world::item_defaults::validate_dialog(&value)?;
             let source = json_to_nbt(&value);
             let dialog = Dialog::decode_pack(&source, &value)
                 .map_err(|field| format!("invalid dialog field {field}"))?;

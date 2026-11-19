@@ -820,7 +820,9 @@ mod tests {
             assert!(game.world.set_stored(0, 64, 0, lava));
             game.player.as_mut().unwrap().position = Vec3::new(0.5, 64.0, 0.5);
             let tick_lava = |game: &mut Game<'_>| {
+                let side = game_side!(game);
                 let mut world = MotionWorld {
+                    side: &side,
                     entities: &[],
                     player: game.player.as_mut().unwrap(),
                     scene: &mut game.world,
@@ -1121,6 +1123,8 @@ mod tests {
             let falling = game.next_entity;
             game.falling.push(FallingBlock {
                 on_ground: false,
+                fire_ticks: 0,
+                sync_velocity: false,
                 attachment_lifetime: Default::default(),
                 rotation: [0.0, 0.0],
                 join: Default::default(),
@@ -1300,6 +1304,8 @@ mod tests {
             let id = game.next_entity;
             game.falling.push(FallingBlock {
                 on_ground: false,
+                fire_ticks: 0,
+                sync_velocity: false,
                 attachment_lifetime: Default::default(),
                 rotation: [0.0, 0.0],
                 join: Default::default(),

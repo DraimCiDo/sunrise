@@ -947,6 +947,11 @@ fn tnt_seat(tnt: Vec3, rider_offset: f64) -> Vec3 {
     Vec3::new(tnt.x, tnt.y + PrimedTnt::SIZE - rider_offset, tnt.z)
 }
 
+/// A general rider's seat on primed TNT: no vehicle attachment of its own.
+pub(super) fn tnt_general_seat(tnt: Vec3) -> Vec3 {
+    tnt_seat(tnt, 0.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

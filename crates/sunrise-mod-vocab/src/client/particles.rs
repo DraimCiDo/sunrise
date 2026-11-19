@@ -49,18 +49,12 @@ pub struct ParticleOptions {
     /// sent to clients; the resolved point is used for local rendering
     /// (`ParticleEngine::vibration` is the same particle).
     pub vibration: Option<(PositionSource, [f64; 3], i32)>,
-    /// Older entity-effect providers use velocity as RGB; true is ambient.
-    pub legacy_entity_effect: Option<bool>,
-    /// Older trails choose their lifetime in the provider rather than on the wire.
-    pub legacy_trail_lifetime: bool,
 }
 impl ParticleOptions {
     /// Construct an option for a retained vanilla or custom sprite-provider key.
     pub fn simple(ty: ParticleKey) -> Self {
         Self {
             ty,
-            legacy_entity_effect: None,
-            legacy_trail_lifetime: false,
             block: None,
             color: [1.0; 4],
             scale: 1.0,

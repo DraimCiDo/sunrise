@@ -37,11 +37,13 @@ Add the stack's damage separately when reproducing vanilla's nonempty stack scat
 `Option<EntityTypeKey>`, using the existing entity-type registry. The key is a
 copyable scalar on native and wasm; compare it with a retained key instead of
 allocating and comparing a type-name string on every read. A stale or missing
-entity still returns `None`. There is no separate equipment-only type read.
+entity still returns `None`. A native general row returns its declared type.
+There is no separate equipment-only type read.
 
 After the registry is available, resolve the type keys your Part needs once and
-retain them. `host.entity_type_keys()` enumerates that registry; `key.id(host)`
-explicitly requests its canonical namespaced name. Name resolution returns an
+retain them. `host.entity_type_keys()` enumerates built-in and content types in
+registry order, then native general types by declaring mod and type id.
+`key.id(host)` explicitly requests its canonical namespaced name. Name resolution returns an
 owned diagnostic string and can allocate. Persist the name, never the scalar slot.
 For example, retain the zombie key at setup, then compare
 `entity.kind(host) == Some(zombie_key)` in a predicate.

@@ -63,6 +63,12 @@ pub mod pages {
     pub use sunrise_hooks::pages::{Act, Label, Page, Place, Row, connect, register};
 }
 
+/// The volume of the audio mods make themselves (`sunrise_hooks::sound`): a crate's setting can turn
+/// it down or off.
+pub mod sound {
+    pub use sunrise_hooks::sound::set_mod_stream_gain;
+}
+
 /// The lang files with a crate's text, loaded with the game's own (docs/layers.md, "Platform
 /// registries").
 pub mod lang {
@@ -109,15 +115,6 @@ pub mod containers {
 /// The buttons a crate adds to the title screen (docs/layers.md, "Platform registries").
 pub mod title {
     pub use sunrise_hooks::title::{Button, Opens, Refused, Title, register};
-}
-
-/// The multiplayer server list as vanilla stores it (`servers.dat`): read, write, add, remove,
-/// and the lock held while it is read and written back.
-#[cfg(feature = "protocol")]
-pub mod servers {
-    pub use sunrise_protocol::servers::{
-        ServerEntry, load, lock, parse_address, prepend, remove_where, save,
-    };
 }
 
 /// Drawing on the HUD (docs/layers.md, "Platform registries").
