@@ -10,7 +10,7 @@
 //! depends on nothing else in the crate, so that `tools/string_hash_kit` can time byte-identical
 //! copies of it.
 
-use simd::{WIDE_FROM, fold, fold_short};
+use simd::{WIDE_FROM, fold};
 
 /// `String.hashCode` of a string's UTF-16 units.
 #[inline]
@@ -22,25 +22,30 @@ pub fn java_string_hash(units: &[u16]) -> i32 {
 /// without collecting them.
 #[inline]
 pub fn java_string_hash_str(text: &str) -> i32 {
-    // For ASCII text each byte is one UTF-16 unit. Short text is hashed while looking for a byte
-    // that is not ASCII; longer text is checked first, so that text that is not ASCII does not
-    // pay for a fold it throws away.
+    // For ASCII text each byte is one UTF-16 unit. Short text is folded byte by byte until a
+    // byte that is not ASCII, from which the encoded units are folded; longer text is checked
+    // first, so that text that is not ASCII does not pay for a vector fold it throws away.
     let bytes = text.as_bytes();
     if bytes.len() < WIDE_FROM {
-        let (hash, non_ascii) = fold_short(0, bytes);
-        if !non_ascii {
-            return hash as i32;
+        let mut hash = 0u32;
+        for (i, &b) in bytes.iter().enumerate() {
+            if b >= 0x80 {
+                return fold_encoded(hash, &text[i..]) as i32;
+            }
+            hash = hash.wrapping_mul(31).wrapping_add(u32::from(b));
         }
-    } else if bytes.is_ascii() {
+        return hash as i32;
+    }
+    if bytes.is_ascii() {
         return fold(0, bytes) as i32;
     }
-    hash_mixed(text) as i32
+    fold_encoded(0, text) as i32
 }
 
-/// A string with non-ASCII characters: the fold over the units its characters encode to.
-#[inline(never)]
-fn hash_mixed(text: &str) -> u32 {
-    text.encode_utf16().fold(0u32, |hash, unit| {
+/// `hash` continued over the UTF-16 units `text` encodes to.
+#[inline]
+fn fold_encoded(hash: u32, text: &str) -> u32 {
+    text.encode_utf16().fold(hash, |hash, unit| {
         hash.wrapping_mul(31).wrapping_add(u32::from(unit))
     })
 }
@@ -71,27 +76,24 @@ mod simd {
     #[inline(always)]
     pub(super) fn fold<T: Unit>(hash: u32, units: &[T]) -> u32 {
         if units.len() < WIDE_FROM {
-            return fold_short(hash, units).0;
+            return fold_short(hash, units);
         }
         fold_wide(hash, units)
     }
 
     /// `fold` for under sixteen units, four a step, in few enough registers that an empty string
-    /// costs next to nothing; also whether a unit is 0x80 or more (not ASCII, for bytes).
+    /// costs next to nothing.
     #[inline(always)]
-    pub(super) fn fold_short<T: Unit>(mut hash: u32, units: &[T]) -> (u32, bool) {
-        let mut high = 0u32;
+    fn fold_short<T: Unit>(mut hash: u32, units: &[T]) -> u32 {
         if units.len() < 4 {
             for &u in units {
-                high |= u.into();
                 hash = hash.wrapping_mul(31).wrapping_add(u.into());
             }
-            return (hash, high >= 0x80);
+            return hash;
         }
         let (quads, rest) = units.as_chunks::<4>();
         for q in quads {
             let [a, b, c, d] = q.map(Into::into);
-            high |= a | b | c | d;
             let sum = a
                 .wrapping_mul(POWERS[3])
                 .wrapping_add(b.wrapping_mul(POWERS[2]))
@@ -100,10 +102,9 @@ mod simd {
             hash = hash.wrapping_mul(POWERS[4]).wrapping_add(sum);
         }
         for &u in rest {
-            high |= u.into();
             hash = hash.wrapping_mul(31).wrapping_add(u.into());
         }
-        (hash, high >= 0x80)
+        hash
     }
 
     /// Sixteen units or more: vector steps.
@@ -257,15 +258,9 @@ mod simd {
 
     /// `hash` continued over `units`: the hash of a string whose first part hashed to `hash`.
     pub(super) fn fold<T: Unit>(hash: u32, units: &[T]) -> u32 {
-        fold_short(hash, units).0
-    }
-
-    /// `fold`, and whether a unit is 0x80 or more (not ASCII, for bytes).
-    pub(super) fn fold_short<T: Unit>(hash: u32, units: &[T]) -> (u32, bool) {
-        let hash = units
+        units
             .iter()
-            .fold(hash, |h, &u| h.wrapping_mul(31).wrapping_add(u.into()));
-        (hash, units.iter().any(|&u| u.into() >= 0x80))
+            .fold(hash, |h, &u| h.wrapping_mul(31).wrapping_add(u.into()))
     }
 }
 
