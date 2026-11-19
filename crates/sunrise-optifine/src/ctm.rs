@@ -58,6 +58,8 @@ fn tiles_needed(method: Method, width: u32, height: u32) -> (usize, Option<usize
         // `checked_mul`'s `None` (a pattern no pack can fill) asks for 0 tiles: refused.
         Repeat | OverlayRepeat => n(width.checked_mul(height).unwrap_or(0) as usize),
         Overlay => n(17),
+        // No file names it: mods' tables are read elsewhere.
+        Table => n(0),
     }
 }
 
@@ -245,6 +247,7 @@ impl Rule {
             connect,
             connect_tiles: get("connectTiles").map_or_else(Vec::new, |v| sprite_list(path, v)),
             connect_blocks: get("connectBlocks").map_or_else(Vec::new, block_list),
+            connect_properties: Vec::new(),
             inner_seams: flag("innerSeams") == Some(true),
             weights,
             random_loops: int("randomLoops", 0).clamp(0, 9) as u32,
@@ -265,6 +268,7 @@ impl Rule {
             },
             orient,
             tiles,
+            table: None,
         };
         let name = match get("name") {
             Some(n) => Some(Name::parse(n).ok_or(format!("bad name {n}"))?),

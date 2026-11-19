@@ -2,7 +2,7 @@
 //! sprites it applies to, which faces, what it joins and how it picks a tile. A format's reader
 //! (OptiFine's `.properties`, a mod's asset file) builds these; the client's mesher walks them.
 
-use crate::Symmetry;
+use crate::{Symmetry, TableSheet};
 
 /// In this order: the overlays last ([`Method::is_overlay`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -19,6 +19,8 @@ pub enum Method {
     Random,
     Repeat,
     Fixed,
+    /// A tile of a sheet picked by a lookup on the neighbours ([`Rule::table`]).
+    Table,
     /// The 17 transition tiles drawn over a face beside the connecting blocks.
     Overlay,
     OverlayCtm,
@@ -48,6 +50,10 @@ pub enum Connect {
     Tile,
     /// The same block state.
     State,
+    /// Any block of `connect_blocks`.
+    Blocks,
+    /// The same block, with the same values of the state properties in `connect_properties`.
+    Properties,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -159,6 +165,8 @@ pub struct Rule {
     pub connect_tiles: Vec<String>,
     /// ... or these blocks.
     pub connect_blocks: Vec<BlockSel>,
+    /// [`Connect::Properties`]: the state properties that must be equal.
+    pub connect_properties: Vec<String>,
     pub inner_seams: bool,
     /// One per tile (`random`); empty when every tile counts the same.
     pub weights: Vec<u32>,
@@ -177,9 +185,45 @@ pub struct Rule {
     pub orient: Orient,
     /// Applied before every rule without it.
     pub prioritize: bool,
+    /// [`Method::Table`]'s sheet and table.
+    pub table: Option<TableSheet>,
 }
 
 impl Rule {
+    /// A rule that draws `sheet`'s tiles on every face of the blocks and sprites it is given,
+    /// joining the same block.
+    pub fn table(path: String, sheet: TableSheet) -> Self {
+        Self {
+            path,
+            method: Method::Table,
+            tiles: Vec::new(),
+            match_tiles: Vec::new(),
+            match_blocks: Vec::new(),
+            weight: 0,
+            faces: faces::ALL,
+            biomes: None,
+            heights: None,
+            connect: Connect::Block,
+            connect_tiles: Vec::new(),
+            connect_blocks: Vec::new(),
+            connect_properties: Vec::new(),
+            inner_seams: false,
+            weights: Vec::new(),
+            random_loops: 0,
+            symmetry: Symmetry::None,
+            linked: false,
+            width: 0,
+            height: 0,
+            compact_overrides: Vec::new(),
+            tint_index: -1,
+            tint_block: None,
+            layer: Layer::Cutout,
+            orient: Orient::None,
+            prioritize: false,
+            table: Some(sheet),
+        }
+    }
+
     /// The rule names this block state (`state` answers its properties).
     pub fn matches_block<'a>(&self, id: &str, state: impl Fn(&str) -> Option<&'a str>) -> bool {
         self.match_blocks.iter().any(|m| m.matches(id, &state))
@@ -199,4 +243,9 @@ impl Rule {
             &self.path,
         )
     }
+}
+
+/// `rules` in the order they are tried ([`Rule::order`]).
+pub fn sort(rules: &mut [Rule]) {
+    rules.sort_by(|a, b| a.order().cmp(&b.order()));
 }

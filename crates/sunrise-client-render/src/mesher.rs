@@ -2492,6 +2492,7 @@ impl Mesher<'_> {
                 CtmFace::ALL[q.facing as usize],
                 [world.x, world.y, world.z],
                 neighbour,
+                |s| self.tables.full_faces[s as usize],
                 || Some(tints.biome(pos[0], pos[1], pos[2])),
                 // A pane's tiles are drawn with the cube's UVs (below), so that is its texture.
                 || {

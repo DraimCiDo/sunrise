@@ -385,7 +385,7 @@ impl RenderAssets {
         // Connected-texture rules find their faces by sprite layer: what they match by name keeps a
         // layer of its own, decided before the models insert their textures.
         let ctm_rules = if draws {
-            crate::pack_hooks::formats().connected(root.source())
+            crate::connected::read_rules(root.source())
         } else {
             Vec::new()
         };

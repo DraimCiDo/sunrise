@@ -889,7 +889,7 @@ mod tests {
         );
         let connected = crate::connected::ConnectedTextures::load(
             root.source(),
-            crate::pack_hooks::formats().connected(root.source()),
+            crate::connected::read_rules(root.source()),
             &registry,
             &mut sprites,
             |_, _| Some(base),

@@ -23,8 +23,10 @@ pub enum Symmetry {
 }
 
 mod rule;
+mod table;
 
 pub use rule::*;
+pub use table::*;
 
 pub type Vec3 = [i32; 3];
 
