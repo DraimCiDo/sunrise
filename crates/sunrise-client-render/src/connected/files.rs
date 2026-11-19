@@ -8,9 +8,15 @@
 use crate::pack_tags::Tags;
 use crate::resource_source::ResourceSource;
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use sunrise_connected::{BlockSel, Connect, Orient, Rule, Table, TableSheet, faces};
+
+/// The most a rule or table file may hold: both are a few lines.
+const MAX_FILE: u64 = 1 << 20;
+
+/// The named tables read so far in one load, each parsed once, refused ones too.
+type Tables = HashMap<String, Result<Arc<Table>, String>>;
 
 /// Every rule the `sunrise/connected` files of `root` declare, refused ones left out.
 pub fn read(root: &ResourceSource) -> Vec<Rule> {
@@ -23,13 +29,14 @@ pub fn read(root: &ResourceSource) -> Vec<Rule> {
         return Vec::new();
     }
     let tags = Tags::new(root);
+    let mut tables = Tables::new();
     files
         .into_iter()
         .filter_map(|path| {
             let rule = root
-                .read(&path)
+                .read_limited(&path, MAX_FILE)
                 .map_err(|e| e.to_string())
-                .and_then(|bytes| parse(&path, &bytes, root, &tags));
+                .and_then(|bytes| parse(&path, &bytes, root, &tags, &mut tables));
             rule.map_err(|e| log::warn!("Sunrise: connected textures {path}: {e}"))
                 .ok()
         })
@@ -71,14 +78,43 @@ enum FileMethod {
     Table,
 }
 
+/// A string, or an object of `T`: the object's own error (the field it names) is the error, which
+/// an untagged enum would replace with "did not match any variant".
+fn string_or_object<T: serde::de::DeserializeOwned>(
+    value: serde_json::Value,
+    what: &str,
+) -> Result<Result<String, T>, String> {
+    match value {
+        serde_json::Value::String(name) => Ok(Ok(name)),
+        serde_json::Value::Object(_) => serde_json::from_value(value)
+            .map(Err)
+            .map_err(|e| e.to_string()),
+        _ => Err(format!("{what} is a string or an object")),
+    }
+}
+
 #[derive(Deserialize)]
-#[serde(untagged)]
+#[serde(try_from = "serde_json::Value")]
 enum FileBlock {
     Id(String),
-    State {
-        block: String,
-        state: BTreeMap<String, OneOrMany>,
-    },
+    State(StateBlock),
+}
+
+impl TryFrom<serde_json::Value> for FileBlock {
+    type Error = String;
+    fn try_from(value: serde_json::Value) -> Result<Self, String> {
+        Ok(match string_or_object(value, "a block")? {
+            Ok(id) => Self::Id(id),
+            Err(state) => Self::State(state),
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StateBlock {
+    block: String,
+    state: BTreeMap<String, OneOrMany>,
 }
 
 #[derive(Deserialize)]
@@ -89,7 +125,7 @@ enum OneOrMany {
 }
 
 #[derive(Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
+#[serde(try_from = "serde_json::Value")]
 enum FileConnect {
     /// The same block.
     #[default]
@@ -97,15 +133,40 @@ enum FileConnect {
     State,
     Sprite,
     /// Any block of a tag.
-    #[serde(untagged)]
-    Tag {
-        tag: String,
-    },
+    Tag(String),
     /// The same block with equal values of these state properties.
-    #[serde(untagged)]
-    Same {
-        same: Vec<String>,
-    },
+    Same(Vec<String>),
+}
+
+/// The object form of `connect`: exactly one of its fields.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConnectFields {
+    tag: Option<String>,
+    same: Option<Vec<String>>,
+}
+
+impl TryFrom<serde_json::Value> for FileConnect {
+    type Error = String;
+    fn try_from(value: serde_json::Value) -> Result<Self, String> {
+        match string_or_object::<ConnectFields>(value, "connect")? {
+            Ok(name) => match name.as_str() {
+                "block" => Ok(Self::Block),
+                "state" => Ok(Self::State),
+                "sprite" => Ok(Self::Sprite),
+                other => Err(format!("unknown connect {other}")),
+            },
+            Err(ConnectFields {
+                tag: Some(tag),
+                same: None,
+            }) => Ok(Self::Tag(tag)),
+            Err(ConnectFields {
+                tag: None,
+                same: Some(same),
+            }) => Ok(Self::Same(same)),
+            Err(_) => Err("connect takes one of tag and same".into()),
+        }
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -118,11 +179,21 @@ enum FileOrient {
 }
 
 #[derive(Deserialize)]
-#[serde(untagged)]
+#[serde(try_from = "serde_json::Value")]
 enum FileTable {
     /// A file in `connected_tables`.
     Named(String),
     Inline(TableFile),
+}
+
+impl TryFrom<serde_json::Value> for FileTable {
+    type Error = String;
+    fn try_from(value: serde_json::Value) -> Result<Self, String> {
+        Ok(match string_or_object(value, "table")? {
+            Ok(name) => Self::Named(name),
+            Err(inline) => Self::Inline(inline),
+        })
+    }
 }
 
 /// A table as `connected_tables` files hold it.
@@ -197,18 +268,7 @@ fn face_bits(names: &[String]) -> Result<u8, String> {
     })
 }
 
-fn table(root: &ResourceSource, namespace: &str, table: FileTable) -> Result<Table, String> {
-    let file = match table {
-        FileTable::Inline(file) => file,
-        FileTable::Named(name) => {
-            let (ns, name) = name.split_once(':').unwrap_or((namespace, &name));
-            let path = format!("assets/{ns}/sunrise/connected_tables/{name}.json");
-            let bytes = root
-                .read(&path)
-                .map_err(|e| format!("table {ns}:{name} ({path}): {e}"))?;
-            json::<TableFile>(&bytes).map_err(|e| format!("table {ns}:{name} ({path}): {e}"))?
-        }
-    };
+fn build(file: TableFile) -> Result<Table, String> {
     let tests = file
         .tests
         .iter()
@@ -217,7 +277,39 @@ fn table(root: &ResourceSource, namespace: &str, table: FileTable) -> Result<Tab
     Table::new(tests, file.cover, file.grid, file.tiles)
 }
 
-fn parse(path: &str, bytes: &[u8], root: &ResourceSource, tags: &Tags) -> Result<Rule, String> {
+fn table(
+    root: &ResourceSource,
+    namespace: &str,
+    table: FileTable,
+    cache: &mut Tables,
+) -> Result<Arc<Table>, String> {
+    match table {
+        FileTable::Inline(file) => build(file).map(Arc::new),
+        FileTable::Named(name) => {
+            let (ns, name) = name.split_once(':').unwrap_or((namespace, &name));
+            let path = format!("assets/{ns}/sunrise/connected_tables/{name}.json");
+            cache
+                .entry(path.clone())
+                .or_insert_with(|| {
+                    root.read_limited(&path, MAX_FILE)
+                        .map_err(|e| e.to_string())
+                        .and_then(|bytes| json::<TableFile>(&bytes))
+                        .and_then(build)
+                        .map(Arc::new)
+                        .map_err(|e| format!("table {ns}:{name} ({path}): {e}"))
+                })
+                .clone()
+        }
+    }
+}
+
+fn parse(
+    path: &str,
+    bytes: &[u8],
+    root: &ResourceSource,
+    tags: &Tags,
+    tables: &mut Tables,
+) -> Result<Rule, String> {
     let file: File = json(bytes)?;
     let FileMethod::Table = file.method;
     let namespace = path
@@ -233,7 +325,7 @@ fn parse(path: &str, bytes: &[u8], root: &ResourceSource, tags: &Tags) -> Result
                 id: block_id(namespace, &id),
                 states: Vec::new(),
             },
-            FileBlock::State { block, state } => BlockSel {
+            FileBlock::State(StateBlock { block, state }) => BlockSel {
                 id: block_id(namespace, &block),
                 states: state
                     .into_iter()
@@ -261,18 +353,18 @@ fn parse(path: &str, bytes: &[u8], root: &ResourceSource, tags: &Tags) -> Result
         true => file.sheet,
         false => format!("{namespace}:{}", file.sheet),
     };
-    let table = table(root, namespace, file.table)?;
+    let table = table(root, namespace, file.table, tables)?;
 
     let (connect, connect_blocks, connect_properties) = match file.connect {
         FileConnect::Block => (Connect::Block, Vec::new(), Vec::new()),
         FileConnect::State => (Connect::State, Vec::new(), Vec::new()),
         FileConnect::Sprite => (Connect::Tile, Vec::new(), Vec::new()),
-        FileConnect::Tag { tag } => (Connect::Blocks, tag_blocks(tags, &tag)?, Vec::new()),
-        FileConnect::Same { same } => (Connect::Properties, Vec::new(), same),
+        FileConnect::Tag(tag) => (Connect::Blocks, tag_blocks(tags, &tag)?, Vec::new()),
+        FileConnect::Same(same) => (Connect::Properties, Vec::new(), same),
     };
     let sheet = TableSheet {
         sprite: sheet,
-        table: Arc::new(table),
+        table,
     };
     Ok(Rule {
         prioritize: !match_tiles.is_empty(),
@@ -297,11 +389,19 @@ mod tests {
     use super::*;
     use sunrise_connected::Method;
 
+    /// The folder, removed when the test ends.
+    struct Scratch(std::path::PathBuf);
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
     const DIR: &str = "assets/demo/sunrise/connected";
 
     /// A resource folder holding the `files` (path, text), the textures `demo:block/casing` and
     /// `demo:block/casing_sheet`, and the block tag `demo:casings`.
-    fn folder(name: &str, files: &[(&str, &str)]) -> ResourceSource {
+    fn folder(name: &str, files: &[(&str, &str)]) -> (Scratch, ResourceSource) {
         let root =
             std::env::temp_dir().join(format!("sunrise-ct-files-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -318,7 +418,7 @@ mod tests {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, text).unwrap();
         }
-        ResourceSource::directory(root)
+        (Scratch(root.clone()), ResourceSource::directory(root))
     }
 
     fn parse_in(root: &ResourceSource, text: &str) -> Result<Rule, String> {
@@ -327,6 +427,7 @@ mod tests {
             text.as_bytes(),
             root,
             &Tags::new(root),
+            &mut Tables::new(),
         )
     }
 
@@ -334,7 +435,7 @@ mod tests {
 
     #[test]
     fn a_file_is_a_table_rule() {
-        let root = folder(
+        let (_scratch, root) = folder(
             "good",
             &[("assets/demo/sunrise/connected_tables/row.json", ROW)],
         );
@@ -377,7 +478,7 @@ mod tests {
 
     #[test]
     fn a_file_that_cannot_load_is_refused_by_name() {
-        let root = folder(
+        let (_scratch, root) = folder(
             "bad",
             &[
                 ("assets/demo/sunrise/connected_tables/row.json", ROW),
@@ -421,11 +522,18 @@ mod tests {
         assert!(err.contains("names no block"), "{err}");
         let err = file(r#","colour":1"#).unwrap_err();
         assert!(err.contains("colour"), "{err}");
+        // Combined or misspelt fields of a variant fail too, never dropped.
+        let err = file(r#","connect":{"tag":"demo:casings","same":["axis"]}"#).unwrap_err();
+        assert!(err.contains("one of tag and same"), "{err}");
+        let err = file(r#","connect":{"same":["axis"],"sames":[]}"#).unwrap_err();
+        assert!(err.contains("sames"), "{err}");
+        let err = file(r#","blocks":[{"block":"demo:log","state":{},"stat":{}}]"#).unwrap_err();
+        assert!(err.contains("stat"), "{err}");
     }
 
     #[test]
     fn only_the_valid_files_of_a_folder_load() {
-        let root = folder(
+        let (_scratch, root) = folder(
             "read",
             &[
                 ("assets/demo/sunrise/connected_tables/row.json", ROW),
@@ -440,6 +548,6 @@ mod tests {
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].path, "assets/demo/sunrise/connected/good.json");
         // Nothing declared: nothing read (and the tag files are not even opened).
-        assert!(read(&folder("none", &[])).is_empty());
+        assert!(read(&folder("none", &[]).1).is_empty());
     }
 }

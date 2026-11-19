@@ -81,6 +81,11 @@ impl Table {
         })
     }
 
+    /// The mask bits the tests read: the only neighbours a face needs to probe.
+    pub fn tested(&self) -> u8 {
+        self.tests.iter().fold(0, |bits, &t| bits | t)
+    }
+
     pub fn cover(&self) -> bool {
         self.cover
     }

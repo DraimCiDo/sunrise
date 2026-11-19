@@ -190,6 +190,9 @@ impl ConnectedTextures {
             })
             .collect();
         sprites.prefetch(tiles.iter().map(String::as_str));
+        // A sheet shared by rules is cut once: by sprite and grid.
+        let mut sheets: HashMap<(String, (u32, u32)), crate::Result<Vec<Option<TileLayer>>>> =
+            HashMap::new();
         let loaded = rules
             .into_iter()
             .filter_map(|rule| {
@@ -220,14 +223,16 @@ impl ConnectedTextures {
                 let cells = match &rule.table {
                     None => Vec::new(),
                     Some(sheet) => {
-                        let cut = sprites.insert_tiles(&sheet.sprite, sheet.table.grid(), false);
-                        match cut.and_then(|layers| {
-                            layers
+                        let key = (sheet.sprite.clone(), sheet.table.grid());
+                        let cut = sheets.entry(key).or_insert_with_key(|(sprite, grid)| {
+                            sprites
+                                .insert_tiles(sprite, *grid, false)?
                                 .into_iter()
                                 .map(|l| l.map(|l| tile_layer(sprites, l)).transpose())
-                                .collect::<crate::Result<Vec<_>>>()
-                        }) {
-                            Ok(cells) => cells,
+                                .collect()
+                        });
+                        match cut {
+                            Ok(cells) => cells.clone(),
                             Err(e) => {
                                 log::warn!(
                                     "Sunrise: connected textures {}: sheet {}: {e}",
@@ -732,20 +737,24 @@ impl ConnectedTextures {
                 let sheet = rule.table.as_ref()?;
                 let axes = axes(face);
                 let normal = face.normal();
-                let mut mask = geometry::neighbours(axes, normal, false, &joins);
-                if sheet.table.cover() {
-                    // A neighbour does not join when the block in front of it, on the face's
-                    // side, joins too and has a full face toward it.
-                    let toward = 1 << (face as u8 ^ 1);
-                    for (bit, offset) in geometry::offsets(axes) {
-                        let front = [0, 1, 2].map(|k| offset[k] + normal[k]);
-                        if mask & bit != 0
-                            && joins(front)
-                            && full_faces(neighbour(front)) & toward != 0
-                        {
-                            mask &= !bit;
-                        }
+                // Only the neighbours the table tests are probed, the cover check included. With
+                // `cover`, a neighbour does not join when the block in front of it, on the
+                // face's side, joins too and has a full face toward it.
+                let tested = sheet.table.tested();
+                let toward = 1 << (face as u8 ^ 1);
+                let mut mask = 0;
+                for (bit, offset) in geometry::offsets(axes) {
+                    if tested & bit == 0 || !joins(offset) {
+                        continue;
                     }
+                    let front = [0, 1, 2].map(|k| offset[k] + normal[k]);
+                    if sheet.table.cover()
+                        && joins(front)
+                        && full_faces(neighbour(front)) & toward != 0
+                    {
+                        continue;
+                    }
+                    mask |= bit;
                 }
                 return Some(
                     match r.cells.get(sheet.table.tile(mask)).copied().flatten() {
@@ -1822,6 +1831,72 @@ mod tests {
         sprites.finish();
         let at = layer as usize * (sprites.size * sprites.size * 4) as usize;
         assert_eq!(sprites.pixels[at..at + 4], [0, 255, 0, 255]);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_table_rule_cuts_its_sheet_into_cells_and_a_non_grid_sheet_is_refused() {
+        let root = std::env::temp_dir().join(format!("sunrise-ct-table-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let textures = root.join("assets/demo/textures/block");
+        std::fs::create_dir_all(&textures).unwrap();
+        let write = |name: &str, (width, height): (u32, u32)| {
+            let mut encoder = png::Encoder::new(
+                std::fs::File::create(textures.join(name)).unwrap(),
+                width,
+                height,
+            );
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&[255, 0, 0, 255].repeat((width * height) as usize))
+                .unwrap();
+        };
+        // Two 2 x 2 tiles side by side, and a sheet 3 wide that two columns cannot cut.
+        write("row.png", (4, 2));
+        write("odd.png", (3, 2));
+        let registry = BlockRegistry::from_facts_json(
+            &br#"{"defaults":{"minecraft:air":0},"states":[["air",true,false,"","minecraft:air"]]}"#[..],
+        )
+        .unwrap();
+        let rule = |sprite: &str| {
+            use std::sync::Arc;
+            let table = sunrise_connected::Table::new(
+                vec![sunrise_connected::R],
+                false,
+                (2, 1),
+                vec![0, 1],
+            )
+            .unwrap();
+            let sheet = sunrise_connected::TableSheet {
+                sprite: sprite.into(),
+                table: Arc::new(table),
+            };
+            let mut rule = sunrise_connected::Rule::table(format!("{sprite}.json"), sheet);
+            rule.match_blocks = vec![sunrise_connected::BlockSel {
+                id: "demo:casing".into(),
+                states: Vec::new(),
+            }];
+            rule
+        };
+        let load = |sprite: &str| {
+            let source = ResourceSource::directory(root.clone());
+            let mut sprites = Sprites::new(source.clone());
+            ConnectedTextures::load(
+                &source,
+                vec![rule(sprite)],
+                &registry,
+                &mut sprites,
+                |_, _| None,
+            )
+        };
+        assert!(!load("demo:block/row").is_empty());
+        assert!(
+            load("demo:block/odd").is_empty(),
+            "a sheet that is not a grid of square tiles drops its rule"
+        );
         std::fs::remove_dir_all(&root).unwrap();
     }
 }

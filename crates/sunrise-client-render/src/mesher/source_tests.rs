@@ -324,6 +324,30 @@ fn a_folder_without_connected_texture_rules_meshes_exactly_as_before() {
     );
     assert!(render.connected.is_empty(), "nothing declares a rule here");
     assert_eq!(bytes(&render), before);
+    // A rule that matches another block leaves the mesh the same.
+    let sheet = sunrise_connected::TableSheet {
+        sprite: "fixture:block/low".into(),
+        table: std::sync::Arc::new(
+            sunrise_connected::Table::new(Vec::new(), false, (1, 1), vec![0]).unwrap(),
+        ),
+    };
+    let mut other = sunrise_connected::Rule::table("other.json".into(), sheet);
+    other.method = sunrise_connected::Method::Fixed;
+    other.table = None;
+    other.tiles = vec![sunrise_connected::Tile::Default];
+    other.match_blocks = vec![sunrise_connected::BlockSel {
+        id: "fixture:other".into(),
+        states: Vec::new(),
+    }];
+    render.connected = crate::connected::ConnectedTextures::load(
+        &source,
+        vec![other],
+        assets.registry,
+        &mut crate::sprites::Sprites::default(),
+        |_, _| None,
+    );
+    assert!(!render.connected.is_empty());
+    assert_eq!(bytes(&render), before);
 }
 
 #[test]
