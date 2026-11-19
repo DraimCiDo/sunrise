@@ -108,11 +108,12 @@ impl EntityRenderer for Missile {
             .map(|value| value.copied())
             .map_err(|e| format!("{e:?}"))?;
         *self.fuel.lock().unwrap() = fuel;
+        let extent = fuel.ok_or("missing fuel")? as f32;
         let corners = [
             [0.0, 1.0, 0.0],
             [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [1.0, 1.0, 0.0],
+            [extent, 0.0, 0.0],
+            [extent, 1.0, 0.0],
         ];
         draw.quad("block/stone", corners, [0.0, 0.0, 16.0, 16.0], 0xFF_FFFF);
         Ok(())
@@ -128,9 +129,20 @@ impl EntityRenderer for Bomb {
     fn submit(
         &self,
         _: &EntityRenderState,
-        _: &mut dyn BlockEntityDrawContext,
+        draw: &mut dyn BlockEntityDrawContext,
     ) -> Result<(), String> {
         self.calls.fetch_add(1, Ordering::Relaxed);
+        draw.quad(
+            "block/stone",
+            [
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 1.0, 0.0],
+            ],
+            [0.0, 0.0, 16.0, 16.0],
+            0xFF_FFFF,
+        );
         panic!("the bomb's renderer");
     }
 }
@@ -230,18 +242,11 @@ fn frame(game: &mut Game<'_>, alpha: f64) -> Vec<Vertex> {
 /// (id 5) going from (0, 321, 0) to (4, 321, 0) with fuel 7, `test:bomb` (6) and `test:plain` (7).
 /// In a child process running only `test`: the registrations are kept once per process.
 fn in_scene(test: &str, check: impl FnOnce(&mut Game<'_>, &Scene)) {
-    if std::env::var_os("SUNRISE_GENERAL_RENDERERS_CHILD").is_none() {
-        let status = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                &format!("game::native_general_renderers_tests::{test}"),
-                "--include-ignored",
-                "--nocapture",
-            ])
-            .env("SUNRISE_GENERAL_RENDERERS_CHILD", "1")
-            .status()
-            .unwrap();
-        assert!(status.success());
+    if super::native_entity_refs::tests::run_fresh_cases(
+        &format!("game::native_general_renderers_tests::{test}"),
+        "SUNRISE_GENERAL_RENDERERS_CHILD",
+        &["native"],
+    ) {
         return;
     }
     let held = Scene {
@@ -322,7 +327,7 @@ fn in_scene(test: &str, check: impl FnOnce(&mut Game<'_>, &Scene)) {
 }
 
 /// A quarter of the way between ticks: the pose stack starts at x = 1, and the state is
-/// interpolated the same way; the renderer reads the row's synced fuel through its host.
+/// interpolated the same way; the row's synced fuel sets the quad width.
 #[test]
 #[ignore = "daily"]
 fn a_row_is_drawn_by_its_types_renderer_at_the_frames_pose_reading_its_synced_fields() {
@@ -348,6 +353,7 @@ fn a_row_is_drawn_by_its_types_renderer_at_the_frames_pose_reading_its_synced_fi
             let xs: Vec<f32> = out.iter().map(|v| v.pos[0]).collect();
             let min = xs.iter().copied().fold(f32::INFINITY, f32::min);
             assert_eq!(min, 1.0 - CAMERA.x as f32);
+            assert_eq!(xs.iter().copied().fold(f32::NEG_INFINITY, f32::max), 8.0);
             let seen = scene.missile.seen.lock().unwrap().clone().unwrap();
             assert_eq!((seen.id, seen.partial, seen.age), (5, 0.25, 40.25));
             assert_eq!((seen.yaw, seen.pitch), (22.5, -10.0));
@@ -408,4 +414,161 @@ fn a_failing_renderer_is_dropped_until_reload_and_a_type_without_one_draws_nothi
             assert_eq!(game.remote.as_ref().unwrap().general.rows.len(), 3);
         },
     );
+}
+
+#[path = "../../../../sunrise-mod-wasm/tests/fixture/src/general_renderer.rs"]
+mod fixture;
+
+struct NativeProbe;
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for NativeProbe {
+    fn register(&self, registrar: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+        fixture::register(registrar);
+    }
+
+    fn register_entity_renderers(
+        &self,
+        _: &mod_api::RegistrationContext,
+        event: &mut mod_api::RegisterEntityRenderersEvent<'_>,
+    ) {
+        fixture::register_renderer(event.renderers);
+    }
+}
+
+/// The integrated server loads a real general row and syncs its fuel to its window through
+/// the tracker, without injecting client packets. Both renderer adapters turn that field into
+/// geometry, and still do so after resource reload, with the tracked row left in place.
+#[test]
+#[ignore = "daily"]
+fn integrated_general_renderer_reads_synced_fuel_on_native_and_wasm() {
+    const CASE: &str = "SUNRISE_GENERAL_RENDERER_TARGET";
+    if super::native_entity_refs::tests::run_fresh_cases(
+        "game::native_general_renderers_tests::integrated_general_renderer_reads_synced_fuel_on_native_and_wasm",
+        CASE,
+        &["native", "wasm"],
+    ) {
+        return;
+    }
+    sunrise_guest_stack::run_on_guest_stack(|| {
+        use mod_api::{Holder, Host};
+        mod_platform::__private::initialize().unwrap();
+        let mods: mod_api::Mods = if std::env::var(CASE).unwrap() == "wasm" {
+            super::block_entity_tick_reply_tests::wasm_mods().into()
+        } else {
+            vec![mod_api::ModEntry::new(
+                "wasm_fixture",
+                Box::new(NativeProbe),
+            )]
+            .into()
+        };
+        let registration =
+            mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Registration);
+        mod_platform::testing::with_mods(mods, || {
+            super::native_entity_refs::tests::with_client_game(|game| {
+                super::mods::register_entity_renderers(
+                    super::execution_role::ExecutionRole::Client,
+                );
+                drop(registration);
+                game.resolve_entity_renderers();
+                game.settings.render_distance = 2;
+                game.settings.simulation_distance = 2;
+                let options = sunrise_client::title::WorldOptions {
+                    world_type: sunrise_client::save::WorldPreset::Flat,
+                    ..Default::default()
+                };
+                game.open_integrated("general_render", None, Some(1), true, Some(&options))
+                    .unwrap();
+                poll_until(game, |g| {
+                    g.remote.as_ref().is_some_and(|r| r.logged_in && r.joined)
+                });
+                let (id, at) = game
+                    .integrated
+                    .as_ref()
+                    .unwrap()
+                    .call(|server| {
+                        let [x, _, z] = server.lan.as_ref().unwrap().hub.guests[0].position;
+                        // The headless fixture has no GPU to compile the section. Keep the row
+                        // above build height, where the vanilla section gate does not apply.
+                        let position = [
+                            x.floor(),
+                            f64::from(server.world.shape.max_y() + 1),
+                            z.floor(),
+                        ];
+                        let uuid = [380, 39, 9, 57];
+                        let saved = Tag::Compound(
+                            [
+                                ("id".into(), Tag::String(fixture::KIND.into())),
+                                (
+                                    "Pos".into(),
+                                    Tag::List(
+                                        position.map(|axis| Tag::Double(axis.to_bits())).into(),
+                                    ),
+                                ),
+                                ("UUID".into(), Tag::IntArray(uuid.into())),
+                                ("PayloadVersion".into(), Tag::Short(1)),
+                            ]
+                            .into(),
+                        );
+                        server
+                            .load_listed(fixture::KIND, Some(uuid), None, saved)
+                            .unwrap();
+                        let id = server
+                            .resident_entities
+                            .general
+                            .rows
+                            .iter()
+                            .find(|row| row.uuid == uuid)
+                            .unwrap()
+                            .id;
+                        let tx = server.transaction_open();
+                        fixture::FUEL
+                            .set(
+                                (server as &mut dyn Host).attachments(),
+                                Holder::Entity(id),
+                                7,
+                            )
+                            .unwrap();
+                        server.transaction_close(&tx, true);
+                        (id, position)
+                    })
+                    .unwrap();
+                let camera = glam::DVec3::from_array(at) - glam::DVec3::Z * 5.0;
+                let ready = |g: &Game<'_>| {
+                    g.remote
+                        .as_ref()
+                        .unwrap()
+                        .general
+                        .rows
+                        .get(&(id as i32))
+                        .is_some_and(|r| r.shown)
+                };
+                poll_until(game, ready);
+                let check_quad = |g: &Game<'_>| {
+                    let mut vertices = Vec::new();
+                    g.general_entity_geometry(camera, 1.0, &mut vertices);
+                    assert_eq!(vertices.len(), 4);
+                    let x = vertices.iter().map(|v| v.pos[0]);
+                    assert_eq!(x.clone().fold(f32::INFINITY, f32::min), 0.0);
+                    assert_eq!(x.fold(f32::NEG_INFINITY, f32::max), 7.0);
+                };
+                check_quad(game);
+                super::model_baking_completed_tests::reload(game);
+                assert!(ready(game), "resource reload must preserve the tracked row");
+                check_quad(game);
+                game.leave_server(None).unwrap();
+            });
+        });
+    });
+}
+
+fn poll_until(game: &mut Game<'_>, ready: impl Fn(&Game<'_>) -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while !ready(game) {
+        game.poll_remote().unwrap();
+        assert!(
+            std::time::Instant::now() < deadline,
+            "integrated general entity scene did not become ready"
+        );
+        std::thread::yield_now();
+    }
 }

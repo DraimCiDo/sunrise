@@ -53,6 +53,14 @@ impl Hooks for Mod {
         world_name_tags::render_level_stage(event);
     }
 
+    fn register_entity_renderers(
+        &self,
+        _: &mod_api::RegistrationContext,
+        event: &mut mod_api::RegisterEntityRenderersEvent<'_>,
+    ) {
+        general_renderer::register_renderer(event.renderers);
+    }
+
     fn tick_target_millis(
         &self,
         host: &dyn mod_api::ClientHost,
@@ -356,6 +364,7 @@ impl Hooks for Mod {
         tick_reply::register(registrar);
         part_state::register(registrar);
         entity_parts::register(registrar);
+        general_renderer::register(registrar);
         // A command argument type whose arguments declare a suggestion provider: the game asks the
         // provider through the nested handle (tests/fixture/src/suggestion_provider.rs).
         registrar.register_command_argument("warps", suggestion_provider::WarpsArgument);

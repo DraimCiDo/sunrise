@@ -263,7 +263,12 @@ fn a_registered_experience_orb_draws_its_renderer_in_place_of_the_quad() {
                     [0.5, 99.0, 4.0],
                 ]
             );
-            let state = heard.lock().unwrap().state.expect("the renderer was asked");
+            let state = heard
+                .lock()
+                .unwrap()
+                .state
+                .take()
+                .expect("the renderer was asked");
             assert_eq!(state.id, 91);
             assert_eq!(state.partial, ALPHA);
             assert_eq!(state.age, AGE as f32 + ALPHA);

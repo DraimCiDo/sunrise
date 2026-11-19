@@ -374,7 +374,12 @@ fn a_registered_item_frame_draws_its_renderer_in_place_of_the_model() {
             game.frame_geometry(CAMERA, ALPHA, &mut drawn);
             assert_eq!(drawn.len(), 4, "one quad, no frame and no item: {drawn:?}");
             assert_raised_at_hanging_pose(&drawn);
-            let state = heard.lock().unwrap().state.expect("the renderer was asked");
+            let state = heard
+                .lock()
+                .unwrap()
+                .state
+                .take()
+                .expect("the renderer was asked");
             assert_frame_state(state, 91, false, 6.5, true);
 
             heard.lock().unwrap().state = None;
@@ -390,6 +395,7 @@ fn a_registered_item_frame_draws_its_renderer_in_place_of_the_model() {
                 .lock()
                 .unwrap()
                 .state
+                .take()
                 .expect("the glow renderer was asked");
             assert_frame_state(state, 94, true, 3.5, false);
         },

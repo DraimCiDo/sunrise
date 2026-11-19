@@ -59,6 +59,12 @@ impl EntityRenderAttachments {
             }
         }
         values.sort_unstable_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
+        if values
+            .windows(2)
+            .any(|pair| (&pair[0].0, &pair[0].1) == (&pair[1].0, &pair[1].1))
+        {
+            return Err(WireError::Invalid("duplicate attachment key"));
+        }
         let mut writer = Writer::new();
         writer.limit(MAX_BYTES);
         writer.put_len(values.len());
@@ -113,48 +119,78 @@ impl EntityRenderAttachments {
 }
 
 impl Wire for Snapshot {
-    crate::wire::layout_fields!("bytes" => Vec<u8>);
+    crate::wire::layout_fields!("fields" => Vec<(String, String, Vec<u8>)>);
     const MIN: usize = 4;
 
     fn put(&self, out: &mut Writer) {
-        out.put(&self.bytes);
+        out.put_bytes(&self.bytes);
     }
 
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
-        let len = input.take_len(1)?;
-        if len > MAX_BYTES {
-            return Err(WireError::Length);
-        }
-        let bytes = input.take_bytes(len)?;
-        let mut payload = Reader::new(bytes);
-        let count = payload.take_len(12)?; // Three lengths per field.
-        let mut entries: Vec<(String, String, AttachmentEntry)> = Vec::with_capacity(count);
-        for _ in 0..count {
-            let (namespace, name): (String, String) = (payload.take()?, payload.take()?);
-            if entries
-                .last()
-                .is_some_and(|(ns, path, _)| (ns, path) >= (&namespace, &name))
-            {
-                return Err(WireError::Invalid("unordered attachment keys"));
+        input.bounded(MAX_BYTES, |payload| {
+            let bytes = payload.rest();
+            let count = payload.take_len(12)?; // Three lengths per field.
+            let mut entries: Vec<(String, String, AttachmentEntry)> = Vec::with_capacity(count);
+            for _ in 0..count {
+                let (namespace, name): (String, String) = (payload.take()?, payload.take()?);
+                if entries
+                    .last()
+                    .is_some_and(|(ns, path, _)| (ns, path) >= (&namespace, &name))
+                {
+                    return Err(WireError::Invalid("unordered attachment keys"));
+                }
+                let n = payload.take_len(1)?;
+                let (tag, consumed) = nbt::read_network(payload.take_bytes(n)?, Limits::default())
+                    .map_err(|_| WireError::Invalid("invalid attachment NBT"))?;
+                if !matches!(tag, Tag::Compound(_)) || consumed != n {
+                    return Err(WireError::Invalid("invalid attachment compound"));
+                }
+                entries.push((
+                    namespace,
+                    name,
+                    AttachmentEntry::from_saved([("value".into(), tag)].into()),
+                ));
             }
-            let n = payload.take_len(1)?;
-            let (tag, consumed) = nbt::read_network(payload.take_bytes(n)?, Limits::default())
-                .map_err(|_| WireError::Invalid("invalid attachment NBT"))?;
-            if !matches!(tag, Tag::Compound(_)) || consumed != n {
-                return Err(WireError::Invalid("invalid attachment compound"));
-            }
-            entries.push((
-                namespace,
-                name,
-                AttachmentEntry::from_saved([("value".into(), tag)].into()),
-            ));
-        }
-        if !payload.rest().is_empty() {
-            return Err(WireError::Trailing);
-        }
-        Ok(Self {
-            bytes: bytes.to_vec(),
-            entries,
+            Ok(Self {
+                bytes: bytes[..bytes.len() - payload.rest().len()].to_vec(),
+                entries,
+            })
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn attachment_snapshot_refuses_a_payload_over_its_budget_on_both_boundaries() {
+        let value = Tag::ByteArray(vec![42; 40 * 1024]);
+        let changes = ["a", "b"].map(|name| AttachmentSync {
+            namespace: "test".into(),
+            name: name.into(),
+            value: Some([("v".into(), value.clone())].into()),
+        });
+        assert_eq!(
+            EntityRenderAttachments::from_synced(changes.to_vec()),
+            Err(WireError::Length)
+        );
+        let fields: Vec<_> = changes
+            .into_iter()
+            .map(|field| {
+                (
+                    "test".to_owned(),
+                    field.name.to_string().unwrap(),
+                    nbt::write_network(&Tag::Compound(field.value.unwrap()), Limits::default())
+                        .unwrap(),
+                )
+            })
+            .collect();
+        let mut writer = Writer::new();
+        writer.put(&fields);
+        assert!(matches!(
+            Snapshot::take(&mut Reader::new(writer.bytes())),
+            Err(WireError::Length)
+        ));
     }
 }

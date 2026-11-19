@@ -383,7 +383,12 @@ fn a_registered_painting_draws_its_renderer_in_place_of_the_quads() {
                 );
                 assert!(v.pos[2].abs() < 1e-5, "quad z at the hanging pose: {v:?}");
             }
-            let state = heard.lock().unwrap().state.expect("the renderer was asked");
+            let state = heard
+                .lock()
+                .unwrap()
+                .state
+                .take()
+                .expect("the renderer was asked");
             assert_eq!(state.id, 91);
             assert_eq!(state.partial, 0.5);
             assert_eq!(state.age, 6.5);
