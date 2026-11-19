@@ -1,43 +1,33 @@
 //! Java's `String.hashCode`: `s[0]*31^(n-1) + ... + s[n-1]` over the string's UTF-16 units, in
 //! wrapping `int` arithmetic. Bit-exact on every input, including lone surrogates; nothing allocates.
 //!
-//! On x86-64, strings of eight units or more are folded eight units at a time with the SSE2
+//! On x86-64, strings of sixteen units or more are folded eight units at a time with the SSE2
 //! operations every x86-64 CPU has, through `safe_arch`'s safe wrappers, so the crate stays free of
 //! `unsafe`. Each unit is weighted by its power of 31 straight from a table (a power of 31 modulo
 //! 2^32, since wrapping multiplication and addition are a ring), so the units of a block are
 //! independent sums and no multiplication waits for another: the same value as `h = 31 * h + c`,
-//! summed in another order. Elsewhere, and below eight units, it is the plain loop. This module
+//! summed in another order. Elsewhere it is the plain loop, and below sixteen units four units a step. This module
 //! depends on nothing else in the crate, so that `tools/string_hash_kit` can time byte-identical
 //! copies of it.
 
-use simd::{STEP, fold};
+use simd::fold;
 
 /// `String.hashCode` of a string's UTF-16 units.
 #[inline]
 pub fn java_string_hash(units: &[u16]) -> i32 {
-    fold(0, units) as i32
+    fold(0, units).0 as i32
 }
 
 /// `String.hashCode` of the Java string holding `text`'s UTF-16 units (`text.encode_utf16()`),
 /// without collecting them.
 #[inline]
 pub fn java_string_hash_str(text: &str) -> i32 {
-    let bytes = text.as_bytes();
-    if bytes.len() < STEP {
-        // Short: hash the bytes while looking for a non-ASCII one, which ends the shortcut.
-        let (mut hash, mut or) = (0u32, 0u8);
-        for &b in bytes {
-            or |= b;
-            hash = hash.wrapping_mul(31).wrapping_add(u32::from(b));
-        }
-        if or < 0x80 {
-            return hash as i32;
-        }
-    } else if bytes.is_ascii() {
-        // Each byte is one UTF-16 unit.
-        return fold(0, bytes) as i32;
+    // For ASCII text each byte is one UTF-16 unit, and the fold notes whether one was not.
+    let (hash, non_ascii) = fold(0, text.as_bytes());
+    if non_ascii {
+        return hash_mixed(text) as i32;
     }
-    hash_mixed(text) as i32
+    hash as i32
 }
 
 /// A string with non-ASCII characters: its UTF-16 units, decoded into a small buffer on the stack
@@ -50,11 +40,11 @@ fn hash_mixed(text: &str) -> u32 {
     for c in text.chars() {
         filled += c.encode_utf16(&mut buffer[filled..]).len();
         if filled > buffer.len() - 2 {
-            hash = fold(hash, &buffer[..filled]);
+            hash = fold(hash, &buffer[..filled]).0;
             filled = 0;
         }
     }
-    fold(hash, &buffer[..filled])
+    fold(hash, &buffer[..filled]).0
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -74,51 +64,86 @@ mod simd {
     /// Units folded per block, each block as long a run of vector steps as the weight tables hold.
     const BLOCK: usize = 256;
     /// Units per vector step.
-    pub(super) const STEP: usize = 8;
+    const STEP: usize = 8;
 
-    /// `hash` continued over `units`: the hash of a string whose first part hashed to `hash`.
+    /// `hash` continued over `units`: the hash of a string whose first part hashed to `hash`. For
+    /// bytes, also whether one is 0x80 or more (not ASCII), which says nothing about UTF-16 units.
     #[inline(always)]
-    pub(super) fn fold<T: Unit>(mut hash: u32, units: &[T]) -> u32 {
-        if units.len() < STEP {
+    pub(super) fn fold<T: Unit>(mut hash: u32, units: &[T]) -> (u32, bool) {
+        let mut high = 0u32;
+        if units.len() < 4 {
             for &u in units {
+                high |= u.into();
                 hash = hash.wrapping_mul(31).wrapping_add(u.into());
             }
-            return hash;
+            return (hash, high >= 0x80);
         }
+        if units.len() < 2 * STEP {
+            let (quads, rest) = units.as_chunks::<4>();
+            for q in quads {
+                let [a, b, c, d] = q.map(Into::into);
+                high |= a | b | c | d;
+                let sum = a
+                    .wrapping_mul(POWERS[3])
+                    .wrapping_add(b.wrapping_mul(POWERS[2]))
+                    .wrapping_add(c.wrapping_mul(31))
+                    .wrapping_add(d);
+                hash = hash.wrapping_mul(POWERS[4]).wrapping_add(sum);
+            }
+            for &u in rest {
+                high |= u.into();
+                hash = hash.wrapping_mul(31).wrapping_add(u.into());
+            }
+            return (hash, high >= 0x80);
+        }
+        let mut seen = zeroed_m128i();
         let (blocks, rest) = units.as_chunks::<BLOCK>();
         for block in blocks {
             hash = hash
                 .wrapping_mul(POWERS[BLOCK])
-                .wrapping_add(weighted_sum(block));
+                .wrapping_add(weighted_sum(block, &mut seen));
         }
         let (head, body) = rest.split_at(rest.len() % STEP);
         for &u in head {
+            high |= u.into();
             hash = hash.wrapping_mul(31).wrapping_add(u.into());
         }
-        if body.is_empty() {
-            return hash;
+        if !body.is_empty() {
+            hash = hash
+                .wrapping_mul(POWERS[body.len()])
+                .wrapping_add(weighted_sum(body, &mut seen));
         }
-        hash.wrapping_mul(POWERS[body.len()])
-            .wrapping_add(weighted_sum(body))
+        (hash, high >= 0x80 || move_mask_i8_m128i(seen) != 0)
     }
 
     /// A UTF-16 unit, or an ASCII byte standing for one.
     pub(super) trait Unit: Copy + Into<u32> {
-        /// Eight units as 16-bit lanes.
-        fn load(units: &[Self; STEP]) -> m128i;
+        const ZERO: Self;
+        /// Two vector steps of units as 16-bit lanes. For bytes, ORs them into `seen` first.
+        fn load(units: &[Self; 2 * STEP], seen: &mut m128i) -> [m128i; 2];
     }
     impl Unit for u16 {
+        const ZERO: u16 = 0;
         #[inline(always)]
-        fn load(units: &[u16; STEP]) -> m128i {
-            m128i::from(*units)
+        fn load(units: &[u16; 2 * STEP], _: &mut m128i) -> [m128i; 2] {
+            let (a, b) = units.split_at(STEP);
+            [
+                m128i::from(<[u16; STEP]>::try_from(a).unwrap()),
+                m128i::from(<[u16; STEP]>::try_from(b).unwrap()),
+            ]
         }
     }
     impl Unit for u8 {
+        const ZERO: u8 = 0;
         #[inline(always)]
-        fn load(units: &[u8; STEP]) -> m128i {
-            let mut bytes = [0u8; 16];
-            bytes[..STEP].copy_from_slice(units);
-            unpack_low_i8_m128i(m128i::from(bytes), zeroed_m128i())
+        fn load(units: &[u8; 2 * STEP], seen: &mut m128i) -> [m128i; 2] {
+            let bytes = m128i::from(*units);
+            *seen = bitor_m128i(*seen, bytes);
+            let zero = zeroed_m128i();
+            [
+                unpack_low_i8_m128i(bytes, zero),
+                unpack_high_i8_m128i(bytes, zero),
+            ]
         }
     }
 
@@ -162,25 +187,41 @@ mod simd {
     };
 
     /// The units (a multiple of 8, at most a block) each weighted by 31 to the number of units after
-    /// it: the weights are the last of a block's.
+    /// it: the weights are the last of a block's. Eight units over a multiple of 16 go in front of
+    /// the rest as a step of 16 with eight zeros before them, which weigh nothing.
     ///
     /// A unit `c` times a weight is `c * lo + (c * hi << 16)` for the weight's halves. `lo` is taken as
     /// signed and `c` biased by 0x8000 (undone by `BIAS`), so that `lo` products are the signed 16-bit
     /// pairs a multiply-add (`pmaddwd`) sums; `hi` products only matter modulo 2^16, which a 16-bit
     /// multiply (`pmullw`) gives.
     #[inline(always)]
-    fn weighted_sum<T: Unit>(units: &[T]) -> u32 {
-        let first = BLOCK / STEP - units.len() / STEP;
+    fn weighted_sum<T: Unit>(units: &[T], seen: &mut m128i) -> u32 {
+        let (front, rest) = units.split_at(units.len() % (2 * STEP));
+        let pairs = rest.as_chunks::<{ 2 * STEP }>().0;
+        let rows = 2 * (pairs.len() + usize::from(!front.is_empty()));
+        let first = BLOCK / STEP - rows;
         let bias = set_splat_i16_m128i(i16::MIN);
         let (mut low, mut high) = (zeroed_m128i(), zeroed_m128i());
-        for (i, step) in units.as_chunks::<STEP>().0.iter().enumerate() {
-            let v = T::load(step);
-            let (lo, hi) = (
-                m128i::from(WEIGHT_LO[first + i]),
-                m128i::from(WEIGHT_HI[first + i]),
-            );
-            low = add_i32_m128i(low, mul_i16_horizontal_add_m128i(bitxor_m128i(v, bias), lo));
-            high = add_i16_m128i(high, mul_i16_keep_low_m128i(v, hi));
+        let mut row = first;
+        let mut step = |chunk: &[T; 2 * STEP], row: usize| {
+            for (k, v) in T::load(chunk, seen).into_iter().enumerate() {
+                let (lo, hi) = (
+                    m128i::from(WEIGHT_LO[row + k]),
+                    m128i::from(WEIGHT_HI[row + k]),
+                );
+                low = add_i32_m128i(low, mul_i16_horizontal_add_m128i(bitxor_m128i(v, bias), lo));
+                high = add_i16_m128i(high, mul_i16_keep_low_m128i(v, hi));
+            }
+        };
+        if !front.is_empty() {
+            let mut padded = [T::ZERO; 2 * STEP];
+            padded[STEP..].copy_from_slice(front);
+            step(&padded, row);
+            row += 2;
+        }
+        for pair in pairs {
+            step(pair, row);
+            row += 2;
         }
         // Sum the 16-bit lanes of `high` in pairs, as the top halves of 32-bit lanes.
         let high =
@@ -189,25 +230,24 @@ mod simd {
         a.wrapping_add(b)
             .wrapping_add(c)
             .wrapping_add(d)
-            .wrapping_add(BIAS[units.len() / STEP])
+            .wrapping_add(BIAS[rows])
     }
 }
 
 /// The plain loop, where there are no vector steps to take.
 #[cfg(not(target_arch = "x86_64"))]
 mod simd {
-    pub(super) const STEP: usize = 8;
-
     /// A UTF-16 unit, or an ASCII byte standing for one.
     pub(super) trait Unit: Copy + Into<u32> {}
     impl Unit for u8 {}
     impl Unit for u16 {}
 
-    /// `hash` continued over `units`: the hash of a string whose first part hashed to `hash`.
-    pub(super) fn fold<T: Unit>(hash: u32, units: &[T]) -> u32 {
-        units
+    /// `hash` continued over `units`, and whether a unit is 0x80 or more.
+    pub(super) fn fold<T: Unit>(hash: u32, units: &[T]) -> (u32, bool) {
+        let hash = units
             .iter()
-            .fold(hash, |h, &u| h.wrapping_mul(31).wrapping_add(u.into()))
+            .fold(hash, |h, &u| h.wrapping_mul(31).wrapping_add(u.into()));
+        (hash, units.iter().any(|&u| u.into() >= 0x80))
     }
 }
 

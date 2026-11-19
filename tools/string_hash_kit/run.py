@@ -153,8 +153,9 @@ def symbols(binary):
     return out
 
 
-def build_placed(copies, attempts=16):
-    """Builds until every group's copies start at min(copies, 4) distinct offsets mod 64: while a group's copies share
+def build_placed(copies, attempts=64):
+    """Builds until each loop group's copies start at min(copies, 4) distinct offsets mod 64 (the module's out-of-line
+    functions, which only the non-ASCII &str rows reach, at min(copies, 2)): while a group's copies share
     an offset, its filler grows by a statement. -Z merge-functions=disabled (RUSTC_BOOTSTRAP, this build only) keeps
     LLVM from folding the byte-identical copies of the module's out-of-line functions into one."""
     need = min(copies, 4)
@@ -166,7 +167,8 @@ def build_placed(copies, attempts=16):
         run("cargo", "build", "--release", "--quiet", "--manifest-path", crate / "Cargo.toml", env=env)
         binary = BUILD / "target/release/string-hash-kit"
         groups = symbols(binary)
-        ok = {k: len(g) == copies and len({a % 64 for a in g.values()}) >= need for k, g in groups.items()}
+        ok = {k: len(g) == copies and len({a % 64 for a in g.values()}) >= (need if k in ENTRIES else min(need, 2))
+              for k, g in groups.items()}
         if all(ok.values()):
             break
         if not all(ok[e] for e in ENTRIES if e in ok):
