@@ -84,9 +84,9 @@ fn main() {
     let texts: Vec<&str> = owned.iter().map(String::as_str).collect();
     if mode == "check" {
         // Copy 0's loops start their sums from 1.
-        let (utf16, text) = (copies::UTF16[0].1, copies::STR[0].1);
-        let (a, b) = (utf16(&slices).wrapping_sub(1), text(&texts).wrapping_sub(1));
-        println!("{} {}", a as i32, b as i32);
+        let sums = [copies::UTF16[0].1, copies::MAIN_UTF16[0].1].map(|f| f(&slices).wrapping_sub(1) as i32);
+        let sums_str = [copies::STR[0].1, copies::MAIN_STR[0].1].map(|f| f(&texts).wrapping_sub(1) as i32);
+        println!("{} {} {} {}", sums[0], sums_str[0], sums[1], sums_str[1]);
         return;
     }
     for (copy, f) in copies::UTF16 {
@@ -96,6 +96,15 @@ fn main() {
     for (copy, f) in copies::STR {
         let (ns, allocations) = median_ns(|| f(&texts), texts.len());
         println!(r#"{{"entry":"str","copy":{copy},"median_ns":{ns:.4},"allocations":{allocations}}}"#);
+    }
+    // Main's hash, which allocates nothing either, for the "vs main" ratios.
+    for (copy, f) in copies::MAIN_UTF16 {
+        let (ns, _) = median_ns(|| f(&slices), slices.len());
+        println!(r#"{{"entry":"main_utf16","copy":{copy},"median_ns":{ns:.4},"allocations":0}}"#);
+    }
+    for (copy, f) in copies::MAIN_STR {
+        let (ns, _) = median_ns(|| f(&texts), texts.len());
+        println!(r#"{{"entry":"main_str","copy":{copy},"median_ns":{ns:.4},"allocations":0}}"#);
     }
     std::hint::black_box(copies::FILLERS);
 }

@@ -10,41 +10,39 @@
 //! depends on nothing else in the crate, so that `tools/string_hash_kit` can time byte-identical
 //! copies of it.
 
-use simd::fold;
+use simd::{WIDE_FROM, fold, fold_short};
 
 /// `String.hashCode` of a string's UTF-16 units.
 #[inline]
 pub fn java_string_hash(units: &[u16]) -> i32 {
-    fold(0, units).0 as i32
+    fold(0, units) as i32
 }
 
 /// `String.hashCode` of the Java string holding `text`'s UTF-16 units (`text.encode_utf16()`),
 /// without collecting them.
 #[inline]
 pub fn java_string_hash_str(text: &str) -> i32 {
-    // For ASCII text each byte is one UTF-16 unit, and the fold notes whether one was not.
-    let (hash, non_ascii) = fold(0, text.as_bytes());
-    if non_ascii {
-        return hash_mixed(text) as i32;
+    // For ASCII text each byte is one UTF-16 unit. Short text is hashed while looking for a byte
+    // that is not ASCII; longer text is checked first, so that text that is not ASCII does not
+    // pay for a fold it throws away.
+    let bytes = text.as_bytes();
+    if bytes.len() < WIDE_FROM {
+        let (hash, non_ascii) = fold_short(0, bytes);
+        if !non_ascii {
+            return hash as i32;
+        }
+    } else if bytes.is_ascii() {
+        return fold(0, bytes) as i32;
     }
-    hash as i32
+    hash_mixed(text) as i32
 }
 
-/// A string with non-ASCII characters: its UTF-16 units, decoded into a small buffer on the stack
-/// and folded a buffer at a time.
+/// A string with non-ASCII characters: the fold over the units its characters encode to.
 #[inline(never)]
 fn hash_mixed(text: &str) -> u32 {
-    let mut buffer = [0u16; 64];
-    let mut filled = 0;
-    let mut hash = 0;
-    for c in text.chars() {
-        filled += c.encode_utf16(&mut buffer[filled..]).len();
-        if filled > buffer.len() - 2 {
-            hash = fold(hash, &buffer[..filled]).0;
-            filled = 0;
-        }
-    }
-    fold(hash, &buffer[..filled]).0
+    text.encode_utf16().fold(0u32, |hash, unit| {
+        hash.wrapping_mul(31).wrapping_add(u32::from(unit))
+    })
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -66,10 +64,22 @@ mod simd {
     /// Units per vector step.
     const STEP: usize = 8;
 
-    /// `hash` continued over `units`: the hash of a string whose first part hashed to `hash`. For
-    /// bytes, also whether one is 0x80 or more (not ASCII), which says nothing about UTF-16 units.
+    /// Units from here on take vector steps.
+    pub(super) const WIDE_FROM: usize = 2 * STEP;
+
+    /// `hash` continued over `units`: the hash of a string whose first part hashed to `hash`.
     #[inline(always)]
-    pub(super) fn fold<T: Unit>(mut hash: u32, units: &[T]) -> (u32, bool) {
+    pub(super) fn fold<T: Unit>(hash: u32, units: &[T]) -> u32 {
+        if units.len() < WIDE_FROM {
+            return fold_short(hash, units).0;
+        }
+        fold_wide(hash, units)
+    }
+
+    /// `fold` for under sixteen units, four a step, in few enough registers that an empty string
+    /// costs next to nothing; also whether a unit is 0x80 or more (not ASCII, for bytes).
+    #[inline(always)]
+    pub(super) fn fold_short<T: Unit>(mut hash: u32, units: &[T]) -> (u32, bool) {
         let mut high = 0u32;
         if units.len() < 4 {
             for &u in units {
@@ -78,54 +88,55 @@ mod simd {
             }
             return (hash, high >= 0x80);
         }
-        if units.len() < 2 * STEP {
-            let (quads, rest) = units.as_chunks::<4>();
-            for q in quads {
-                let [a, b, c, d] = q.map(Into::into);
-                high |= a | b | c | d;
-                let sum = a
-                    .wrapping_mul(POWERS[3])
-                    .wrapping_add(b.wrapping_mul(POWERS[2]))
-                    .wrapping_add(c.wrapping_mul(31))
-                    .wrapping_add(d);
-                hash = hash.wrapping_mul(POWERS[4]).wrapping_add(sum);
-            }
-            for &u in rest {
-                high |= u.into();
-                hash = hash.wrapping_mul(31).wrapping_add(u.into());
-            }
-            return (hash, high >= 0x80);
+        let (quads, rest) = units.as_chunks::<4>();
+        for q in quads {
+            let [a, b, c, d] = q.map(Into::into);
+            high |= a | b | c | d;
+            let sum = a
+                .wrapping_mul(POWERS[3])
+                .wrapping_add(b.wrapping_mul(POWERS[2]))
+                .wrapping_add(c.wrapping_mul(31))
+                .wrapping_add(d);
+            hash = hash.wrapping_mul(POWERS[4]).wrapping_add(sum);
         }
-        let mut seen = zeroed_m128i();
+        for &u in rest {
+            high |= u.into();
+            hash = hash.wrapping_mul(31).wrapping_add(u.into());
+        }
+        (hash, high >= 0x80)
+    }
+
+    /// Sixteen units or more: vector steps.
+    #[inline(never)]
+    fn fold_wide<T: Unit>(mut hash: u32, units: &[T]) -> u32 {
         let (blocks, rest) = units.as_chunks::<BLOCK>();
         for block in blocks {
             hash = hash
                 .wrapping_mul(POWERS[BLOCK])
-                .wrapping_add(weighted_sum(block, &mut seen));
+                .wrapping_add(weighted_sum(block));
         }
         let (head, body) = rest.split_at(rest.len() % STEP);
         for &u in head {
-            high |= u.into();
             hash = hash.wrapping_mul(31).wrapping_add(u.into());
         }
         if !body.is_empty() {
             hash = hash
                 .wrapping_mul(POWERS[body.len()])
-                .wrapping_add(weighted_sum(body, &mut seen));
+                .wrapping_add(weighted_sum(body));
         }
-        (hash, high >= 0x80 || move_mask_i8_m128i(seen) != 0)
+        hash
     }
 
     /// A UTF-16 unit, or an ASCII byte standing for one.
     pub(super) trait Unit: Copy + Into<u32> {
         const ZERO: Self;
-        /// Two vector steps of units as 16-bit lanes. For bytes, ORs them into `seen` first.
-        fn load(units: &[Self; 2 * STEP], seen: &mut m128i) -> [m128i; 2];
+        /// Two vector steps of units as 16-bit lanes.
+        fn load(units: &[Self; 2 * STEP]) -> [m128i; 2];
     }
     impl Unit for u16 {
         const ZERO: u16 = 0;
         #[inline(always)]
-        fn load(units: &[u16; 2 * STEP], _: &mut m128i) -> [m128i; 2] {
+        fn load(units: &[u16; 2 * STEP]) -> [m128i; 2] {
             let (a, b) = units.split_at(STEP);
             [
                 m128i::from(<[u16; STEP]>::try_from(a).unwrap()),
@@ -136,9 +147,8 @@ mod simd {
     impl Unit for u8 {
         const ZERO: u8 = 0;
         #[inline(always)]
-        fn load(units: &[u8; 2 * STEP], seen: &mut m128i) -> [m128i; 2] {
+        fn load(units: &[u8; 2 * STEP]) -> [m128i; 2] {
             let bytes = m128i::from(*units);
-            *seen = bitor_m128i(*seen, bytes);
             let zero = zeroed_m128i();
             [
                 unpack_low_i8_m128i(bytes, zero),
@@ -195,7 +205,7 @@ mod simd {
     /// pairs a multiply-add (`pmaddwd`) sums; `hi` products only matter modulo 2^16, which a 16-bit
     /// multiply (`pmullw`) gives.
     #[inline(always)]
-    fn weighted_sum<T: Unit>(units: &[T], seen: &mut m128i) -> u32 {
+    fn weighted_sum<T: Unit>(units: &[T]) -> u32 {
         let (front, rest) = units.split_at(units.len() % (2 * STEP));
         let pairs = rest.as_chunks::<{ 2 * STEP }>().0;
         let rows = 2 * (pairs.len() + usize::from(!front.is_empty()));
@@ -204,7 +214,7 @@ mod simd {
         let (mut low, mut high) = (zeroed_m128i(), zeroed_m128i());
         let mut row = first;
         let mut step = |chunk: &[T; 2 * STEP], row: usize| {
-            for (k, v) in T::load(chunk, seen).into_iter().enumerate() {
+            for (k, v) in T::load(chunk).into_iter().enumerate() {
                 let (lo, hi) = (
                     m128i::from(WEIGHT_LO[row + k]),
                     m128i::from(WEIGHT_HI[row + k]),
@@ -242,8 +252,16 @@ mod simd {
     impl Unit for u8 {}
     impl Unit for u16 {}
 
-    /// `hash` continued over `units`, and whether a unit is 0x80 or more.
-    pub(super) fn fold<T: Unit>(hash: u32, units: &[T]) -> (u32, bool) {
+    /// Units from here on would take vector steps.
+    pub(super) const WIDE_FROM: usize = 16;
+
+    /// `hash` continued over `units`: the hash of a string whose first part hashed to `hash`.
+    pub(super) fn fold<T: Unit>(hash: u32, units: &[T]) -> u32 {
+        fold_short(hash, units).0
+    }
+
+    /// `fold`, and whether a unit is 0x80 or more (not ASCII, for bytes).
+    pub(super) fn fold_short<T: Unit>(hash: u32, units: &[T]) -> (u32, bool) {
         let hash = units
             .iter()
             .fold(hash, |h, &u| h.wrapping_mul(31).wrapping_add(u.into()));
@@ -317,6 +335,21 @@ mod tests {
                 java_string_hash_str(&text),
                 naive(&text_units),
                 "{len} latin1 text"
+            );
+            let wide: String = ascii
+                .chars()
+                .enumerate()
+                .map(|(i, c)| match i % 7 {
+                    2 => '\u{4e16}',
+                    5 => '\u{1F600}',
+                    _ => c,
+                })
+                .collect();
+            let wide_units: Vec<u16> = wide.encode_utf16().collect();
+            assert_eq!(
+                java_string_hash_str(&wide),
+                naive(&wide_units),
+                "{len} 3- and 4-byte text"
             );
         }
     }

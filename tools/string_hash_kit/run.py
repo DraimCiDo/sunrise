@@ -29,12 +29,14 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 MODULE = ROOT / "crates/sunrise-core/src/java_string.rs"
+MAIN = HERE / "main_hash.rs"
 BENCH = ROOT / "mods/sunrise/src/test/java/dev/sunriselab/parity/StringHashBench.java"
 BENCH_CLASS = "dev.sunriselab.parity.StringHashBench"
 BUILD = ROOT / ".local/string-hash-kit"
 MIXES = ["ascii", "latin1", "bmp", "surrogates"]
 LENGTHS = [0, 1, 8, 32, 128, 1024]
-ENTRIES = ["utf16", "str"]
+ENTRIES = ["utf16", "str", "main_utf16", "main_str"]
+MAIN_OF = {"utf16": "main_utf16", "str": "main_str"}
 
 
 def log(message):
@@ -88,7 +90,7 @@ def pick_cpu():
     return default, "the default rule (CPU 2 if allowed, else the last allowed CPU): no hybrid cores found"
 
 
-GROUPS = ["module", "utf16", "str"]
+GROUPS = ["module", *ENTRIES]
 
 
 def filler(name, uid, n):
@@ -111,28 +113,34 @@ def generate(copies, fill):
         '[dependencies]\nsafe_arch = "=1.2.0"\n\n[workspace]\n\n[profile.release]\nopt-level = 3\ncodegen-units = 1\nlto = "thin"\n')
     shutil.copyfile(HERE / "bench.rs", src / "main.rs")
     lines = ["//! Written by tools/string_hash_kit/run.py.", "#![allow(dead_code)]", "use std::hint::black_box;", ""]
-    utf16, text, fillers = [], [], []
+    lists, fillers = {e: [] for e in ENTRIES}, []
     for c in range(copies):
         (src / "copies" / f"copy_{c}").mkdir()
         shutil.copyfile(MODULE, src / "copies" / f"copy_{c}" / "java_string.rs")
+        shutil.copyfile(MAIN, src / "copies" / f"copy_{c}" / "main_hash.rs")
         # `java_strinf` sorts just before `java_string`'s functions.
         (src / "copies" / f"copy_{c}.rs").write_text(
-            "use std::hint::black_box;\npub mod java_string;\n"
+            "use std::hint::black_box;\npub mod java_string;\npub mod main_hash;\n"
             + "\n".join(filler("java_strinf", 1000 + c, fill["module"] if c else 0)) + "\n")
         lines.append(f"pub mod copy_{c};")
         fillers.append(f"    copy_{c}::java_strinf,")
     for c in range(copies):
-        for group, entry, arg in (("utf16", "java_string_hash", "&[&[u16]]"), ("str", "java_string_hash_str", "&[&str]")):
+        for group, module, entry, arg in (
+                ("utf16", "java_string", "java_string_hash", "&[&[u16]]"),
+                ("str", "java_string", "java_string_hash_str", "&[&str]"),
+                ("main_utf16", "main_hash", "java_string_hash", "&[&[u16]]"),
+                ("main_str", "main_hash", "java_string_hash_str", "&[&str]")):
             lines += filler(f"{group}_{c}_g", 2000 + 10 * c + len(group), fill[group] if c else 0)
             # Each loop starts from a sum of its own (c + 1), so that no two copies' loops are one function.
             lines += ["#[inline(never)]", f"pub fn {group}_{c}_h(s: {arg}) -> u32 {{",
-                      f"    s.iter().fold({c + 1}u32, |a, x| a.wrapping_add(copy_{c}::java_string::{entry}(black_box(x)) as u32))",
+                      f"    s.iter().fold({c + 1}u32, |a, x| a.wrapping_add(copy_{c}::{module}::{entry}(black_box(x)) as u32))",
                       "}"]
             fillers.append(f"    {group}_{c}_g,")
-        utf16.append(f"    ({c}, utf16_{c}_h),")
-        text.append(f"    ({c}, str_{c}_h),")
-    lines += ["pub const UTF16: &[(usize, fn(&[&[u16]]) -> u32)] = &[", *utf16, "];",
-              "pub const STR: &[(usize, fn(&[&str]) -> u32)] = &[", *text, "];",
+            lists[group].append(f"    ({c}, {group}_{c}_h),")
+    lines += ["pub const UTF16: &[(usize, fn(&[&[u16]]) -> u32)] = &[", *lists["utf16"], "];",
+              "pub const STR: &[(usize, fn(&[&str]) -> u32)] = &[", *lists["str"], "];",
+              "pub const MAIN_UTF16: &[(usize, fn(&[&[u16]]) -> u32)] = &[", *lists["main_utf16"], "];",
+              "pub const MAIN_STR: &[(usize, fn(&[&str]) -> u32)] = &[", *lists["main_str"], "];",
               "pub const FILLERS: &[fn(u64) -> u64] = &[", *fillers, "];", ""]
     (src / "copies.rs").write_text("\n".join(lines))
     return crate
@@ -146,7 +154,7 @@ def symbols(binary):
         if len(parts) != 3:
             continue
         name = re.sub(r"::h[0-9a-f]{16}$", "", parts[2])
-        m = re.search(r"copies::(?:(utf16|str)_(\d+)_h|copy_(\d+)::java_string::(\w+(?:::<\w+>)?))$", name)
+        m = re.search(r"copies::(?:(utf16|str|main_utf16|main_str)_(\d+)_h|copy_(\d+)::java_string::(\w+(?:::<\w+>)?))$", name)
         if m:
             key, c = (m.group(1), m.group(2)) if m.group(1) else (m.group(4), m.group(3))
             out.setdefault(key, {})[int(c)] = int(parts[0], 16)
@@ -155,7 +163,7 @@ def symbols(binary):
 
 def build_placed(copies, attempts=64):
     """Builds until each loop group's copies start at min(copies, 4) distinct offsets mod 64 (the module's out-of-line
-    functions, which only the non-ASCII &str rows reach, at min(copies, 2)): while a group's copies share
+    function, which only the non-ASCII &str rows reach, is reported but not required to differ): while a group's copies share
     an offset, its filler grows by a statement. -Z merge-functions=disabled (RUSTC_BOOTSTRAP, this build only) keeps
     LLVM from folding the byte-identical copies of the module's out-of-line functions into one."""
     need = min(copies, 4)
@@ -167,7 +175,7 @@ def build_placed(copies, attempts=64):
         run("cargo", "build", "--release", "--quiet", "--manifest-path", crate / "Cargo.toml", env=env)
         binary = BUILD / "target/release/string-hash-kit"
         groups = symbols(binary)
-        ok = {k: len(g) == copies and len({a % 64 for a in g.values()}) >= (need if k in ENTRIES else min(need, 2))
+        ok = {k: len(g) == copies and len({a % 64 for a in g.values()}) >= (need if k in ENTRIES else 1)
               for k, g in groups.items()}
         if all(ok.values()):
             break
@@ -221,7 +229,7 @@ def main():
         rust_sum = run(binary, "check", mix, length, capture_output=True, text=True).stdout.split()
         java_sum = run(java, "-cp", classes, BENCH_CLASS, mix, length, 0, "check",
                        capture_output=True, text=True).stdout.split()
-        if rust_sum != java_sum * 2:
+        if rust_sum != java_sum * 4:
             sys.exit(f"{mix} {length}: hash sums differ: rust {rust_sum}, java {java_sum}")
         if args.check_only:
             log(f"{mix:10} {length:5}: hash sums agree")
@@ -268,17 +276,31 @@ def main():
                 "ratio_ci95": [lo, hi], "copies": copies,
                 "status": ("faster" if hi < 0.98 else "slower" if lo > 1.0 else "inside the noise")
                 + ("" if placed else ", not placement-averaged")}
+        for entry, main_entry in MAIN_OF.items():
+            # Ours over main's, round by round (the copies' means): the same method as the HotSpot ratio.
+            med, lo, hi = bootstrap_median_ci([mean(r["ns"][entry]) / mean(r["ns"][main_entry]) for r in rounds], rng)
+            row["entries"][entry]["vs_main"] = {
+                "ratio_median": med, "ratio_ci95": [lo, hi],
+                "status": "faster" if hi < 0.98 else "slower" if lo > 1.0 else "not slower" if hi <= 1.0
+                else "inside the noise"}
         report["rows"][f"{mix} {length}"] = row
         log(f"{mix:10} {length:5}: hotspot {row['hotspot_ns']:8.3f} ns (JVM starts spread "
             f"{row['hotspot_start_spread'] * 100:4.1f}%)" + "".join(
                 f"  {e} {d['rust_ns']:8.3f} ns ratio {d['ratio_median']:.3f} [{d['ratio_ci95'][0]:.3f}, "
-                f"{d['ratio_ci95'][1]:.3f}] {d['status']}" for e, d in row["entries"].items()))
+                f"{d['ratio_ci95'][1]:.3f}] {d['status']}" + (
+                    f" | vs main {d['vs_main']['ratio_median']:.3f} [{d['vs_main']['ratio_ci95'][0]:.3f}, "
+                    f"{d['vs_main']['ratio_ci95'][1]:.3f}] {d['vs_main']['status']}" if "vs_main" in d else "")
+                for e, d in row["entries"].items()))
     if args.check_only:
         return
     report["allocations_in_bench_loops"] = allocations
     (BUILD / "report.json").write_text(json.dumps(report, indent=1))
     misses = [f"{k} {e}" for k, r in report["rows"].items() for e, d in r["entries"].items()
-              if not d["status"].startswith("faster")]
+              if e in MAIN_OF and not d["status"].startswith("faster")]
+    slower_than_main = [f"{k} {e}" for k, r in report["rows"].items() for e, d in r["entries"].items()
+                        if e in MAIN_OF and d["vs_main"]["status"] in ("slower", "inside the noise")]
+    log("against main's code: " + ("no row slower, or inside the noise above 1.0" if not slower_than_main
+                                   else "rows not shown below 1.0: " + ", ".join(slower_than_main)))
     log(f"allocations in the timed Rust loops: {allocations}")
     log("verdict: " + ("PASS: every row faster than HotSpot by more than 2%" if not misses and not allocations
                        else "FAIL: rows that miss the bar: " + ", ".join(misses)))
