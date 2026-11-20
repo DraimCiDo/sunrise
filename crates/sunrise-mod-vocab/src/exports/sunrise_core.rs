@@ -5,6 +5,9 @@ pub use sunrise_core::{game_mode::GameMode, geometry::Direction, position::Block
 /// [`Host::math_profile`](crate::Host) describes the engine selection on both native and wasm;
 /// it does not make these functions available to a guest.
 pub mod java_math;
+/// Host-free SNBT and JSON conversion for typed NBT.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod nbt;
 /// Platform-independent, host-call-free StrictMath functions, including sin/cos/tan/exp/pow.
 pub mod strict_math;
 pub use sunrise_core::nbt::{Error as NbtError, NETWORK_NBT_QUOTA};
