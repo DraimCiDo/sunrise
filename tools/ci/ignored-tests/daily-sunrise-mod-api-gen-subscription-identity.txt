@@ -1,1 +1,0 @@
-sunrise-mod-api-gen wire::tests::an_unrelated_hook_added_to_the_catalog_moves_no_subscription_name_or_id lib daily slow

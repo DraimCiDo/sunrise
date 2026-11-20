@@ -64,8 +64,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.rust.outputs.version }}
-          # wasm-std uses -Zbuild-std even when this pinned toolchain is already installed.
-          components: rust-src, rustfmt
       - uses: actions/setup-python@v6
         if: runner.environment == 'github-hosted'
         with:
@@ -85,15 +83,6 @@ jobs:
       - name: Restore unchanged source timestamps
         if: runner.environment == 'self-hosted'
         run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes-v2.json"
-      - name: Build the shared wasm standard library
-        shell: bash
-        run: |
-          cargo run --locked -p cargo-sunrise-mod -- sunrise-mod wasm-std sunrise-wasm-std.wasm
-      - uses: actions/upload-artifact@v7
-        with:
-          name: wasm-std
-          path: sunrise-wasm-std.wasm
-          if-no-files-found: error
       - name: Private exporter inputs
         run: |
           if [[ -n "${DYNA_CI_BUILD:-}" ]]; then
@@ -375,11 +364,6 @@ jobs:
         with:
           name: original-exporters
           path: exporters
-      # The wasm member is target-independent, including on musl and Windows.
-      - uses: actions/download-artifact@v8
-        with:
-          name: wasm-std
-          path: ${{ matrix.musl && 'target/x86_64-unknown-linux-musl/release' || env.BIN }}
       - name: Build, check and package for musl in Alpine
         if: matrix.musl
         # Run Docker on the Ubuntu host: JavaScript actions themselves require glibc.

@@ -178,69 +178,38 @@ class ManifestTests(unittest.TestCase):
 
 
 class RootTests(unittest.TestCase):
-    """`check_root`: each API root is judged by a consumer that depends on it."""
     REGISTRY = "registry+https://github.com/rust-lang/crates.io-index"
+    GAME = "0sunrise-mod-host v0.1.0|\n1sunrise-mod-api v0.1.0|derive\n2serde v0.1.0|derive,rc\n3subtle v0.1.0|"
+    STARTER = "0mod-starter v0.1.0|\n1sunrise-mod-api v0.1.0|derive\n2serde v0.1.0|derive"
 
-    def metadata(self):
-        return {"packages": [package("sunrise-mod-api"), package("sunrise-wasmtime"),
-                             package("serde", source=self.REGISTRY), package("wasmtime", source=self.REGISTRY)],
-                "resolve": {"nodes": [node("sunrise-mod-api", ("serde", None)),
-                                      node("sunrise-wasmtime", ("wasmtime", None)), node("serde"), node("wasmtime")]}}
+    def metadata(self, wider=False):
+        packages = [package("sunrise-mod-api"), package("serde", source=self.REGISTRY)]
+        nodes = [node("sunrise-mod-api", ("serde", None)), node("serde")]
+        if wider:
+            packages.append(package("subtle", source=self.REGISTRY))
+            nodes[1:] = [node("serde", ("subtle", None)), node("subtle")]
+        return {"packages": packages, "resolve": {"nodes": nodes}}
 
-    GAME = "\n".join(["0sunrise-mod-host v0.1.0|", "1serde v0.1.0|derive", "1wasmtime v0.1.0|cranelift,std"])
-    STARTER = "\n".join(["0mod-starter v0.1.0|", "1serde v0.1.0|derive"])
-    NATIVE = "\n".join(["0mod-starter-wasmtime v0.1.0|", "1serde v0.1.0|derive", "1wasmtime v0.1.0|cranelift,std"])
+    def check(self, consumer, game_wider=True, api_wider=False):
+        return api_source.check_root(self.metadata(game_wider), self.metadata(api_wider), "sunrise-mod-api",
+                                     self.GAME, consumer, "mod-starter")
 
-    def check(self, root, consumer):
-        return api_source.check_root(self.metadata(), self.metadata(), root, self.GAME, consumer, "consumer")
-
-    def test_an_api_only_starter_is_judged_on_the_api_closure_alone(self):
-        self.assertEqual(self.check("sunrise-mod-api", self.STARTER), 2)
-
-    def test_the_wasmtime_root_needs_a_consumer_that_depends_on_it(self):
-        self.assertEqual(self.check("sunrise-wasmtime", self.NATIVE), 2)
+    def test_a_transitive_dependency_can_resolve_fewer_features_but_never_more(self):
+        self.assertEqual(self.check(self.STARTER), 2)
+        self.assertEqual(self.check(self.STARTER + "\n3subtle v0.1.0|", api_wider=True), 3)
         with self.assertRaises(Refusal) as refused:
-            self.check("sunrise-wasmtime", self.STARTER)
-        self.assertEqual(refused.exception.code, "E_FEATURES")
-        self.assertIn("wasmtime 0.1.0: game ['cranelift', 'std'], ours None", str(refused.exception))
-        with self.assertRaises(Refusal) as refused:
-            self.check("sunrise-wasmtime", self.NATIVE.replace("cranelift,std", "std"))
+            self.check(self.STARTER.replace("serde v0.1.0|derive", "serde v0.1.0|derive,extra"))
         self.assertEqual(refused.exception.code, "E_FEATURES")
 
-
-    def test_a_root_the_games_other_crates_widen_may_resolve_fewer_packages_but_never_more(self):
-        wider = self.metadata()
-        wider["packages"].append(package("subtle", source=self.REGISTRY))
-        wider["resolve"]["nodes"].append(node("subtle"))
-        for parent in ("serde", "wasmtime"):
-            next(n for n in wider["resolve"]["nodes"] if n["id"] == parent)["deps"].append(
-                {"pkg": "subtle", "dep_kinds": [{"kind": None}]})
-        game = "\n".join([self.GAME.replace("serde v0.1.0|derive", "serde v0.1.0|derive,rc"), "1subtle v0.1.0|"])
-        # The API root: the game's other crates give serde a feature and a dependency the starter does not get.
-        self.assertEqual(api_source.check_root(wider, self.metadata(), "sunrise-mod-api", game, self.STARTER,
-                                               "consumer"), 2)
-        with self.assertRaises(Refusal) as refused:
-            api_source.check_root(wider, self.metadata(), "sunrise-mod-api", game,
-                                  self.STARTER.replace("|derive", "|derive,extra"), "consumer")
-        self.assertEqual(refused.exception.code, "E_FEATURES")
-        args = ("sunrise-wasmtime", game, self.NATIVE, "consumer")
-        self.assertEqual(api_source.check_root(wider, self.metadata(), *args), 2)
-        # Wasmtime itself is exact: a feature the game lacks fails, and so does one the game has that it misses.
-        for consumer in (self.NATIVE.replace("cranelift,std", "cranelift,std,wat"),
-                         self.NATIVE.replace("cranelift,std", "std")):
-            with self.subTest(consumer), self.assertRaises(Refusal) as refused:
-                api_source.check_root(wider, self.metadata(), "sunrise-wasmtime", game, consumer, "consumer")
+    def test_the_named_api_root_has_exactly_the_games_features(self):
+        for features in ("", "derive,extra"):
+            with self.subTest(features=features), self.assertRaises(Refusal) as refused:
+                self.check(self.STARTER.replace("sunrise-mod-api v0.1.0|derive", f"sunrise-mod-api v0.1.0|{features}"))
             self.assertEqual(refused.exception.code, "E_FEATURES")
-        # A transitive crate may have fewer features than the game's, never more.
-        loose = self.NATIVE + "\n1subtle v0.1.0|"
-        self.assertEqual(api_source.check_root(wider, self.metadata(), "sunrise-wasmtime", game, loose, "consumer"), 2)
+
+    def test_the_api_closure_never_adds_a_package_the_game_does_not_have(self):
         with self.assertRaises(Refusal) as refused:
-            api_source.check_root(wider, self.metadata(), "sunrise-wasmtime", game,
-                                  self.NATIVE + "\n1subtle v0.1.0|extra", "consumer")
-        self.assertEqual(refused.exception.code, "E_FEATURES")
-        # The API source never holds a package the game's closure does not.
-        with self.assertRaises(Refusal) as refused:
-            api_source.check_root(self.metadata(), wider, *args)
+            self.check(self.STARTER, game_wider=False, api_wider=True)
         self.assertEqual(refused.exception.code, "E_CLOSURE")
 
 

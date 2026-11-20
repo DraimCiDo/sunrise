@@ -25,7 +25,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from tools.check_mod_api_wire import code_tokens  # noqa: E402
+from tools.rust_tokens import code_tokens  # noqa: E402
 
 CRATES = ('sunrise-mod-api', 'sunrise-mod-vocab')
 
