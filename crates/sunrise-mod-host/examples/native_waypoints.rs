@@ -135,7 +135,6 @@ fn main() {
     sunrise_mod_host::main_with(
         vec![ModEntry::new("waypoints", Box::<Waypoints>::default())],
         &[],
-        &[],
         startup,
     );
 }

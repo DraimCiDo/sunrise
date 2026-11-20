@@ -1,5 +1,5 @@
 //! How native mods stand against one game build before anything compiles: each mod's refusal and fit (SDK design §10), and the route the usable ones take.
-use crate::{api, game_uses, internals, prebuilt, scan_bundles};
+use crate::{api, game_uses, prebuilt, scan_bundles};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -32,8 +32,6 @@ pub enum Verdict {
         made_for: String,
         misfits: Vec<Misfit>,
     },
-    /// An `[[inject]]` row's point is not the same in this build: why.
-    Points { made_for: String, why: String },
 }
 
 impl Verdict {
@@ -80,12 +78,11 @@ pub fn table(dir: &Path) -> Result<UsesTable, Unlisted> {
     })
 }
 
-/// How `project` stands against build `build`, whose surface `surface` gives (asked for only when the mod was made for another build), whose build data `catalog` holds, and where the game code the mod declares is as `game` says ([`game_uses::entries`], asked for only when it declares some).
+/// How `project` stands against build `build`, whose surface `surface` gives (asked for only when the mod was made for another build), and where the game code the mod declares is as `game` says ([`game_uses::entries`], asked for only when it declares some).
 pub fn judge<E>(
     project: &api::Project<'_>,
     build: &str,
     surface: &mut dyn FnMut() -> Result<Rc<mod_surface::Surface>, E>,
-    catalog: &mut dyn FnMut() -> Result<Rc<internals::Catalog>, E>,
     game: &mut dyn FnMut() -> Result<Vec<(String, game_uses::Now)>, E>,
 ) -> Result<Verdict, E> {
     let made_for = project.bundle.native().sunrise.clone();
@@ -150,14 +147,6 @@ pub fn judge<E>(
             std::mem::take(&mut unversioned),
         ));
     }
-    if !project.bundle.manifest.inject.is_empty()
-        && let Err(error) = catalog()?.check(&project.bundle.manifest)
-    {
-        return Ok(Verdict::Points {
-            made_for,
-            why: error.to_string(),
-        });
-    }
     Ok(Verdict::Fits { made_for })
 }
 
@@ -174,7 +163,7 @@ pub struct Plan {
     /// The build's `surface.json`; absent, a mod that needs it says so (`needs`).
     #[serde(default)]
     pub surface: Option<PathBuf>,
-    /// The build's unpacked build data (`points.json`, `internals.json`); absent, a mod that needs it says so.
+    /// The build's unpacked build data (`internals.json`, `loops.json`, `functions.json`); absent, a mod that needs it says so.
     #[serde(default)]
     pub build_data: Option<PathBuf>,
 }
@@ -209,7 +198,6 @@ enum Lack {
 pub fn check(plan: &Plan) -> Result<Reply, String> {
     let found = scan_bundles(&plan.mods)?;
     let mut surface: Option<Rc<mod_surface::Surface>> = None;
-    let mut catalog: Option<Rc<internals::Catalog>> = None;
     let mut mods = Vec::new();
     let mut usable = Vec::new();
     for bundle in &found {
@@ -250,15 +238,6 @@ pub fn check(plan: &Plan) -> Result<Reply, String> {
                         .map_err(|e| Lack::Unread(format!("{}: {e}", path.display())))?,
                 );
                 surface = Some(read.clone());
-                Ok(read)
-            },
-            &mut || {
-                if let Some(read) = &catalog {
-                    return Ok(read.clone());
-                }
-                let dir = plan.build_data.as_ref().ok_or(Lack::Needs("build-data"))?;
-                let read = Rc::new(internals::Catalog::read(dir).map_err(Lack::Unread)?);
-                catalog = Some(read.clone());
                 Ok(read)
             },
             &mut || {

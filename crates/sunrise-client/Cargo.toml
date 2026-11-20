@@ -20,7 +20,6 @@ sunrise-guest-stack = { path = "../sunrise-guest-stack" }
 sunrise-hooks = { path = "../sunrise-hooks" }
 sunrise-mod-runtime = { path = "../sunrise-mod-runtime" }
 mod_api = { package = "sunrise-mod-vocab", path = "../sunrise-mod-vocab" }
-sunrise-engine-slots = { path = "../sunrise-engine-slots" }
 sunrise-mod-api-macros = { path = "../sunrise-mod-api-macros" }
 sunrise-client-lib = { path = "../sunrise-client-lib", default-features = false }
 sunrise-gameplay = { path = "../sunrise-gameplay" }

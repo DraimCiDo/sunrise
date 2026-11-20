@@ -12,6 +12,3 @@ pub use loading::main_with;
 mod mods_button;
 
 pub use sunrise_guest_stack::prepare_main as prepare_main_stack;
-
-/// A typed API-point listener supplied by generated native startup.
-pub use mod_points::__private::SlotListener;

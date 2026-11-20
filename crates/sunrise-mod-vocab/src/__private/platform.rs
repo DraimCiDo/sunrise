@@ -1,5 +1,5 @@
 //! Set-once platform services used by the engine during load and profiler commands.
-use mod_vocab::{
+use crate::{
     __private::{RegistrationData, RuleSchema},
     DimensionSettings, ModEntry, PackageInfo,
 };

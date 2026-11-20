@@ -51,7 +51,6 @@ pub fn compile(
             &prebuilt::library_entry(
                 &api::template(&api.join(TEMPLATE))?,
                 &[&project.bundle.manifest],
-                &internals::Catalog::read(api)?,
                 sdk.commit(),
                 &project.bundle.manifest.id,
                 &project.bundle.manifest.version.to_string(),

@@ -19,22 +19,17 @@ fn path_dep(path: &str) -> toml::Table {
 
 pub fn template(path: &Path) -> Result<String, String> {
     fs::read_to_string(path).ok()
-        .filter(|template| ["/* MOD_ENTRIES */", "/* MOD_SLOTS */", "/* BUILT_MODS */"].iter()
+        .filter(|template| ["/* MOD_ENTRIES */", "/* BUILT_MODS */"].iter()
             .all(|marker| template.matches(marker).count() == 1))
         .ok_or_else(|| crate::host::tr("This game source has no native inventory entry template. Update Sunrise and rebuild the mods against this game.").to_string())
 }
 
-pub fn main_rs(
-    template: &str,
-    mods: &[&sunrise_mod_package::Manifest],
-    catalog: &internals::Catalog,
-) -> String {
+pub fn main_rs(template: &str, mods: &[&sunrise_mod_package::Manifest]) -> String {
     // Own the bytes even when the staged SDK template references a static in a dylib.
     let template = template.replace(
         "std::hint::black_box(&sunrise_mod_package::holder::CAPABILITY);",
         "#[used] static HOLDER_CAPABILITY: [u8; sunrise_mod_package::holder::CAPABILITY.len()] = sunrise_mod_package::holder::CAPABILITY; std::hint::black_box(&HOLDER_CAPABILITY);",
     );
-    let listed = &catalog.points;
     let entries = mods
         .iter()
         .enumerate()
@@ -44,22 +39,7 @@ pub fn main_rs(
         "    mod_api::__private::native::BuiltMod {{ id: {:?}, version: {:?}, side: mod_api::Side::{:?} }},\n",
         m.id, m.version.to_string(), m.side,
     )).collect::<String>();
-    let api_points = listed
-        .iter()
-        .map(super::inject::ListedPoint::emitted)
-        .collect::<Vec<_>>();
-    let raw = mods
-        .iter()
-        .enumerate()
-        .flat_map(|(i, manifest)| {
-            sunrise_mod_point_emit::api(manifest, &api_points, &format!("mod_{i}::"))
-                .expect("API slots checked")
-                .into_iter()
-                .map(|expression| format!("        {expression},\n"))
-        })
-        .collect::<String>();
     let markers = [
-        ("/* MOD_SLOTS */", &raw),
         ("/* MOD_ENTRIES */", &entries),
         ("/* BUILT_MODS */", &inventory),
     ];
@@ -87,7 +67,6 @@ pub struct Project<'a> {
 }
 
 /// The mod API's package, the one crate every mod depends on.
-pub const POINTS_PACKAGE: &str = "sunrise-mod-points";
 pub const API_PACKAGE: &str = "sunrise-mod-api";
 
 /// The per-mod facade's package, rewritten to its generated crate.
@@ -95,7 +74,6 @@ pub const INTERNALS_PACKAGE: &str = "sunrise-internals";
 /// Each game package a mod may depend on, with its library's name.
 pub const PACKAGES: [(&str, &str); 3] = [
     (API_PACKAGE, "mod_api"),
-    (POINTS_PACKAGE, "mod_points"),
     (INTERNALS_PACKAGE, "internals"),
 ];
 
@@ -529,11 +507,7 @@ mod tests {
         );
         let template =
             "fn main() { std::hint::black_box(&sunrise_mod_package::holder::CAPABILITY); }";
-        fs::write(
-            &source,
-            main_rs(template, &[], &internals::Catalog::default()),
-        )
-        .unwrap();
+        fs::write(&source, main_rs(template, &[])).unwrap();
         assert!(
             std::process::Command::new("rustc")
                 .args(["--edition=2021", "-O", "-Cprefer-dynamic", "--extern"])
@@ -677,16 +651,13 @@ mod tests {
         extra.side = mod_vocab::Side::Client;
         let mods = [&base, &extra];
         for count in 0..=2 {
-            let text = main_rs(template, &mods[..count], &internals::Catalog::default());
-            let padded = ["/* MOD_ENTRIES */", "/* MOD_SLOTS */", "/* BUILT_MODS */"]
+            let text = main_rs(template, &mods[..count]);
+            let padded = ["/* MOD_ENTRIES */", "/* BUILT_MODS */"]
                 .into_iter()
                 .fold(template.to_owned(), |text, marker| {
                     text.replace(marker, &format!("    {marker}"))
                 });
-            assert_eq!(
-                main_rs(&padded, &mods[..count], &internals::Catalog::default()),
-                text
-            );
+            assert_eq!(main_rs(&padded, &mods[..count]), text);
             let facts: Vec<_> = text
                 .lines()
                 .filter(|line| line.contains(" => mod_"))

@@ -4,12 +4,9 @@ use mod_api::__private::game::Fields;
 /// and start the engine. Keep the validated startup lease alive for the whole run.
 pub fn main_with(
     mods: Vec<mod_api::ModEntry>,
-    slots: &[crate::SlotListener],
     built: &'static [mod_api::__private::native::BuiltMod],
     startup: sunrise_client::entry::Startup,
 ) {
-    sunrise_engine_slots::install_seal(mod_points::__private::seal)
-        .expect("engine seal provider must be installed once before startup");
     // The title screen's Mods button: every game that loads mods has it, before the game seals
     // the title screen's buttons.
     if let Err(error) = sunrise_hooks::title::register(&crate::mods_button::MODS) {
@@ -24,16 +21,18 @@ pub fn main_with(
         eprintln!("Sunrise: refusing startup because mod instrumentation is unavailable: {error}");
         std::process::exit(1);
     }
-    if let Err(error) = sunrise_engine_slots::install_platform(sunrise_engine_slots::Platform {
-        install_packages: mod_api::__private::install_packages,
-        install_registration_data: mod_api::__private::install_registration_data,
-        install_parts: mod_api::__private::install_parts,
-        profiler_is_enabled: mod_api::__private::profiler::is_enabled,
-        profiler_start: mod_api::__private::profiler::start,
-        profiler_stop: mod_api::__private::profiler::stop,
-        profiler_summary: mod_api::__private::profiler::summary,
-        profiler_firefox_profile: mod_api::__private::profiler::firefox_profile,
-    }) {
+    if let Err(error) =
+        mod_api::__private::platform::install_platform(mod_api::__private::platform::Platform {
+            install_packages: mod_api::__private::install_packages,
+            install_registration_data: mod_api::__private::install_registration_data,
+            install_parts: mod_api::__private::install_parts,
+            profiler_is_enabled: mod_api::__private::profiler::is_enabled,
+            profiler_start: mod_api::__private::profiler::start,
+            profiler_stop: mod_api::__private::profiler::stop,
+            profiler_summary: mod_api::__private::profiler::summary,
+            profiler_firefox_profile: mod_api::__private::profiler::firefox_profile,
+        })
+    {
         eprintln!("Sunrise: {error}");
         std::process::exit(1);
     }
@@ -142,17 +141,7 @@ pub fn main_with(
                 .filter(|&i| code_ids.contains(manifests[i].id.as_str()))
                 .map(|i| entries.remove(manifests[i].id.as_str()).unwrap())
                 .collect();
-            let ids: Vec<_> = mods.iter().map(|entry| entry.fields().id).collect();
             mod_api::__private::install(mods.into());
-            for &id in &ids {
-                for slot in slots.iter().filter(|slot| slot.id() == id) {
-                    if let Err(error) = mod_points::register(slot) {
-                        log::error!("Sunrise: {id}: {error}");
-                        sunrise_client::logging::flush();
-                        std::process::exit(1);
-                    }
-                }
-            }
         },
         startup,
     );
