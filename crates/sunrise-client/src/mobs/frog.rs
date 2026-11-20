@@ -2,21 +2,17 @@
 //! behaviours as goals, the poses they set and the client's animation states.
 //! AnimState states: jump, croak, tongue, swim idle.
 //!
-//! The brain's idle `RunOne` picks a croak three times as often as a stroll
-//! (weights 3 and 1; it also holds a do-nothing option that only repeats
-//! the pick), so a frog that is not walking croaks in three of four idle
-//! picks: `Croak` takes those, and the frog's stroll then follows at once.
+//! The brain itself (`FrogAi`: activities, sensors, gates) lives in
+//! `animal_brain`; this file holds the frog's behaviours it runs and the
+//! frog's memories.
 use super::{
     DamageLevel, Mob, MobEvent, MobWorld, Species, Who,
-    goals::{
-        Breed, Cx, Goal, LOOK, LookAtPlayer, MOVE, Panic, RandomLookAround, Stroll, Tempt,
-        goal_clone,
-    },
+    animal_brain::{Tracker, WalkTarget, mem},
+    goals::{Cx, Goal, LOOK, MOVE, goal_clone},
     sync,
 };
 use crate::blocks::Fluid;
 use mod_api::SoundSource;
-use std::fmt::Debug;
 use sunrise_core::{
     geometry::Vec3,
     random::{LegacyRandom, RandomSource},
@@ -32,10 +28,8 @@ const CROAK_TICKS: i32 = 60;
 /// `ShootTongue`'s duration and eating distance.
 const TONGUE_TIME_OUT: i32 = 100;
 const EATING_DISTANCE: f64 = 1.75;
-/// `FrogAttackablesSensor.TARGET_DETECTION_DISTANCE` and the sensor's scan
-/// rate.
+/// `FrogAttackablesSensor.TARGET_DETECTION_DISTANCE`.
 const DETECTION_DISTANCE: f64 = 10.0;
-const SCAN_RATE: i32 = 20;
 
 /// `FrogAi.TIME_BETWEEN_LONG_JUMPS` and the brain memory
 /// `LONG_JUMP_COOLDOWN_TICKS` (saved with the others, as `finalize` sets it).
@@ -77,19 +71,17 @@ enum Phase {
 #[derive(Clone, Debug, Default)]
 pub struct State {
     croak: i32,
-    /// The land beside water `LaySpawn` walks to (its `WALK_TARGET`).
-    lay_target: Option<[i32; 3]>,
-    /// Ticks to the `IsInWaterSensor`'s next scan, and its `IS_IN_WATER`
-    /// memory: the swim activity follows it, up to 20 ticks behind the water.
-    water_scan: i32,
-    in_water: bool,
-    /// Ticks to the attackables sensor's next scan, and `NEAREST_ATTACKABLE`.
-    scan: i32,
+    /// The `IsInWaterSensor`'s `IS_IN_WATER` memory: the swim activity
+    /// follows it, up to 20 ticks behind the water.
+    pub(super) in_water: bool,
+    /// `LONG_JUMP_MID_JUMP`.
+    pub(super) mid_jump: bool,
+    /// `NEAREST_ATTACKABLE`.
     nearest: Option<u32>,
     /// `UNREACHABLE_TONGUE_TARGETS`: the mob and the ticks it stays in mind.
     unreachable: Vec<(u32, i32)>,
     /// `ATTACK_TARGET` while `ShootTongue` runs, and the synched tongue target.
-    target: Option<u32>,
+    pub(super) target: Option<u32>,
     pub tongue_target: Option<u32>,
     phase: Phase,
     eat_timer: i32,
@@ -105,7 +97,6 @@ pub fn attack_target(m: &Mob) -> Option<Who> {
 }
 
 pub fn register(m: &mut Mob) {
-    let food = m.kind.food.clone();
     // `Frog()`: SmoothSwimmingMoveControl(85, 10, 0.02, 0.1, true). The
     // frog's movement speed is 1.0, so the controller's 0.1 outside-water
     // speed is what keeps a walking frog at vanilla's pace; the plain ground
@@ -123,41 +114,8 @@ pub fn register(m: &mut Mob) {
     m.ai.nav.kind = super::nav::NavKind::Amphibious {
         prefers_shallow: true,
     };
-    let g = &mut m.ai.goals;
-    // `FrogAi.initCoreActivity`: `AnimalPanic(2.0)` — the panic speed
-    // multiplier is 2.0, not the 1.25 its temptation uses.
-    g.add(1, Panic::new(2.0));
-    // `FrogAi.initIdleActivity`: `AnimalMakeLove` first, then `FollowTemptation(1.25)`.
-    g.add(2, Breed::new(1.0));
-    g.add(3, Unless(is_pregnant, Tempt::new(1.25, food, false)));
-    // `FrogAi.initSwimActivity`: `TryFindLand(8, 1.5)` and the swim `RandomStroll`.
-    // Vanilla's core activity has no `Swim`, so the frog has no `Float`.
-    g.add(4, Swim::default());
-    g.add(2, ShootTongue);
-    g.add(2, LaySpawn::default());
-    g.add(3, LongJump::default());
-    g.add(4, Croak);
-    g.add(
-        5,
-        Unless(laying_or_swimming, Stroll::avoiding_water(1.0).interval(1)),
-    );
-    g.add(6, LookAtPlayer::new(6.0));
-    g.add(7, RandomLookAround::default());
-    delay_sensors(m);
-}
-
-/// `Brain.Provider.makeBrain`: `Sensor.randomlyDelayStart` (`nextInt(20)`) for
-/// each sensor of `Frog.SENSOR_TYPES` from the frog's own random: nearest
-/// living entities, hurt by, attackables, temptations and in water. A draw is
-/// the time to that sensor's first scan.
-pub fn delay_sensors(m: &mut Mob) {
-    let draw = |m: &mut Mob| m.random.next_int_bound(SCAN_RATE).unwrap_or(0);
-    for _ in 0..2 {
-        draw(m);
-    }
-    m.extra.frog.scan = draw(m);
-    draw(m);
-    m.extra.frog.water_scan = draw(m);
+    // `Frog.BRAIN_PROVIDER`: the brain and its sensors' start delays.
+    super::animal_brain::init(m, i64::from(m.id));
 }
 
 /// `Entity.setPose` and `Frog.onSyncedDataUpdated(DATA_POSE)`.
@@ -223,27 +181,22 @@ fn can_eat(species: Species, size: i32) -> bool {
     matches!(species, Species::Slime | Species::MagmaCube) && size == 1
 }
 
-/// `FrogAttackablesSensor` (every 20 ticks) and the memory timers.
-pub fn server_ai_step(m: &mut Mob, w: &MobWorld) {
-    count_down_cooldown(m);
-    // `IsInWaterSensor` (every 20 ticks, the first on the first tick).
-    let wet = m.fluids.in_water;
-    let f = &mut m.extra.frog;
-    f.water_scan -= 1;
-    if f.water_scan <= 0 {
-        f.water_scan = SCAN_RATE;
-        f.in_water = wet;
-    }
-    f.unreachable.retain_mut(|(_, ttl)| {
+/// The frog's memories that expire: `UNREACHABLE_TONGUE_TARGETS`.
+pub(super) fn forget(m: &mut Mob) {
+    m.extra.frog.unreachable.retain_mut(|(_, ttl)| {
         *ttl -= 1;
         *ttl > 0
     });
-    f.scan -= 1;
-    if f.scan > 0 {
-        return;
-    }
-    f.scan = SCAN_RATE;
-    let unreachable: Vec<u32> = f.unreachable.iter().map(|u| u.0).collect();
+}
+
+/// `IsInWaterSensor`.
+pub(super) fn sense_water(m: &mut Mob) {
+    m.extra.frog.in_water = m.fluids.in_water;
+}
+
+/// `FrogAttackablesSensor`.
+pub(super) fn sense_attackables(m: &mut Mob, w: &MobWorld) {
+    let unreachable: Vec<u32> = m.extra.frog.unreachable.iter().map(|u| u.0).collect();
     let eye = Vec3::new(m.position.x, m.eye_y(), m.position.z);
     let nearest = w
         .nearby(m.position, DETECTION_DISTANCE, |s| {
@@ -257,28 +210,26 @@ pub fn server_ai_step(m: &mut Mob, w: &MobWorld) {
 }
 
 /// `Croak`: the pose sync::CROAKING for 60 ticks (the croak is the frog's ambient
-/// sound).
+/// sound). Started by the idle `RunOne`; it is the behaviour of the idle and lay
+/// spawn activities.
 #[derive(Clone, Debug)]
-struct Croak;
+pub(super) struct Croak;
 impl Goal for Croak {
     goal_clone!();
     fn flags(&self) -> u8 {
         MOVE
     }
     fn can_use(&mut self, m: &mut Mob, _cx: &mut Cx) -> bool {
-        // checkExtraStartConditions (standing), no walk target, and not in
-        // a liquid (start does nothing there).
-        m.extra.pose == sync::STANDING
-            && m.on_ground
-            && !m.fluids.in_water
-            && !m.fluids.in_lava
-            && m.ai.nav.is_done()
-            && m.random.next_int_bound(4).unwrap_or(0) != 0
+        m.extra.pose == sync::STANDING && !mem(m).walk_target.present()
     }
     fn can_continue(&mut self, m: &mut Mob, _cx: &mut Cx) -> bool {
         m.extra.frog.croak < CROAK_TICKS
     }
     fn start(&mut self, m: &mut Mob, _cx: &mut Cx) {
+        // `start` does nothing in a liquid, and the counter stays as it was.
+        if m.fluids.in_water || m.fluids.in_lava {
+            return;
+        }
         m.extra.frog.croak = 0;
         set_pose(m, sync::CROAKING);
     }
@@ -293,155 +244,9 @@ impl Goal for Croak {
     }
 }
 
-/// `FrogAi.initSwimActivity`'s requirements and `updateActivity`'s order: in
-/// water by the sensor's memory, and not in the tongue, lay spawn or long jump
-/// activities that come before it.
-fn swim_activity(m: &Mob) -> bool {
-    m.extra.frog.in_water && m.extra.frog.target.is_none() && !is_pregnant(m)
-}
-
-/// `TryFindLand.create(8, 1.5)` and the gate of the swim activity: a walk
-/// target toward the nearest land, else `RandomStroll.swim(0.75)`, the land
-/// `stroll(1.0, true)` when that finds nothing. `MoveToTargetSink` takes the
-/// walk target the tick after a behaviour sets it.
-#[derive(Clone, Debug, Default)]
-struct Swim {
-    /// `TryFindLand`'s `nextOkStartTime`: tried every tick it pushes the next
-    /// search 60 ticks on, so it only searches again after a gap.
-    next_ok: i64,
-    /// The `WALK_TARGET` the sink has not taken yet: block, speed.
-    walk: Option<([i32; 3], f64)>,
-    /// The tick the behaviour set it is over: the sink starts on the next.
-    set_this_tick: bool,
-}
-impl Swim {
-    /// `TryFindLand.canStandOn`.
-    fn can_stand_on(w: &MobWorld, p: [i32; 3]) -> bool {
-        w.collision_bounds(p).is_none() && w.top_face_full([p[0], p[1] - 1, p[2]])
-    }
-    fn find_land(&mut self, m: &mut Mob, cx: &mut Cx) {
-        let at = [
-            m.position.x.floor() as i32,
-            m.position.y.floor() as i32,
-            m.position.z.floor() as i32,
-        ];
-        if cx.w.fluid(at[0], at[1], at[2]) != Fluid::Water {
-            return;
-        }
-        let now = cx.w.game_time;
-        if now < self.next_ok {
-            self.next_ok = now + 60;
-            return;
-        }
-        self.next_ok = now + 60;
-        let found = manhattan_box(at, 8).into_iter().find(|p| {
-            (p[0] != at[0] || p[2] != at[2])
-                && cx.w.fluid(p[0], p[1], p[2]) == Fluid::None
-                && Self::can_stand_on(cx.w, *p)
-        });
-        if let Some(p) = found {
-            // The look target is a `BlockPosTracker` on the block.
-            m.look_at([
-                f64::from(p[0]) + 0.5,
-                f64::from(p[1]) + 0.5,
-                f64::from(p[2]) + 0.5,
-            ]);
-            self.walk = Some((p, 1.5));
-        }
-    }
-    /// `MoveToTargetSink.start`: `createPath(target, 0)` for the walk target.
-    fn take_walk(&mut self, m: &mut Mob, cx: &mut Cx) {
-        let Some((p, speed)) = self.walk.take() else {
-            return;
-        };
-        let path = m.create_path_to(cx.w, p, 0);
-        m.nav_move_to_path(cx.w, path, speed);
-    }
-    /// The brain's turn with no walk target: the gate's behaviours in order.
-    fn gate(&mut self, m: &mut Mob, cx: &mut Cx) {
-        // `RandomStroll.swim`: only in water; a position or nothing.
-        if m.fluids.in_water {
-            if let Some(p) = super::animal_brain::swim_stroll_pos(m, cx.w) {
-                self.walk = Some((
-                    [
-                        p.x.floor() as i32,
-                        p.y.floor() as i32,
-                        p.z.floor() as i32,
-                    ],
-                    0.75,
-                ));
-                return;
-            }
-        }
-        // `RandomStroll.stroll(1.0, true)`.
-        if let Some(p) = m.land_random_pos(cx.w, 10, 7) {
-            self.walk = Some((
-                [
-                    p[0].floor() as i32,
-                    p[1].floor() as i32,
-                    p[2].floor() as i32,
-                ],
-                1.0,
-            ));
-        }
-    }
-    fn step(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        if !swim_activity(m) {
-            self.walk = None;
-            return false;
-        }
-        // A walk target is present while another goal's trip runs.
-        if !m.ai.nav.is_done() {
-            return false;
-        }
-        self.find_land(m, cx);
-        if self.walk.is_none() {
-            self.gate(m, cx);
-        }
-        self.set_this_tick = self.walk.is_some();
-        self.walk.is_some()
-    }
-}
-impl Goal for Swim {
-    goal_clone!();
-    fn flags(&self) -> u8 {
-        MOVE
-    }
-    fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        self.step(m, cx)
-    }
-    fn can_continue(&mut self, m: &mut Mob, _cx: &mut Cx) -> bool {
-        swim_activity(m) && (!m.ai.nav.is_done() || self.walk.is_some())
-    }
-    fn every_tick(&self) -> bool {
-        true
-    }
-    fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
-        // Core's `MoveToTargetSink` starts the tick after the walk target is set.
-        if std::mem::take(&mut self.set_this_tick) {
-            return;
-        }
-        self.take_walk(m, cx);
-    }
-    fn stop(&mut self, m: &mut Mob, _cx: &mut Cx) {
-        self.walk = None;
-        self.set_this_tick = false;
-        m.nav_stop();
-    }
-}
-
 /// `IS_PREGNANT`, set by `Frog.spawnChildFromBreeding` and erased once the
 /// frog has laid its frogspawn.
 const PREGNANT: &str = "is_pregnant";
-/// `LaySpawn`'s walk target is set.
-fn laying_trip(m: &Mob) -> bool {
-    m.extra.frog.lay_target.is_some()
-}
-/// The idle activity runs only while `IS_IN_WATER` is absent, and the lay
-/// spawn activity's trip has its own walk target.
-fn laying_or_swimming(m: &Mob) -> bool {
-    laying_trip(m) || m.extra.frog.in_water
-}
 pub fn is_pregnant(m: &Mob) -> bool {
     m.extra.memories.iter().any(|x| x.0 == PREGNANT)
 }
@@ -456,194 +261,164 @@ pub fn set_pregnant(m: &mut Mob, on: bool) {
     }
 }
 
-/// A goal that waits while `blocked` holds: a pregnant frog is in the lay
-/// spawn activity, which has no `FollowTemptation`, and a frog with a walk
-/// target (`MoveToTargetSink`) does not run the stroll `RunOne`.
-#[derive(Clone)]
-struct Unless<G>(fn(&Mob) -> bool, G);
-impl<G: Debug> Debug for Unless<G> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.1.fmt(f)
-    }
+fn block_at(m: &Mob) -> [i32; 3] {
+    [
+        m.position.x.floor() as i32,
+        m.position.y.floor() as i32,
+        m.position.z.floor() as i32,
+    ]
 }
-impl<G: Goal + Clone + 'static> Goal for Unless<G> {
-    goal_clone!();
-    fn flags(&self) -> u8 {
-        self.1.flags()
+fn is_air(w: &MobWorld, p: [i32; 3]) -> bool {
+    w.facts.is_air(w.world.block(p[0], p[1], p[2]))
+}
+fn empty(w: &MobWorld, p: [i32; 3]) -> bool {
+    w.collision_bounds(p).is_none()
+}
+/// `TryFindLand.canStandOn`.
+fn can_stand_on(w: &MobWorld, p: [i32; 3]) -> bool {
+    empty(w, p) && w.top_face_full([p[0], p[1] - 1, p[2]])
+}
+/// `TryFindLandNearLiquid`'s `findFirst` test.
+fn land_near_water(w: &MobWorld, p: [i32; 3]) -> bool {
+    if !empty(w, p) || empty(w, [p[0], p[1] - 1, p[2]]) {
+        return false;
     }
-    fn name(&self) -> &'static str {
-        self.1.name()
-    }
-    fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        !(self.0)(m) && self.1.can_use(m, cx)
-    }
-    fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        !(self.0)(m) && self.1.can_continue(m, cx)
-    }
-    fn interruptable(&self) -> bool {
-        self.1.interruptable()
-    }
-    fn every_tick(&self) -> bool {
-        self.1.every_tick()
-    }
-    fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
-        self.1.start(m, cx)
-    }
-    fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
-        self.1.stop(m, cx)
-    }
-    fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
-        self.1.tick(m, cx)
-    }
+    HORIZONTAL.iter().any(|d| {
+        let n = [p[0] + d[0], p[1], p[2] + d[1]];
+        is_air(w, n) && w.fluid(n[0], n[1] - 1, n[2]) == Fluid::Water
+    })
+}
+/// The walk target and look target both `TryFindLand` behaviours set.
+fn set_land_target(m: &mut Mob, p: [i32; 3], speed: f32, close: i32) {
+    let mm = mem(m);
+    mm.look_target.set(Tracker::Block(p));
+    mm.walk_target.set(WalkTarget {
+        target: Tracker::Block(p),
+        speed,
+        close,
+    });
 }
 
-/// `FrogAi.initLaySpawnActivity` for a pregnant frog: `TryFindLandNearLiquid(8, 1.0)`
-/// looks for land beside water and walks there, and `TryLaySpawnOnFluidNearLand`
-/// puts frogspawn on the water next to it. Both run every tick (the brain's
-/// walk target is `lay_target` here); the wandering `RunOne` is the goals below it.
-#[derive(Clone, Debug, Default)]
-struct LaySpawn {
-    /// `nextOkStartTime`: the search runs again once it has passed; every tick the
-    /// behaviour is tried before that pushes it 40 ticks on.
-    next_ok: i64,
+/// `TryFindLand.create(range, speed)`: needs no attack target and no walk
+/// target; in water it looks for land (blocks by Manhattan distance, off the
+/// frog's column, with no fluid and a block to stand on) every 60 ticks. A try
+/// before then pushes the next search 60 ticks on. `next_ok` is
+/// `nextOkStartTime`.
+pub(super) fn try_find_land(
+    m: &mut Mob,
+    w: &MobWorld,
+    next_ok: &mut i64,
+    range: i32,
+    speed: f32,
+) -> bool {
+    if m.extra.frog.target.is_some() || mem(m).walk_target.present() {
+        return false;
+    }
+    let at = block_at(m);
+    if w.fluid(at[0], at[1], at[2]) != Fluid::Water {
+        return false;
+    }
+    let now = w.game_time;
+    if now < *next_ok {
+        *next_ok = now + 60;
+        return true;
+    }
+    let found = manhattan_box(at, range).into_iter().find(|p| {
+        (p[0] != at[0] || p[2] != at[2])
+            && w.fluid(p[0], p[1], p[2]) == Fluid::None
+            && can_stand_on(w, *p)
+    });
+    if let Some(p) = found {
+        set_land_target(m, p, speed, 1);
+    }
+    *next_ok = now + 60;
+    true
 }
-impl LaySpawn {
-    fn is_air(w: &MobWorld, p: [i32; 3]) -> bool {
-        w.facts.is_air(w.world.block(p[0], p[1], p[2]))
+
+/// `TryFindLandNearLiquid.create(8, 1.0, FROG_TRIES_TO_FIND_LAND_NEAR)`: the
+/// same out of water, for land beside water, every 40 ticks.
+pub(super) fn try_find_land_near_liquid(m: &mut Mob, w: &MobWorld, next_ok: &mut i64) -> bool {
+    if m.extra.frog.target.is_some() || mem(m).walk_target.present() {
+        return false;
     }
-    fn empty(w: &MobWorld, p: [i32; 3]) -> bool {
-        w.collision_bounds(p).is_none()
+    let at = block_at(m);
+    if w.fluid(at[0], at[1], at[2]) == Fluid::Water {
+        return false;
     }
-    /// `TryFindLandNearLiquid`'s `findFirst` test.
-    fn land_near_water(w: &MobWorld, p: [i32; 3]) -> bool {
-        if !Self::empty(w, p) || Self::empty(w, [p[0], p[1] - 1, p[2]]) {
-            return false;
-        }
-        HORIZONTAL.iter().any(|d| {
-            let n = [p[0] + d[0], p[1], p[2] + d[1]];
-            Self::is_air(w, n) && w.fluid(n[0], n[1] - 1, n[2]) == Fluid::Water
-        })
+    let now = w.game_time;
+    if now < *next_ok {
+        *next_ok = now + 40;
+        return true;
     }
-    fn find(&mut self, m: &mut Mob, cx: &mut Cx) {
-        let at = [
-            m.position.x.floor() as i32,
-            m.position.y.floor() as i32,
-            m.position.z.floor() as i32,
-        ];
-        if cx.w.fluid(at[0], at[1], at[2]) == Fluid::Water {
-            return;
-        }
-        let now = cx.w.game_time;
-        let search = now >= self.next_ok;
-        self.next_ok = now + 40;
-        if !search {
-            return;
-        }
-        let found = manhattan_box(at, 8)
-            .into_iter()
-            .find(|p| (p[0] != at[0] || p[2] != at[2]) && Self::land_near_water(cx.w, *p));
-        if let Some(p) = found {
-            let to = [
-                f64::from(p[0]) + 0.5,
-                f64::from(p[1]),
-                f64::from(p[2]) + 0.5,
-            ];
-            m.look_at([to[0], to[1] + 0.5, to[2]]);
-            // `MoveToTargetSink`: `createPath(target block, 0)`.
-            let path = m.create_path_to(cx.w, p, 0);
-            m.nav_move_to_path(cx.w, path, 1.0);
-            m.extra.frog.lay_target = Some(p);
-        }
+    let found = manhattan_box(at, 8)
+        .into_iter()
+        .find(|p| (p[0] != at[0] || p[2] != at[2]) && land_near_water(w, *p));
+    if let Some(p) = found {
+        set_land_target(m, p, 1.0, 0);
     }
-    fn lay(m: &mut Mob, cx: &mut Cx) {
-        if m.fluids.in_water || !m.on_ground {
-            return;
-        }
-        let below = [
-            m.position.x.floor() as i32,
-            m.position.y.floor() as i32 - 1,
-            m.position.z.floor() as i32,
-        ];
-        for d in HORIZONTAL {
-            let rel = [below[0] + d[0], below[1], below[2] + d[1]];
-            // `getFaceShape(UP).isEmpty()`: nothing reaches the top of the block.
-            let open_top =
-                cx.w.collision_bounds(rel)
-                    .is_none_or(|b| b.max_position().y < 1.0);
-            let supports = cx.w.fluid(rel[0], rel[1], rel[2]) == Fluid::Water
-                || cx.w.has_tag(
-                    "minecraft:supports_frogspawn",
-                    cx.w.block_name(rel[0], rel[1], rel[2]),
-                );
-            let spawn = [rel[0], rel[1] + 1, rel[2]];
-            if open_top && supports && Self::is_air(cx.w, spawn) {
-                if let Some(state) = cx.w.registry.default_state("minecraft:frogspawn") {
-                    cx.events.push(MobEvent::SetBlock { pos: spawn, state });
-                    cx.events.push(MobEvent::GameEvent {
-                        event: "minecraft:block_place",
-                        at: [
-                            f64::from(spawn[0]) + 0.5,
-                            f64::from(spawn[1]) + 0.5,
-                            f64::from(spawn[2]) + 0.5,
-                        ],
-                        source: m.id,
-                        state,
-                    });
-                }
-                // level.playSound(null, body, FROG_LAY_SPAWN, BLOCKS, 1, 1).
-                cx.events.push(MobEvent::bound_sound(
-                    m,
-                    "entity.frog.lay_spawn",
-                    SoundSource::Blocks,
-                    1.0,
-                    1.0,
-                ));
-                set_pregnant(m, false);
-                return;
+    *next_ok = now + 40;
+    true
+}
+
+/// `TryLaySpawnOnFluidNearLand.create(FROGSPAWN)`: with a walk target and
+/// `IS_PREGNANT`, on the ground out of water, frogspawn on the first
+/// neighbouring water or `supports_frogspawn` block with air above it.
+pub(super) fn try_lay_spawn(m: &mut Mob, cx: &mut Cx) -> bool {
+    if m.extra.frog.target.is_some() || !mem(m).walk_target.present() || !is_pregnant(m) {
+        return false;
+    }
+    if m.fluids.in_water || !m.on_ground {
+        return false;
+    }
+    let below = [
+        m.position.x.floor() as i32,
+        m.position.y.floor() as i32 - 1,
+        m.position.z.floor() as i32,
+    ];
+    for d in HORIZONTAL {
+        let rel = [below[0] + d[0], below[1], below[2] + d[1]];
+        // `getFaceShape(UP).isEmpty()`: nothing reaches the top of the block.
+        let open_top =
+            cx.w.collision_bounds(rel)
+                .is_none_or(|b| b.max_position().y < 1.0);
+        let supports = cx.w.fluid(rel[0], rel[1], rel[2]) == Fluid::Water
+            || cx.w.has_tag(
+                "minecraft:supports_frogspawn",
+                cx.w.block_name(rel[0], rel[1], rel[2]),
+            );
+        let spawn = [rel[0], rel[1] + 1, rel[2]];
+        if open_top && supports && is_air(cx.w, spawn) {
+            if let Some(state) = cx.w.registry.default_state("minecraft:frogspawn") {
+                cx.events.push(MobEvent::SetBlock { pos: spawn, state });
+                cx.events.push(MobEvent::GameEvent {
+                    event: "minecraft:block_place",
+                    at: [
+                        f64::from(spawn[0]) + 0.5,
+                        f64::from(spawn[1]) + 0.5,
+                        f64::from(spawn[2]) + 0.5,
+                    ],
+                    source: m.id,
+                    state,
+                });
             }
+            // level.playSound(null, body, FROG_LAY_SPAWN, BLOCKS, 1, 1).
+            cx.events.push(MobEvent::bound_sound(
+                m,
+                "entity.frog.lay_spawn",
+                SoundSource::Blocks,
+                1.0,
+                1.0,
+            ));
+            set_pregnant(m, false);
+            return true;
         }
     }
-}
-impl LaySpawn {
-    /// The brain's turn: `TryFindLandNearLiquid`, then `TryLaySpawnOnFluidNearLand`.
-    /// They run ahead of the wandering `RunOne`, so the selector runs them where it
-    /// asks first (`can_use` and `can_continue`), before the stroll can start.
-    fn step(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        if !is_pregnant(m) {
-            return false;
-        }
-        // `MoveToTargetSink` erases the walk target once the trip is over.
-        if m.extra.frog.lay_target.is_some() && m.ai.nav.is_done() {
-            m.extra.frog.lay_target = None;
-        }
-        if m.extra.frog.lay_target.is_none() && m.ai.nav.is_done() {
-            self.find(m, cx);
-        }
-        if m.extra.frog.lay_target.is_some() {
-            Self::lay(m, cx);
-        }
-        is_pregnant(m)
-    }
-}
-impl Goal for LaySpawn {
-    goal_clone!();
-    fn flags(&self) -> u8 {
-        0
-    }
-    fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        self.step(m, cx)
-    }
-    fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        self.step(m, cx)
-    }
-    fn stop(&mut self, m: &mut Mob, _cx: &mut Cx) {
-        m.extra.frog.lay_target = None;
-    }
+    true
 }
 /// `Direction.Plane.HORIZONTAL` as x and z steps: north, east, south, west.
-const HORIZONTAL: [[i32; 2]; 4] = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+pub(super) const HORIZONTAL: [[i32; 2]; 4] = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 /// `BlockPos.withinManhattan`: nearest first, then x, y, and +z before -z.
-fn manhattan_box(o: [i32; 3], range: i32) -> Vec<[i32; 3]> {
+pub(super) fn manhattan_box(o: [i32; 3], range: i32) -> Vec<[i32; 3]> {
     let mut out = Vec::new();
     for depth in 0..=range * 3 {
         let max_x = range.min(depth);
@@ -663,49 +438,75 @@ fn manhattan_box(o: [i32; 3], range: i32) -> Vec<[i32; 3]> {
     out
 }
 
-/// `ShootTongue` with the tongue activity's `StartAttacking` and
-/// `StopAttackingIfTargetInvalid`: walk up to a small slime or magma cube,
+/// `StartAttacking.create(canAttack, NEAREST_ATTACKABLE)` of the idle, swim
+/// and lay spawn activities: `ATTACK_TARGET` is the nearest attackable, once
+/// the brain's target hooks let the frog take it, and the walk target goes.
+pub(super) fn start_attacking(m: &mut Mob, cx: &mut Cx) -> bool {
+    // `canAttack`: not breeding; and no attack target already.
+    if mem(m).breed_target.present() || m.extra.frog.target.is_some() {
+        return false;
+    }
+    let Some(id) = m.extra.frog.nearest else {
+        return false;
+    };
+    let Some(t) = cx.w.seen(id).filter(|t| t.alive) else {
+        m.extra.frog.nearest = None;
+        return false;
+    };
+    // A frog can never accept a player. Hide the mutable player
+    // selection from this proposal so a rejected player redirect cannot
+    // change who the remainder of the mob tick sees.
+    let change = if cx.w.mob_hooks.is_none() {
+        super::TargetChange::Set(Some(Who::Mob(t.id)))
+    } else {
+        let mut target_world = cx.w.clone();
+        target_world.player = cx.w.selected_player().cloned();
+        target_world.player_identity = cx.w.selected_player_identity();
+        target_world.player_selection = None;
+        target_world.change_target(m, true, Some(Who::Mob(t.id)))
+    };
+    let super::TargetChange::Set(Some(Who::Mob(id))) = change else {
+        return false;
+    };
+    m.extra.frog.target = Some(id);
+    mem(m).walk_target.clear();
+    true
+}
+
+/// `StopAttackingIfTargetInvalid.create()`: a dead or gone target is
+/// forgotten.
+pub(super) fn stop_attacking_if_invalid(m: &mut Mob, cx: &mut Cx) -> bool {
+    let Some(id) = m.extra.frog.target else {
+        return false;
+    };
+    if cx.w.seen(id).is_some_and(|t| t.alive) {
+        return false;
+    }
+    m.extra.frog.target = None;
+    true
+}
+
+/// `ShootTongue`: walk up to the attack target (a small slime or magma cube),
 /// shoot the tongue, pull it in and eat it.
 #[derive(Clone, Debug)]
-struct ShootTongue;
+pub(super) struct ShootTongue;
 impl Goal for ShootTongue {
     goal_clone!();
     fn flags(&self) -> u8 {
         MOVE | LOOK
     }
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        let Some(id) = m.extra.frog.nearest else {
+        // `IS_PANICKING` must be absent.
+        let Some(id) = m.extra.frog.target else {
             return false;
         };
-        // The start conditions: no walk target, no panic, not croaking.
-        if m.ai.panicking || m.extra.pose == sync::CROAKING || !m.ai.nav.is_done() {
+        if m.ai.panicking {
             return false;
         }
-        let Some(t) = cx.w.seen(id).filter(|t| t.alive) else {
-            m.extra.frog.nearest = None;
-            return false;
-        };
-        // `StartAttacking` selects ATTACK_TARGET before `ShootTongue`
-        // checks its path and `Frog.canEat`. A redirected target must pass
-        // those same checks; players and other prey cannot be eaten.
-        // A frog can never accept a player. Hide the mutable player
-        // selection from this proposal so a rejected player redirect cannot
-        // change who the remainder of the mob tick sees.
-        let change = if cx.w.mob_hooks.is_none() {
-            super::TargetChange::Set(Some(Who::Mob(t.id)))
-        } else {
-            let mut target_world = cx.w.clone();
-            target_world.player = cx.w.selected_player().cloned();
-            target_world.player_identity = cx.w.selected_player_identity();
-            target_world.player_selection = None;
-            target_world.change_target(m, true, Some(Who::Mob(t.id)))
-        };
-        let super::TargetChange::Set(Some(Who::Mob(id))) = change else {
-            return false;
-        };
-        let Some(t) =
-            cx.w.seen(id)
-                .filter(|t| t.alive && can_eat(t.species, t.size))
+        let Some(t) = cx
+            .w
+            .seen(id)
+            .filter(|t| t.alive && can_eat(t.species, t.size))
         else {
             return false;
         };
@@ -718,6 +519,7 @@ impl Goal for ShootTongue {
             // The target is forgotten and not taken for 100 ticks.
             let f = &mut m.extra.frog;
             f.nearest = None;
+            f.target = None;
             if !f.unreachable.iter().any(|u| u.0 == id) {
                 if f.unreachable.len() == 5 {
                     f.unreachable.remove(0);
@@ -726,7 +528,6 @@ impl Goal for ShootTongue {
             }
             return false;
         }
-        m.extra.frog.target = Some(id);
         true
     }
     fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
@@ -1050,6 +851,7 @@ impl LongJump {
             sample_cooldown(m, cx.level.random(), 1);
         }
         set_discard_friction(m, false);
+        m.extra.frog.mid_jump = false;
         *self = Self::default();
     }
 }
@@ -1095,16 +897,10 @@ impl Goal for LongJump {
         true
     }
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        // The activity: no cooldown, and for a frog out of water (a frog in
-        // water is in its swim activity; a goat has none, so its check below
-        // sets the cooldown instead). FrogAi.initJumpActivity also wants
-        // TEMPTING_PLAYER and BREED_TARGET absent, and the LAY_SPAWN activity
-        // (IS_PREGNANT) goes before LONG_JUMP. The tempting player and the
-        // breed target are not gated: Tempt and Breed hold MOVE at a better priority.
-        if jump_cooldown(m).is_some()
-            || m.species() == Species::Frog && is_pregnant(m)
-            || m.species() != Species::Goat && m.fluids.in_water
-        {
+        // A frog's activity requirements (no cooldown, out of the water memory,
+        // no tempting player or breed target) are the brain's. A goat has none
+        // here: its check below sets the cooldown instead.
+        if m.species() == Species::Goat && jump_cooldown(m).is_some() {
             return false;
         }
         // GoatAi.initLongJumpActivity's other memories, and the activity
@@ -1155,9 +951,7 @@ impl Goal for LongJump {
     fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
         if self.mid_jump {
             // LongJumpMidJump starts the tick after the leap and runs until
-            // the mob is on the ground again, for 100 ticks at most; water
-            // switches a frog's brain to the swim activity, which stops it
-            // too (a goat has none).
+            // the mob is on the ground again, for 100 ticks at most.
             match self.in_air {
                 None => {
                     self.in_air = Some(0);
@@ -1166,9 +960,7 @@ impl Goal for LongJump {
                 }
                 Some(t) => self.in_air = Some(t + 1),
             }
-            return !m.on_ground
-                && (m.species() == Species::Goat || !m.fluids.in_water)
-                && self.in_air.is_some_and(|t| t <= MID_JUMP_DURATION);
+            return !m.on_ground && self.in_air.is_some_and(|t| t <= MID_JUMP_DURATION);
         }
         let valid = self.initial == Some(m.position)
             && self.tries > 0
@@ -1209,6 +1001,9 @@ impl Goal for LongJump {
             .map_or(0.0, |e| f64::from(0.1_f32 * (e.amplifier + 1) as f32));
         m.velocity = jump.scale((len + boost) / len);
         self.mid_jump = true;
+        if m.species() == Species::Frog {
+            m.extra.frog.mid_jump = true;
+        }
         // level.playSound(null, body, getJumpSound(body), NEUTRAL, 1, 1).
         let sound = MobEvent::bound_sound(m, jump_sound(m), SoundSource::Neutral, 1.0, 1.0);
         cx.events.push(sound);
@@ -1232,42 +1027,49 @@ mod tests {
     fn swim_activity_replaces_float() {
         let mut m = frog();
         register(&mut m);
-        // `FrogAi.initCoreActivity` has no `Swim`; the swim activity's goal is there.
+        // `FrogAi.initCoreActivity` has no `Swim`: the swim activity is a brain one.
         assert!(!m.ai.goals.has("Float"));
-        assert!(m.ai.goals.has("Swim"));
+        assert!(m.extra.animal_brain.is_some());
         assert!(!m.ai.nav.can_float, "no FloatGoal, so the navigation cannot float");
     }
 
-    #[test]
-    fn swim_activity_follows_the_sensor_memory_and_the_earlier_activities() {
-        let mut m = frog();
-        // `IS_IN_WATER` absent: the idle activity.
-        assert!(!swim_activity(&m));
-        m.extra.frog.in_water = true;
-        assert!(swim_activity(&m));
-        // `updateActivity` tries TONGUE and LAY_SPAWN first.
-        m.extra.frog.target = Some(2);
-        assert!(!swim_activity(&m));
-        m.extra.frog.target = None;
-        set_pregnant(&mut m, true);
-        assert!(!swim_activity(&m));
-        set_pregnant(&mut m, false);
-        assert!(swim_activity(&m));
-        // Idle goals wait while the memory is set.
-        assert!(laying_or_swimming(&m));
-        m.extra.frog.in_water = false;
-        assert!(!laying_or_swimming(&m));
+    fn activity(m: &mut Mob) -> super::super::animal_brain::Act {
+        super::super::animal_brain::update_frog_activity(m);
+        m.extra.animal_brain.as_ref().unwrap().activity
     }
 
     #[test]
-    fn sensor_delays_draw_five_times_and_keep_two_of_them() {
+    fn the_activity_follows_the_memories_in_frog_ais_order() {
+        use super::super::animal_brain::Act;
+        let mut m = frog();
+        register(&mut m);
+        // `IS_IN_WATER` absent: no cooldown, so the long jump comes before idle.
+        assert_eq!(activity(&mut m), Act::LongJump);
+        set_jump_cooldown(&mut m, Some(5));
+        assert_eq!(activity(&mut m), Act::Idle);
+        m.extra.frog.in_water = true;
+        assert_eq!(activity(&mut m), Act::Swim);
+        // `updateActivity` tries TONGUE and LAY_SPAWN first.
+        set_pregnant(&mut m, true);
+        assert_eq!(activity(&mut m), Act::LaySpawn);
+        m.extra.frog.target = Some(2);
+        assert_eq!(activity(&mut m), Act::Tongue);
+        // Idle, swim and lay spawn wait for the landing.
+        m.extra.frog.mid_jump = true;
+        m.extra.frog.target = None;
+        set_pregnant(&mut m, false);
+        assert_eq!(activity(&mut m), Act::Tongue, "no activity is valid: it stays");
+    }
+
+    #[test]
+    fn sensor_delays_draw_five_times() {
         let mut m = frog();
         m.random.set_seed(179);
         let mut twin = LegacyRandom::new(179);
-        delay_sensors(&mut m);
-        let draws: Vec<i32> = (0..5).map(|_| twin.next_int_bound(20).unwrap()).collect();
-        assert_eq!(m.extra.frog.scan, draws[2], "FrogAttackablesSensor");
-        assert_eq!(m.extra.frog.water_scan, draws[4], "IsInWaterSensor");
+        super::super::animal_brain::init(&mut m, 1);
+        for _ in 0..5 {
+            twin.next_int_bound(20).unwrap();
+        }
         assert_eq!(m.random.state(), twin.state());
     }
 
@@ -1384,7 +1186,7 @@ mod tests {
                         events: &mut events,
                     };
                     assert_eq!(
-                        ShootTongue.can_use(&mut m, &mut cx),
+                        start_attacking(&mut m, &mut cx) && ShootTongue.can_use(&mut m, &mut cx),
                         expected.is_some(),
                         "{outcome:?}"
                     );
@@ -1679,6 +1481,12 @@ mod tests {
                 m.position = Vec3::new(8.5, 64.0, 8.5);
                 m.on_ground = true;
                 set_pregnant(&mut m, true);
+                super::super::animal_brain::init(&mut m, 1);
+                mem(&mut m).walk_target.set(WalkTarget {
+                    target: Tracker::Block([8, 64, 7]),
+                    speed: 1.0,
+                    close: 0,
+                });
                 let mut lr = crate::health::TestLevel::new(3);
                 let mut events = Vec::new();
                 let mut cx = Cx {
@@ -1686,7 +1494,7 @@ mod tests {
                     level: &mut lr.level(),
                     events: &mut events,
                 };
-                LaySpawn::lay(&mut m, &mut cx);
+                assert!(try_lay_spawn(&mut m, &mut cx));
                 let spawn = w.registry.default_state("minecraft:frogspawn").unwrap();
                 assert!(
                     events

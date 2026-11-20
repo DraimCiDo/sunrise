@@ -48,12 +48,12 @@ Frog.FrogNodeEvaluator.getStart	missing		minor: frogs use the plain ground navig
 Frog.FrogNodeEvaluator.getPathType	missing		minor: blocks above #frog_prefer_jump_to (lily pad, dripleaf) are not treated as open path nodes
 Frog.FrogPathNavigation.canCutCorner	port	crates/sunrise-client/src/mobs/nav.rs::Navigation::can_cut_corner	with the frog on the amphibious finder the corners it refuses are the generic set (fire, damage, walkable doors), which is the frog's own three
 Frog.FrogPathNavigation.createPathFinder	port	crates/sunrise-client/src/mobs/frog.rs::register	amphibious navigation with the frog's prefersShallowSwimming (water below sea level - 10 costs more)
-FrogAi.initCoreActivity	inline	crates/sunrise-client/src/mobs/frog.rs::register	AnimalPanic(2.0) is the Panic goal; look and move sinks are the controls
-FrogAi.initIdleActivity	inline	crates/sunrise-client/src/mobs/frog.rs::register	gap: minor: Croak, stroll and look at player (6 blocks), the 1.25 food tempt (unless pregnant) and the mate search; no TryFindLand
-FrogAi.initSwimActivity	inline	crates/sunrise-client/src/mobs/frog.rs::Swim::step	the Swim goal (priority 4) stands in for the activity: IsInWaterSensor memory, TryFindLand(8, 1.5), RandomStroll.swim at 0.75, then stroll(1.0, true); no Float. gap: minor: SetWalkTargetFromLookTarget, and the sink's reached-target and cooldown handling
-FrogAi.initLaySpawnActivity	port	crates/sunrise-client/src/mobs/frog.rs::register	the LaySpawn goal, added in place of the activity
-FrogAi.initJumpActivity	port	crates/sunrise-client/src/mobs/frog.rs::register	the LongJump goal, added in place of the activity
-FrogAi.initTongueActivity	inline	crates/sunrise-client/src/mobs/frog.rs::register	ShootTongue goal at priority 2 with the attack-target checks inside it
+FrogAi.initCoreActivity	port	crates/sunrise-client/src/mobs/animal_brain.rs::frog_package	AnimalPanic(2.0), the look and move sinks and the two cooldown countdowns, at the priorities ActivityData.create numbers them
+FrogAi.initIdleActivity	port	crates/sunrise-client/src/mobs/animal_brain.rs::frog_package	look sometimes (30..60), make love, tempt at 1.25, StartAttacking, TryFindLand(6, 1.0) and the RunOne of stroll, walk to the look target, Croak and the on-ground trigger
+FrogAi.initSwimActivity	port	crates/sunrise-client/src/mobs/animal_brain.rs::frog_package	look sometimes, tempt, StartAttacking, TryFindLand(8, 1.5) and the ordered try-all gate of swim stroll (0.75), stroll, walk to the look target and the in-water trigger
+FrogAi.initLaySpawnActivity	port	crates/sunrise-client/src/mobs/animal_brain.rs::frog_package	look sometimes, StartAttacking, TryFindLandNearLiquid, TryLaySpawnOnFluidNearLand and the RunOne (weights 2, 1, 2, 1)
+FrogAi.initJumpActivity	port	crates/sunrise-client/src/mobs/animal_brain.rs::frog_package	LongJumpMidJump and LongJumpToPreferredBlock as one wrapped goal (gap: the two draws of the level random for their separate durations are one)
+FrogAi.initTongueActivity	port	crates/sunrise-client/src/mobs/animal_brain.rs::frog_package	StopAttackingIfTargetInvalid and ShootTongue
 FrogAi.isAcceptableLandingSpot	port	crates/sunrise-client/src/mobs/frog.rs::acceptable_landing	land on `frog_prefer_jump_to`, a trapdoor, or next to water
 FrogVariants.bootstrap	skip:data		variant registry; the biome to variant choice is BiomeFacts.frog
 FrogVariants.register	skip:data		registry registration

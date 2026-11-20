@@ -260,6 +260,11 @@ pub enum Act {
     Sniff,
     Dig,
     Panic,
+    /// The frog's: swimming, laying spawn, shooting its tongue, long jumping.
+    Swim,
+    LaySpawn,
+    Tongue,
+    LongJump,
 }
 impl Act {
     pub fn name(self) -> &'static str {
@@ -271,6 +276,10 @@ impl Act {
             Act::Sniff => "sniff",
             Act::Dig => "dig",
             Act::Panic => "panic",
+            Act::Swim => "swim",
+            Act::LaySpawn => "lay_spawn",
+            Act::Tongue => "tongue",
+            Act::LongJump => "long_jump",
         }
     }
 }
@@ -286,6 +295,8 @@ pub enum Kind {
     CopperGolem,
     /// `TadpoleAi`.
     Tadpole,
+    /// `FrogAi`.
+    Frog,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -297,6 +308,8 @@ enum Sensor {
     Players,
     Tempting,
     AdultAnyType,
+    FrogAttackables,
+    InWater,
 }
 impl Kind {
     /// `BRAIN_PROVIDER`'s sensors, in order (all scan every 20 ticks).
@@ -330,6 +343,14 @@ impl Kind {
                 Sensor::Players,
                 Sensor::HurtBy,
                 Sensor::Tempting,
+            ],
+            // `Frog.SENSOR_TYPES`.
+            Kind::Frog => &[
+                Sensor::Living,
+                Sensor::HurtBy,
+                Sensor::FrogAttackables,
+                Sensor::Tempting,
+                Sensor::InWater,
             ],
         }
     }
@@ -380,6 +401,7 @@ fn kind_for_species(species: Species) -> Option<Kind> {
         Species::HappyGhast => Some(Kind::Ghastling),
         Species::CopperGolem => Some(Kind::CopperGolem),
         Species::Tadpole => Some(Kind::Tadpole),
+        Species::Frog => Some(Kind::Frog),
         _ => None,
     }
 }
@@ -411,6 +433,7 @@ pub fn init(m: &mut Mob, shuffle_seed: i64) {
         Kind::Ghastling => ghastling_package(shuffle_seed),
         Kind::CopperGolem => copper_golem_package(shuffle_seed),
         Kind::Tadpole => tadpole_package(shuffle_seed),
+        Kind::Frog => frog_package(shuffle_seed),
     };
     // The parts' behaviors join before the sort, so each lands after
     // vanilla's of its priority (#824); the stable sort keeps vanilla's own
@@ -430,6 +453,10 @@ pub fn init(m: &mut Mob, shuffle_seed: i64) {
                     Act::Fight => 14,
                     Act::PlayDead => 15,
                     Act::Panic => 15,
+                    Act::Swim => 14,
+                    Act::LaySpawn => 8,
+                    Act::Tongue => 5,
+                    Act::LongJump => 15,
                 },
             )
         });
@@ -543,6 +570,9 @@ pub fn tick(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut
     }
     // forgetOutdatedMemories
     mem(m).tick();
+    if m.species() == Species::Frog {
+        super::frog::forget(m);
+    }
     tick_sensors(m, w);
     let mut list = std::mem::take(&mut brain_mut(m).list);
     let mut cx = Bx {
@@ -593,6 +623,9 @@ fn update_activity(m: &mut Mob, w: &MobWorld) {
         }
         return;
     }
+    if brain_mut(m).kind == Kind::Frog {
+        return update_frog_activity(m);
+    }
     let b = brain_mut(m);
     let mm = &b.mem;
     let order: &[Act] = match b.kind {
@@ -600,7 +633,7 @@ fn update_activity(m: &mut Mob, w: &MobWorld) {
         Kind::Ghastling => &[Act::Panic, Act::Idle],
         // `TadpoleAi.updateActivity`: `setActiveActivityToFirstValid(IDLE)`.
         Kind::CopperGolem | Kind::Tadpole => &[Act::Idle],
-        Kind::Axolotl => unreachable!(),
+        Kind::Axolotl | Kind::Frog => unreachable!(),
     };
     for &a in order {
         let ok = match a {
@@ -617,12 +650,38 @@ fn update_activity(m: &mut Mob, w: &MobWorld) {
             Act::Idle => b.kind != Kind::Sniffer || !mm.sniffer_digging.present(),
             Act::Panic => mm.is_panicking.present(),
             Act::Core => true,
-            Act::Fight | Act::PlayDead => false,
+            Act::Fight | Act::PlayDead | Act::Swim | Act::LaySpawn | Act::Tongue | Act::LongJump => {
+                false
+            }
         };
         if ok {
             b.activity = a;
             break;
         }
+    }
+}
+
+/// `FrogAi.updateActivity`: `setActiveActivityToFirstValid(TONGUE, LAY_SPAWN,
+/// LONG_JUMP, SWIM, IDLE)`, each with the memories its activity requires.
+pub(super) fn update_frog_activity(m: &mut Mob) {
+    let f = &m.extra.frog;
+    let (target, mid_jump, wet) = (f.target.is_some(), f.mid_jump, f.in_water);
+    let mm = mem_ref(m).expect("the frog brain is built");
+    let jumping = !mm.tempting_player.present()
+        && !mm.breed_target.present()
+        && super::frog::jump_cooldown(m).is_none()
+        && !wet;
+    let first = [
+        (Act::Tongue, target),
+        (Act::LaySpawn, !mid_jump && super::frog::is_pregnant(m)),
+        (Act::LongJump, jumping),
+        (Act::Swim, !mid_jump && wet),
+        (Act::Idle, !mid_jump && !wet),
+    ]
+    .into_iter()
+    .find_map(|(a, ok)| ok.then_some(a));
+    if let Some(a) = first {
+        brain_mut(m).activity = a;
     }
 }
 
@@ -671,6 +730,8 @@ fn tick_sensors(m: &mut Mob, w: &MobWorld) {
             Sensor::Players => sense_players(m, w),
             Sensor::Tempting => sense_tempting(m, w),
             Sensor::AdultAnyType => sense_adult(m, w),
+            Sensor::FrogAttackables => super::frog::sense_attackables(m, w),
+            Sensor::InWater => super::frog::sense_water(m),
         }
     }
 }
@@ -1008,6 +1069,15 @@ enum B {
     },
     /// `TransportItemsBetweenContainers`.
     Transport(Box<super::transport_items::Transport>),
+    /// A frog behaviour that runs over several ticks (`Croak`,
+    /// `ShootTongue`, the long jump): its start condition, its duration
+    /// (`Behavior`'s) and the goal the frog keeps its state in.
+    FrogGoal {
+        g: Box<dyn super::goals::Goal>,
+        t: Timed,
+    },
+    /// `CountDownCooldownTicks(LONG_JUMP_COOLDOWN_TICKS)`.
+    CountDownLongJump(Timed),
 }
 
 impl B {
@@ -1029,7 +1099,9 @@ impl B {
             | B::Sniffing(t)
             | B::DoNothing(t)
             | B::CountDownGaze(t)
+            | B::CountDownLongJump(t)
             | B::CountDownTransport(t) => t.running,
+            B::FrogGoal { t, .. } => t.running,
             B::Transport(x) => x.running,
             B::LookAtPlayerSometimes(running, _) => *running,
             B::InteractWithDoor { running, .. } => *running,
@@ -1061,7 +1133,9 @@ impl B {
             | B::Sniffing(t)
             | B::DoNothing(t)
             | B::CountDownGaze(t)
+            | B::CountDownLongJump(t)
             | B::CountDownTransport(t) => t.running = false,
+            B::FrogGoal { t, .. } => t.running = false,
             B::Transport(x) => x.running = false,
             B::MoveToTargetSink { t, path, .. } => {
                 t.running = false;
@@ -1194,6 +1268,26 @@ impl B {
                     return false;
                 }
                 t.begin(cx.level.random(), cx.now);
+                true
+            }
+            B::CountDownLongJump(t) => {
+                if super::frog::jump_cooldown(m).is_none() {
+                    return false;
+                }
+                t.begin(cx.level.random(), cx.now);
+                true
+            }
+            B::FrogGoal { g, t } => {
+                let mut gcx = super::goals::Cx {
+                    w: cx.w,
+                    level: cx.level,
+                    events: cx.events,
+                };
+                if !g.can_use(m, &mut gcx) {
+                    return false;
+                }
+                t.begin(gcx.level.random(), cx.now);
+                g.start(m, &mut gcx);
                 true
             }
             B::CountDownTransport(t) => {
@@ -1439,7 +1533,10 @@ impl B {
                 let Some(t) = found else { return false };
                 // Ticker.tickDownAndCheck (UniformInt 40..80 on the level random).
                 if *ticks == 0 {
-                    *ticks = if matches!(m.species(), Species::Axolotl | Species::Tadpole) {
+                    *ticks = if matches!(
+                        m.species(),
+                        Species::Axolotl | Species::Tadpole | Species::Frog
+                    ) {
                         30 + cx.level.random().next_int_bound(31).unwrap_or(0) - 1
                     } else {
                         40 + cx.level.random().next_int_bound(41).unwrap_or(0) - 1
@@ -1606,6 +1703,22 @@ impl B {
                     _ => self.do_stop(m, cx),
                 }
             }
+            B::CountDownLongJump(_) => match super::frog::jump_cooldown(m) {
+                Some(v) if v > 0 => super::frog::set_jump_cooldown(m, Some(v - 1)),
+                _ => self.do_stop(m, cx),
+            },
+            B::FrogGoal { g, t } => {
+                let mut gcx = super::goals::Cx {
+                    w: cx.w,
+                    level: cx.level,
+                    events: cx.events,
+                };
+                if t.timed_out(now) || !g.can_continue(m, &mut gcx) {
+                    self.do_stop(m, cx);
+                } else {
+                    g.tick(m, &mut gcx);
+                }
+            }
             B::CountDownGaze(_) => {
                 let v = mem(m).gaze_cooldown_ticks.value();
                 match v {
@@ -1660,6 +1773,10 @@ impl B {
                     let Who::Mob(id) = partner else { return };
                     m.extra.in_love = 0;
                     m.extra.age = 6000;
+                    // Frog.spawnChildFromBreeding: IS_PREGNANT instead of a baby.
+                    if m.species() == Species::Frog {
+                        super::frog::set_pregnant(m, true);
+                    }
                     cx.events.push(MobEvent::Breed {
                         parent: m.id,
                         partner: id,
@@ -1828,6 +1945,19 @@ impl B {
             B::CountDownTransport(t) => {
                 t.running = false;
                 mem(m).transport_items_cooldown_ticks.clear();
+            }
+            B::CountDownLongJump(t) => {
+                t.running = false;
+                super::frog::set_jump_cooldown(m, None);
+            }
+            B::FrogGoal { g, t } => {
+                t.running = false;
+                let mut gcx = super::goals::Cx {
+                    w: cx.w,
+                    level: cx.level,
+                    events: cx.events,
+                };
+                g.stop(m, &mut gcx);
             }
             B::Transport(x) => x.do_stop(m, cx),
             B::MakeLove { t, spawn_at } => {
@@ -2079,7 +2209,7 @@ fn follow_temptation_close(m: &mut Mob) -> f64 {
             }
         }
         // `new FollowTemptation(speed)`: the default close-enough distance, 2.5.
-        Kind::Axolotl | Kind::Tadpole => 2.5,
+        Kind::Axolotl | Kind::Tadpole | Kind::Frog => 2.5,
         Kind::Ghastling | Kind::CopperGolem => 3.0,
     }
 }
@@ -2423,6 +2553,21 @@ enum AxolotlAction {
     TadpoleWalkFromLook,
     StayWater,
     StayGround,
+    /// `StartAttacking.create(canAttack, NEAREST_ATTACKABLE)` of the frog.
+    FrogStartAttacking,
+    /// `StopAttackingIfTargetInvalid.create()`.
+    FrogStopAttacking,
+    /// `TryFindLand.create(range, speed)`; the action's `until` is `nextOkStartTime`.
+    FrogFindLand(i32, f32),
+    /// `TryFindLandNearLiquid.create(8, 1.0, ...)`.
+    FrogFindLandNearLiquid,
+    /// `TryLaySpawnOnFluidNearLand.create(FROGSPAWN)`.
+    FrogLaySpawn,
+    /// `RandomStroll.swim(0.75)`.
+    FrogSwimStroll,
+    /// `BehaviorBuilder.triggerIf(Frog::onGround)` and `(Frog::isInWater)`.
+    FrogOnGround,
+    FrogInWater,
 }
 fn axolotl_speed(m: &Mob, chase: bool) -> f32 {
     if m.fluids.in_water {
@@ -2737,6 +2882,34 @@ fn axolotl_action(m: &mut Mob, cx: &mut Bx, action: AxolotlAction, until: &mut i
         }
         StayWater => m.fluids.in_water,
         StayGround => m.on_ground,
+        FrogStartAttacking | FrogStopAttacking | FrogLaySpawn => {
+            let mut gcx = super::goals::Cx {
+                w: cx.w,
+                level: cx.level,
+                events: cx.events,
+            };
+            match action {
+                FrogStartAttacking => super::frog::start_attacking(m, &mut gcx),
+                FrogStopAttacking => super::frog::stop_attacking_if_invalid(m, &mut gcx),
+                _ => super::frog::try_lay_spawn(m, &mut gcx),
+            }
+        }
+        FrogFindLand(range, speed) => {
+            super::frog::try_find_land(m, cx.w, until, range, speed)
+        }
+        FrogFindLandNearLiquid => super::frog::try_find_land_near_liquid(m, cx.w, until),
+        FrogSwimStroll => {
+            if mem(m).walk_target.present() || !m.fluids.in_water {
+                return false;
+            }
+            let pos = swim_stroll_pos(m, cx.w);
+            mem(m)
+                .walk_target
+                .set_opt(pos.map(|p| WalkTarget::point([p.x, p.y, p.z], 0.75, 0)));
+            true
+        }
+        FrogOnGround => m.on_ground,
+        FrogInWater => m.fluids.in_water,
     }
 }
 /// `TadpoleAi`: the core activity (panic 2.0, the look and move sinks, the temptation
@@ -2793,6 +2966,123 @@ fn tadpole_package(seed: i64) -> Vec<Entry> {
         ),
         // Priority 3.
         e(3, Core, B::CountDownTemptation(Timed::new(60, 60))),
+    ]
+}
+
+/// `FrogAi.getActivities`: core, idle, swim, lay spawn, tongue and long jump,
+/// each behaviour at the priority `ActivityData.create` numbers it with.
+fn frog_package(seed: i64) -> Vec<Entry> {
+    use Act::*;
+    use AxolotlAction::*;
+    let e = |prio: i32, act, b| Entry { prio, act, b };
+    let action = |action| B::AxolotlAction {
+        action,
+        running: false,
+        until: 0,
+    };
+    let goal = |g: Box<dyn super::goals::Goal>, duration: i32| B::FrogGoal {
+        g,
+        t: Timed::new(duration, duration),
+    };
+    let look = || B::LookAtPlayerSometimes(false, 0);
+    let tempt = || B::FollowTemptation {
+        t: Timed::new(60, 60),
+        look_in_the_eyes: false,
+    };
+    let walk_from_look = || B::WalkToLookTarget {
+        running: false,
+        speed: 1.0,
+        close: 3,
+    };
+    let stroll = || B::Stroll {
+        running: false,
+        fly: false,
+        speed: 1.0,
+        range: (10, 7),
+    };
+    let croak = || goal(Box::new(super::frog::Croak), 100);
+    let gate = |kids: Vec<(B, i32)>| B::Gate(Box::new(Gate::run_one(seed, kids)
+        .when(|mm| !mm.walk_target.present())));
+    vec![
+        // Core: `ActivityData.create(CORE, 0, ...)`.
+        e(
+            0,
+            Core,
+            B::AnimalPanic {
+                t: Timed::new(100, 120),
+                fly: false,
+                speed: 2.0,
+            },
+        ),
+        e(1, Core, B::LookAtTargetSink(Timed::new(45, 90))),
+        e(2, Core, move_to_target_sink(150, 250)),
+        e(3, Core, B::CountDownTemptation(Timed::new(60, 60))),
+        e(4, Core, B::CountDownLongJump(Timed::new(60, 60))),
+        // Idle.
+        e(0, Idle, look()),
+        e(
+            0,
+            Idle,
+            B::MakeLove {
+                t: Timed::new(110, 110),
+                spawn_at: 0,
+            },
+        ),
+        e(1, Idle, tempt()),
+        e(2, Idle, action(FrogStartAttacking)),
+        e(3, Idle, action(FrogFindLand(6, 1.0))),
+        e(
+            4,
+            Idle,
+            gate(vec![
+                (stroll(), 1),
+                (walk_from_look(), 1),
+                (croak(), 3),
+                (action(FrogOnGround), 2),
+            ]),
+        ),
+        // Swim.
+        e(0, Swim, look()),
+        e(1, Swim, tempt()),
+        e(2, Swim, action(FrogStartAttacking)),
+        e(3, Swim, action(FrogFindLand(8, 1.5))),
+        e(
+            5,
+            Swim,
+            B::Gate(Box::new(Gate {
+                running: false,
+                shuffle: false,
+                try_all: true,
+                random: sunrise_core::random::LegacyRandom::new(seed),
+                kids: vec![
+                    (action(FrogSwimStroll), 1, 0.0),
+                    (stroll(), 1, 0.0),
+                    (walk_from_look(), 1, 0.0),
+                    (action(FrogInWater), 5, 0.0),
+                ],
+                when: Some(|mm| !mm.walk_target.present()),
+            })),
+        ),
+        // Lay spawn.
+        e(0, LaySpawn, look()),
+        e(1, LaySpawn, action(FrogStartAttacking)),
+        e(2, LaySpawn, action(FrogFindLandNearLiquid)),
+        e(3, LaySpawn, action(FrogLaySpawn)),
+        e(
+            4,
+            LaySpawn,
+            gate(vec![
+                (stroll(), 2),
+                (walk_from_look(), 1),
+                (croak(), 2),
+                (action(FrogOnGround), 1),
+            ]),
+        ),
+        // Tongue.
+        e(0, Tongue, action(FrogStopAttacking)),
+        e(1, Tongue, goal(Box::new(super::frog::ShootTongue), 100)),
+        // Long jump: `LongJumpMidJump` and `LongJumpToPreferredBlock` are one goal.
+        e(1, LongJump, goal(Box::new(super::frog::LongJump::default()), 200)),
     ]
 }
 
@@ -3043,6 +3333,24 @@ pub fn describe(m: &Mob) -> Option<(String, String)> {
         |p: &[i32; 3]| pos(*p)
     );
     slot!("sniffer_happy", mm.sniffer_happy, |b: &bool| b.to_string());
+    if b.kind == Kind::Frog {
+        let f = &m.extra.frog;
+        if f.in_water {
+            put("is_in_water", "u".to_string(), NEVER);
+        }
+        if f.mid_jump {
+            put("long_jump_mid_jump", "u".to_string(), NEVER);
+        }
+        if super::frog::is_pregnant(m) {
+            put("is_pregnant", "u".to_string(), NEVER);
+        }
+        if let Some(t) = super::frog::jump_cooldown(m) {
+            put("long_jump_cooling_down", t.to_string(), NEVER);
+        }
+        if let Some(id) = f.target {
+            put("attack_target", who(Who::Mob(id)), NEVER);
+        }
+    }
     slot!("sniff_cooldown", mm.sniff_cooldown, |_: &()| "u"
         .to_string());
     slot!("gaze_cooldown_ticks", mm.gaze_cooldown_ticks, |t: &i32| t

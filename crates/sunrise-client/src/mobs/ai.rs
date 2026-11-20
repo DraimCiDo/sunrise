@@ -3359,6 +3359,7 @@ fn finish_server_ai_step(
         || m.species() == Species::CopperGolem
         || m.species() == Species::Axolotl
         || m.species() == Species::Tadpole
+        || m.species() == Species::Frog
     {
         super::animal_brain::tick(m, w, level, events);
     }
@@ -3432,7 +3433,6 @@ fn custom_server_ai_step(m: &mut Mob, cx: &mut Cx) {
         Species::Evoker | Species::Illusioner if m.extra.counter > 0 => m.extra.counter -= 1,
         Species::Bat => super::bat::server_ai_step(m, cx.w, cx.events),
         Species::Bee => super::bee::server_ai_step(m, cx),
-        Species::Frog => super::frog::server_ai_step(m, cx.w),
         // Hoglin and Piglin.customServerAiStep: the brain, then updateActivity.
         Species::Piglin | Species::Hoglin => super::piglin::brain_step(m, cx),
         Species::Zoglin => super::piglin::zoglin_step(m, cx),

@@ -34,12 +34,12 @@ AdultSensorAnyType.setNearestVisibleAdult	port	crates/sunrise-client/src/mobs/an
 AxolotlAttackablesSensor.isMatchingEntity	port	crates/sunrise-client/src/mobs/animal_brain.rs::sense_axolotl_attackables	within 8 blocks, in water, always-hostile or hunt target tag, alive and not playing dead
 AxolotlAttackablesSensor.isHuntTarget	inline	crates/sunrise-client/src/mobs/animal_brain.rs::sense_axolotl_attackables	hunt target tag only while there is no hunting cooldown
 BreezeAttackEntitySensor.doTick	port	crates/sunrise-client/src/mobs/monster_brain.rs::sense_breeze_attack	nearest living entity that is not a creative or spectator player and is attackable
-FrogAttackablesSensor.isMatchingEntity	port	crates/sunrise-client/src/mobs/frog.rs::server_ai_step	every 20 ticks: nearest size-1 slime or magma cube within 10 blocks in line of sight
-FrogAttackablesSensor.isUnreachableAttackTarget	inline	crates/sunrise-client/src/mobs/frog.rs::server_ai_step	skips ids in the unreachable list (up to five, 100 ticks each)
+FrogAttackablesSensor.isMatchingEntity	port	crates/sunrise-client/src/mobs/frog.rs::sense_attackables	every 20 ticks: nearest size-1 slime or magma cube within 10 blocks in line of sight
+FrogAttackablesSensor.isUnreachableAttackTarget	inline	crates/sunrise-client/src/mobs/frog.rs::sense_attackables	skips ids in the unreachable list (up to five, 100 ticks each)
 GolemSensor.checkForNearbyGolem	port	crates/sunrise-client/src/mobs/villager_brain.rs::sense_golem	an iron golem in the nearby list sets golem_detected_recently for 599 ticks
 HoglinSpecificSensor.doTick	inline	crates/sunrise-client/src/mobs/piglin.rs::hoglin_sense	hoglin_repellent runs it every 20 ticks with the repellent scan: it counts the adult piglins and hoglins in sight and keeps the nearest adult piglin and the adult hoglins; the idle activity keeps an adult hoglin 8 blocks from that piglin (AwayFrom::AdultPiglin) and piglins_outnumber_hoglins starts and ends its retreat
 HurtBySensor.doTick	port	crates/sunrise-client/src/mobs/villager_brain.rs::sense_hurt	last damage source forgotten after 40 ticks, attacker kept while alive
-IsInWaterSensor.doTick	inline	crates/sunrise-client/src/mobs/frog.rs::server_ai_step	the frog's IS_IN_WATER memory, scanned every 20 ticks after its randomly delayed start; the swim goal and the idle stroll follow it, the other frog goals still read fluids.in_water directly
+IsInWaterSensor.doTick	inline	crates/sunrise-client/src/mobs/frog.rs::sense_water	the frog's IS_IN_WATER memory, scanned every 20 ticks after its randomly delayed start; the swim goal and the idle stroll follow it, the other frog goals still read fluids.in_water directly
 MobSensor.doTick	inline	crates/sunrise-client/src/mobs/armadillo.rs::server_ai_step	armadillo scare sensor every fifth tick: cannot stay rolled up clears the danger, else scan
 MobSensor.checkForMobsNearby	port	crates/sunrise-client/src/mobs/armadillo.rs::scared_by_someone	undead, last attacker or a sprinting or riding player within 7 by 2 blocks
 MobSensor.mobDetected	inline	crates/sunrise-client/src/mobs/armadillo.rs::server_ai_step	danger = 80 ticks
