@@ -2,7 +2,7 @@
 //! connection and LAN TCP: who is sent values, in which order, what a rollback and a stale
 //! epoch send, and what an oversized message does to the connection.
 use super::super::Game;
-use mod_api::{AttachmentCodec, AttachmentStore, AttachmentType, Host};
+use mod_api::{AttachmentCodec, AttachmentDescriptor, AttachmentKey, Host};
 use std::time::{Duration, Instant};
 use sunrise_core::nbt::Tag;
 use sunrise_mod_runtime::attachments::Holder;
@@ -17,7 +17,7 @@ use sunrise_protocol::{
 const NAME: &str =
     "game::attachment_sync::transport_tests::attachment_sync_follows_the_negotiated_route";
 
-pub(super) const VALUE_CODEC: mod_api::AttachmentCodec<i32> = AttachmentCodec {
+const VALUE_CODEC: mod_api::AttachmentCodec<i32> = AttachmentCodec {
     encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
     decode: |c| match c.get(&"n".into()) {
         Some(Tag::Int(n)) => Ok(*n),
@@ -25,14 +25,6 @@ pub(super) const VALUE_CODEC: mod_api::AttachmentCodec<i32> = AttachmentCodec {
     },
 };
 
-pub(super) static VALUE: AttachmentType<i32> = AttachmentType {
-    namespace: "sync_route",
-    name: "value",
-    default: || 0,
-    codec: Some(VALUE_CODEC),
-    copy_on_death: false,
-    sync: true,
-};
 const BLOB_CODEC: mod_api::AttachmentCodec<Vec<u8>> = AttachmentCodec {
     encode: |bytes| Ok([("b".into(), Tag::ByteArray(bytes.clone()))].into()),
     decode: |c| match c.get(&"b".into()) {
@@ -41,31 +33,17 @@ const BLOB_CODEC: mod_api::AttachmentCodec<Vec<u8>> = AttachmentCodec {
     },
 };
 
-/// A value past every network frame limit, and incompressible.
-static BLOB: AttachmentType<Vec<u8>> = AttachmentType {
-    namespace: "sync_route",
-    name: "blob",
-    default: Vec::new,
-    codec: Some(BLOB_CODEC),
-    copy_on_death: false,
-    sync: true,
-};
-
 /// A mod with no hooks: with a mod loaded, the server sends joining players snapshots.
 pub(super) struct Route;
 #[mod_api::__subscriptions]
 impl mod_api::Hooks for Route {
     fn register(&self, registrar: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
         registrar
-            .register_attachment_type(
-                mod_api::AttachmentDescriptor::new("sync_route:value", VALUE.default)
-                    .serialize(VALUE_CODEC)
-                    .sync(),
-            )
+            .register_attachment_type(value_descriptor())
             .unwrap();
         registrar
             .register_attachment_type(
-                mod_api::AttachmentDescriptor::new("sync_route:blob", BLOB.default)
+                AttachmentDescriptor::new("sync_route:blob", Vec::new)
                     .serialize(BLOB_CODEC)
                     .sync(),
             )
@@ -73,10 +51,15 @@ impl mod_api::Hooks for Route {
     }
 }
 
-/// The server's own attachment store.
-pub(super) fn store<'a>(server: &'a mut Game<'_>) -> &'a mut dyn AttachmentStore {
-    let host: &mut dyn Host = server;
-    host.attachments()
+pub(super) fn value_descriptor() -> AttachmentDescriptor<i32> {
+    AttachmentDescriptor::new("sync_route:value", || 0)
+        .serialize(VALUE_CODEC)
+        .sync()
+}
+
+/// The key issued on the thread hosting the holder, never carried across installs.
+pub(super) fn value_key() -> AttachmentKey<i32> {
+    mod_api::testing::registered_attachment_fixture("sync_route:value")
 }
 
 /// The server sets the level's value, committed or rolled back.
@@ -86,7 +69,7 @@ pub(super) fn set_level(game: &Game<'_>, value: i32, commit: bool) {
         .unwrap()
         .call(move |server| {
             let seal = server.transaction_open();
-            VALUE.set(store(server), Holder::Level, value).unwrap();
+            value_key().set(server, Holder::Level, value).unwrap();
             server.transaction_close(&seal, commit);
         })
         .unwrap();
@@ -95,7 +78,7 @@ pub(super) fn set_level(game: &Game<'_>, value: i32, commit: bool) {
 /// The window's synced copy of the level's value.
 fn window_value(game: &mut Game<'_>) -> Option<i32> {
     let host: &dyn Host = game;
-    let key = mod_api::testing::registered_attachment_fixture::<i32>("sync_route:value");
+    let key = value_key();
     let rows = host
         .attachment_query("sync_route", "value")
         .unwrap()
@@ -383,7 +366,7 @@ fn attachment_sync_follows_the_negotiated_route() {
                 .integrated
                 .as_ref()
                 .unwrap()
-                .call(|server| VALUE.get(store(server), Holder::Level))
+                .call(|server| value_key().get(server, Holder::Level))
                 .unwrap();
             assert_eq!(authority, Ok(12));
             // A vanilla peer is sent nothing, before or after.
@@ -422,7 +405,10 @@ fn attachment_sync_follows_the_negotiated_route() {
                         .clone();
                     let refused = server.queue_attachment_sync(&peer, &body);
                     // The same value through the level's own pass, as a mod's edit sends it.
-                    BLOB.set(store(server), Holder::Level, blob).unwrap();
+                    let key = mod_api::testing::registered_attachment_fixture::<Vec<u8>>(
+                        "sync_route:blob",
+                    );
+                    key.set(server, Holder::Level, blob).unwrap();
                     refused
                 })
                 .unwrap();

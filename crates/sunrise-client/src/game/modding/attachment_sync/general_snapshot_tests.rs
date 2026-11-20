@@ -2,7 +2,7 @@
 //! even with nothing synced, since the client shows the row only once it arrives
 //! (`game/network/remote/general.rs`); and whole, so a client that pairs later reads the value
 //! the row holds then.
-use super::transport_tests::{VALUE, VALUE_CODEC, store};
+use super::transport_tests::{value_descriptor, value_key};
 use crate::game::general::{GeneralEntityRecord, GeneralTypeEnvelope};
 use crate::game::native_entity_refs::tests::with_game;
 use mod_api::{GeneralEntityCategory, GeneralSavePolicy};
@@ -13,12 +13,7 @@ struct Declare;
 #[mod_api::__subscriptions]
 impl mod_api::Hooks for Declare {
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type(
-            mod_api::AttachmentDescriptor::new("sync_route:value", VALUE.default)
-                .serialize(VALUE_CODEC)
-                .sync(),
-        )
-        .unwrap();
+        r.register_attachment_type(value_descriptor()).unwrap();
         r.declare_general_entity(
             "robot",
             GeneralEntityCategory::Misc,
@@ -94,7 +89,7 @@ fn a_general_row_always_has_a_first_snapshot_holding_what_it_holds_now() {
         assert!(first[0].replace && first[0].changes.is_empty());
         // A client that pairs later is sent the value the row holds then.
         let seal = game.transaction_open();
-        VALUE.set(store(game), Holder::Entity(id), 7).unwrap();
+        value_key().set(game, Holder::Entity(id), 7).unwrap();
         game.transaction_close(&seal, true);
         let late = game.attachment_snapshot(Holder::Entity(id));
         assert_eq!(late.len(), 1);

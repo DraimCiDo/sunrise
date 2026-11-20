@@ -3,16 +3,17 @@
 use std::{panic::AssertUnwindSafe, sync::Arc};
 
 use mod_api::{
-    AttachmentType, BlockEntityPart, BlockEntityPartState, BlockEntityRef, BlockEntityTickEvent,
-    BlockPart, Hooks, HostTransaction, PartStateError, Registrar, ServerHost, edit_part_state,
-    read_state,
+    BlockEntityPart, BlockEntityPartState, BlockEntityRef, BlockEntityTickEvent, BlockPart, Hooks,
+    HostTransaction, PartStateError, Registrar, ServerHost, edit_part_state, read_state,
 };
 use sunrise_client::{
     chunk::Chunk,
     containers::{BlockEntity, ModBlockEntity},
 };
 use sunrise_core::nbt::{Compound, Tag};
-use sunrise_mod_runtime::attachments::{AttachmentCodec, AttachmentError, Attachments, Holder};
+use sunrise_mod_runtime::attachments::{
+    AttachmentCodec, AttachmentError, AttachmentType, Attachments, Holder,
+};
 
 use super::{Dim, Game};
 
@@ -24,6 +25,7 @@ const PROGRESS_CODEC: mod_api::AttachmentCodec<i32> = AttachmentCodec {
     },
 };
 
+// Engine-only saved map used to seed or inspect bytes outside a live holder.
 const PROGRESS: AttachmentType<i32> = AttachmentType {
     namespace: "part_state",
     name: "progress",
@@ -67,7 +69,7 @@ impl Hooks for StateMod {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
         let state_key = r
             .register_attachment_type(
-                mod_api::AttachmentDescriptor::new("part_state:progress", PROGRESS.default)
+                mod_api::AttachmentDescriptor::new("part_state:progress", || 0)
                     .serialize(PROGRESS_CODEC),
             )
             .unwrap();
@@ -179,7 +181,7 @@ fn part_state_is_per_block_entity_through_ticks_transactions_and_replacement() {
             assert_eq!(part.state_existing_in(level, a), Ok(None));
         });
         assert_eq!(
-            PROGRESS.has(game, Holder::BlockEntity([1, 64, 1])),
+            part.state_key().has(game, Holder::BlockEntity([1, 64, 1])),
             Ok(false)
         );
         assert_eq!(part.edit_state(game, a, |_, n| *n = 7), Ok(()));
@@ -261,8 +263,8 @@ fn part_state_is_per_block_entity_through_ticks_transactions_and_replacement() {
         // A value replaced while the closure ran refuses the edit and keeps the old one.
         let changed = part.edit_state(game, a, |host, n| {
             *n = 12;
-            PROGRESS
-                .set(host.attachments(), Holder::BlockEntity([1, 64, 1]), 50)
+            part.state_key()
+                .set(host, Holder::BlockEntity([1, 64, 1]), 50)
                 .unwrap();
         });
         assert_eq!(changed, Err(PartStateError::Changed));

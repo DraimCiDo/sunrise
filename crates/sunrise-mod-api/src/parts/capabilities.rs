@@ -648,6 +648,7 @@ pub mod tests {
             }
         }
         let mods: crate::Mods = vec![
+            ModEntry::new("test", Box::new(FixtureContent)),
             ModEntry::new("doubler", Box::new(Doubler)),
             ModEntry::new("later", Box::new(Later)),
         ]

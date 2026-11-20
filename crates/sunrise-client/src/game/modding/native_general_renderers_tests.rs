@@ -507,7 +507,7 @@ impl mod_api::Hooks for NativeProbe {
 
 /// Loads a saved row of the fixture's type at `position` with fuel 7: the chunk-load route.
 fn load_saved_row(server: &mut Game<'_>, position: [f64; 3]) -> u32 {
-    use mod_api::{Holder, Host};
+    use mod_api::Holder;
     let uuid = [380, 39, 9, 57];
     let saved = Tag::Compound(
         [
@@ -533,13 +533,10 @@ fn load_saved_row(server: &mut Game<'_>, position: [f64; 3]) -> u32 {
         .unwrap()
         .id;
     let tx = server.transaction_open();
-    fixture::FUEL
-        .set(
-            (server as &mut dyn Host).attachments(),
-            Holder::Entity(id),
-            7,
-        )
-        .unwrap();
+    let fuel = mod_api::testing::registered_attachment_fixture::<i32>(
+        "general_render_fixture:render_fuel",
+    );
+    fuel.set(server, Holder::Entity(id), 7).unwrap();
     server.transaction_close(&tx, true);
     id
 }
@@ -561,13 +558,10 @@ fn spawn_row(server: &mut Game<'_>, position: [f64; 3]) -> u32 {
             &EntitySpawn::new(SpawnBody::General),
         )
         .expect("the spawn is admitted");
-    fixture::FUEL
-        .set(
-            (server as &mut dyn Host).attachments(),
-            Holder::Entity(row.id()),
-            7,
-        )
-        .unwrap();
+    let fuel = mod_api::testing::registered_attachment_fixture::<i32>(
+        "general_render_fixture:render_fuel",
+    );
+    fuel.set(server, Holder::Entity(row.id()), 7).unwrap();
     server.transaction_close(&tx, true);
     row.id()
 }

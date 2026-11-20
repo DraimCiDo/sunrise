@@ -1,5 +1,6 @@
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use sunrise_mod_runtime::attachments::AttachmentType;
 
 const VALUE: AttachmentType<i32> = AttachmentType {
     namespace: "disk_fixture",

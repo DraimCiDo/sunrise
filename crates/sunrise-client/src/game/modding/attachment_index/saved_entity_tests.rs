@@ -1,29 +1,26 @@
 use super::*;
-use crate::game::native_entity_refs::tests::{with_game, with_game_attachment};
+use crate::game::native_entity_refs::tests::with_game_attachment;
 use mod_api::{AttachmentQueries, AttachmentQueriesMut};
 use std::collections::HashSet;
 use sunrise_core::nbt::Tag;
 use sunrise_mod_runtime::attachments::{ATTACHMENTS_KEY, AttachmentCodec, AttachmentError};
 
-static PROJECTILE_VALUE: AttachmentType<i32> = AttachmentType {
-    namespace: "saved_projectile",
-    name: "value",
-    default: || 0,
-    codec: Some(AttachmentCodec {
-        encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
-        decode: |tag| match tag.get(&"n".into()) {
-            Some(Tag::Int(n)) => Ok(*n),
-            _ => Err(AttachmentError::Decode),
-        },
-    }),
-    copy_on_death: false,
-    sync: false,
+const PROJECTILE_CODEC: AttachmentCodec<i32> = AttachmentCodec {
+    encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
+    decode: |tag| match tag.get(&"n".into()) {
+        Some(Tag::Int(n)) => Ok(*n),
+        _ => Err(AttachmentError::Decode),
+    },
 };
 
 #[test]
 #[ignore = "daily"]
 fn saved_spit_and_bullet_query_before_access_and_round_trip() {
-    with_game(|game| {
+    let descriptor = || {
+        mod_api::AttachmentDescriptor::new("saved_projectile:value", || 0)
+            .serialize(PROJECTILE_CODEC)
+    };
+    with_game_attachment("saved_projectile", descriptor, |game, key| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
         let contents = Tag::compound([(
@@ -55,16 +52,16 @@ fn saved_spit_and_bullet_query_before_access_and_round_trip() {
             game.spawn_loaded_entities();
             let index = game.attachment_indexes[&Dim::Overworld].clone();
             let name = ("saved_projectile".into(), "value".into());
-            let batch = index.lock().unwrap().snapshot(&name);
-            assert_eq!(batch.len(), 1, "{kind} before attachment access");
-            assert_eq!(batch[0].entry.read(&PROJECTILE_VALUE), Ok(&37), "{kind}");
-            let AttachmentHolder::Entity(entity) = batch[0].holder else {
+            let batch = game.query(&key).unwrap();
+            let mut rows = batch.iter();
+            let row = rows.next().unwrap().unwrap();
+            assert!(rows.next().is_none(), "{kind} before attachment access");
+            assert_eq!(*row.value, 37, "{kind}");
+            let AttachmentHolder::Entity(entity) = row.holder else {
                 panic!("not entity");
             };
             // Change the live map so an opaque raw-NBT echo cannot satisfy the save check.
-            PROJECTILE_VALUE
-                .set(game, Holder::Entity(entity.id()), 59)
-                .unwrap();
+            key.set(game, Holder::Entity(entity.id()), 59).unwrap();
             let saved = game.entity_chunks(&HashSet::from([(0, 0)]), false);
             let saved = saved
                 .iter()
@@ -81,14 +78,12 @@ fn saved_spit_and_bullet_query_before_access_and_round_trip() {
                 .loaded_entities
                 .push(((0, 0), vec![saved.into()]));
             game.spawn_loaded_entities();
-            let restored = index.lock().unwrap().snapshot(&name);
-            assert_eq!(restored.len(), 1, "{kind} after reload");
-            assert_eq!(
-                restored[0].entry.read(&PROJECTILE_VALUE),
-                Ok(&59),
-                "{kind} saved value"
-            );
-            let AttachmentHolder::Entity(entity) = restored[0].holder else {
+            let restored = game.query(&key).unwrap();
+            let mut rows = restored.iter();
+            let row = rows.next().unwrap().unwrap();
+            assert!(rows.next().is_none(), "{kind} after reload");
+            assert_eq!(*row.value, 59, "{kind} saved value");
+            let AttachmentHolder::Entity(entity) = row.holder else {
                 panic!("not entity");
             };
             assert!(game.entity_discard(entity));

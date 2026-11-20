@@ -1,6 +1,6 @@
 use super::*;
 use crate::prelude::*;
-use runtime::index::AttachmentIndex;
+use runtime::{AttachmentType, index::AttachmentIndex};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},

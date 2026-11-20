@@ -1,9 +1,9 @@
 /// The test mods, their parts installed, on a thread that runs a game.
 pub fn game_thread() -> crate::Mods {
     let mods: crate::Mods = vec![
+        ModEntry::new("test", Box::new(FixtureContent)),
         ModEntry::new("doubler", Box::new(Doubler)),
         ModEntry::new("chemist", Box::new(Chemist)),
-        ModEntry::new("test", Box::new(FixtureContent)),
     ]
     .into();
     crate::__private::install(mods.clone());

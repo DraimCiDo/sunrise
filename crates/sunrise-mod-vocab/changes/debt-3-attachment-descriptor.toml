@@ -61,13 +61,13 @@ migrate = """\
     `lookup_attachment(id)`, returning an opaque `RegisteredAttachment`; use the typed inherent \
     methods above when the value type is known. \
     Replace `const DATA` on `BlockEntityPartState` or `EntityPartState` with \
-    `fn state_key(&self) -> &AttachmentType<Self::Data>` returning a borrow of the Part's key field. \
+    `fn state_key(&self) -> &AttachmentKey<Self::Data>` returning a borrow of the Part's key field. \
     Initialize that field in the Part passed to `block_entity_part_with_state` or `entity_part_with_state`; \
     keep the same namespace and name. Replace `P::DATA` with `part.state_key()`. \
     Replace `P::state(host, entity)`, `P::state_existing(host, entity)`, and `P::edit_state(host, entity, edit)` \
     with `part.state(host, entity)`, `part.state_existing(host, entity)`, and `part.edit_state(host, entity, edit)` \
     (`self` in a Part hook). For block entities, replace `P::state_in(level, entity)` and \
     `P::state_existing_in(level, entity)` with `part.state_in(level, entity)` and \
-    `part.state_existing_in(level, entity)`. `edit_part_state(host, entity, key, edit)` now accepts a \
-    non-static key borrow; existing calls passing a static key still compile.\
+    `part.state_existing_in(level, entity)`. Pass a borrow of the issued key to \
+    `edit_part_state(host, entity, &key, edit)`. \
     """

@@ -7,24 +7,14 @@ use std::sync::{
 };
 
 use mod_api::{
-    AttachmentType, EntityConstructingEvent, EntityJoinLevelEvent, EntityLeaveLevelEvent,
-    EntityRef, Flow, Hooks, HostSide, RemovalReason, ServerHost,
+    AttachmentKey, EntityConstructingEvent, EntityJoinLevelEvent, EntityLeaveLevelEvent, EntityRef,
+    Flow, Hooks, HostSide, RemovalReason, ServerHost,
 };
 use sunrise_client::{chunk::Chunk, items::ItemStack, mobs::StoredEffect};
 use sunrise_core::nbt::{Tag, parse_snbt};
 use sunrise_mod_runtime::attachments::Holder;
 
 use super::{Dim, Game, commands::Target, lan_entities::ENTITY_ID_HEADROOM};
-
-/// Kept for the session only.
-static MARK: AttachmentType<i32> = AttachmentType {
-    namespace: "journal",
-    name: "mark",
-    default: || 0,
-    codec: None,
-    copy_on_death: false,
-    sync: false,
-};
 
 /// What the observer heard, in order.
 #[derive(Debug, Default, PartialEq)]
@@ -62,20 +52,26 @@ static NEST: AtomicU8 = AtomicU8::new(0);
 
 /// Hears construction, joins and leaves; marks each entity it constructs; keeps sheep and
 /// snowballs out.
-struct Observer;
+#[derive(Default)]
+struct Observer(Mutex<Option<AttachmentKey<i32>>>);
 #[mod_api::__subscriptions]
 impl Hooks for Observer {
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type(mod_api::AttachmentDescriptor::new(
-            "journal:mark",
-            MARK.default,
-        ))
-        .unwrap();
+        let mark = r
+            .register_attachment_type(mod_api::AttachmentDescriptor::new("journal:mark", || 0))
+            .unwrap();
+        *self.0.lock().unwrap() = Some(mark);
     }
     fn entity_constructing(&self, host: HostSide<'_>, event: &mut EntityConstructingEvent) {
         if let (HostSide::Server(host), Holder::Entity(id)) = (host, event.holder) {
             HEARD.lock().unwrap().constructed.push(id);
-            MARK.set(host, event.holder, 1).unwrap();
+            self.0
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .set(host, event.holder, 1)
+                .unwrap();
         }
     }
     fn entity_join_level(
@@ -162,7 +158,11 @@ fn with_observer(name: &str, test: impl FnOnce(&mut Game<'_>)) {
     if run_fresh_cases(name, "SUNRISE_TRANSACTION_ENTITIES_CHILD", &["valid"]) {
         return;
     }
-    let mods: mod_api::Mods = vec![mod_api::ModEntry::new("journal", Box::new(Observer))].into();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "journal",
+        Box::new(Observer::default()),
+    )]
+    .into();
     mod_platform::testing::with_mods(mods, || {
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
@@ -205,11 +205,12 @@ fn a_spawn_then_abort_leaves_no_entity_map_or_hook() {
     const NAME: &str =
         "game::transaction_entities_tests::a_spawn_then_abort_leaves_no_entity_map_or_hook";
     with_observer(NAME, |game| {
+        let mark = mod_api::testing::registered_attachment_fixture::<i32>("journal:mark");
         let (mobs, next) = (game.mobs.len(), game.next_entity);
         let seal = game.transaction_open();
         let pig = summon(game, "minecraft:pig", "{}").unwrap();
         assert!(game.entity(pig).is_some(), "in the level inside the action");
-        assert_eq!(MARK.get(game, Holder::Entity(pig)), Ok(1));
+        assert_eq!(mark.get(game, Holder::Entity(pig)), Ok(1));
         assert_eq!(heard().constructed, [pig], "constructed at the spawn call");
         game.transaction_close(&seal, false);
 
@@ -268,6 +269,7 @@ fn a_mob_removed_in_a_transaction_leaves_once_at_the_root_commit() {
 fn a_spawn_joins_at_the_root_commit() {
     const NAME: &str = "game::transaction_entities_tests::a_spawn_joins_at_the_root_commit";
     with_observer(NAME, |game| {
+        let mark = mod_api::testing::registered_attachment_fixture::<i32>("journal:mark");
         let seal = game.transaction_open();
         let pig = summon(game, "minecraft:pig", "{}").unwrap();
         game.native_joins_flush(false, 0);
@@ -275,7 +277,7 @@ fn a_spawn_joins_at_the_root_commit() {
         game.transaction_close(&seal, true);
         assert_eq!(heard().joined, [pig]);
         assert!(game.entity(pig).is_some());
-        assert_eq!(MARK.get(game, Holder::Entity(pig)), Ok(1));
+        assert_eq!(mark.get(game, Holder::Entity(pig)), Ok(1));
     });
 }
 
@@ -370,10 +372,11 @@ fn a_removal_then_abort_keeps_the_row_map_and_rider() {
     const NAME: &str =
         "game::transaction_entities_tests::a_removal_then_abort_keeps_the_row_map_and_rider";
     with_observer(NAME, |game| {
+        let mark = mod_api::testing::registered_attachment_fixture::<i32>("journal:mark");
         let (boat, cow) = boat_with_rider(game);
         let pig = summon(game, "minecraft:pig", "{}").unwrap();
         let pig = game.entity(pig).unwrap();
-        MARK.set(game, Holder::Entity(boat.id()), 7).unwrap();
+        mark.set(game, Holder::Entity(boat.id()), 7).unwrap();
         heard();
         let seal = game.transaction_open();
         assert!(game.entity_discard(boat));
@@ -398,7 +401,7 @@ fn a_removal_then_abort_keeps_the_row_map_and_rider() {
 
         assert_eq!(game.entity(boat.id()), Some(boat));
         assert_eq!(game.entity(pig.id()), Some(pig));
-        assert_eq!(MARK.get(game, Holder::Entity(boat.id())), Ok(7));
+        assert_eq!(mark.get(game, Holder::Entity(boat.id())), Ok(7));
         assert_eq!(game.entity_vehicle(cow), Some(boat));
         assert!(game.persist.removals.is_empty());
         game.native_leaves_flush();
@@ -534,19 +537,20 @@ fn another_writer_sees_the_spawn_and_its_writes_roll_back() {
     const NAME: &str =
         "game::transaction_entities_tests::another_writer_sees_the_spawn_and_its_writes_roll_back";
     with_observer(NAME, |game| {
+        let mark = mod_api::testing::registered_attachment_fixture::<i32>("journal:mark");
         let witness = summon(game, "minecraft:cow", "{}").unwrap();
         let seal = game.transaction_open();
         let pig = summon(game, "minecraft:pig", "{}").unwrap();
         // A second mod, lent the host inside the same action.
         let host: &mut dyn ServerHost = game;
         assert!(host.entity(pig).is_some(), "it sees the spawn");
-        MARK.set(host, Holder::Entity(pig), 5).unwrap();
-        MARK.set(host, Holder::Entity(witness), 5).unwrap();
+        mark.set(host, Holder::Entity(pig), 5).unwrap();
+        mark.set(host, Holder::Entity(witness), 5).unwrap();
         game.transaction_close(&seal, false);
 
         assert_eq!(game.entity(pig), None);
         assert!(!game.entity_attachments.contains_key(&pig));
-        assert_eq!(MARK.get(game, Holder::Entity(witness)), Ok(1));
+        assert_eq!(mark.get(game, Holder::Entity(witness)), Ok(1));
     });
 }
 
@@ -1145,11 +1149,12 @@ fn a_parked_levels_pending_removal_is_hidden_from_another_level_until_it_aborts(
     use sunrise_client::join_seq::residency::table::EntityLookup;
     const NAME: &str = "game::transaction_entities_tests::a_parked_levels_pending_removal_is_hidden_from_another_level_until_it_aborts";
     with_observer(NAME, |game| {
+        let mark = mod_api::testing::registered_attachment_fixture::<i32>("journal:mark");
         game.enter_level(Dim::Nether).unwrap();
         game.enter_level(Dim::Overworld).unwrap();
         let boat = summon(game, "minecraft:oak_boat", "{}").unwrap();
         let target = super::commands::Target::Boat(boat);
-        MARK.set(game, Holder::Entity(boat), 7).unwrap();
+        mark.set(game, Holder::Entity(boat), 7).unwrap();
         // Parked, nothing pending: the boat is found and visible (else the checks below prove
         // nothing).
         game.enter_level(Dim::Nether).unwrap();
@@ -1164,7 +1169,7 @@ fn a_parked_levels_pending_removal_is_hidden_from_another_level_until_it_aborts(
         // An attachment is reached through the level in place only (`attachment_slot` asks the
         // resident table for `self.dim`), so from the nether the overworld boat's is out of reach,
         // pending removal or not.
-        assert!(MARK.get(game, Holder::Entity(boat)).is_err());
+        assert!(mark.get(game, Holder::Entity(boat)).is_err());
         game.enter_level(Dim::Overworld).unwrap();
         let seal = game.transaction_open();
         assert!(game.entity_discard(game.entity(boat).unwrap()));
@@ -1174,7 +1179,7 @@ fn a_parked_levels_pending_removal_is_hidden_from_another_level_until_it_aborts(
             "the parked level's boat reads as gone while its removal is pending"
         );
         assert!(!game.resident_source_target_visible(mod_api::DimensionKey::OVERWORLD, target));
-        assert!(MARK.get(game, Holder::Entity(boat)).is_err());
+        assert!(mark.get(game, Holder::Entity(boat)).is_err());
         game.enter_level(Dim::Overworld).unwrap();
         game.transaction_close(&seal, false);
         game.enter_level(Dim::Nether).unwrap();
@@ -1186,10 +1191,10 @@ fn a_parked_levels_pending_removal_is_hidden_from_another_level_until_it_aborts(
             "the abort put it back"
         );
         assert!(game.resident_source_target_visible(mod_api::DimensionKey::OVERWORLD, target));
-        assert!(MARK.get(game, Holder::Entity(boat)).is_err());
+        assert!(mark.get(game, Holder::Entity(boat)).is_err());
         game.enter_level(Dim::Overworld).unwrap();
         assert_eq!(
-            MARK.get(game, Holder::Entity(boat)),
+            mark.get(game, Holder::Entity(boat)),
             Ok(7),
             "kept by the abort"
         );

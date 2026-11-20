@@ -3,30 +3,25 @@ use crate::game::{
     Dim,
     native_entity_refs::tests::{with_client_game, with_game},
 };
-use mod_api::{AttachmentType, EntityConstructingEvent, Hooks, HostSide};
+use mod_api::{AttachmentKey, EntityConstructingEvent, Hooks, HostSide};
 use std::sync::{Arc, Mutex};
 use sunrise_core::nbt::Tag;
+use sunrise_mod_runtime::attachments::AttachmentType;
 
-const VALUE: AttachmentType<i32> = AttachmentType {
-    namespace: "constructing",
-    name: "value",
-    default: || 0,
-    codec: None,
-    copy_on_death: false,
-    sync: false,
-};
 type Calls = Arc<Mutex<Vec<(bool, Holder)>>>;
 
-struct Listener(Calls);
+struct Listener(Calls, Mutex<Option<AttachmentKey<i32>>>);
 
 #[mod_api::__subscriptions]
 impl Hooks for Listener {
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type(mod_api::AttachmentDescriptor::new(
-            "constructing:value",
-            VALUE.default,
-        ))
-        .unwrap();
+        let value = r
+            .register_attachment_type(mod_api::AttachmentDescriptor::new(
+                "constructing:value",
+                || 0,
+            ))
+            .unwrap();
+        *self.1.lock().unwrap() = Some(value);
     }
     fn entity_constructing(&self, host: HostSide<'_>, event: &mut EntityConstructingEvent) {
         self.0
@@ -35,14 +30,16 @@ impl Hooks for Listener {
             .push((matches!(host, HostSide::Client(_)), event.holder));
         // Both a read and a write inside dispatch must reach the canonical map
         // without recursively constructing the same entity.
+        let value = self.1.lock().unwrap();
+        let value = value.as_ref().unwrap();
         match host {
             HostSide::Server(host) => {
-                let _ = VALUE.get(host, event.holder).unwrap();
-                VALUE.set(host, event.holder, 41).unwrap();
+                let _ = value.get(host, event.holder).unwrap();
+                value.set(host, event.holder, 41).unwrap();
             }
             HostSide::Client(host) => {
-                let _ = VALUE.get(host, event.holder).unwrap();
-                VALUE.set(host, event.holder, 41).unwrap();
+                let _ = value.get(host, event.holder).unwrap();
+                value.set(host, event.holder, 41).unwrap();
             }
         }
     }
@@ -52,7 +49,7 @@ fn observe(test: impl FnOnce(Calls)) {
     let calls = Calls::default();
     let mods = vec![mod_api::ModEntry::new(
         "constructing",
-        Box::new(Listener(calls.clone())),
+        Box::new(Listener(calls.clone(), Mutex::default())),
     )]
     .into();
     mod_platform::testing::with_mods(mods, || test(calls));
@@ -78,6 +75,8 @@ fn tag(kind: &str, uuid: i32) -> Tag {
 fn spawn_summon_and_disk_load_initialize_before_first_attachment_read() {
     observe(|calls| {
         with_game(|game| {
+            let value =
+                mod_api::testing::registered_attachment_fixture::<i32>("constructing:value");
             game.options.dedicated = Some(Vec::new());
             let spawn = game
                 .spawn_mob_spawned(
@@ -86,7 +85,7 @@ fn spawn_summon_and_disk_load_initialize_before_first_attachment_read() {
                     crate::game::creatures::SpawnSite::Plain,
                 )
                 .unwrap();
-            assert_eq!(VALUE.get(game, Holder::Entity(spawn)), Ok(41));
+            assert_eq!(value.get(game, Holder::Entity(spawn)), Ok(41));
             game.spawn_entity_from_nbt(tag("minecraft:pig", 100));
             let summoned = game
                 .persist
@@ -95,7 +94,7 @@ fn spawn_summon_and_disk_load_initialize_before_first_attachment_read() {
                 .find(|(_, uuid)| **uuid == [100, 2, 3, 4])
                 .map(|(id, _)| *id)
                 .unwrap();
-            assert_eq!(VALUE.get(game, Holder::Entity(summoned)), Ok(41));
+            assert_eq!(value.get(game, Holder::Entity(summoned)), Ok(41));
             for (i, kind) in [
                 "minecraft:zombie",
                 "minecraft:arrow",
@@ -121,7 +120,7 @@ fn spawn_summon_and_disk_load_initialize_before_first_attachment_read() {
                     .unwrap()
                     .0;
                 let expected = Ok(41);
-                assert_eq!(VALUE.get(game, Holder::Entity(id)), expected, "{kind}");
+                assert_eq!(value.get(game, Holder::Entity(id)), expected, "{kind}");
                 assert_eq!(
                     calls
                         .lock()
@@ -149,6 +148,8 @@ fn spawn_summon_and_disk_load_initialize_before_first_attachment_read() {
 fn borrowed_spawn_first_read_and_dimension_transfer_keep_one_initialization() {
     observe(|calls| {
         with_game(|game| {
+            let value =
+                mod_api::testing::registered_attachment_fixture::<i32>("constructing:value");
             game.options.dedicated = Some(Vec::new());
             // A borrowed simulation pass can insert without running Game's spawn helper.
             let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
@@ -159,7 +160,7 @@ fn borrowed_spawn_first_read_and_dimension_transfer_keep_one_initialization() {
                 sunrise_core::geometry::Vec3::new(1.0, 70.0, 3.0),
                 0.0,
             ));
-            assert_eq!(VALUE.get(game, Holder::Entity(id)), Ok(41));
+            assert_eq!(value.get(game, Holder::Entity(id)), Ok(41));
             game.native_joins_flush(false, 0);
             assert_eq!(calls.lock().unwrap().len(), 1);
             let uuid = game.uuid_for(id);
@@ -176,12 +177,12 @@ fn borrowed_spawn_first_read_and_dimension_transfer_keep_one_initialization() {
             game.enter_level(Dim::Nether).unwrap();
             let moved = game.load_mob_transferred(saved, None, Some(state)).unwrap();
             assert_eq!(game.persist.uuid_of(moved), Some(uuid));
-            assert_eq!(VALUE.get(game, Holder::Entity(moved)), Ok(41));
+            assert_eq!(value.get(game, Holder::Entity(moved)), Ok(41));
             assert_eq!(calls.lock().unwrap().len(), 1);
             game.forget_entity(moved);
             game.mobs.retain(|mob| mob.id != moved);
             let replacement = game.load_mob(tag("minecraft:cow", uuid[0]), None).unwrap();
-            assert_eq!(VALUE.get(game, Holder::Entity(replacement)), Ok(41));
+            assert_eq!(value.get(game, Holder::Entity(replacement)), Ok(41));
             assert_eq!(calls.lock().unwrap().len(), 2);
             // Non-Mob transfers must retain values that cannot be serialized at all.
             for (n, kind) in [
@@ -216,7 +217,7 @@ fn borrowed_spawn_first_read_and_dimension_transfer_keep_one_initialization() {
                     .find(|(_, u)| **u == uuid)
                     .unwrap()
                     .0;
-                VALUE.set(game, Holder::Entity(source), 73).unwrap();
+                value.set(game, Holder::Entity(source), 73).unwrap();
                 let before = calls.lock().unwrap().len();
                 let state = game.take_transferred_entity_state(source);
                 let entity = game.entity(source).unwrap();
@@ -239,7 +240,7 @@ fn borrowed_spawn_first_read_and_dimension_transfer_keep_one_initialization() {
                     .unwrap()
                     .0;
                 assert_ne!(source, arrived);
-                assert_eq!(VALUE.get(game, Holder::Entity(arrived)), Ok(73), "{kind}");
+                assert_eq!(value.get(game, Holder::Entity(arrived)), Ok(73), "{kind}");
                 assert_eq!(
                     calls.lock().unwrap().len(),
                     before,
@@ -288,6 +289,8 @@ fn client_login_tracking_and_retracking_initialize_the_client_store_once() {
     use sunrise_protocol::packets::play::{self, Clientbound as C};
     observe(|calls| {
         with_client_game(|game| {
+            let value =
+                mod_api::testing::registered_attachment_fixture::<i32>("constructing:value");
             let (pipe, _server) = sunrise_protocol::connection::Pipe::pair();
             game.connect_local(pipe, "Steve").unwrap();
             game.handle_packet(C::Login(play::Login {
@@ -306,7 +309,7 @@ fn client_login_tracking_and_retracking_initialize_the_client_store_once() {
             }))
             .unwrap();
             let profile = game.remote.as_ref().unwrap().profile;
-            assert_eq!(VALUE.get(game, Holder::Player(profile)), Ok(41));
+            assert_eq!(value.get(game, Holder::Player(profile)), Ok(41));
             let registry = game
                 .remote
                 .as_ref()
@@ -339,7 +342,7 @@ fn client_login_tracking_and_retracking_initialize_the_client_store_once() {
                 } else {
                     Holder::Entity(id as u32)
                 };
-                assert_eq!(VALUE.get(game, holder), Ok(41));
+                assert_eq!(value.get(game, holder), Ok(41));
                 game.handle_packet(packet()).unwrap();
                 assert_eq!(
                     calls
@@ -399,6 +402,8 @@ fn client_login_tracking_and_retracking_initialize_the_client_store_once() {
 fn server_players_initialize_on_join_and_new_respawn_but_not_rebind() {
     observe(|calls| {
         crate::game::native_guest_turn_tests::with_guests(|game| {
+            let value =
+                mod_api::testing::registered_attachment_fixture::<i32>("constructing:value");
             game.options.dedicated = Some(Vec::new());
             game.world_root = game.save.root.clone();
             game.lan
@@ -408,7 +413,7 @@ fn server_players_initialize_on_join_and_new_respawn_but_not_rebind() {
                 .guests
                 .update_all(|guest| guest.placed = false);
             game.lan_guest_joined(12, &[], [0.5, 64.0, 0.5]);
-            assert_eq!(VALUE.get(game, Holder::Player(12)), Ok(41));
+            assert_eq!(value.get(game, Holder::Player(12)), Ok(41));
             game.bind_player_attachments(12, false);
             game.initialize_server_player(12, 12);
             assert_eq!(
@@ -422,7 +427,7 @@ fn server_players_initialize_on_join_and_new_respawn_but_not_rebind() {
                 .guests
                 .update(0, |guest| guest.dead = true);
             game.guest_respawn(12);
-            assert_eq!(VALUE.get(game, Holder::Player(12)), Ok(41));
+            assert_eq!(value.get(game, Holder::Player(12)), Ok(41));
             assert_eq!(
                 calls.lock().unwrap().as_slice(),
                 &[(false, Holder::Player(12)), (false, Holder::Player(12))]
@@ -442,7 +447,8 @@ fn decode(c: &sunrise_core::nbt::Compound) -> Result<i32, mod_api::AttachmentErr
 }
 const SAVED_CODEC: mod_api::AttachmentCodec<i32> = mod_api::AttachmentCodec { encode, decode };
 
-const SAVED: AttachmentType<i32> = AttachmentType {
+// Seed saved data and inspect an engine map while its rejected passenger has no live holder.
+const STORED: AttachmentType<i32> = AttachmentType {
     namespace: "constructing",
     name: "saved",
     default: || 0,
@@ -452,21 +458,29 @@ const SAVED: AttachmentType<i32> = AttachmentType {
 };
 type Kinds = Arc<Mutex<Vec<(Holder, String)>>>;
 
-struct Saving(Kinds);
+struct Saving(
+    Kinds,
+    Mutex<Option<AttachmentKey<i32>>>,
+    Mutex<Option<AttachmentKey<i32>>>,
+);
 
 #[mod_api::__subscriptions]
 impl Hooks for Saving {
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type(mod_api::AttachmentDescriptor::new(
-            "constructing:value",
-            VALUE.default,
-        ))
-        .unwrap();
-        r.register_attachment_type(
-            mod_api::AttachmentDescriptor::new("constructing:saved", SAVED.default)
-                .serialize(SAVED_CODEC),
-        )
-        .unwrap();
+        let value = r
+            .register_attachment_type(mod_api::AttachmentDescriptor::new(
+                "constructing:value",
+                || 0,
+            ))
+            .unwrap();
+        *self.1.lock().unwrap() = Some(value);
+        let saved = r
+            .register_attachment_type(
+                mod_api::AttachmentDescriptor::new("constructing:saved", || 0)
+                    .serialize(SAVED_CODEC),
+            )
+            .unwrap();
+        *self.2.lock().unwrap() = Some(saved);
     }
     fn entity_constructing(&self, host: HostSide<'_>, event: &mut EntityConstructingEvent) {
         self.0
@@ -474,8 +488,20 @@ impl Hooks for Saving {
             .unwrap()
             .push((event.holder, event.kind.to_owned()));
         if let HostSide::Server(host) = host {
-            SAVED.set(host, event.holder, 41).unwrap();
-            VALUE.set(host, event.holder, 41).unwrap();
+            self.2
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .set(host, event.holder, 41)
+                .unwrap();
+            self.1
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .set(host, event.holder, 41)
+                .unwrap();
         }
     }
 }
@@ -486,15 +512,17 @@ fn a_loaded_entity_reads_its_saved_attachments_over_the_listeners_and_is_named_b
     let kinds = Kinds::default();
     let mods = vec![mod_api::ModEntry::new(
         "constructing",
-        Box::new(Saving(kinds.clone())),
+        Box::new(Saving(kinds.clone(), Mutex::default(), Mutex::default())),
     )]
     .into();
     mod_platform::testing::with_mods(mods, || {
         with_game(|game| {
             let key = mod_api::testing::registered_attachment_fixture::<i32>("constructing:saved");
+            let value =
+                mod_api::testing::registered_attachment_fixture::<i32>("constructing:value");
             game.options.dedicated = Some(Vec::new());
             let mut saved = sunrise_mod_runtime::attachments::Attachments::default();
-            SAVED.set(&mut saved, Holder::Level, 7).unwrap();
+            STORED.set(&mut saved, Holder::Level, 7).unwrap();
             let mut pig = tag("minecraft:pig", 200);
             if let Tag::Compound(c) = &mut pig {
                 c.insert(
@@ -512,15 +540,15 @@ fn a_loaded_entity_reads_its_saved_attachments_over_the_listeners_and_is_named_b
                 .unwrap()
                 .0;
             // `Entity.load` after `EntityConstructing`: the saved value wins, the unsaved one stays.
-            assert_eq!(SAVED.get(game, Holder::Entity(id)), Ok(7));
-            assert_eq!(VALUE.get(game, Holder::Entity(id)), Ok(41));
+            assert_eq!(key.get(game, Holder::Entity(id)), Ok(7));
+            assert_eq!(value.get(game, Holder::Entity(id)), Ok(41));
             assert_eq!(
                 kinds.lock().unwrap().as_slice(),
                 &[(Holder::Entity(id), "minecraft:pig".to_owned())]
             );
             // Equal saved UUIDs identify distinct objects, including rejected passengers.
             game.native_level_opened(Dim::Overworld);
-            SAVED.set(&mut saved, Holder::Level, 9).unwrap();
+            STORED.set(&mut saved, Holder::Level, 9).unwrap();
             let mut child = tag("minecraft:pig", 200);
             if let Tag::Compound(c) = &mut child {
                 c.insert(
@@ -531,17 +559,17 @@ fn a_loaded_entity_reads_its_saved_attachments_over_the_listeners_and_is_named_b
             let ghost = game.load_mob(child.clone(), Some(id)).unwrap();
             assert!(game.entity(ghost).is_none());
             assert_eq!(
-                SAVED.get(game, Holder::Entity(ghost)),
+                key.get(game, Holder::Entity(ghost)),
                 Err(mod_api::AttachmentError::MissingHolder)
             );
             assert_eq!(
-                SAVED.get(
+                STORED.get(
                     game.entity_attachments.get_mut(&ghost).unwrap(),
                     Holder::Entity(ghost)
                 ),
                 Ok(9)
             );
-            assert_eq!(SAVED.get(game, Holder::Entity(id)), Ok(7));
+            assert_eq!(key.get(game, Holder::Entity(id)), Ok(7));
             assert_eq!(kinds.lock().unwrap().len(), 2);
             game.prune_entity_attachments();
             assert!(game.entity_attachments.contains_key(&ghost));
@@ -566,7 +594,7 @@ fn a_loaded_entity_reads_its_saved_attachments_over_the_listeners_and_is_named_b
             let refused = game
                 .load_mob_transferred(tag("minecraft:pig", 200), Some(arrived), Some(parent_state))
                 .unwrap();
-            assert_eq!(SAVED.get(game, Holder::Entity(arrived)), Ok(9));
+            assert_eq!(key.get(game, Holder::Entity(arrived)), Ok(9));
             assert!(game.entity(refused).is_none());
             assert_eq!(
                 kinds.lock().unwrap().len(),
@@ -582,12 +610,12 @@ fn a_loaded_entity_reads_its_saved_attachments_over_the_listeners_and_is_named_b
             game.persist.off_level.remove(&refused);
             game.forget_entity(refused);
             game.prune_entity_attachments();
-            assert_eq!(SAVED.get(game, Holder::Entity(arrived)), Ok(9));
+            assert_eq!(key.get(game, Holder::Entity(arrived)), Ok(9));
             assert_eq!(game.query(&key).unwrap().iter().count(), 1);
             game.forget_entity(arrived);
             game.mobs.retain(|mob| mob.id != arrived);
             let rebuilt = game.load_mob(tag("minecraft:pig", 200), None).unwrap();
-            assert_eq!(SAVED.get(game, Holder::Entity(rebuilt)), Ok(41));
+            assert_eq!(key.get(game, Holder::Entity(rebuilt)), Ok(41));
             assert_eq!(
                 kinds.lock().unwrap().len(),
                 3,
@@ -638,19 +666,29 @@ fn mob_constructor_first_store_binds_only_the_resident_lifetime() {
 #[ignore = "daily"]
 fn marker_constructor_store_reaches_its_real_owned_map() {
     use std::sync::atomic::{AtomicBool, Ordering};
-    struct Store(Arc<AtomicBool>);
+    struct Store(Arc<AtomicBool>, Mutex<Option<AttachmentKey<i32>>>);
     #[mod_api::__subscriptions]
     impl Hooks for Store {
         fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-            r.register_attachment_type(mod_api::AttachmentDescriptor::new(
-                "constructing:value",
-                VALUE.default,
-            ))
-            .unwrap();
+            let value = r
+                .register_attachment_type(mod_api::AttachmentDescriptor::new(
+                    "constructing:value",
+                    || 0,
+                ))
+                .unwrap();
+            *self.1.lock().unwrap() = Some(value);
         }
         fn entity_constructing(&self, host: HostSide<'_>, event: &mut EntityConstructingEvent) {
             if let HostSide::Server(host) = host {
-                assert_eq!(VALUE.set(host, event.holder, 41), Ok(()));
+                assert_eq!(
+                    self.1
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .unwrap()
+                        .set(host, event.holder, 41),
+                    Ok(())
+                );
                 self.0.store(true, Ordering::SeqCst);
             }
         }
@@ -659,7 +697,7 @@ fn marker_constructor_store_reaches_its_real_owned_map() {
     mod_platform::testing::with_mods(
         vec![mod_api::ModEntry::new(
             "constructing",
-            Box::new(Store(ran.clone())),
+            Box::new(Store(ran.clone(), Mutex::default())),
         )]
         .into(),
         || {
@@ -691,7 +729,10 @@ fn cancelled_mob_creation_forgets_constructor_payload_and_identity() {
     let calls = Calls::default();
     mod_platform::testing::with_mods(
         vec![
-            mod_api::ModEntry::new("constructing", Box::new(Listener(calls.clone()))),
+            mod_api::ModEntry::new(
+                "constructing",
+                Box::new(Listener(calls.clone(), Mutex::default())),
+            ),
             mod_api::ModEntry::new("cancel", Box::new(Cancel)),
         ]
         .into(),
@@ -732,7 +773,7 @@ fn dragon_part_constructor_first_read_indexes_payload_and_same_id_replacement_re
             let holder = Holder::Entity(421);
             // Only an inspection outside dispatch: the constructor listener
             // performs the store, and there is no subsequent explicit store.
-            assert_eq!(VALUE.get_existing(game, holder), Ok(Some(41)));
+            assert_eq!(key.get_existing(game, holder), Ok(Some(41)));
             assert!(game.dragon.as_mut().unwrap().parts[0].2.is_bound());
             let batch = game.query(&key).unwrap();
             let rows: Vec<_> = batch.iter().collect();
@@ -761,7 +802,7 @@ fn dragon_part_constructor_first_read_indexes_payload_and_same_id_replacement_re
             assert!(!game.entity_attachments.contains_key(&421));
             assert!(!game.entity_initialization.initialized.contains(&holder));
             assert!(game.query(&key).unwrap().iter().next().is_none());
-            assert_eq!(VALUE.get_existing(game, holder), Ok(Some(41)));
+            assert_eq!(key.get_existing(game, holder), Ok(Some(41)));
             assert_eq!(
                 calls
                     .lock()
@@ -779,7 +820,7 @@ fn dragon_part_constructor_first_read_indexes_payload_and_same_id_replacement_re
             game.spawn_remote_dragon(420, [1.0, 80.0, 1.0], 0.0);
             assert!(!game.entity_attachments.contains_key(&421));
             assert!(game.query(&key).unwrap().iter().next().is_none());
-            assert_eq!(VALUE.get_existing(game, holder), Ok(Some(41)));
+            assert_eq!(key.get_existing(game, holder), Ok(Some(41)));
             assert_eq!(
                 calls
                     .lock()

@@ -250,7 +250,7 @@ pub fn client_backend_mut_of(host: &mut dyn ClientHost) -> Option<&mut dyn Clien
     host.client_backend_mut().map(|wrapper| wrapper.open())
 }
 
-/// A host is the store of its holders' attachments, so `TYPE.get(host, holder)` reads one.
+/// Engine storage access by saved name; mod code uses keys issued during registration.
 macro_rules! host_attachment_store {
     ($($host:ident),+) => { $(
         impl AttachmentStore for dyn $host + '_ {

@@ -7,12 +7,13 @@ use std::{
 use sunrise_client::join_seq::residency::table::EntityLookup;
 use sunrise_client::join_seq::residency::{Kind, Source};
 use sunrise_core::geometry::Vec3;
+use sunrise_mod_runtime::attachments::AttachmentType;
 
 #[test]
 #[ignore = "daily"]
 fn actual_guest_membership_and_lifetime_survive_nested_body_loans_and_reset() {
     with_guests(|game| {
-        use sunrise_mod_runtime::attachments::{AttachmentType, Holder, index::AttachmentIndex};
+        use sunrise_mod_runtime::attachments::{Holder, index::AttachmentIndex};
         const VALUE: AttachmentType<i32> = AttachmentType {
             namespace: "source_test",
             name: "value",
@@ -355,15 +356,14 @@ fn production_login_and_local_body_constructor_admit_profile_and_real_loan() {
 #[test]
 #[ignore = "daily"]
 fn actual_dragon_admits_exactly_eight_checked_parts_with_independent_uuids() {
-    const VALUE: sunrise_mod_runtime::attachments::AttachmentType<i32> =
-        sunrise_mod_runtime::attachments::AttachmentType {
-            namespace: "source_test",
-            name: "part_lifetime",
-            default: || 0,
-            codec: None,
-            copy_on_death: false,
-            sync: false,
-        };
+    const VALUE: AttachmentType<i32> = AttachmentType {
+        namespace: "source_test",
+        name: "part_lifetime",
+        default: || 0,
+        codec: None,
+        copy_on_death: false,
+        sync: false,
+    };
     crate::game::native_entity_refs::tests::with_game(|game| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(game.dim);
@@ -480,15 +480,14 @@ fn actual_dragon_admits_exactly_eight_checked_parts_with_independent_uuids() {
 #[test]
 #[ignore = "daily"]
 fn dragon_part_registrations_retire_on_replacement_command_and_chunk_unload() {
-    const VALUE: sunrise_mod_runtime::attachments::AttachmentType<i32> =
-        sunrise_mod_runtime::attachments::AttachmentType {
-            namespace: "source_test",
-            name: "part_retirement",
-            default: || 0,
-            codec: None,
-            copy_on_death: false,
-            sync: false,
-        };
+    const VALUE: AttachmentType<i32> = AttachmentType {
+        namespace: "source_test",
+        name: "part_retirement",
+        default: || 0,
+        codec: None,
+        copy_on_death: false,
+        sync: false,
+    };
     for operation in 0..3 {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());
@@ -549,15 +548,14 @@ fn dragon_part_registrations_retire_on_replacement_command_and_chunk_unload() {
 #[test]
 #[ignore = "daily"]
 fn parked_mob_attachment_values_survive_other_level_cleanup() {
-    const VALUE: sunrise_mod_runtime::attachments::AttachmentType<i32> =
-        sunrise_mod_runtime::attachments::AttachmentType {
-            namespace: "source_test",
-            name: "parked_cleanup",
-            default: || 0,
-            codec: None,
-            copy_on_death: false,
-            sync: false,
-        };
+    const VALUE: AttachmentType<i32> = AttachmentType {
+        namespace: "source_test",
+        name: "parked_cleanup",
+        default: || 0,
+        codec: None,
+        copy_on_death: false,
+        sync: false,
+    };
     crate::game::native_entity_refs::tests::with_game(|game| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(game.dim);

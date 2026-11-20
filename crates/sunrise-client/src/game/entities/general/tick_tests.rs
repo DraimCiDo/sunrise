@@ -6,8 +6,8 @@
 use super::*;
 use crate::game::native_entity_refs::tests::with_game;
 use mod_api::{
-    AttachmentCodec, AttachmentDescriptor, AttachmentError, AttachmentKey, AttachmentType,
-    EntityPart, EntityTickListenedEvent, EntityTickPreEvent, Flow, GeneralEntityCategory,
+    AttachmentCodec, AttachmentDescriptor, AttachmentError, AttachmentKey, EntityPart,
+    EntityTickListenedEvent, EntityTickPreEvent, Flow, GeneralEntityCategory,
     GeneralEntityTickEvent, GeneralSavePolicy, Holder, Hooks, HostSide, Registrar, ServerHost,
 };
 use std::sync::{Arc, Mutex};
@@ -19,17 +19,6 @@ const COUNTER_CODEC: mod_api::AttachmentCodec<i32> = AttachmentCodec {
         Some(Tag::Int(n)) => Ok(*n),
         _ => Err(AttachmentError::Decode),
     },
-};
-
-/// The fixture counter: an attachment with a codec, so a saved row resumes
-/// its count and a quarantined record keeps it in its bytes.
-static COUNTER: AttachmentType<i32> = AttachmentType {
-    namespace: "mymod",
-    name: "counter",
-    default: || 0,
-    codec: Some(COUNTER_CODEC),
-    copy_on_death: false,
-    sync: false,
 };
 
 /// What the part saw, in call order: each row's id.
@@ -128,8 +117,7 @@ impl Hooks for Declare {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
         let key = r
             .register_attachment_type(
-                AttachmentDescriptor::new("mymod:counter", COUNTER.default)
-                    .serialize(COUNTER_CODEC),
+                AttachmentDescriptor::new("mymod:counter", || 0).serialize(COUNTER_CODEC),
             )
             .unwrap();
         for (path, save) in [("robot", true), ("ghost", false)] {
@@ -334,15 +322,19 @@ fn tick(game: &mut Game<'_>) {
     game.tick_general().unwrap();
 }
 
+fn counter_key() -> AttachmentKey<i32> {
+    mod_api::testing::registered_attachment_fixture("mymod:counter")
+}
+
 /// A row's counter, read through the same host surface the part writes.
 fn counter(game: &mut Game<'_>, id: u32) -> i32 {
-    COUNTER.get(game, Holder::Entity(id)).unwrap()
+    counter_key().get(game, Holder::Entity(id)).unwrap()
 }
 
 /// One robot row, its counter already at `value`.
 fn seeded_row(game: &mut Game<'_>, uuid: [i32; 4], value: i32) -> u32 {
     let id = spawn_tree(game, uuid, [0.5, 64.0, 0.5], Vec::new());
-    COUNTER.set(game, Holder::Entity(id), value).unwrap();
+    counter_key().set(game, Holder::Entity(id), value).unwrap();
     id
 }
 
@@ -646,7 +638,7 @@ fn a_reloaded_row_resumes_the_counter_and_refuses_its_old_handle() {
         let fresh = rows[0].id;
         assert_ne!(fresh, old);
         assert_eq!(counter(game, fresh), 41);
-        assert!(COUNTER.get(game, Holder::Entity(old)).is_err());
+        assert!(counter_key().get(game, Holder::Entity(old)).is_err());
         tick(game);
         assert_eq!(counter(game, fresh), 42);
     });

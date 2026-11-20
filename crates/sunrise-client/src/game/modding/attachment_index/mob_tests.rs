@@ -161,13 +161,12 @@ fn saved_mob_binding_rebinds_retained_id_with_a_new_generation() {
         game.enter_level(Dim::Nether).unwrap();
         game.rebind_transferred_entity(id, &mut owner);
         game.mobs.push(owner);
-        let current = game.attachment_indexes[&Dim::Nether]
-            .lock()
-            .unwrap()
-            .snapshot(&name);
-        assert_eq!(current.len(), 1);
-        assert_eq!(current[0].holder, AttachmentHolder::Entity(holder));
-        assert_eq!(current[0].entry.read(&VALUE), Ok(&13));
+        let current = game.query(&key).unwrap();
+        let mut current = current.iter();
+        let rebound = current.next().unwrap().unwrap();
+        assert_eq!(rebound.holder, AttachmentHolder::Entity(holder));
+        assert_eq!(*rebound.value, 13);
+        assert!(current.next().is_none());
         assert_eq!(
             row.set(game, 14),
             Err(mod_api::AttachmentRowError::StaleHolder)

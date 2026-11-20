@@ -2202,19 +2202,8 @@ pub(super) mod tests {
     ) {
         use crate::game::maps::MapData;
         use mod_api::__private::game::Fields;
-        use mod_api::{
-            AttachedItems, AttachmentType, Holder, MenuReplace, MenuSlotPlace, StackList,
-        };
+        use mod_api::{AttachedItems, Holder, MenuReplace, MenuSlotPlace, StackList};
         use sunrise_core::nbt::{JavaString, Tag};
-
-        static MAP_SLOT: AttachmentType<StackList<ItemResource>> = AttachmentType {
-            namespace: "crafted_map_fixture",
-            name: "slot",
-            default: Vec::new,
-            codec: None,
-            copy_on_death: false,
-            sync: false,
-        };
 
         struct MapStorage(bool);
         #[mod_api::__subscriptions]
@@ -2272,13 +2261,15 @@ pub(super) mod tests {
 
                 pig(game, 700, 64.0);
                 let entity = game.entity(700).unwrap();
-                MAP_SLOT
-                    .set(
-                        game,
-                        Holder::Entity(entity.id()),
-                        vec![Some((ItemResource::of(&map), 1))],
-                    )
-                    .unwrap();
+                let slot = mod_api::testing::registered_attachment_fixture::<StackList<ItemResource>>(
+                    "crafted_map_fixture:slot",
+                );
+                slot.set(
+                    game,
+                    Holder::Entity(entity.id()),
+                    vec![Some((ItemResource::of(&map), 1))],
+                )
+                .unwrap();
                 let host: &mut dyn ServerHost = game;
                 let window = host
                     .open_menu(

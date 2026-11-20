@@ -1,24 +1,6 @@
 //! Load-time attachment declarations, before any registration is installed.
 use super::*;
 
-struct LoadedAttachmentDeclarations;
-impl crate::AttachmentDeclarations for LoadedAttachmentDeclarations {
-    fn validate_attachment_type(
-        &self,
-        namespace: &str,
-        name: &str,
-        sync: bool,
-    ) -> Result<(), crate::AttachmentError> {
-        mod_vocab::__private::validate_attachment_use(namespace, name, sync)
-    }
-}
-
-/// The immutable attachment type registry, with no world borrow.
-pub fn attachment_declarations() -> &'static dyn crate::AttachmentDeclarations {
-    static LOOKUP: LoadedAttachmentDeclarations = LoadedAttachmentDeclarations;
-    &LOOKUP
-}
-
 impl AttachmentTypesRegistrar for PartRegistrar {
     fn submit_attachment(
         &mut self,
@@ -259,25 +241,12 @@ mod tests {
             mana.get().unwrap().get(&mut store, crate::Holder::Level),
             Ok(37)
         );
-        let missing = crate::AttachmentType {
-            namespace: "test_pkg",
-            name: "mana",
-            default: || 0u32,
-            codec: None,
-            copy_on_death: false,
-            sync: false,
-        };
-        let error = crate::AttachmentError::Undeclared {
-            package_id: "b".into(),
-            attachment_id: "test_pkg:mana".into(),
-        };
         assert_eq!(
-            missing.get(&mut store, crate::Holder::Level),
-            Err(error.clone())
-        );
-        assert_eq!(
-            missing.sync_data(&mut store, crate::Holder::Level),
-            Err(error.clone())
+            mod_vocab::__private::validate_attachment_use("test_pkg", "mana", false),
+            Err(crate::AttachmentError::Undeclared {
+                package_id: "b".into(),
+                attachment_id: "test_pkg:mana".into(),
+            })
         );
     }
     #[test]

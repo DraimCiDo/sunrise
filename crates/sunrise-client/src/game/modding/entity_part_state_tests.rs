@@ -3,15 +3,17 @@
 use std::{collections::HashSet, panic::AssertUnwindSafe, sync::Arc};
 
 use mod_api::{
-    AttachmentType, EntityPart, EntityPartState, EntityRef, Hooks, HostTransaction, PartStateError,
-    Registrar, ServerHost, WorldEpoch, edit_part_state, read_state,
+    EntityPart, EntityPartState, EntityRef, Hooks, HostTransaction, PartStateError, Registrar,
+    ServerHost, WorldEpoch, edit_part_state, read_state,
 };
 use sunrise_client::chunk::Chunk;
 use sunrise_core::{
     geometry::Vec3,
     nbt::{Compound, Tag},
 };
-use sunrise_mod_runtime::attachments::{AttachmentCodec, AttachmentError, Attachments, Holder};
+use sunrise_mod_runtime::attachments::{
+    AttachmentCodec, AttachmentError, AttachmentType, Attachments, Holder,
+};
 
 use super::{Dim, Game};
 
@@ -23,6 +25,7 @@ const CHARGE_CODEC: mod_api::AttachmentCodec<i32> = AttachmentCodec {
     },
 };
 
+// Seed one engine map with a bad saved value, independent of live holder access.
 const CHARGE: AttachmentType<i32> = AttachmentType {
     namespace: "part_state",
     name: "charge",
@@ -60,7 +63,7 @@ impl Hooks for StateMod {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
         let state_key = r
             .register_attachment_type(
-                mod_api::AttachmentDescriptor::new("part_state:charge", CHARGE.default)
+                mod_api::AttachmentDescriptor::new("part_state:charge", || 0)
                     .serialize(CHARGE_CODEC),
             )
             .unwrap();
@@ -192,16 +195,21 @@ fn indexed(game: &Game<'_>, level: Dim) -> Vec<(u32, i32)> {
     let Some(index) = game.attachment_indexes.get(&level) else {
         return Vec::new();
     };
-    let mut rows: Vec<_> = index
-        .lock()
+    let key = mod_api::testing::registered_attachment_fixture::<i32>("part_state:charge");
+    let batch: mod_api::AttachmentBatch = sunrise_mod_runtime::attachments::AttachmentBatch::new(
+        index.lock().unwrap().snapshot_named("part_state", "charge"),
+    )
+    .into();
+    let mut rows: Vec<_> = batch
+        .query(&key)
         .unwrap()
-        .snapshot(&("part_state".into(), "charge".into()))
         .iter()
         .map(|row| {
+            let row = row.unwrap();
             let mod_api::AttachmentHolder::Entity(entity) = row.holder else {
                 panic!("not an entity row");
             };
-            (entity.id(), *row.entry.read(&CHARGE).unwrap())
+            (entity.id(), *row.value)
         })
         .collect();
     rows.sort();

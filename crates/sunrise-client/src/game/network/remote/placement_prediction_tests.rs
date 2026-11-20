@@ -354,31 +354,25 @@ fn a_predicted_break_reconciles_its_neighbour_s_shape_change() {
 #[test]
 #[ignore = "daily"]
 fn a_denied_break_restores_wall_sign_text_and_synced_attachments() {
-    use mod_api::{AttachmentCodec, AttachmentType, Host};
+    use mod_api::{AttachmentCodec, Host};
     use sunrise_mod_runtime::attachments::AttachmentSync;
     use sunrise_protocol::attachment_sync::{Message, encode};
 
-    const VALUE: AttachmentType<i32> = AttachmentType {
-        namespace: "break_test",
-        name: "wall_sign",
-        default: || 0,
-        codec: Some(AttachmentCodec {
-            encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
-            decode: |c| match c.get(&"n".into()) {
-                Some(Tag::Int(n)) => Ok(*n),
-                _ => Err(mod_api::AttachmentError::Decode),
-            },
-        }),
-        copy_on_death: false,
-        sync: true,
+    const VALUE_CODEC: AttachmentCodec<i32> = AttachmentCodec {
+        encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
+        decode: |c| match c.get(&"n".into()) {
+            Some(Tag::Int(n)) => Ok(*n),
+            _ => Err(mod_api::AttachmentError::Decode),
+        },
     };
+
     struct WallSignAttachment;
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for WallSignAttachment {
         fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
             r.register_attachment_type(
-                mod_api::AttachmentDescriptor::new("break_test:wall_sign", VALUE.default)
-                    .serialize(VALUE.codec.unwrap())
+                mod_api::AttachmentDescriptor::new("break_test:wall_sign", || 0)
+                    .serialize(VALUE_CODEC)
                     .sync(),
             )
             .unwrap();
@@ -431,7 +425,7 @@ fn a_denied_break_restores_wall_sign_text_and_synced_attachments() {
         let holder = Holder::BlockEntity([0, 65, 0]);
         let attachment_values = |game: &Game<'_>| {
             let host: &dyn Host = game;
-            host.attachment_query(VALUE.namespace, VALUE.name)
+            host.attachment_query("break_test", "wall_sign")
                 .unwrap()
                 .query(&key)
                 .unwrap()
@@ -453,8 +447,8 @@ fn a_denied_break_restores_wall_sign_text_and_synced_attachments() {
                 holder,
                 replace: true,
                 changes: vec![AttachmentSync {
-                    namespace: VALUE.namespace.into(),
-                    name: VALUE.name.into(),
+                    namespace: "break_test".into(),
+                    name: "wall_sign".into(),
                     value: Some([("n".into(), Tag::Int(41))].into()),
                 }],
             })

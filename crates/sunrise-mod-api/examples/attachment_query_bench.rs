@@ -13,7 +13,7 @@ mod allocations;
 use allocations::measured;
 const HOLDERS: u32 = 10_000;
 const ROUNDS: u32 = 1000;
-const VALUE: AttachmentType<u32> = AttachmentType {
+const VALUE: runtime::AttachmentType<u32> = runtime::AttachmentType {
     namespace: "bench",
     name: "value",
     default: || panic!("no defaults"),
@@ -35,7 +35,7 @@ fn holder(id: u32) -> AttachmentHolder {
     AttachmentHolder::Entity(EntityRef::new(WorldEpoch::new(1), id))
 }
 impl BenchHost {
-    fn new(cold: bool, indexed: bool) -> Self {
+    fn new(cold: bool, indexed: bool, key: &AttachmentKey<u32>) -> Self {
         let mut host = Self {
             index: Default::default(),
             maps: Vec::with_capacity(HOLDERS as usize),
@@ -69,7 +69,7 @@ impl BenchHost {
             }
             host.maps.push(map);
             if !cold {
-                VALUE.set(&mut host, Holder::Entity(id), id).unwrap();
+                key.set(&mut host, Holder::Entity(id), id).unwrap();
             }
         }
         host
@@ -220,7 +220,7 @@ fn cold(key: &AttachmentKey<u32>) {
         let mut lazy = Vec::new();
         let mut eager = Vec::new();
         for _ in 0..9 {
-            let host = BenchHost::new(true, true);
+            let host = BenchHost::new(true, true, key);
             let start = Instant::now();
             let (sum, counts) = measured(|| {
                 host.query(key)
@@ -235,7 +235,7 @@ fn cold(key: &AttachmentKey<u32>) {
             });
             lazy.push(start.elapsed().as_secs_f64() * 1e6);
             assert_eq!(sum, (limit * (limit - 1)) as u64);
-            let host = BenchHost::new(true, true);
+            let host = BenchHost::new(true, true, key);
             let start = Instant::now();
             let (_, eager_counts) = measured(|| {
                 // Eager policy measured using the very same production decode path.
@@ -277,7 +277,7 @@ fn cow(host: &mut BenchHost, key: &AttachmentKey<u32>) {
         }
         drop(batch);
         let start = Instant::now();
-        let (_, ordinary_counts) = measured(|| VALUE.set(host, Holder::Entity(0), 123).unwrap());
+        let (_, ordinary_counts) = measured(|| key.set(host, Holder::Entity(0), 123).unwrap());
         if unpinned.is_empty() {
             println!("unpinned ordinary set allocations: {ordinary_counts:?}");
         }
@@ -289,24 +289,15 @@ fn cow(host: &mut BenchHost, key: &AttachmentKey<u32>) {
         median(unpinned)
     );
 }
-static VECTOR: AttachmentType<Vec<i32>> = AttachmentType {
-    namespace: "bench",
-    name: "vector",
-    default: || vec![0; 8],
-    codec: None,
-    copy_on_death: false,
-    sync: false,
-};
-fn map_probes() {
-    let mut host = BenchHost::new(false, false);
+fn map_probes(key: &AttachmentKey<u32>, vector: &AttachmentKey<Vec<i32>>) {
+    let mut host = BenchHost::new(false, false, key);
     for (label, operation) in [("get", 0), ("set", 1)] {
         let (_, counts) = measured(|| {
             for _ in 0..100_000 {
                 if operation == 0 {
-                    black_box(VALUE.get(&mut host, Holder::Entity(0)).unwrap());
+                    black_box(key.get(&mut host, Holder::Entity(0)).unwrap());
                 } else {
-                    VALUE
-                        .set(&mut host, Holder::Entity(0), black_box(42))
+                    key.set(&mut host, Holder::Entity(0), black_box(42))
                         .unwrap();
                 }
             }
@@ -315,10 +306,9 @@ fn map_probes() {
         let start = Instant::now();
         for _ in 0..100_000 {
             if operation == 0 {
-                black_box(VALUE.get(&mut host, Holder::Entity(0)).unwrap());
+                black_box(key.get(&mut host, Holder::Entity(0)).unwrap());
             } else {
-                VALUE
-                    .set(&mut host, Holder::Entity(0), black_box(42))
+                key.set(&mut host, Holder::Entity(0), black_box(42))
                     .unwrap();
             }
         }
@@ -327,15 +317,15 @@ fn map_probes() {
             start.elapsed().as_nanos() as f64 / 100_000.0
         );
     }
-    VECTOR
+    vector
         .set(&mut host, Holder::Entity(0), vec![0; 8])
         .unwrap();
     let start = Instant::now();
     let (_, counts) = measured(|| {
         for _ in 0..100_000 {
-            let mut value = VECTOR.get(&mut host, Holder::Entity(0)).unwrap();
+            let mut value = vector.get(&mut host, Holder::Entity(0)).unwrap();
             value[0] += 1;
-            VECTOR.set(&mut host, Holder::Entity(0), value).unwrap();
+            vector.set(&mut host, Holder::Entity(0), value).unwrap();
         }
     });
     println!(
@@ -344,7 +334,48 @@ fn map_probes() {
     );
 }
 fn main() {
-    map_probes();
+    #[derive(Default)]
+    struct Keys {
+        value: Option<AttachmentKey<u32>>,
+        vector: Option<AttachmentKey<Vec<i32>>>,
+    }
+    struct Owner(Arc<Mutex<Keys>>);
+    impl Hooks for Owner {
+        fn subscribed(&self) -> &'static [Option<HookId>] {
+            &[]
+        }
+
+        fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+            let key = r
+                .register_attachment_type(
+                    AttachmentDescriptor::new("bench:value", VALUE.default)
+                        .serialize(VALUE.codec.unwrap()),
+                )
+                .unwrap();
+            let vector = r
+                .register_attachment_type(AttachmentDescriptor::new("bench:vector", || vec![0; 8]))
+                .unwrap();
+            *self.0.lock().unwrap() = Keys {
+                value: Some(key),
+                vector: Some(vector),
+            };
+        }
+    }
+    let issued = Arc::new(Mutex::new(Keys::default()));
+    mod_api::__private::install_parts(
+        &[ModEntry::new("bench", Box::new(Owner(issued.clone())))],
+        &mod_api::__private::RuleSchema {
+            category: &|_| false,
+            position: &|_| None,
+            rule_count: 0,
+        },
+        |_| false,
+    )
+    .unwrap();
+    let Keys { value, vector } = std::mem::take(&mut *issued.lock().unwrap());
+    let key = value.unwrap();
+    let vector = vector.unwrap();
+    map_probes(&key, &vector);
     if std::env::var_os("ATTACHMENT_MAP_ONLY").is_some() {
         return;
     }
@@ -360,9 +391,9 @@ fn main() {
             "optimized"
         }
     );
-    let (unindexed, without_index) = measured(|| BenchHost::new(false, false));
+    let (unindexed, without_index) = measured(|| BenchHost::new(false, false, &key));
     drop(unindexed);
-    let (mut host, memory) = measured(|| BenchHost::new(false, true));
+    let (mut host, memory) = measured(|| BenchHost::new(false, true, &key));
     println!(
         "maps + index + decoded serialized u32 entries requested live bytes: {}",
         memory.live
@@ -371,34 +402,6 @@ fn main() {
         "incremental residency/index requested live bytes: {}",
         memory.live - without_index.live
     );
-    struct Owner(Arc<Mutex<Option<AttachmentKey<u32>>>>);
-    impl Hooks for Owner {
-        fn subscribed(&self) -> &'static [Option<HookId>] {
-            &[]
-        }
-
-        fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
-            let key = r
-                .register_attachment_type(
-                    AttachmentDescriptor::new("bench:value", VALUE.default)
-                        .serialize(VALUE.codec.unwrap()),
-                )
-                .unwrap();
-            *self.0.lock().unwrap() = Some(key);
-        }
-    }
-    let issued = Arc::new(Mutex::new(None));
-    mod_api::__private::install_parts(
-        &[ModEntry::new("bench", Box::new(Owner(issued.clone())))],
-        &mod_api::__private::RuleSchema {
-            category: &|_| false,
-            position: &|_| None,
-            rule_count: 0,
-        },
-        |_| false,
-    )
-    .unwrap();
-    let key = issued.lock().unwrap().take().unwrap();
     let overhead = warm(&host, &key);
     cold(&key);
     cow(&mut host, &key);

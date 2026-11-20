@@ -29,28 +29,17 @@ impl Hooks for Mod {
     }
 }
 
-static LOAN_VALUE: mod_api::AttachmentType<i32> = mod_api::AttachmentType {
-    namespace: "loan_test",
-    name: "progress",
-    default: || 0,
-    codec: None,
-    copy_on_death: false,
-    sync: false,
-};
-
 use mod_api::RandomSource as _;
 use sunrise_core::random::RandomSource as _;
 
-struct LoanPart(std::sync::Arc<()>);
+struct LoanPart(std::sync::Arc<()>, mod_api::AttachmentKey<i32>);
 #[mod_api::sunrise_part]
 impl BlockPart for LoanPart {
     fn fall_on(&self, host: &mut dyn LevelRandomHost, event: &mut FallOnEvent<'_>) {
         let mut random = host.random().expect("authoritative landing random");
         assert_eq!(random.next_int(), 1553932502);
         assert!(host.set_random(random));
-        LOAN_VALUE
-            .set(host.attachments(), mod_api::Holder::Level, 73)
-            .unwrap();
+        self.1.set_in(host, mod_api::Holder::Level, 73).unwrap();
         event.request(mod_api::LandingWrite::DestroyBlock { drop: false });
         std::panic::panic_any(self.0.clone());
     }
@@ -59,13 +48,14 @@ struct LoanMod(std::sync::Arc<()>);
 #[mod_api::__subscriptions]
 impl Hooks for LoanMod {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type(mod_api::AttachmentDescriptor::new(
-            "loan_test:progress",
-            LOAN_VALUE.default,
-        ))
-        .unwrap();
+        let progress = r
+            .register_attachment_type(mod_api::AttachmentDescriptor::new(
+                "loan_test:progress",
+                || 0,
+            ))
+            .unwrap();
         let key = r.block_key("minecraft:stone");
-        r.block_part(key, LoanPart(self.0.clone()));
+        r.block_part(key, LoanPart(self.0.clone(), progress));
     }
 }
 
@@ -103,9 +93,9 @@ fn item_fall_on_returns_progressed_level_loan_after_part_panic() {
                 let pos = BlockPos::new(1, 64, 1);
                 game.world.set(pos.x, pos.y, pos.z, stone).unwrap();
                 *game.world.random = sunrise_core::random::LegacyRandom::new(12345);
-                LOAN_VALUE
-                    .set(&mut game.world.attachments, mod_api::Holder::Level, 11)
-                    .unwrap();
+                let progress =
+                    mod_api::testing::registered_attachment_fixture::<i32>("loan_test:progress");
+                progress.set(game, mod_api::Holder::Level, 11).unwrap();
                 game.world.attachment_syncs.insert(mod_api::Holder::Level);
                 let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     sunrise_client::block_contact::in_level(
@@ -126,12 +116,7 @@ fn item_fall_on_returns_progressed_level_loan_after_part_panic() {
                     -2090749135,
                     "continue the progressed stream"
                 );
-                assert_eq!(
-                    LOAN_VALUE
-                        .get(&mut game.world.attachments, mod_api::Holder::Level)
-                        .unwrap(),
-                    73
-                );
+                assert_eq!(progress.get(game, mod_api::Holder::Level).unwrap(), 73);
                 assert!(
                     game.world
                         .attachment_syncs

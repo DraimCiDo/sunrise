@@ -1,7 +1,10 @@
 use super::*;
 use crate::game::native_entity_refs::tests::with_game_attachment;
-use mod_api::{AttachmentRowError, AttachmentType, AttachmentWriteToken};
+use mod_api::{AttachmentRowError, AttachmentWriteToken};
 
+use sunrise_mod_runtime::attachments::AttachmentType;
+
+// Seed independent engine maps so both residencies have the same saved name.
 static VALUE: AttachmentType<u32> = AttachmentType {
     namespace: "boundary",
     name: "value",
@@ -33,7 +36,7 @@ fn capture(
 #[test]
 #[ignore = "daily"]
 fn current_dimension_capture_and_foreign_residency_validation() {
-    let descriptor = || mod_api::AttachmentDescriptor::new("boundary:value", VALUE.default);
+    let descriptor = || mod_api::AttachmentDescriptor::new("boundary:value", || 0_u32);
     with_game_attachment("boundary", descriptor, |game, key| {
         VALUE
             .set(&mut game.world.attachments, Holder::Level, 7)

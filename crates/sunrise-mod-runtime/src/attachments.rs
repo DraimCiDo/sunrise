@@ -217,8 +217,7 @@ pub enum AttachmentWrite {
     Set,
 }
 
-/// The current server's holders' values, erased to what crosses any boundary: the typed
-/// [`AttachmentType`] methods are built on it, for mods.
+/// The engine's erased view of a host's attachment maps.
 pub trait AttachmentStore {
     /// Validate an attachment type against the loaded declarations.
     fn validate_attachment(
@@ -394,7 +393,7 @@ pub struct AttachmentCodec<T> {
     pub decode: fn(&Compound) -> Result<T, AttachmentError>,
 }
 
-/// A mod-defined attachment key and its value's behavior.
+/// The engine's raw attachment descriptor; mods use registration-issued keys.
 // no wire: host-local key with callback pointers; attachment calls cross by namespace/name and codec.
 pub struct AttachmentType<T: 'static> {
     pub namespace: &'static str,

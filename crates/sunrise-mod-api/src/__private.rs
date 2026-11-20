@@ -44,6 +44,3 @@ pub use crate::equip_reads::{
     cached_equip_hand_item, cached_equip_health, cached_equip_kind, cached_equip_living,
     cached_equip_max_health, cached_equip_position, enter_equip_reads,
 };
-
-#[doc(hidden)]
-pub use crate::parts::attachment_declarations;

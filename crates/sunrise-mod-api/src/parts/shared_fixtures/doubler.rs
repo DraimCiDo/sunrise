@@ -16,7 +16,8 @@ impl Hooks for Doubler {
         r.block_entity_part(&kind, Press).expect("native type");
         let hoard = r.block_entity_type("hoard").blocks(&["test:hoard"]).build();
         let granite = r.block_key("minecraft:granite");
-        r.block_entity_part(&hoard, Hoard(granite))
+        let state = r.attachment_key("test:hoard").unwrap();
+        r.block_entity_part(&hoard, Hoard(granite, state))
             .expect("native type");
         // These handlers wrap the test hosts' own slots and tanks, as a mod replacing how a
         // block entity's are reached does: ahead of the game's.
@@ -32,16 +33,21 @@ impl Hooks for Doubler {
             Some(Box::new(Cargo))
         });
         // A battery reached from any side but below, as a mod's sided entity storage.
+        let energy = r.attachment_key("test:energy").unwrap();
         r.entity_capability(
             &ENTITY_ENERGY,
             "minecraft:armor_stand",
-            |_, entity, side| {
-                (side != Some(Direction::Down)).then(|| Box::new(EntityBattery(entity)) as _)
+            move |_, entity, side| {
+                (side != Some(Direction::Down))
+                    .then(|| Box::new(EntityBattery(entity, energy.clone())) as _)
             },
         );
-        r.entity_capability(&ENTITY_FLUIDS, "minecraft:armor_stand", |_, entity, _| {
-            Some(Box::new(EntityTank(entity)))
-        });
+        let fluid = r.attachment_key("test:fluid").unwrap();
+        r.entity_capability(
+            &ENTITY_FLUIDS,
+            "minecraft:armor_stand",
+            move |_, entity, _| Some(Box::new(EntityTank(entity, fluid.clone()))),
+        );
         r.item_capability_before_game(&ITEM_ITEMS, "test:pouch", |_, place| {
             Some(Box::new(Pouch(place.clone())))
         });

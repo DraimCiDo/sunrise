@@ -3068,18 +3068,12 @@ mod mod_capability_tests {
     #[test]
     #[ignore = "daily"]
     fn entity_and_player_attachments_stay_on_commit_and_go_back_on_abort() {
-        use mod_api::{AttachmentType, Holder};
+        use crate::game::native_entity_refs::tests::with_game_attachment;
+        use mod_api::{AttachmentDescriptor, Holder};
         use sunrise_client::entities::ArmorStand;
         use sunrise_core::geometry::Vec3;
-        const ENERGY: AttachmentType<i32> = AttachmentType {
-            namespace: "robot",
-            name: "energy",
-            default: || 0,
-            codec: None,
-            copy_on_death: false,
-            sync: false,
-        };
-        with_game(|game| {
+        let descriptor = || AttachmentDescriptor::new("robot:energy", || 0_i32);
+        with_game_attachment("robot", descriptor, |game, energy_key| {
             game.options.dedicated = Some(Vec::new());
             game.world
                 .chunks
@@ -3133,12 +3127,12 @@ mod mod_capability_tests {
                 Holder::Player(guest),
             );
             let energy =
-                |host: &mut dyn ServerHost, holder| ENERGY.get_existing(host, holder).unwrap();
+                |host: &mut dyn ServerHost, holder| energy_key.get_existing(host, holder).unwrap();
 
             let host: &mut dyn ServerHost = game;
             let done = host.transaction(|host, _| {
-                ENERGY.set(host, stand, 100)?;
-                ENERGY.set(host, player, 40)
+                energy_key.set(host, stand, 100)?;
+                energy_key.set(host, player, 40)
             });
             assert_eq!(done, Ok(()));
             assert_eq!(
@@ -3149,10 +3143,10 @@ mod mod_capability_tests {
             // Aborted, with a committed child inside: both maps as they were, and the entity
             // that had no value has none.
             let aborted: Result<(), _> = host.transaction(|host, _| {
-                ENERGY.set(host, stand, 250)?;
-                ENERGY.set(host, player, 90)?;
-                ENERGY.set(host, fresh, 7)?;
-                host.transaction(|host, _| ENERGY.set(host, stand, 300))?;
+                energy_key.set(host, stand, 250)?;
+                energy_key.set(host, player, 90)?;
+                energy_key.set(host, fresh, 7)?;
+                host.transaction(|host, _| energy_key.set(host, stand, 300))?;
                 assert_eq!(energy(host, stand), Some(300));
                 Err(mod_api::AttachmentError::MissingHolder)
             });
@@ -3178,7 +3172,7 @@ mod mod_capability_tests {
                     .unwrap(),
             );
             let host: &mut dyn ServerHost = game;
-            ENERGY.set(host, player, 70).unwrap();
+            energy_key.set(host, player, 70).unwrap();
             std::mem::swap(
                 &mut game.player_state.attachments,
                 game.lan

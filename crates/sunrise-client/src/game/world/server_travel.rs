@@ -1782,30 +1782,30 @@ mod tests {
     #[test]
     #[ignore = "daily"]
     fn natural_carrier_moves_full_objects_and_readmits_the_tree_in_order() {
-        use mod_api::{AttachmentType, EntityConstructingEvent, Holder, Hooks, HostSide};
+        use mod_api::{AttachmentKey, EntityConstructingEvent, Holder, Hooks, HostSide};
         use std::sync::Mutex;
-        const STATE: AttachmentType<i32> = AttachmentType {
-            namespace: "natural_tree",
-            name: "state",
-            default: || 0,
-            codec: None,
-            copy_on_death: false,
-            sync: false,
-        };
-        struct Constructed(Arc<Mutex<Vec<Holder>>>);
+        struct Constructed(Arc<Mutex<Vec<Holder>>>, Mutex<Option<AttachmentKey<i32>>>);
         #[mod_api::__subscriptions]
         impl Hooks for Constructed {
             fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-                r.register_attachment_type(mod_api::AttachmentDescriptor::new(
-                    "natural_tree:state",
-                    STATE.default,
-                ))
-                .unwrap();
+                let state = r
+                    .register_attachment_type(mod_api::AttachmentDescriptor::new(
+                        "natural_tree:state",
+                        || 0,
+                    ))
+                    .unwrap();
+                *self.1.lock().unwrap() = Some(state);
             }
             fn entity_constructing(&self, host: HostSide<'_>, event: &mut EntityConstructingEvent) {
                 self.0.lock().unwrap().push(event.holder);
                 if let HostSide::Server(host) = host {
-                    STATE.set(host, event.holder, 41).unwrap();
+                    self.1
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .unwrap()
+                        .set(host, event.holder, 41)
+                        .unwrap();
                 }
             }
         }
@@ -1813,11 +1813,14 @@ mod tests {
             let calls = Arc::new(Mutex::new(Vec::new()));
             let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
                 "natural_tree",
-                Box::new(Constructed(calls.clone())),
+                Box::new(Constructed(calls.clone(), Mutex::default())),
             )]
             .into();
             mod_platform::testing::with_mods(mods, || {
                 super::super::native_entity_refs::tests::with_game(|game| {
+                    let state = mod_api::testing::registered_attachment_fixture::<i32>(
+                        "natural_tree:state",
+                    );
                     game.options.dedicated = Some(Vec::new());
                     let tag = sunrise_core::nbt::parse_snbt(r#"{
                     id:"minecraft:pig",UUID:[I;703,0,0,1],Pos:[1.0d,80.0d,2.0d],NoAI:1b,
@@ -1834,7 +1837,7 @@ mod tests {
                     let ids = [root, held, leaf, sibling];
                     assert!(game.persist.off_level.contains_key(&held));
                     assert!(game.persist.off_level.contains_key(&sibling));
-                    STATE.set(game, Holder::Entity(leaf), 77).unwrap();
+                    state.set(game, Holder::Entity(leaf), 77).unwrap();
                     game.persist.forced_meta.insert(leaf, [5, 6, 7, 8]);
                     game.portals.entities.entry(leaf).or_default().cooldown = 19;
                     let source = game.dim;
@@ -1877,9 +1880,9 @@ mod tests {
                     );
                     assert_eq!(game.persist.forced_meta.get(&leaf), Some(&[5, 6, 7, 8]));
                     assert_eq!(game.portals.entities[&leaf].cooldown, 19);
-                    assert_eq!(STATE.get(game, Holder::Entity(leaf)), Ok(77));
+                    assert_eq!(state.get(game, Holder::Entity(leaf)), Ok(77));
                     if !conflict {
-                        assert_eq!(STATE.get(game, Holder::Entity(held)), Ok(41));
+                        assert_eq!(state.get(game, Holder::Entity(held)), Ok(41));
                     }
                     assert!(game.mobs_below_off_level().contains(&leaf));
                     game.native_joins_flush(false, 0);
@@ -1902,7 +1905,7 @@ mod tests {
                         assert!(!game.persist.forced_meta.contains_key(&id));
                     }
                     game.enter_level(Dim::Nether).unwrap();
-                    assert_eq!(STATE.get(game, Holder::Entity(leaf)), Ok(77));
+                    assert_eq!(state.get(game, Holder::Entity(leaf)), Ok(77));
                     game.native_joins_flush(false, 0);
                     assert_eq!(*calls.lock().unwrap(), before);
                 })

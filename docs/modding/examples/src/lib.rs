@@ -6,13 +6,13 @@ use mod_api::{
     AttachmentDescriptor, AttachmentError, AttachmentKey, Holder, Hooks, Registrar,
     RegistrationContext, ServerHost, ServerTickEvent,
 };
-use std::sync::OnceLock;
+use std::sync::RwLock;
 
 // ANCHOR: counter
 #[derive(Default)]
 struct Mod {
     /// A counter on the level, kept for the session.
-    counter: OnceLock<AttachmentKey<i32>>,
+    counter: RwLock<Option<AttachmentKey<i32>>>,
 }
 // ANCHOR_END: counter
 
@@ -20,15 +20,18 @@ struct Mod {
 #[mod_api::sunrise_mod]
 impl Hooks for Mod {
     fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
-        if let Ok(key) =
-            registrar.register_attachment_type(AttachmentDescriptor::new("example:counter", || 0))
-        {
-            let _ = self.counter.set(key);
+        let key = registrar
+            .register_attachment_type(AttachmentDescriptor::new("example:counter", || 0))
+            .ok();
+        if let Ok(mut counter) = self.counter.write() {
+            *counter = key;
         }
     }
 
     fn server_tick(&self, host: &mut dyn ServerHost, _: &mut ServerTickEvent<'_>) {
-        if let Some(counter) = self.counter.get() {
+        if let Ok(counter) = self.counter.read()
+            && let Some(counter) = counter.as_ref()
+        {
             let _ = count(host, counter);
         }
     }

@@ -2,6 +2,7 @@ pub(crate) struct FixtureContent;
 #[mod_api::__subscriptions]
 impl Hooks for FixtureContent {
     fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+        // Doubler is registered after this owner and binds these keys to its Part and providers.
         for id in ["test:hoard", "test:energy", "test:fluid"] {
             r.register_attachment_type(crate::AttachmentDescriptor::new(id, || 0u32))
                 .unwrap();

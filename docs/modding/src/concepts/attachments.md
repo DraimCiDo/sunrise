@@ -56,9 +56,10 @@ keeps a copy for any holder it is asked about (see the sync paragraph below).
 without a codec) and `InvalidSyncPolicy` (sync without a codec), `HolderBusy` (storage temporarily
 unavailable; retry after the pass) and `UnsupportedHolder` (the holder family has
 no attachment storage; retrying does not help).
-`host.attachments()` exposes
-the host's `AttachmentStore`. Reading clones the value; copying a holder's data
-shares its stored values without cloning them.
+On a level lent to a hook (`LevelRandomHost`), use `get_in`, `set_in`, `remove_in`,
+`has_in`, `get_existing_in` and `sync_data_in` on the same key, passing the level
+instead of a full host. Copying a holder's data shares its stored values without
+cloning them.
 
 `AttachmentHolder` keeps an existing typed handle when a system needs to store a holder
 identity: `Entity`, `Player`, `BlockEntity`, `Chunk` or `Level`. It is `Copy`, does not keep
@@ -138,8 +139,7 @@ units, a value that cannot be written, or one past the frame limits is not sent,
 refusal is logged by name once per connection; the player stays joined. A full outgoing
 queue closes that player's connection.
 
-On a client, `Host::attachments` returns a copy of what the server synced, which `get`
-decodes; `set` and `remove` change only that copy, which is dropped when the chunk,
+On a client, `key.get(host, holder)` decodes the client's copy of what the server synced; `set` and `remove` change only that copy, which is dropped when the chunk,
 entity or player goes. A client keeps no copy for the level hosts (`LevelRandomHost`):
 they stay server-only there, though their changes on a server are synced.
 

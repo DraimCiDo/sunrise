@@ -265,7 +265,6 @@ pub mod tests {
             event.distance = 128.0;
         }
     }
-    /// The gold a `doubler:hoard` block entity holds, kept beside it.
     /// How many times a `doubler:hoard` was asked about its removal.
     pub static HOARD_ASKED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     /// The block entity of type `doubler:hoard`, held by block `test:hoard`: when it is

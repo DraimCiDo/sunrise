@@ -1214,7 +1214,7 @@ mod off_level_tests {
 mod nested_vehicle_discard_tests {
     use super::*;
     use std::sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     };
     use sunrise_client::mobs::Mob;
@@ -1674,25 +1674,18 @@ mod nested_vehicle_discard_tests {
         }
     }
 
-    static VEHICLE_VALUE: sunrise_mod_runtime::attachments::AttachmentType<i32> =
-        sunrise_mod_runtime::attachments::AttachmentType {
-            namespace: "vehicle_boundary",
-            name: "value",
-            default: || 0,
-            codec: None,
-            copy_on_death: false,
-            sync: false,
-        };
-
     fn set_vehicle_test_attachment(game: &mut Game<'_>) {
         // The real store path binds the resident owner's registration. Rebinding
         // it manually would replace that lifetime before removal is exercised.
-        VEHICLE_VALUE
-            .set(game, mod_api::Holder::Entity(71), 37)
-            .unwrap();
+        let key = mod_api::testing::registered_attachment_fixture::<i32>("vehicle_boundary:value");
+        key.set(game, mod_api::Holder::Entity(71), 37).unwrap();
     }
 
-    fn assert_vehicle_queries_hidden(host: &mut dyn mod_api::ServerHost, kind: &str) {
+    fn assert_vehicle_queries_hidden(
+        host: &mut dyn mod_api::ServerHost,
+        kind: &str,
+        key: &mod_api::AttachmentKey<i32>,
+    ) {
         assert!(host.entity(71).is_none());
         assert!(
             host.entity(73).is_some(),
@@ -1723,9 +1716,7 @@ mod nested_vehicle_discard_tests {
         assert_eq!(
             host.attachment_query("vehicle_boundary", "value")
                 .unwrap()
-                .query(&mod_api::testing::registered_attachment_fixture::<i32>(
-                    "vehicle_boundary:value"
-                ))
+                .query(key)
                 .unwrap()
                 .iter()
                 .count(),
@@ -1734,6 +1725,7 @@ mod nested_vehicle_discard_tests {
     }
 
     struct RemovalBoundaryObserver {
+        key: Mutex<Option<mod_api::AttachmentKey<i32>>>,
         kind: &'static str,
         cancel: Arc<AtomicBool>,
         mounts: Arc<AtomicUsize>,
@@ -1747,12 +1739,13 @@ mod nested_vehicle_discard_tests {
             registrar: &mut dyn mod_api::Registrar,
             _: &mod_api::RegistrationContext,
         ) {
-            registrar
+            let key = registrar
                 .register_attachment_type(mod_api::AttachmentDescriptor::new(
                     "vehicle_boundary:value",
-                    VEHICLE_VALUE.default,
+                    || 0,
                 ))
                 .unwrap();
+            *self.key.lock().unwrap() = Some(key);
         }
 
         fn entity_mount(
@@ -1762,7 +1755,11 @@ mod nested_vehicle_discard_tests {
         ) -> mod_api::Flow {
             if !event.mounting && event.entity == 72 {
                 self.mounts.fetch_add(1, Ordering::Relaxed);
-                assert_vehicle_queries_hidden(host, self.kind);
+                assert_vehicle_queries_hidden(
+                    host,
+                    self.kind,
+                    self.key.lock().unwrap().as_ref().unwrap(),
+                );
                 // A stale vehicle must not become a new parent while removal
                 // is notifying the old canceled edge.
                 let level = host.level("minecraft:overworld").unwrap();
@@ -1787,7 +1784,11 @@ mod nested_vehicle_discard_tests {
         ) {
             if event.entity == 71 {
                 self.leaves.fetch_add(1, Ordering::Relaxed);
-                assert_vehicle_queries_hidden(host, self.kind);
+                assert_vehicle_queries_hidden(
+                    host,
+                    self.kind,
+                    self.key.lock().unwrap().as_ref().unwrap(),
+                );
             }
         }
         fn vehicle_destroy(
@@ -1820,6 +1821,7 @@ mod nested_vehicle_discard_tests {
             let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
                 "vehicle_boundary",
                 Box::new(RemovalBoundaryObserver {
+                    key: Mutex::default(),
                     kind,
                     cancel: cancel.clone(),
                     mounts: mounts.clone(),
@@ -1839,6 +1841,9 @@ mod nested_vehicle_discard_tests {
                             .update(0, |cart| cart.kind = super::super::minecarts::CartKind::Tnt);
                     }
                     set_vehicle_test_attachment(game);
+                    let key = mod_api::testing::registered_attachment_fixture::<i32>(
+                        "vehicle_boundary:value",
+                    );
                     let vehicle = game.entity(71).unwrap();
                     let uuid = [160, 0, 0, 71];
                     let holder = sunrise_client::save::uuid_text(uuid);
@@ -1869,7 +1874,7 @@ mod nested_vehicle_discard_tests {
                             assert!(game.entity_remove(vehicle, mod_api::RemovalReason::Killed));
                         }
                     }
-                    assert_vehicle_queries_hidden(game, kind);
+                    assert_vehicle_queries_hidden(game, kind, &key);
                     assert!(game.entity_position(vehicle).is_none());
                     assert!(game.entity_passengers(vehicle).is_none());
                     assert!(game.vehicle_by_uuid(uuid).is_none());
@@ -1882,7 +1887,7 @@ mod nested_vehicle_discard_tests {
                     for _ in 0..3 {
                         game.native_removals_flush();
                         game.native_leaves_flush();
-                        assert_vehicle_queries_hidden(game, kind);
+                        assert_vehicle_queries_hidden(game, kind, &key);
                         assert_eq!(mounts.load(Ordering::Relaxed), 1);
                         assert_eq!(leaves.load(Ordering::Relaxed), 1);
                         assert_eq!(destroys.load(Ordering::Relaxed), usize::from(mode < 2));
@@ -1922,7 +1927,7 @@ mod nested_vehicle_discard_tests {
                     assert!(!game.entity_attachments.contains_key(&71));
                     game.native_removals_flush();
                     game.dismount_mob(72);
-                    assert_vehicle_queries_hidden(game, kind);
+                    assert_vehicle_queries_hidden(game, kind, &key);
                     assert_eq!(mounts.load(Ordering::Relaxed), 2);
                     assert_eq!(leaves.load(Ordering::Relaxed), 1);
                     assert_eq!(destroys.load(Ordering::Relaxed), usize::from(mode < 2));
@@ -2064,7 +2069,7 @@ mod nested_vehicle_discard_tests {
             registrar
                 .register_attachment_type(mod_api::AttachmentDescriptor::new(
                     "vehicle_boundary:value",
-                    VEHICLE_VALUE.default,
+                    || 0,
                 ))
                 .unwrap();
         }
@@ -2157,7 +2162,7 @@ mod nested_vehicle_discard_tests {
             fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
                 r.register_attachment_type(mod_api::AttachmentDescriptor::new(
                     "vehicle_boundary:value",
-                    VEHICLE_VALUE.default,
+                    || 0,
                 ))
                 .unwrap();
             }

@@ -1,16 +1,10 @@
 // game-module-cfg: test
-use crate::game::native_entity_refs::tests::{prepare_entity_ticking_neighborhood, with_game};
+use crate::game::native_entity_refs::tests::{
+    prepare_entity_ticking_neighborhood, with_game_attachment,
+};
+use mod_api::{AttachmentDescriptor, AttachmentKey};
 use sunrise_client::mobs::Mob;
 use sunrise_core::{geometry::Vec3, position::ChunkPos};
-use sunrise_mod_runtime::attachments::AttachmentType;
-static VALUE: AttachmentType<u32> = AttachmentType {
-    namespace: "bench",
-    name: "tick_state",
-    default: || 0,
-    codec: None,
-    copy_on_death: false,
-    sync: false,
-};
 #[test]
 #[ignore = "callgrind fixture; needs SUNRISE_TEST_RESOURCES"]
 fn attachment_instruction_count() {
@@ -21,7 +15,8 @@ fn attachment_instruction_count() {
         eprintln!("refused, needs ATTACHMENT_PASSES; run by the parity harness");
         return;
     };
-    with_game(|game| {
+    let descriptor = || AttachmentDescriptor::new("bench:tick_state", || 0_u32);
+    with_game_attachment("bench", descriptor, |game, key| {
         game.options.dedicated = Some(Vec::new());
         prepare_entity_ticking_neighborhood(game, ChunkPos::new(0, 0));
         game.bind_dimension_attachments(game.dim);
@@ -40,8 +35,7 @@ fn attachment_instruction_count() {
             }
         }
         for &holder in &holders {
-            VALUE
-                .set(game, holder, 0)
+            key.set(game, holder, 0)
                 .unwrap_or_else(|e| panic!("warm holder {holder:?}: {e:?}"));
         }
         assert_eq!(
@@ -52,9 +46,9 @@ fn attachment_instruction_count() {
                 .len(),
             700
         );
-        attachment_measured_passes(game, &holders, passes);
+        attachment_measured_passes(game, &key, &holders, passes);
         for &holder in &holders {
-            assert_eq!(VALUE.get(game, holder).unwrap(), passes as u32);
+            assert_eq!(key.get(game, holder).unwrap(), passes as u32);
         }
     });
 }
@@ -62,14 +56,14 @@ fn attachment_instruction_count() {
 #[inline(never)]
 fn attachment_measured_passes(
     game: &mut crate::game::Game<'_>,
+    key: &AttachmentKey<u32>,
     holders: &[mod_api::Holder],
     passes: usize,
 ) {
     for _ in 0..passes {
         for &holder in holders {
-            let value = VALUE.get(game, holder).unwrap();
-            VALUE
-                .set(game, holder, std::hint::black_box(value.wrapping_add(1)))
+            let value = key.get(game, holder).unwrap();
+            key.set(game, holder, std::hint::black_box(value.wrapping_add(1)))
                 .unwrap();
         }
     }

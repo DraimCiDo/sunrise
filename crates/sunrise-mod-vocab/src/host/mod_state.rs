@@ -16,9 +16,8 @@ pub trait ModStateHost {
         name: &str,
     ) -> Result<AttachmentBatch, AttachmentError>;
     /// Side: both.
-    /// The server-owned holders' attachments; `TYPE.get(host, holder)` reads
-    /// one. On a client it is the copy of what the server synced: `set` and
-    /// `remove` change only the copy.
+    /// Storage used by issued keys. Mod code reads with [`AttachmentKey::get`].
+    /// On a client the keys read and write the client's synced copy only.
     #[access(WorldOnly)]
     fn attachments(&mut self) -> &mut dyn AttachmentStore;
 }

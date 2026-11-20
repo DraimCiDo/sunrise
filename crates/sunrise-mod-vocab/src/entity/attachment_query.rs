@@ -131,6 +131,7 @@ impl crate::wire::Wire for AttachmentBatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runtime::AttachmentType;
     static KEY: AttachmentType<u32> = AttachmentType {
         namespace: "test",
         name: "value",

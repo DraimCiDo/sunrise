@@ -5,6 +5,7 @@ use mod_api::{
 
 use sunrise_mod_runtime::attachments::AttachmentType;
 
+// Raw fixture for the region writer's independent map setup and readback.
 pub const VALUE: AttachmentType<i32> = AttachmentType {
     namespace: "chunk_disk_fixture",
     name: "disk_value",
@@ -25,7 +26,7 @@ const CODEC: AttachmentCodec<i32> = AttachmentCodec {
 pub fn register(registrar: &mut dyn mod_api::Registrar) -> AttachmentKey<i32> {
     registrar
         .register_attachment_type(
-            mod_api::AttachmentDescriptor::new("chunk_disk_fixture:disk_value", VALUE.default)
+            mod_api::AttachmentDescriptor::new("chunk_disk_fixture:disk_value", || 0)
                 .serialize(CODEC),
         )
         .unwrap()

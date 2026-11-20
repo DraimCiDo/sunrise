@@ -1,6 +1,6 @@
 //! Load-owned attachment identities and owner-supplied callbacks.
 use super::*;
-use crate::{AttachmentCodec, AttachmentError, Holder};
+use crate::{AttachmentCodec, AttachmentError, Holder, LevelRandomHost};
 use sunrise_mod_runtime::attachments::{AttachmentType, CheckedAttachmentType};
 
 // no wire: an authoring descriptor contains process-local callbacks.
@@ -254,6 +254,61 @@ impl<T: Clone + Send + Sync + 'static> AttachmentKey<T> {
     pub fn sync_data(&self, host: &mut dyn Host, holder: Holder) -> Result<(), AttachmentError> {
         self.live()?.sync_data(host.attachments(), holder)
     }
+
+    /// Like [`Self::get`], on a level lent to a hook.
+    pub fn get_in(
+        &self,
+        level: &mut dyn LevelRandomHost,
+        holder: Holder,
+    ) -> Result<T, AttachmentError> {
+        self.live()?.get(level.attachments(), holder)
+    }
+
+    /// Like [`Self::has`], on a level lent to a hook.
+    pub fn has_in(
+        &self,
+        level: &mut dyn LevelRandomHost,
+        holder: Holder,
+    ) -> Result<bool, AttachmentError> {
+        self.live()?.has(level.attachments(), holder)
+    }
+
+    /// Like [`Self::get_existing`], on a level lent to a hook.
+    pub fn get_existing_in(
+        &self,
+        level: &mut dyn LevelRandomHost,
+        holder: Holder,
+    ) -> Result<Option<T>, AttachmentError> {
+        self.live()?.get_existing(level.attachments(), holder)
+    }
+
+    /// Like [`Self::set`], on a level lent to a hook.
+    pub fn set_in(
+        &self,
+        level: &mut dyn LevelRandomHost,
+        holder: Holder,
+        value: T,
+    ) -> Result<(), AttachmentError> {
+        self.live()?.set(level.attachments(), holder, value)
+    }
+
+    /// Like [`Self::remove`], on a level lent to a hook.
+    pub fn remove_in(
+        &self,
+        level: &mut dyn LevelRandomHost,
+        holder: Holder,
+    ) -> Result<Option<T>, AttachmentError> {
+        self.live()?.remove(level.attachments(), holder)
+    }
+
+    /// Like [`Self::sync_data`], on a level lent to a hook.
+    pub fn sync_data_in(
+        &self,
+        level: &mut dyn LevelRandomHost,
+        holder: Holder,
+    ) -> Result<(), AttachmentError> {
+        self.live()?.sync_data(level.attachments(), holder)
+    }
 }
 
 /// Attachment registration and lookup during [`crate::Hooks::register`].
@@ -295,19 +350,7 @@ impl dyn Registrar + '_ {
     }
 }
 
-/// Read-only access to the load-owned attachment registry, including without a world host.
-// hidden: attachment metadata lookup; authors use typed keys and snapshots.
-#[doc(hidden)]
-pub trait AttachmentDeclarations {
-    fn validate_attachment_type(
-        &self,
-        namespace: &str,
-        name: &str,
-        sync: bool,
-    ) -> Result<(), AttachmentError>;
-}
-
-/// Validate use by consumers still operating on a storage-relative attachment type.
+/// Authorize an engine storage operation by saved name in the current package scope.
 // hidden: shared engine and host adapter validation, not an authoring method.
 #[doc(hidden)]
 pub fn validate_attachment_use(
