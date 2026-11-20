@@ -1356,11 +1356,23 @@ impl<'a> Plan<'a> {
                     };
                     row.get(4)?.get("properties")
                 };
+                let declaration_source = || {
+                    // File declarations take their id from this path. A code declaration
+                    // in the same mod has no file, so name only its block id.
+                    if let Some((namespace, path)) = decl.id.split_once(':') {
+                        let file = format!("data/{namespace}/sunrise/block/{path}.json");
+                        if m.content.files.binary_search(&file).is_ok() {
+                            return format!("{file}: {}", decl.id);
+                        }
+                    }
+                    decl.id.clone()
+                };
                 for key in decl.state_properties.keys() {
                     if properties(default).is_some_and(|p| p.get(key).is_some()) {
                         return Err(format!(
-                            "{}: state property {key} is already on {}",
-                            decl.id, decl.template
+                            "{}: state_properties.{key} is already on {}",
+                            declaration_source(),
+                            decl.template
                         )
                         .into());
                     }
@@ -1369,7 +1381,7 @@ impl<'a> Plan<'a> {
                     if liquid_templates.contains(&decl.template) {
                         return Err(format!(
                             "{}: state_properties.waterlogged cannot be added: template {} is a standalone liquid block",
-                            decl.id, decl.template
+                            declaration_source(), decl.template
                         ).into());
                     }
                     let template_water = water_states
@@ -1378,7 +1390,7 @@ impl<'a> Plan<'a> {
                     if template_water.iter().all(|water| *water) {
                         return Err(format!(
                             "{}: state_properties.waterlogged cannot be added: every state of template {} already holds water",
-                            decl.id, decl.template
+                            declaration_source(), decl.template
                         ).into());
                     }
                 }

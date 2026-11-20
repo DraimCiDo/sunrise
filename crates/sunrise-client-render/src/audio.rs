@@ -23,6 +23,9 @@ use std::{
 use sunrise_assets::resource_source::{Resource, ResourceSource};
 use sunrise_core::random::{LegacyRandom, RandomSource};
 
+mod fx;
+mod reverb;
+
 /// An OpenAL source's state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum State {
@@ -51,6 +54,8 @@ struct Channel {
     started: Option<(String, std::time::Instant)>,
     /// Its sound event plays clearly through a mod's muffle (`Audio::muffle`).
     unmuffled: bool,
+    /// Its own effects (`SoundPlay::effects`) and their filters' state.
+    fx: fx::VoiceFx,
 }
 /// The cutoff of the muffle's low-pass at full strength: the world heard through ringing ears.
 const MUFFLED_CUTOFF: f32 = 300.0;
@@ -108,6 +113,71 @@ impl Muffle {
         }
     }
 }
+/// The most frames one [`mix`] takes. The reverbs' send buffer is reserved for this many when the
+/// mixer is created, so the output callback never grows it: a device buffer larger than this (a
+/// rare default of 85 ms or more at 192 kHz) is mixed in pieces of this size.
+const MAX_MIX_FRAMES: usize = 16_384;
+/// The shared reverbs and what the sounds send to them in one buffer.
+///
+/// Everything it holds is allocated when the mixer is created (`Mixer::default`, on the game
+/// thread that opens the sound system), not on the first send and never in the output callback:
+/// each bus's delay lines are sized for 192 kHz ([`reverb::Reverb::new`]), 236,071 samples for
+/// the three buses together (944,284 bytes), and the send buffer holds [`MAX_MIX_FRAMES`] frames
+/// for each bus (196,608 bytes): 1,140,892 bytes (about 1.09 MiB) in all, whatever the output's
+/// rate. A slower output uses the start of each line.
+struct Reverbs {
+    buses: [reverb::Reverb; reverb::BUSES],
+    /// One buffer's sends, bus after bus, one mono sample a frame; reused.
+    input: Vec<f32>,
+    /// `input` is cleared for this buffer.
+    ready: bool,
+    /// What was sent to each bus this buffer.
+    sent: [bool; reverb::BUSES],
+}
+impl Default for Reverbs {
+    fn default() -> Self {
+        Self {
+            buses: reverb::ROOMS.map(reverb::Reverb::new),
+            // Room for the largest piece `mix` takes, so the callback doesn't allocate.
+            input: Vec::with_capacity(reverb::BUSES * MAX_MIX_FRAMES),
+            ready: false,
+            sent: [false; reverb::BUSES],
+        }
+    }
+}
+impl Reverbs {
+    /// The sends of a buffer of `frames` frames, cleared at the first ask.
+    fn input(&mut self, frames: usize) -> &mut [f32] {
+        debug_assert!(
+            frames <= MAX_MIX_FRAMES,
+            "a mix piece is at most MAX_MIX_FRAMES"
+        );
+        if !self.ready {
+            self.input.clear();
+            self.input.resize(reverb::BUSES * frames, 0.0);
+            self.ready = true;
+        }
+        &mut self.input
+    }
+    /// Adds every bus's reverb of this buffer's sends into `out`, then readies the next buffer.
+    /// A bus with no sends and no tail left costs nothing.
+    fn run(&mut self, out: &mut [f32], channels: usize, rate: u32) {
+        let frames = out.len() / channels.max(1);
+        if self.ready || self.buses.iter().any(|b| !b.idle()) {
+            self.input(frames);
+            for ((bus, input), sent) in self
+                .buses
+                .iter_mut()
+                .zip(self.input.chunks(frames.max(1)))
+                .zip(self.sent)
+            {
+                bus.run(input, sent, out, channels, rate);
+            }
+        }
+        self.ready = false;
+        self.sent = [false; reverb::BUSES];
+    }
+}
 #[derive(Default)]
 struct Mixer {
     channels: HashMap<ChannelId, Channel>,
@@ -131,6 +201,8 @@ struct Mixer {
     stream_gain: [f32; 11],
     /// A mod's muffle of the sounds it does not exempt.
     muffle: Muffle,
+    /// The shared reverbs sounds send to (`SoundPlay::effects`).
+    reverbs: Reverbs,
     limiter_peak: f32,
     /// The output device the stream was opened on (`Library.currentDeviceName`).
     #[cfg(feature = "audio")]
@@ -221,6 +293,11 @@ impl Mixer {
             }
         };
         i as u32 + 1
+    }
+    /// Some sound has effects (`SoundPlay::effects`), or a reverb's tail is still ringing.
+    fn effects_heard(&self) -> bool {
+        self.channels.values().any(|c| !c.fx.bypassed())
+            || self.reverbs.buses.iter().any(|b| !b.idle())
     }
 }
 /// A sound the player could have heard (`SoundEventListener.onPlaySound`):
@@ -608,6 +685,7 @@ impl Backend for MixerBackend {
                 world: self.world,
                 started: None,
                 unmuffled: false,
+                fx: fx::VoiceFx::default(),
             },
         );
         Some(id)
@@ -638,13 +716,24 @@ impl Backend for MixerBackend {
     fn set_unmuffled(&mut self, channel: ChannelId, unmuffled: bool) {
         self.with(channel, |c| c.unmuffled = unmuffled);
     }
-    fn update_channel(&mut self, channel: ChannelId, volume: f32, pitch: f32, position: [f64; 3]) {
+    fn set_effects(&mut self, channel: ChannelId, effects: mod_api::SoundEffects) {
+        self.with(channel, |c| c.fx.target = effects);
+    }
+    fn update_channel(
+        &mut self,
+        channel: ChannelId,
+        volume: f32,
+        pitch: f32,
+        position: [f64; 3],
+        effects: mod_api::SoundEffects,
+    ) {
         if let Ok(mut m) = self.mixer.lock()
             && let Some(c) = m.channels.get_mut(&channel)
         {
             c.gain = volume;
             c.pitch = pitch;
             c.at = [position[0] as f32, position[1] as f32, position[2] as f32];
+            c.fx.target = effects;
         }
     }
     fn filter_stopped(&mut self, live: &[(u64, ChannelId)], stopped: &mut Vec<u64>) {
@@ -790,6 +879,79 @@ fn distance_gain(linear: Option<f32>, distance: f32) -> f32 {
         None => 1.0,
         Some(max) if max > 0.0 => (1.0 - distance.min(max) / max).clamp(0.0, 1.0),
         Some(_) => 0.0,
+    }
+}
+/// One voice's buffer through its effects ([`fx::VoiceFx`]): read as the plain path reads it
+/// (linear interpolation, looping or stopping at the end), its direct sound filtered and panned
+/// by `[left, right, gain]` into `out`, and its sends, at the sound's distance gain, into the
+/// shared reverbs' input.
+fn mix_with_effects(
+    c: &mut Channel,
+    (samples, source_channels, frames, step): (&[f32], usize, usize, f64),
+    [left, right, gain]: [f32; 3],
+    out: &mut [f32],
+    channels: usize,
+    rate: u32,
+    reverbs: &mut Reverbs,
+) {
+    let buffer_frames = out.len() / channels;
+    let stereo = source_channels > 1;
+    let mut glide = c.fx.begin(buffer_frames, rate);
+    let mut input: &mut [f32] = &mut [];
+    if glide.sends {
+        for (sent, to) in reverbs.sent.iter_mut().zip(glide.sent) {
+            *sent |= to;
+        }
+        input = reverbs.input(buffer_frames);
+    }
+    for (f, frame) in out.chunks_mut(channels).enumerate() {
+        let mut i = c.position as usize;
+        if i + 1 >= frames {
+            if c.looping && frames > 1 {
+                c.position = 0.0;
+                i = 0;
+            } else {
+                c.state = State::Stopped;
+                break;
+            }
+        }
+        let t = (c.position - i as f64) as f32;
+        let mut x = if stereo {
+            [
+                samples[i * 2] + (samples[(i + 1) * 2] - samples[i * 2]) * t,
+                samples[i * 2 + 1] + (samples[(i + 1) * 2 + 1] - samples[i * 2 + 1]) * t,
+            ]
+        } else {
+            [samples[i] + (samples[i + 1] - samples[i]) * t, 0.0]
+        };
+        let send = c.fx.frame(&mut glide, &mut x, stereo);
+        let [l, r] = if stereo { x } else { [x[0], x[0]] };
+        if channels >= 2 {
+            frame[0] += l * left;
+            frame[1] += r * right;
+        } else {
+            frame[0] += (l + r) * 0.5 * gain;
+        }
+        if glide.sends {
+            for (bus, level) in send.into_iter().enumerate() {
+                input[bus * buffer_frames + f] += level * gain;
+            }
+        }
+        c.position += step;
+    }
+}
+/// [`mix`] over `data` in pieces of at most [`MAX_MIX_FRAMES`] frames: the reverbs' send buffer
+/// was sized for that when the mixer was made, so mixing never allocates, however large a buffer
+/// the device asks for. One piece, the whole buffer, for every usual buffer size, and whenever no
+/// sound has effects and no reverb is ringing: then nothing uses the send buffer, and the output
+/// is the one `mix` it was before effects existed.
+fn mix_pieces(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
+    let most = MAX_MIX_FRAMES * channels.max(1);
+    if data.len() <= most || !mixer.effects_heard() {
+        return mix(mixer, data, channels, rate);
+    }
+    for piece in data.chunks_mut(most) {
+        mix(mixer, piece, channels, rate);
     }
 }
 // Only the output stream mixes; a build without one (no `audio` feature) never does.
@@ -966,6 +1128,19 @@ fn mix(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
         } else {
             &mut *data
         };
+        if !c.fx.bypassed() {
+            mix_with_effects(
+                c,
+                (samples.as_slice(), source_channels, frames, step),
+                [left, right, gain],
+                out,
+                channels,
+                rate,
+                &mut mixer.reverbs,
+            );
+            continue;
+        }
+        c.fx.played(rate);
         for frame in out.chunks_mut(channels) {
             let mut i = c.position as usize;
             if i + 1 >= frames {
@@ -1011,6 +1186,10 @@ fn mix(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
         rate,
     );
     mixer.voices = voices;
+    // The reverbs' tails, muffled with the sounds while a mod's muffle is on.
+    mixer
+        .reverbs
+        .run(if muffling { &mut bus } else { &mut *data }, channels, rate);
     if muffling {
         mixer.muffle.apply(&bus, data, channels, rate);
     } else {
@@ -1226,7 +1405,7 @@ fn build_stream<T: cpal::SizedSample + cpal::FromSample<f32>>(
         move |data: &mut [T], _| {
             scratch.resize(data.len(), 0.0f32);
             if let Ok(mut m) = mixer.lock() {
-                mix(&mut m, &mut scratch, channels, rate);
+                mix_pieces(&mut m, &mut scratch, channels, rate);
             } else {
                 scratch.fill(0.0);
             }
@@ -2243,7 +2422,7 @@ impl Audio {
     /// Mixes one buffer of audio into `data` (channels: 1 or 2, rate in Hz).
     pub fn mix_buffer(&mut self, data: &mut [f32], channels: usize, rate: u32) {
         if let Ok(mut m) = self.backend.mixer.lock() {
-            mix(&mut m, data, channels, rate);
+            mix_pieces(&mut m, data, channels, rate);
         }
     }
     #[doc(hidden)]
@@ -2600,6 +2779,7 @@ mod tests {
             world: 0,
             started: None,
             unmuffled: false,
+            fx: fx::VoiceFx::default(),
         }
     }
 
@@ -3064,6 +3244,191 @@ mod tests {
             out.extend_from_slice(&buffer);
         }
         out
+    }
+
+    /// A looping tone 2 blocks ahead, heard for `seconds` once `effects` have settled.
+    fn heard_with(hz: f32, effects: mod_api::SoundEffects, seconds: f32) -> Vec<f32> {
+        let mut m = Mixer::default();
+        let mut c = channel(sine(hz), None, [0.0, 0.0, 2.0], true);
+        c.fx.target = effects;
+        m.channels.insert(1, c);
+        listen(&mut m, 0.2);
+        listen(&mut m, seconds)
+    }
+
+    #[test]
+    fn a_sounds_low_pass_dulls_it_and_its_gain_turns_it_down() {
+        let none = mod_api::SoundEffects::NONE;
+        let plain = |hz: f32| rms(&heard_with(hz, none, 0.2));
+        let mut dull = none;
+        dull.lowpass = 500.0;
+        // Three octaves and more above the cutoff, two poles: a 6 kHz whine all but goes.
+        assert!(rms(&heard_with(6000.0, dull, 0.2)) < plain(6000.0) * 0.02);
+        assert!(rms(&heard_with(100.0, dull, 0.2)) > plain(100.0) * 0.95);
+        let mut thin = none;
+        thin.highpass = 2000.0;
+        assert!(rms(&heard_with(100.0, thin, 0.2)) < plain(100.0) * 0.01);
+        assert!(rms(&heard_with(8000.0, thin, 0.2)) > plain(8000.0) * 0.95);
+        let mut quiet = none;
+        quiet.gain = 0.5;
+        quiet.direct = 0.5;
+        let ratio = rms(&heard_with(1000.0, quiet, 0.2)) / plain(1000.0);
+        assert!((ratio - 0.25).abs() < 1e-3, "{ratio}");
+    }
+
+    #[test]
+    fn effects_back_to_none_play_the_sound_exactly_as_without_them() {
+        let mut m = Mixer::default();
+        let mut c = channel(sine(440.0), None, [1.0, 0.0, 2.0], true);
+        let mut effects = mod_api::SoundEffects::NONE;
+        effects.lowpass = 800.0;
+        effects.room = 1.0;
+        c.fx.target = effects;
+        m.channels.insert(1, c);
+        listen(&mut m, 0.1);
+        m.channels.get_mut(&1).unwrap().fx.target = mod_api::SoundEffects::NONE;
+        // One buffer glides back, the next is the plain path again.
+        listen(&mut m, 0.01);
+        assert!(m.channels[&1].fx.bypassed());
+        // Once the room's tail has died away, the output is a plain channel's, sample for sample.
+        listen(&mut m, 2.0);
+        let mut plain = Mixer::default();
+        let mut c = channel(sine(440.0), None, [1.0, 0.0, 2.0], true);
+        c.position = m.channels[&1].position;
+        plain.channels.insert(1, c);
+        assert_eq!(listen(&mut m, 0.1), listen(&mut plain, 0.1));
+    }
+
+    #[test]
+    fn a_reverb_send_rings_on_after_the_sound_ends() {
+        let tail = |send: f32| {
+            let mut m = Mixer::default();
+            // 50 ms of noise-like tone, not looping.
+            let mut c = channel(sine(1234.0)[..2400].to_vec(), None, [0.0, 0.0, 2.0], false);
+            let mut effects = mod_api::SoundEffects::NONE;
+            effects.cavern = send;
+            c.fx.target = effects;
+            m.channels.insert(1, c);
+            listen(&mut m, 0.1);
+            assert_eq!(m.channels[&1].state, State::Stopped);
+            rms(&listen(&mut m, 0.5))
+        };
+        assert_eq!(tail(0.0), 0.0);
+        assert!(tail(1.0) > 1e-3, "{}", tail(1.0));
+    }
+
+    #[test]
+    fn a_huge_buffer_with_reverb_sends_never_grows_the_send_buffer() {
+        // 0.5 s at 192 kHz in one device buffer: 96,000 frames, mixed in pieces.
+        let mut m = Mixer::default();
+        let mut c = channel(sine(440.0), None, [0.0, 0.0, 2.0], true);
+        let mut effects = mod_api::SoundEffects::NONE;
+        effects.hall = 1.0;
+        c.fx.target = effects;
+        m.channels.insert(1, c);
+        let (pointer, capacity) = (m.reverbs.input.as_ptr(), m.reverbs.input.capacity());
+        assert_eq!(capacity, reverb::BUSES * MAX_MIX_FRAMES);
+        let mut data = vec![0.0; 2 * 96_000];
+        mix_pieces(&mut m, &mut data, 2, 192_000);
+        assert!(data.iter().any(|s| *s != 0.0));
+        assert_eq!(
+            (m.reverbs.input.as_ptr(), m.reverbs.input.capacity()),
+            (pointer, capacity)
+        );
+    }
+
+    #[test]
+    fn a_sound_started_with_effects_has_them_from_its_first_frame() {
+        let mut m = Mixer::default();
+        let mut c = channel(sine(440.0), None, [0.0, 0.0, 2.0], true);
+        let mut silent = mod_api::SoundEffects::NONE;
+        silent.gain = 0.0;
+        silent.room = 1.0;
+        c.fx.target = silent;
+        m.channels.insert(1, c);
+        assert!(listen(&mut m, 0.1).iter().all(|s| *s == 0.0));
+        assert!(m.reverbs.buses.iter().all(reverb::Reverb::idle));
+    }
+
+    #[test]
+    fn a_send_to_one_reverb_leaves_the_others_idle() {
+        let mut m = Mixer::default();
+        let mut c = channel(sine(440.0), None, [0.0, 0.0, 2.0], true);
+        let mut effects = mod_api::SoundEffects::NONE;
+        effects.room = 1.0;
+        c.fx.target = effects;
+        m.channels.insert(1, c);
+        listen(&mut m, 0.1);
+        let idle = m.reverbs.buses.each_ref().map(reverb::Reverb::idle);
+        assert_eq!(idle, [false, true, true]);
+    }
+
+    #[test]
+    fn a_huge_buffer_without_effects_mixes_as_one_buffer() {
+        // 20,000 frames in one device buffer, too loud for the limiter only near the end: with no
+        // effects it is one `mix` limited as a whole, bit for bit, not two pieces limited apart.
+        let loud = || {
+            let mut m = Mixer::default();
+            let samples = sine(440.0)
+                .iter()
+                .enumerate()
+                .map(|(i, s)| if i < 18_000 { *s } else { s * 6.0 })
+                .collect();
+            m.channels
+                .insert(1, channel(samples, None, [0.0, 0.0, 2.0], true));
+            m
+        };
+        let mut pieces = vec![0.0; 2 * 20_000];
+        mix_pieces(&mut loud(), &mut pieces, 2, 48_000);
+        let mut whole = vec![0.0; 2 * 20_000];
+        mix(&mut loud(), &mut whole, 2, 48_000);
+        assert!(whole.iter().any(|s| *s != 0.0));
+        assert_eq!(
+            pieces.iter().map(|s| s.to_bits()).collect::<Vec<_>>(),
+            whole.iter().map(|s| s.to_bits()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_mono_output_plays_a_sound_with_effects_unpanned() {
+        let mut m = Mixer::default();
+        let mut c = channel(vec![0.5; 4], None, [0.0, 0.0, -3.0], true);
+        let mut effects = mod_api::SoundEffects::NONE;
+        effects.gain = 0.5;
+        c.fx.target = effects;
+        m.channels.insert(1, c);
+        let mut data = [0.0; 2];
+        mix(&mut m, &mut data, 1, 48_000);
+        assert_eq!(data, [0.25; 2]);
+    }
+
+    #[test]
+    fn changing_a_sounds_effects_glides_without_a_click() {
+        // A steady tone whose gain and cutoff jump between buffers: the output never moves more
+        // in one frame than the tone itself can (its largest step is 0.3 * TAU * 440 / 48000).
+        let mut m = Mixer::default();
+        let c = channel(sine(440.0), None, [0.0, 0.0, 2.0], true);
+        m.channels.insert(1, c);
+        let mut out = listen(&mut m, 0.05);
+        for (gain, lowpass) in [
+            (0.0, 20_000.0),
+            (1.0, 300.0),
+            (0.2, 20_000.0),
+            (1.0, 20_000.0),
+        ] {
+            let mut e = mod_api::SoundEffects::NONE;
+            e.gain = gain;
+            e.lowpass = lowpass;
+            m.channels.get_mut(&1).unwrap().fx.target = e;
+            out.extend(listen(&mut m, 0.05));
+        }
+        let largest = 0.3 * std::f32::consts::TAU * 440.0 / 48_000.0;
+        let jump = out
+            .chunks(2)
+            .zip(out.chunks(2).skip(1))
+            .map(|(a, b)| (b[0] - a[0]).abs().max((b[1] - a[1]).abs()))
+            .fold(0.0f32, f32::max);
+        assert!(jump <= largest * 1.05, "{jump} > {largest}");
     }
 
     #[test]

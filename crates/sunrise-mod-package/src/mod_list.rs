@@ -6,6 +6,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
+    io::{self, Write},
     path::Path,
 };
 
@@ -401,16 +402,26 @@ impl ModList {
             keys.remove(name);
         }
     }
-    pub fn save(&self, dir: &Path) {
+    /// Saves a complete replacement for the player's mod settings.
+    pub fn save(&self, dir: &Path) -> io::Result<()> {
+        self.save_with(dir, |file, bytes| file.write_all(bytes))
+    }
+
+    fn save_with(
+        &self,
+        dir: &Path,
+        write: impl FnOnce(&mut fs::File, &[u8]) -> io::Result<()>,
+    ) -> io::Result<()> {
         let path = dir.join(FILE);
         if self.enabled.is_empty()
             && self.disabled.is_empty()
             && self.keys.is_empty()
             && !path.exists()
         {
-            return;
+            return Ok(());
         }
-        let _ = fs::write(path, self.serialize());
+        let text = self.serialize();
+        crate::durable::write_with(&path, |file| write(file, text.as_bytes()))
     }
     pub fn is_on(&self, i: usize) -> bool {
         self.installed.get(i).is_some_and(|m| {
@@ -454,6 +465,25 @@ impl ModList {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interrupted_save_keeps_the_previous_mod_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = ModList::parse("mod.ruby:true\nmod.sapphire:false\n");
+        old.save(dir.path()).unwrap();
+        let new = ModList::parse("mod.amethyst:true\nmod.ruby:false\n");
+        let error = new
+            .save_with(dir.path(), |file, bytes| {
+                file.write_all(&bytes[..b"mod.amethyst:true\n".len()])?;
+                Err(io::ErrorKind::Interrupted.into())
+            })
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(
+            fs::read(dir.path().join(FILE)).unwrap(),
+            old.serialize().as_bytes()
+        );
+    }
 
     #[test]
     fn round_trips_and_ignores_the_rest() {

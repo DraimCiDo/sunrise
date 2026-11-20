@@ -38,13 +38,16 @@ Parts are expanded after every mod has registered, so a Part can target a type d
 
 A Part attaches by type id, whoever declared the type: `r.block_entity_type_key("owner:press")` then
 `r.block_entity_part(&press, MyPart)`. Only a package that lists the declaring package in its
-`[dependencies]` (required or optional) may do so. Otherwise load is refused by name, even when that
-package is installed:
+`[dependencies]` (required or optional) may do so, and that row must apply on the current
+installation side and survive instance overrides. Otherwise load is refused by name,
+even when that package is installed:
 `mod b attached <Part> to block entity type owner:press, declared by package owner; declare owner as a dependency`.
 A type that no package declares keeps the refusal `mod b attached <Part> to undeclared native block entity type owner:press`;
 when `b` lists the installed package that owns the type's namespace (its id or one of its manifest `namespaces`) as a
-required dependency, the refusal says that dependency does not declare it. An optional dependency is recognised for an absent package by a type whose namespace is that package's id. Then the Part is skipped, without a refusal, when that package is not installed
-(a compatibility Part); when it is installed, the Part attaches.
+required dependency, the refusal says that dependency does not declare it. If the type's namespace is
+the ID of an absent package, its Part and the associated key request are skipped only when an optional
+dependency row applies on the installation side and survives instance overrides. A capability
+provider using that key still requires the type. A present package must declare the requested type.
 This keeps resolution independent of what else is installed. Parts of several packages on one type run in
 dispatch order (`mod_index`, then registration order), the same on every load.
 

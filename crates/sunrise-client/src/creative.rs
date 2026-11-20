@@ -340,6 +340,10 @@ pub fn item_group_key(id: &str) -> Option<&'static str> {
         _ => return None,
     })
 }
+/// A mod tab's own `itemGroup.<mod>.<name>` key, for its id `<mod>:<name>`.
+pub fn mod_item_group_key(id: &str) -> String {
+    format!("itemGroup.{}", id.replace(':', "."))
+}
 impl Creative {
     pub const WIDTH: f32 = 195.0;
     pub const HEIGHT: f32 = 136.0;
@@ -450,7 +454,7 @@ impl Creative {
                 .and_then(|s| crate::item_data::parse_stack(s).ok().flatten());
             headers.push(Tab {
                 id: recipe.id.clone(),
-                title: tab["title"].as_str().unwrap_or("").to_owned(),
+                title: recipe.title.clone(),
                 icon: icon.map_or_else(|| "minecraft:stone".to_owned(), |s| s.item.to_string()),
                 items: Vec::new(),
                 top: tab["row"] == "TOP",
@@ -1466,10 +1470,10 @@ mod tests {
         use sunrise_protocol::registry::{Builtin, Dynamic};
         let raw = serde_json::json!({
             "schema":4, "item_features":{}, "potion_features":{}, "tabs":[
-                {"id":"minecraft:ingredients", "type":"CATEGORY", "build":[
+                {"id":"minecraft:ingredients", "title":"Ingredients", "type":"CATEGORY", "build":[
                     {"kind":"enchantments","all_levels":false,"visibility":"PARENT_AND_SEARCH_TABS"}
                 ]},
-                {"id":"minecraft:search", "type":"SEARCH", "build":[], "search_metadata":[
+                {"id":"minecraft:search", "title":"Search Items", "type":"SEARCH", "build":[], "search_metadata":[
                     {"stack":r#"{components:{"minecraft:stored_enchantments":{"minecraft:sharpness":5}},count:1,id:"minecraft:enchanted_book"}"#, "lines":["Enchanted Book","Sharpness V"]}
                 ]}
             ]
@@ -1522,8 +1526,8 @@ mod tests {
         let visible = r#"{id:"minecraft:enchanted_book",count:1,components:{"minecraft:lore":["Ink under moonlight"]}}"#;
         let hidden = r#"{id:"minecraft:enchanted_book",count:1,components:{"minecraft:lore":["Ink under moonlight"],"minecraft:tooltip_display":{hidden_components:["minecraft:lore"]}}}"#;
         let creative = fixture(serde_json::json!([
-            {"id":"minecraft:ingredients", "type":"CATEGORY", "build":[row(visible), row(hidden)]},
-            {"id":"minecraft:search", "type":"SEARCH", "build":[]}
+            {"id":"minecraft:ingredients", "title":"Ingredients", "type":"CATEGORY", "build":[row(visible), row(hidden)]},
+            {"id":"minecraft:search", "title":"Search Items", "type":"SEARCH", "build":[]}
         ]));
         assert_eq!(creative.search_items().len(), 2);
         assert_eq!(
@@ -1544,8 +1548,8 @@ mod tests {
             r#","minecraft:tooltip_display":{hidden_components:["minecraft:written_book_content"]}"#,
         );
         let creative = fixture(serde_json::json!([
-            {"id":"minecraft:ingredients", "type":"CATEGORY", "build":[row(&visible), row(&hidden)]},
-            {"id":"minecraft:search", "type":"SEARCH", "build":[]}
+            {"id":"minecraft:ingredients", "title":"Ingredients", "type":"CATEGORY", "build":[row(&visible), row(&hidden)]},
+            {"id":"minecraft:search", "title":"Search Items", "type":"SEARCH", "build":[]}
         ]));
         assert_eq!(creative.search_items().len(), 2);
         let language = lang::Language::of("en_us", [("book.byAuthor".into(), "by %1$s".into())]);
@@ -1571,12 +1575,12 @@ mod tests {
             )
         };
         let mut creative = fixture(serde_json::json!([
-            {"id":"minecraft:ingredients", "type":"CATEGORY", "build":[
+            {"id":"minecraft:ingredients", "title":"Ingredients", "type":"CATEGORY", "build":[
                 row(stack("")),
                 row(stack(r#""minecraft:attribute_modifiers""#)),
                 row(stack(r#""minecraft:painting/variant""#))
             ]},
-            {"id":"minecraft:search", "type":"SEARCH", "build":[]}
+            {"id":"minecraft:search", "title":"Search Items", "type":"SEARCH", "build":[]}
         ]));
         creative.holders = Arc::new(Holders {
             paintings: vec![Painting {
@@ -1611,8 +1615,8 @@ mod tests {
         let tool = r#"{id:"minecraft:wooden_pickaxe",count:1,components:{"minecraft:enchantments":{"test:veins":2},"minecraft:unbreakable":{}}}"#;
         let mut creative = Creative::from_json(&serde_json::json!({
             "schema":4, "item_features":{}, "potion_features":{}, "tabs":[
-                {"id":"minecraft:ingredients", "type":"CATEGORY", "build":[row(tool)]},
-                {"id":"minecraft:search", "type":"SEARCH", "build":[], "search_metadata":[
+                {"id":"minecraft:ingredients", "title":"Ingredients", "type":"CATEGORY", "build":[row(tool)]},
+                {"id":"minecraft:search", "title":"Search Items", "type":"SEARCH", "build":[], "search_metadata":[
                     {"stack":tool, "lines":["Wooden Pickaxe", "Stale Vein Finder II"]}
                 ]}
             ]

@@ -422,6 +422,7 @@ pub struct SoundPlay {
     pub delay: i32,
     pub attenuation: super::SoundAttenuation,
     pub relative: bool,
+    pub effects: super::SoundEffects,
 }
 impl From<SoundPlay> for super::SoundPlay {
     fn from(v: SoundPlay) -> Self {
@@ -435,6 +436,7 @@ impl From<SoundPlay> for super::SoundPlay {
             delay,
             attenuation,
             relative,
+            effects,
         } = v;
         Self {
             identifier,
@@ -446,6 +448,7 @@ impl From<SoundPlay> for super::SoundPlay {
             delay,
             attenuation,
             relative,
+            effects,
         }
     }
 }

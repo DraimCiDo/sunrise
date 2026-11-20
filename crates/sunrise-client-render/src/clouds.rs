@@ -1,6 +1,7 @@
 //! Cloud visibility and flat/fancy cell geometry (`CloudRenderer`).
-/// `EnvironmentAttributes.CLOUD_HEIGHT`'s default, and the overworld's `visual/cloud_height`.
-pub const CLOUD_HEIGHT: f64 = 192.33;
+/// `EnvironmentAttributes.CLOUD_HEIGHT`'s default (the overworld's `visual/cloud_height`); the
+/// layer itself follows [`Input::height`].
+pub const CLOUD_HEIGHT: f32 = 192.33;
 
 /// Whether the cloud color has any packed alpha (vanilla gates the clouds on it).
 pub fn has_color(alpha: f32) -> bool {
@@ -144,6 +145,10 @@ pub struct Input<'a> {
     pub range: i32,
     pub fast: bool,
     pub color: [f32; 4],
+    /// The layer's bottom: `EnvironmentAttributes.CLOUD_HEIGHT` probed at the camera this frame
+    /// (`LevelExtractor`: `levelRenderState.cloudHeight`, a float), as the game samples it
+    /// (`environment::Sky::cloud_height`).
+    pub height: f32,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -192,7 +197,7 @@ impl Input<'_> {
         let cell_z = (z / 12.0).floor() as i64 / snap * snap;
         // `prepare`'s bottomY is a float (the cloud height attribute's), widened to subtract
         // the camera's double y, then narrowed again.
-        let bottom = (f64::from(CLOUD_HEIGHT as f32) - self.camera.y) as f32;
+        let bottom = (f64::from(self.height) - self.camera.y) as f32;
         // The inward faces of the 3x3 cells around the camera are only seen from inside the
         // layer; outside it they are back-facing, so the mesh need not follow the camera there.
         let inside_layer = bottom <= 0.0 && bottom + 4.0 >= 0.0;
@@ -643,6 +648,7 @@ mod tests {
             range: 2,
             fast: false,
             color: [1.0; 4],
+            height: CLOUD_HEIGHT,
         };
         let mut mesh = Mesh::default();
         assert!(mesh.prepare(&input).0);
@@ -700,6 +706,12 @@ mod tests {
         input.partial_tick = 0.0;
         assert!(mesh.prepare(&input).0);
         assert!(!mesh.prepare(&input).0);
+        // A higher layer, still above the camera, moves only the uniform: its bottom is 250 less
+        // the camera's 101.
+        input.height = 250.0;
+        let (rebuilt, uniform) = mesh.prepare(&input);
+        assert!(!rebuilt);
+        assert_eq!(uniform.offset[1], 149.0);
         // 400 ticks of drift move the clouds 12 blocks: one whole snap cell.
         input.time = SNAP_CELLS * 400;
         assert!(mesh.prepare(&input).0);
@@ -724,6 +736,7 @@ mod tests {
             range: 2,
             fast: false,
             color: [1.0; 4],
+            height: CLOUD_HEIGHT,
         };
         // One snap cell, in blocks.
         let cell = SNAP_CELLS as f64 * 12.0;
@@ -765,6 +778,7 @@ mod tests {
             range: 2,
             fast: false,
             color: [1.0; 4],
+            height: CLOUD_HEIGHT,
         };
         let mut mesh = Mesh::default();
         assert!(mesh.prepare(&input).0);
