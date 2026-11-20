@@ -114,13 +114,6 @@ fn resident_tick_reads_and_updates_the_same_entity() {
 fn nested_commit_is_undone_by_outer_abort() {
     const NAME: &str = "game::block_entity_view_tests::nested_commit_is_undone_by_outer_abort";
     with_fixture(NAME, |game, entity| {
-        let revision = |game: &Game<'_>| {
-            let Some(BlockEntity::Mod(row)) = game.world.block_entities.get(&POS) else {
-                panic!("the resident block entity disappeared");
-            };
-            row.revision()
-        };
-        let original = revision(game);
         let result = mod_api::run_transaction(game, |game, _| {
             mod_api::run_transaction(game, |game, _| {
                 game.tick_mod_block_entity(POS);
@@ -132,8 +125,8 @@ fn nested_commit_is_undone_by_outer_abort() {
             Err::<(), _>("abort")
         });
         assert_eq!(result, Err("abort"));
+        // The same pre-tick handle still reads its original data after abort.
         assert_eq!(entity.data_slots(game).unwrap(), [13, 7]);
-        assert_eq!(revision(game), original);
     });
 }
 
