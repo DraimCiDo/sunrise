@@ -14,7 +14,11 @@ use super::{Game, commands::Target};
 use glam::{DVec3, Mat4, Vec3};
 use mod_api::{GuiEntity, GuiEntityError, GuiEntityLook, GuiEntityView};
 use std::{cell::RefCell, sync::Arc};
-use sunrise_client::{hud::HudBatch, mesher::Vertex, mobs::Mob};
+use sunrise_client::{
+    hud::HudBatch,
+    mesher::Vertex,
+    mobs::{Mob, render::FrameDraw},
+};
 use sunrise_core::{
     geometry::Vec3 as Position,
     nbt::{Compound, JavaString, Tag},
@@ -254,7 +258,10 @@ impl Game<'_> {
         out: &mut Vec<Vertex>,
     ) {
         let added = self.mod_layers(mob);
-        let mut parts = None;
+        let mut frame_draw = FrameDraw {
+            capture_parts: added.is_some(),
+            ..Default::default()
+        };
         // A mod's renderer for the type draws in place of the model only: the mods' layers
         // still follow, as in the world.
         let modded =
@@ -266,7 +273,7 @@ impl Game<'_> {
             if modded {
                 return;
             }
-            sunrise_client::mobs::render::render_with_hidden(
+            sunrise_client::mobs::render::render_with_frame(
                 mob,
                 partial,
                 camera,
@@ -274,12 +281,20 @@ impl Game<'_> {
                 FULL_BRIGHT,
                 self,
                 &[],
-                Default::default(),
-                added.is_some().then_some(&mut parts),
+                &mut frame_draw,
                 out,
             );
         });
-        self.mod_layer_geometry(mob, None, parts, added, partial, camera, FULL_BRIGHT, out);
+        self.mod_layer_geometry(
+            mob,
+            None,
+            frame_draw.parts,
+            added,
+            partial,
+            camera,
+            FULL_BRIGHT,
+            out,
+        );
     }
 }
 

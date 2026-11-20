@@ -1431,6 +1431,18 @@ pub fn put(
     }
     draw_scrolled(part, base, poses, uv, scroll, color, light, overlay, out);
 }
+/// The per-draw model inputs and optional pose captured for the mods' post hooks and layers.
+/// Start with a fresh value for each draw.
+#[derive(Default)]
+pub struct FrameDraw {
+    /// Parts the pre hooks hid on the body and the layers over its own model.
+    pub hidden: mod_api::HiddenParts,
+    /// Whether to capture the body's humanoid pose for this draw.
+    pub capture_parts: bool,
+    /// The captured pose, if requested and the draw produced one.
+    pub parts: Option<mod_api::PosedParts>,
+}
+
 /// Render a mob with its variant model, texture and layers.
 pub fn render(
     m: &Mob,
@@ -1457,7 +1469,7 @@ pub fn render_with(
     extra: &[(&Part, [f32; 4], u32, u32, bool)],
     out: &mut Vec<Vertex>,
 ) {
-    render_with_hidden(
+    render_with_frame(
         m,
         alpha,
         camera,
@@ -1465,18 +1477,16 @@ pub fn render_with(
         light,
         data,
         extra,
-        Default::default(),
-        None,
+        &mut FrameDraw::default(),
         out,
     );
 }
 /// [`render_with`], with the parts a mod's `render_player_pre` hid left out of the body (after Skin
 /// Customization) and the layers on its own model; the armour in `extra` and the other layers keep
-/// every part. `parts`, given while the mods' post hooks want them, gets the humanoid parts as the
-/// body was drawn ([`PosedParts`](mod_api::PosedParts)); it stays None for a mob that isn't a
-/// humanoid or isn't drawn.
+/// every part. When requested, `frame.parts` gets the humanoid parts as the body was drawn; it
+/// stays empty for a mob that isn't a humanoid or isn't drawn.
 #[allow(clippy::too_many_arguments)]
-pub fn render_with_hidden(
+pub fn render_with_frame(
     m: &Mob,
     alpha: f32,
     camera: glam::DVec3,
@@ -1484,8 +1494,7 @@ pub fn render_with_hidden(
     light: u32,
     data: &dyn RenderDataSource,
     extra: &[(&Part, [f32; 4], u32, u32, bool)],
-    hidden: mod_api::HiddenParts,
-    mut parts: Option<&mut Option<mod_api::PosedParts>>,
+    frame: &mut FrameDraw,
     out: &mut Vec<Vertex>,
 ) {
     let paint = Some(body_color(m, alpha));
@@ -1500,18 +1509,7 @@ pub fn render_with_hidden(
                     camera - glam::DVec3::new(off[0] + w[0], off[1] + w[1], off[2] + w[2]);
                 let base = base_transform(m, alpha, shifted);
                 render_visible(
-                    m,
-                    alpha,
-                    base,
-                    atlas,
-                    light,
-                    data,
-                    extra,
-                    paint,
-                    hidden,
-                    parts.as_deref_mut(),
-                    out,
-                    None,
+                    m, alpha, base, atlas, light, data, extra, paint, frame, out, None,
                 );
             }
         }
@@ -1526,15 +1524,14 @@ pub fn render_with_hidden(
         data,
         extra,
         paint,
-        hidden,
-        parts,
+        frame,
         out,
         None,
     );
 }
 /// `render` with the model's ordinary draws posed on the GPU when the mob
 /// allows it (`super::skin`): the same picture, no vertices on the CPU.
-/// `hidden` and `parts` as for [`render_with_hidden`].
+/// `frame` as for [`render_with_frame`].
 #[allow(clippy::too_many_arguments)]
 pub fn render_skinned(
     m: &Mob,
@@ -1543,24 +1540,12 @@ pub fn render_skinned(
     atlas: Atlas,
     light: u32,
     data: &dyn RenderDataSource,
-    hidden: mod_api::HiddenParts,
-    parts: Option<&mut Option<mod_api::PosedParts>>,
+    frame: &mut FrameDraw,
     out: &mut Vec<Vertex>,
     skin: &mut super::skin::Skin,
 ) {
     if m.is_invisible() {
-        render_with_hidden(
-            m,
-            alpha,
-            camera,
-            atlas,
-            light,
-            data,
-            &[],
-            hidden,
-            parts,
-            out,
-        );
+        render_with_frame(m, alpha, camera, atlas, light, data, &[], frame, out);
         return;
     }
     render_visible(
@@ -1572,8 +1557,7 @@ pub fn render_skinned(
         data,
         &[],
         Some(body_color(m, alpha)),
-        hidden,
-        parts,
+        frame,
         out,
         Some(skin),
     );
@@ -1820,8 +1804,8 @@ fn shoulder_parrot_texture(variant: i32) -> String {
 /// `render_with` without the body, for an avatar the viewer can't see:
 /// `LivingEntityRenderer.submit` gets no render type for an invisible body
 /// (`isBodyVisible`, `isInvisibleTo`), but its layers still draw
-/// (`HumanoidArmorLayer`: the armour in `extra`). `parts` as for [`render_with_hidden`], posed as
-/// the layers draw over the unseen body.
+/// (`HumanoidArmorLayer`: the armour in `extra`). Captures the unhidden body's pose if requested;
+/// the parts hidden by the pre hooks do not affect this route.
 #[allow(clippy::too_many_arguments)]
 pub fn render_layers(
     m: &Mob,
@@ -1831,23 +1815,12 @@ pub fn render_layers(
     light: u32,
     data: &dyn RenderDataSource,
     extra: &[(&Part, [f32; 4], u32, u32, bool)],
-    parts: Option<&mut Option<mod_api::PosedParts>>,
+    frame: &mut FrameDraw,
     out: &mut Vec<Vertex>,
 ) {
     let base = base_transform(m, alpha, camera);
     render_visible(
-        m,
-        alpha,
-        base,
-        atlas,
-        light,
-        data,
-        extra,
-        None,
-        Default::default(),
-        parts,
-        out,
-        None,
+        m, alpha, base, atlas, light, data, extra, None, frame, out, None,
     );
 }
 /// A mob drawn under `origin` instead of at its position (the spinning mob
@@ -1871,8 +1844,7 @@ pub fn render_posed(
         data,
         &[],
         Some(body_color(m, alpha)),
-        Default::default(),
-        None,
+        &mut FrameDraw::default(),
         out,
         None,
     );
@@ -2065,8 +2037,7 @@ fn render_visible(
     extra: &[(&Part, [f32; 4], u32, u32, bool)],
     // `submit`'s `tintedColor` to draw the body in, or `None` for its layers only.
     paint: Option<u32>,
-    hidden: mod_api::HiddenParts,
-    parts: Option<&mut Option<mod_api::PosedParts>>,
+    frame: &mut FrameDraw,
     out: &mut Vec<Vertex>,
     skin: Option<&mut super::skin::Skin>,
 ) {
@@ -2200,11 +2171,12 @@ fn render_visible(
     // layers over its own model (`getParentModel`) draw without them, the armour and the other
     // layers below with every part.
     let mut hidden_poses = Poses::pooled();
-    let body_poses: &Poses = if hidden.is_empty() {
+    // The layers-only route always uses the unhidden poses.
+    let body_poses: &Poses = if paint.is_none() || frame.hidden.is_empty() {
         &poses
     } else {
         hidden_poses.copy_from(&poses);
-        if let Err(name) = hide_parts(&mut hidden_poses, &hidden) {
+        if let Err(name) = hide_parts(&mut hidden_poses, &frame.hidden) {
             report_unknown_hidden_part(&m.kind.id, name);
             return;
         }
@@ -2212,10 +2184,8 @@ fn render_visible(
     };
     // The mods' post hooks' snapshot: the body's parts as drawn, for `HumanoidMobRenderer`'s families
     // (`anim::extracts_humanoid`) only.
-    if let Some(parts) = parts
-        && anim::extracts_humanoid(m)
-    {
-        *parts = posed_parts(body_poses);
+    if frame.capture_parts && anim::extracts_humanoid(m) {
+        frame.parts = posed_parts(body_poses);
     }
     let draw_body = |out: &mut Vec<Vertex>, skin: &mut Option<&mut super::skin::Skin>| {
         // A player or mannequin whose skin has no atlas sprite (an evicted or
@@ -2938,8 +2908,13 @@ mod tests {
         };
         let draw_parts = |hidden: mod_api::HiddenParts,
                           extra: &[(&Part, [f32; 4], u32, u32, bool)]| {
-            let (mut out, mut parts) = (Vec::new(), None);
-            render_with_hidden(
+            let mut out = Vec::new();
+            let mut frame_draw = FrameDraw {
+                hidden,
+                capture_parts: true,
+                parts: None,
+            };
+            render_with_frame(
                 &mob,
                 0.5,
                 glam::DVec3::ZERO,
@@ -2947,11 +2922,10 @@ mod tests {
                 0xf0f0,
                 &data,
                 extra,
-                hidden,
-                Some(&mut parts),
+                &mut frame_draw,
                 &mut out,
             );
-            (out.len(), parts.expect("a humanoid"))
+            (out.len(), frame_draw.parts.expect("a humanoid"))
         };
         let draw =
             |hidden, extra: &[(&Part, [f32; 4], u32, u32, bool)]| draw_parts(hidden, extra).0;

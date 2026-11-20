@@ -938,8 +938,7 @@ mod tests {
                         &atlas,
                         0x50a0,
                         &data,
-                        Default::default(),
-                        None,
+                        &mut render::FrameDraw::default(),
                         &mut gpu,
                         &mut skin,
                     );

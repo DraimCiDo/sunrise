@@ -2,6 +2,7 @@
 //! layers, hooks, outline and beam around it), moved out of `mob_geometry_inner`: the pass
 //! works out the frame once (`LivingFrame`) and asks this for each mob in turn.
 use super::*;
+use sunrise_client::mobs::render::FrameDraw;
 
 /// What the mob pass works out once a frame for every living entity it draws.
 #[derive(Clone, Copy)]
@@ -154,7 +155,12 @@ impl Game<'_> {
                 mob.species(),
                 Species::Blaze | Species::MagmaCube | Species::GlowSquid | Species::SulfurCube
             );
-        let (mut skinned, mut parts, added) = (None, None, self.mod_layers(mob));
+        let (mut skinned, added) = (None, self.mod_layers(mob));
+        let mut frame_draw = FrameDraw {
+            hidden,
+            capture_parts: listened || added.is_some(),
+            parts: None,
+        };
         if posable {
             let mut models = self.skin_models.borrow_mut();
             let mut frame = self.skin_frame.borrow_mut();
@@ -167,8 +173,7 @@ impl Game<'_> {
                 &lookup,
                 packed,
                 self,
-                hidden,
-                (listened || added.is_some()).then_some(&mut parts),
+                &mut frame_draw,
                 out,
                 &mut skin,
             );
@@ -183,8 +188,7 @@ impl Game<'_> {
                     packed,
                     self,
                     &armor,
-                    hidden,
-                    (listened || added.is_some()).then_some(&mut parts),
+                    &mut frame_draw,
                     out,
                 );
             } else if layers_only {
@@ -196,11 +200,11 @@ impl Game<'_> {
                     packed,
                     self,
                     &armor,
-                    (listened || added.is_some()).then_some(&mut parts),
+                    &mut frame_draw,
                     out,
                 );
             } else {
-                sunrise_client::mobs::render::render_with_hidden(
+                sunrise_client::mobs::render::render_with_frame(
                     mob,
                     alpha as f32,
                     camera,
@@ -208,8 +212,7 @@ impl Game<'_> {
                     packed,
                     self,
                     &armor,
-                    hidden,
-                    (listened || added.is_some()).then_some(&mut parts),
+                    &mut frame_draw,
                     out,
                 );
             }
@@ -225,6 +228,7 @@ impl Game<'_> {
                 v.layer |= u32::from(tier) << 16;
             }
         }
+        let parts = frame_draw.parts;
         // AvatarRenderer.shouldRenderLayers: a spectator draws no layers.
         let layers = sunrise_client::mobs::render::layers_shown(mob);
         if is_player && layers {

@@ -4,8 +4,12 @@ fn posed_parts_are_the_poses_the_draw_made_and_change_nothing() {
     let (mob, data) = humanoid_zombie();
     let atlas = |_: &str| Some([0.0, 0.0, 1.0, 1.0]);
     let draw = |mob: &Mob, keep: bool| {
-        let (mut out, mut parts) = (Vec::new(), None);
-        render_with_hidden(
+        let mut out = Vec::new();
+        let mut frame_draw = FrameDraw {
+            capture_parts: keep,
+            ..Default::default()
+        };
+        render_with_frame(
             mob,
             0.5,
             glam::DVec3::ZERO,
@@ -13,13 +17,12 @@ fn posed_parts_are_the_poses_the_draw_made_and_change_nothing() {
             0xf0f0,
             &data,
             &[],
-            Default::default(),
-            keep.then_some(&mut parts),
+            &mut frame_draw,
             &mut out,
         );
         (
             out.iter().map(|v| format!("{v:?}")).collect::<Vec<_>>(),
-            parts,
+            frame_draw.parts,
         )
     };
     let (before, none) = draw(&mob, false);
@@ -55,7 +58,10 @@ fn posed_parts_are_the_poses_the_draw_made_and_change_nothing() {
     let mut models = super::super::skin::SkinModels::default();
     let mut frame = crate::gfx::entity_skin::SkinFrame::default();
     let mut skin = super::super::skin::Skin::new(&mut models, &mut frame);
-    let mut skinned = None;
+    let mut skinned = FrameDraw {
+        capture_parts: true,
+        ..Default::default()
+    };
     render_skinned(
         &mob,
         0.5,
@@ -63,13 +69,15 @@ fn posed_parts_are_the_poses_the_draw_made_and_change_nothing() {
         &atlas,
         0xf0f0,
         &data,
-        Default::default(),
-        Some(&mut skinned),
+        &mut skinned,
         &mut Vec::new(),
         &mut skin,
     );
-    assert_eq!(skinned, Some(parts), "the GPU path");
-    let mut layered = None;
+    assert_eq!(skinned.parts, Some(parts), "the GPU path");
+    let mut layered = FrameDraw {
+        capture_parts: true,
+        ..Default::default()
+    };
     render_layers(
         &mob,
         0.5,
@@ -78,10 +86,10 @@ fn posed_parts_are_the_poses_the_draw_made_and_change_nothing() {
         0xf0f0,
         &data,
         &[],
-        Some(&mut layered),
+        &mut layered,
         &mut Vec::new(),
     );
-    assert_eq!(layered, Some(parts), "the layers over an unseen body");
+    assert_eq!(layered.parts, Some(parts), "the layers over an unseen body");
 
     // QuadrupedModel (a cow) has a head and a body too: its family, not its parts, says it
     // isn't humanoid.
@@ -113,7 +121,7 @@ fn posed_parts_are_the_poses_the_draw_made_and_change_nothing() {
     absent.hide_named("nose").unwrap();
     let cpu = |mob: &Mob, hidden| {
         let mut out = Vec::new();
-        render_with_hidden(
+        render_with_frame(
             mob,
             0.5,
             glam::DVec3::ZERO,
@@ -121,8 +129,10 @@ fn posed_parts_are_the_poses_the_draw_made_and_change_nothing() {
             0xf0f0,
             &data,
             &[],
-            hidden,
-            None,
+            &mut FrameDraw {
+                hidden,
+                ..Default::default()
+            },
             &mut out,
         );
         out.len()
@@ -148,8 +158,10 @@ fn posed_parts_are_the_poses_the_draw_made_and_change_nothing() {
             &atlas,
             0xf0f0,
             &data,
-            hidden,
-            None,
+            &mut FrameDraw {
+                hidden,
+                ..Default::default()
+            },
             &mut Vec::new(),
             &mut skin,
         );
@@ -212,8 +224,10 @@ fn posed_parts_are_the_poses_the_draw_made_and_change_nothing() {
                 &data,
                 extra,
                 Some(body_color(&villager, 0.5)),
-                hidden,
-                None,
+                &mut FrameDraw {
+                    hidden,
+                    ..Default::default()
+                },
                 &mut out,
                 gpu_path.then_some(&mut skin),
             );

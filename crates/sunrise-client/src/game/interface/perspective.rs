@@ -17,7 +17,7 @@ use sunrise_client::{
 use sunrise_client::{
     entities::nameplate::NameplateDistances,
     hud::HudBatch,
-    mobs::{Anim, Brain, Mob, MobType},
+    mobs::{Anim, Brain, Mob, MobType, render::FrameDraw},
     mouse::Rotation,
     pose::Pose,
 };
@@ -825,13 +825,18 @@ impl Game<'_> {
             return;
         };
         // The mods' layers' posed parts, kept from the draw below while they want them.
-        let (mut parts, layers) = (None, self.mod_layers(m));
+        let layers = self.mod_layers(m);
+        let mut frame_draw = FrameDraw {
+            hidden,
+            capture_parts: listened || layers.is_some(),
+            parts: None,
+        };
         // A spectator still draws its own model in third person: the poses'
         // visibility (set by player_model_visibility) hides body parts, and
         // translucent_body marks the body OIT for the ghostly look. Only first
         // person and dead players skip it.
         if body || self.spectator() {
-            sunrise_client::mobs::render::render_with_hidden(
+            sunrise_client::mobs::render::render_with_frame(
                 m,
                 alpha as f32,
                 camera,
@@ -839,8 +844,7 @@ impl Game<'_> {
                 packed,
                 self,
                 &self.player_armor_layers(),
-                hidden,
-                (listened || layers.is_some()).then_some(&mut parts),
+                &mut frame_draw,
                 out,
             );
         } else {
@@ -852,10 +856,11 @@ impl Game<'_> {
                 packed,
                 self,
                 &self.player_armor_layers(),
-                (listened || layers.is_some()).then_some(&mut parts),
+                &mut frame_draw,
                 out,
             );
         }
+        let parts = frame_draw.parts;
         // AvatarRenderer.shouldRenderLayers: a spectator draws no layers.
         if sunrise_client::mobs::render::layers_shown(m) {
             let chest = self.armor[1].as_ref().map(|s| &*s.item);
@@ -979,7 +984,15 @@ impl Game<'_> {
                 );
             } else {
                 sunrise_client::mobs::render::render_layers(
-                    &m, 1.0, camera, &lookup, light, data, &armour, None, &mut verts,
+                    &m,
+                    1.0,
+                    camera,
+                    &lookup,
+                    light,
+                    data,
+                    &armour,
+                    &mut FrameDraw::default(),
+                    &mut verts,
                 );
             }
         });
@@ -2021,7 +2034,15 @@ mod preview_tests {
                 );
             } else {
                 sunrise_client::mobs::render::render_layers(
-                    &m, 1.0, at, &atlas, 0xF0F0, &data, &armour, None, &mut out,
+                    &m,
+                    1.0,
+                    at,
+                    &atlas,
+                    0xF0F0,
+                    &data,
+                    &armour,
+                    &mut FrameDraw::default(),
+                    &mut out,
                 );
             }
             out
@@ -2046,7 +2067,7 @@ mod preview_tests {
                 0xF0F0,
                 &data,
                 armour,
-                None,
+                &mut FrameDraw::default(),
                 out,
             );
         }
