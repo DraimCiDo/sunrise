@@ -17,9 +17,6 @@ mod registered_commands;
 #[cfg(test)]
 #[path = "native_server/selector_tests.rs"]
 mod selector_tests;
-#[cfg(test)]
-#[path = "native_server/wasm_provider_tests.rs"]
-mod wasm_provider_tests;
 
 use super::api_values::{TryIntoApi, TryIntoEngine};
 use super::{Dim, Game, commands::execute, respawn_anchor::RespawnConfig};

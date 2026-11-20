@@ -236,14 +236,14 @@ mod tests {
         let info = package_snapshot(
             &manifest,
             mod_api::PackageKind::Code,
-            Some(mod_api::PackageRuntime::Wasm),
+            Some(mod_api::PackageRuntime::Native),
             true,
         );
         assert_eq!(info.name(), "Test");
         assert_eq!(info.homepage(), Some("https://example.org"));
         assert_eq!(info.issues(), None);
         assert_eq!(info.icon_path(), Some("icon.png"));
-        assert_eq!(info.runtime(), Some(mod_api::PackageRuntime::Wasm));
+        assert_eq!(info.runtime(), Some(mod_api::PackageRuntime::Native));
         let [dependency] = info.dependencies() else {
             panic!("one dependency")
         };
