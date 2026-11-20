@@ -434,6 +434,9 @@ impl Game<'_> {
     }
 
     fn pad_all_targets(&self) -> Vec<Target> {
+        if let Some(targets) = self.stock_widget_targets() {
+            return targets.to_vec();
+        }
         let mut targets = key_focus::drawn_targets();
         if self.title.is_some()
             || self.sign_edit.is_some()
@@ -792,7 +795,10 @@ impl Game<'_> {
                 }
                 Button::South if self.pad.menu.armed.is_some() => {
                     let armed = self.pad.menu.armed.take();
-                    if let Some(at) = armed_click(armed, self.pad.menu.focus) {
+                    if let (Some(at), Some(focus)) =
+                        (armed_click(armed, self.pad.menu.focus), self.pad.menu.focus)
+                        && !self.press_stock_widget_target(focus)
+                    {
                         self.pad_click_at(event_loop, at, false);
                     }
                 }
@@ -1327,6 +1333,7 @@ impl Game<'_> {
     /// the one in front (a screen that just opened leaves the old focus
     /// behind it), so every menu's click focus goes.
     pub(super) fn clear_screen_click_focus(&mut self) {
+        self.clear_stock_widget_focus();
         if let Some(title) = self.title.as_mut()
             && !matches!(title.mode, sunrise_client::title::Mode::MissingMods { .. })
         {
@@ -2081,6 +2088,9 @@ impl Game<'_> {
         {
             return false;
         }
+        if self.stock_widget_key(key) {
+            return true;
+        }
         let Some(nav) = key_focus::nav_of(key, self.has_shift_down()) else {
             return false;
         };
@@ -2118,7 +2128,23 @@ impl Game<'_> {
             rows_take_enter: self.title.as_ref().is_some_and(|t| t.list_focused()),
             gui: self.gui_size(),
         };
-        let act = key_focus::act(nav, focus, &targets, ctx);
+        let act = if let key_focus::Nav::Tab { forward } = nav
+            && self.stock_widget_targets().is_some()
+            && !targets.is_empty()
+        {
+            // These targets already have an explicit listener registration
+            // order. The fallback's geometric ordering is for unbuilt screens.
+            let position = focus.and_then(|f| targets.iter().position(|t| *t == f));
+            let n = targets.len();
+            Act::Focus(match (position, forward) {
+                (Some(i), true) => (i + 1) % n,
+                (Some(i), false) => (i + n - 1) % n,
+                (None, true) => 0,
+                (None, false) => n - 1,
+            })
+        } else {
+            key_focus::act(nav, focus, &targets, ctx)
+        };
         if act == Act::Pass {
             return false;
         }
@@ -2148,7 +2174,9 @@ impl Game<'_> {
                 let focus = self.pad_reveal(focus);
                 self.pad.menu.focus = Some(focus);
                 // AbstractButton.keyPressed: onPress, with its click sound.
-                self.pad_click_at(event_loop, focus.center(), false);
+                if !self.press_stock_widget_target(focus) {
+                    self.pad_click_at(event_loop, focus.center(), false);
+                }
             }
             (Act::ToggleSlider, _) => self.pad.menu.slider_edit = !slider_edit,
             (Act::Nudge(sign), Some(focus)) => self.pad_nudge(event_loop, focus, sign),
@@ -2242,7 +2270,9 @@ impl Game<'_> {
         }
         match target.kind {
             Kind::Field => {
-                self.pad_click_at(event_loop, key_focus::field_click(target.rect), false);
+                if !self.focus_stock_widget_field(target) {
+                    self.pad_click_at(event_loop, key_focus::field_click(target.rect), false);
+                }
             }
             Kind::Row => {
                 let size = self.gui_size();
@@ -2378,6 +2408,9 @@ impl Game<'_> {
 
     /// Whether the screen under the keyboard can still be typed in.
     fn pad_has_typing_screen(&self) -> bool {
+        if self.stock_widget_text_focused() {
+            return true;
+        }
         self.text_input_focused()
             || self.title_input_active()
             || matches!(self.screen, Screen::Options | Screen::WorldOptions)

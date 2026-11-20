@@ -1190,6 +1190,12 @@ pub(super) fn emit<'a>(
                     call(&mod_item, "break"),
                 ),
             ),
+            None if name == "screen_init_post" => (
+                String::new(),
+                format!(
+                    "let mut {entered} = super::runtime::ListenerScope::new(); for (_, entry) in super::listening(HookId::{hook_id}) {{ let {mod_item} = {entered}.enter(entry, \"{name}\"); let saved = {event}.widgets.__checkpoint(entry.id); match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| super::runtime::refusable(contained, || {mod_item}.{name}({invoke})))) {{ Ok(Ok(())) => {{}}, Ok(Err(refusal)) => {{ {event}.widgets.__rollback(saved); refusal.report(); }}, Err(_) => {{ {event}.widgets.__rollback(saved); }} }} }}"
+                ),
+            ),
             None if name == "consume_effect" => (
                 format!(
                     "let Some(owner) = super::runtime::listening_kind_owner(HookId::{hook_id}, kind) else {{ return; }};"

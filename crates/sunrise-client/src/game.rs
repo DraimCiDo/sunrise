@@ -5030,7 +5030,12 @@ impl Game<'_> {
                     self.cursor,
                     self.settings.file.bool("hideSplashTexts"),
                     self.settings.file.bool("hideServerAddress"),
-                    &mut |phase, batch| self.draw_screen_phase(batch, phase),
+                    &mut |phase, batch| {
+                        if phase == sunrise_client::screen_draw::RenderPhase::Foreground {
+                            self.draw_stock_screen_additions(batch);
+                        }
+                        self.draw_screen_phase(batch, phase);
+                    },
                 );
             }
             // ScreenEvent.Render.Post over the title's own screens: a mod draws
@@ -9563,7 +9568,9 @@ impl Game<'_> {
             let title_text = control::title_owns_text(&self.screen, self.title.is_some());
             if self.screen_hooks_open()
                 && self.screen != Screen::Options
-                && (!title_text || self.title.as_mut().is_some_and(|t| t.has_caret_field()))
+                && (!title_text
+                    || self.stock_widget_text_focused()
+                    || self.title.as_mut().is_some_and(|t| t.has_caret_field()))
             {
                 typed = key_event.text.take().map(|text| text.to_string());
             }
@@ -9695,6 +9702,15 @@ impl Game<'_> {
                 return Ok(());
             }
             self.key_focus_mouse_press(&event);
+            if let WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Left,
+                ..
+            } = &event
+                && self.stock_widget_mouse(*state == ElementState::Pressed)
+            {
+                return Ok(());
+            }
             match event {
                 WindowEvent::CloseRequested => {
                     if !self.settings.quit_shortcuts
@@ -9721,6 +9737,9 @@ impl Game<'_> {
                         r.resize(size.width, size.height);
                     }
                     self.refresh_window_cursor();
+                    if self.has_screen_init_post() {
+                        self.build_screen();
+                    }
                     self.observe_fullscreen();
                 }
                 WindowEvent::Focused(focused) => {
@@ -9783,6 +9802,9 @@ impl Game<'_> {
                                 mouse_post = Some(post);
                             }
                             native_hooks::ScreenMousePre::NotFired => {}
+                        }
+                        if self.stock_widget_drag() {
+                            return Ok(());
                         }
                         if self.dialog_open() {
                             self.dialog_drag();
