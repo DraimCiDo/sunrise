@@ -4,7 +4,7 @@ During a mod's `BlockEntityPart::block_entity_tick`, existing dropped-item stack
 
 Later Parts see earlier proposed stacks in registration order. A proposed removal hides the item from handle resolution, item narrowing, entity selectors and item-place reads. Explicit nested host transactions can abort their own proposals; committing one waits for final tick acceptance.
 
-The engine validates the final block-entity snapshot and every item's original stack and residency incarnation before publishing either side. Rejected revisions, invalid stack conversions, malformed guest responses, stale item preconditions, and removal or replacement of the ticking block entity discard the proposals. A successful host setter means the proposal was accepted into the scope, not that final writeback has already committed. A numeric entity ID never retargets a replacement or another level. Removal notifications run after publication and after detaching the completed overlay.
+The engine validates the final block-entity snapshot and every item's original stack and residency incarnation before publishing either side. Rejected revisions, invalid stack conversions, stale item preconditions, and removal or replacement of the ticking block entity discard the proposals. A successful host setter means the proposal was accepted into the scope, not that final writeback has already committed. A numeric entity ID never retargets a replacement or another level. Removal notifications run after publication and after detaching the completed overlay.
 
 ## Operations outside the transaction
 

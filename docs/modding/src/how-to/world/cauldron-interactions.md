@@ -109,8 +109,8 @@ statistics must be vanilla custom-statistic identifiers or `minecraft:used`.
 
 `Interaction::fire(&mut dyn ServerHost, &CauldronUse, &CauldronPlan)` runs only on
 the server, inside the shared action transaction. Return `CauldronFire::Applied`
-to permit the plan and supported callback writes to commit. `Refused`, a panic,
-a guest trap, stale preconditions or an enclosing abort discards the action.
+to permit the plan and supported callback writes to commit. A refusal, panic,
+stale precondition or enclosing abort discards the action.
 Sounds, statistics, events and overflow drops wait for root commit. The action uses the
 shared transaction and runtime limits, with no cauldron-specific budget.
 

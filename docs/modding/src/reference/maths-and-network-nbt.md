@@ -8,7 +8,7 @@
 `exp`/`pow` additions use fdlibm's ordered IEEE double algorithms, including
 full large-argument trigonometric reduction, signed zeros, subnormals and
 overflow/underflow. They use no FMA or platform/libm calls and allocate no heap
-memory. Guest code links them locally: there is no Host call per operation.
+memory. These operations do not call the Host.
 The AArch64 FMA variants are deliberately not part of this StrictMath set.
 
 The committed literal reference table and deterministic seeded generator
@@ -42,11 +42,9 @@ returning machine/vendor/OS identification:
   selection on every remaining target.
 - `StrictMath`: fdlibm throughout. No target selects it.
 
-Every profile retains the engine's Java `pow` special cases. This is information,
-not guest math: `java_math` stays native-only. A guest must ship whatever libm,
-correctly rounded or FMA operations it needs, or explicitly report that it cannot
-reproduce the profile. The read does not extend `strict_math`'s supported operations
-or promise universal HotSpot equality. The read allocates nothing.
+Every profile retains the engine's Java `pow` special cases. Reading the profile
+does not change `strict_math` or promise universal HotSpot equality. It allocates
+nothing.
 
 ## Network NBT
 

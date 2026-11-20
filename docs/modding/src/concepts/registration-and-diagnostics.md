@@ -60,7 +60,7 @@ not during registration. Return `None` to omit a line.
 - Lines follow registration order on clients and dedicated servers.
 - Callbacks run on a separate thread. The report waits at most two seconds for headers and
   another two seconds for system-detail sections.
-- A callback that panics, traps or times out produces `~~ERROR~~`; the report is written.
+- A callback that panics or times out produces `~~ERROR~~`; the report is written.
 - Callbacks belonging to the mod blamed for the crash are not called.
 - Control characters become spaces, and each value is limited to 4096 bytes on one line.
 
@@ -68,7 +68,7 @@ not during registration. Return `None` to omit a line.
 
 If your native runtime hosts other packages, declare their IDs with
 `mod_api::content::crash::ConvertedPackages::new(runtime_id, ids)`. Obtain a handle with
-`packages.package(id)`, then call its `enter(export, site)` method around the guest call.
+`packages.package(id)`, then call its `enter(export, site)` method around the converted package’s call.
 
 The scope adds `in converted package <id>, export <export>, call site <site>` below the runtime's
 `in native mod` line. Nested scopes restore the previous attribution on return and panic unwind.

@@ -12,7 +12,7 @@ It has no live backend and is not a `ServerHost`.
 Every typed value needs a persistence codec and must implement `Wire`.
 Unknown bounded attachment entries are preserved opaquely.
 
-Codec errors, native unwinds and guest dispatch failures refuse the entire
+Codec errors and unwinding panics refuse the entire
 store: none of its edits are kept. The chunk still loads, with the attachments
 exactly as they were stored, so a mod bug leaves no gap in the world. No
 `chunk_data_save` listener runs for that chunk for the rest of the session, so
