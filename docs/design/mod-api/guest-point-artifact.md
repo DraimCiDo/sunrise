@@ -2,6 +2,9 @@
 
 Provisional proposal for [#2553](https://github.com/arismoko/horizon/issues/2553).
 Docs only; this is not approval to skip source validation or a speedup claim.
+Superseded for the game's own build by #1331: the point build scripts now read the point catalog
+`sunrise-stage` writes into the staged copy (`points::catalog` in `crates/sunrise-mod-api-gen/src/points.rs`), and
+the interface cache is gone. The code references below are of the tree this was written on.
 The proposed answer is conditional: an SDK-produced, identity-bound artifact can
 replace repeated discovery only when it carries the complete validated point,
 private-type and site input. Keep the full-source generator as an independent

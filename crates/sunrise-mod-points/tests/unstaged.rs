@@ -2,24 +2,16 @@
 use mod_api::__private::points::{Forward, Place, PointHost, SlotListener};
 use mod_points::RegisterError;
 
+/// A source tree's build has no point catalog: it compiles no point, so no listener can name one,
+/// and its table says it has no sites, which a wasm mod's load is refused by.
 #[test]
-fn native_listener_is_refused_by_mod_and_target() {
+fn a_plain_build_has_no_points_and_no_sites() {
     if mod_points::STAGED {
         return;
     }
-    let slot = mod_points::listeners::tick("named_mod", 0, "head", tick);
-    // The one boundary every registration passes, not a wrapper of it.
-    let error = mod_api::__private::points::register(&slot).unwrap_err();
-    assert!(matches!(error, RegisterError::Unstaged { .. }));
-    let message = error.to_string();
-    assert!(
-        message.contains("named_mod")
-            && message.contains("::tick")
-            && message.contains("no point sites"),
-        "{message}"
-    );
+    assert_eq!(mod_points::POINT_COUNT, 0);
+    assert!(!mod_points::__private::TABLE.has_sites());
 }
-fn tick(_: mod_api::HostSide<'_>, _: &mut mod_points::TickArgs) {}
 
 /// A place built outside its table is refused by name, staged or not: no index is trusted.
 #[test]

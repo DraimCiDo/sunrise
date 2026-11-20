@@ -1,5 +1,5 @@
 [workspace]
-exclude = ["crates/sunrise-telemetry-server", "crates/sunrise-mod-registry", "third_party/wgpu-hal", "third_party/naga", "third_party/libmimalloc-sys", "tools/fixtures/paper-trace-mod"]
+exclude = ["docs/modding/examples", "crates/sunrise-telemetry-server", "crates/sunrise-mod-registry", "third_party/wgpu-hal", "third_party/naga", "third_party/libmimalloc-sys", "tools/fixtures/paper-trace-mod"]
 members = [
     "crates/sunrise-guest-stack",
     "crates/sunrise-mod-vocab",
@@ -18,7 +18,6 @@ members = [
     "crates/sunrise-addresses",
     "crates/sunrise-mod-runtime",
     "crates/sunrise-mod-render",
-    "docs/modding/examples",
     "crates/sunrise-dualsense",
     "crates/sunrise-narrator",
     "crates/sunrise-threads",

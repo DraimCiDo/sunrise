@@ -66,8 +66,8 @@ impl GamePoint {
 }
 
 impl GamePoint {
-    /// The point of `found`'s function, whose shape is `shape`, as `points.json` lists it.
-    pub(crate) fn new(shape: point_shape::Shape, found: &Found<'_>, target: String) -> Self {
+    /// The point of a function returning `output`, whose shape is `shape`, as `points.json` lists it.
+    pub(crate) fn new(shape: point_shape::Shape, output: &syn::ReturnType, target: String) -> Self {
         let api = shape.api_items(&target);
         GamePoint {
             signature_hash: String::new(),
@@ -107,7 +107,7 @@ impl GamePoint {
                 (point_shape::Returns::Value(_), true) => "result",
                 (point_shape::Returns::Opaque, true) => "none",
             },
-            return_ty: match &found.sig.output {
+            return_ty: match output {
                 syn::ReturnType::Default => "()".to_owned(),
                 syn::ReturnType::Type(_, ty) => point_shape::spelling(ty),
             },
@@ -161,22 +161,6 @@ pub(crate) fn below_points(root: &Path) -> Result<std::collections::BTreeSet<Str
         }
     }
     Ok(seen)
-}
-
-/// The game module's files, slot lists and marked crates' files, for a build script to track.
-pub fn tracked(root: &Path) -> Result<Vec<PathBuf>, String> {
-    let mut files: Vec<_> = game_files(&root.join("crates/sunrise-client/src"), true)?
-        .into_iter()
-        .map(|file| file.path)
-        .collect();
-    let crates: std::collections::BTreeSet<_> = marked(root)?
-        .into_iter()
-        .filter_map(|(_, path)| path.split("::").next().map(str::to_owned))
-        .collect();
-    for krate in crates {
-        files.extend(crate_files(root, &krate)?.into_iter().map(|file| file.path));
-    }
-    Ok(files)
 }
 
 /// A point's function, as found in a parsed file.
@@ -269,15 +253,71 @@ impl Found<'_> {
     /// Its shape. A function without a replacement cell has no site a listener could run at:
     /// its API listeners are refused, naming the rule.
     fn shape(&self) -> Result<point_shape::Shape, String> {
-        let mut shape =
-            point_shape::shape(self.attribute().parse().expect("the attribute"), self.sig)
-                .map_err(|e| format!("{}: {e}", self.target()))?;
-        if let Some(rule) = self.unreplaceable {
-            shape.api_refusal = Some(format!(
-                "the function has no point site: it takes no replacement ({rule})"
-            ));
+        shape(
+            &self.target(),
+            &self.attribute(),
+            self.sig,
+            self.unreplaceable,
+        )
+    }
+
+    /// What the catalog keeps of it, with `sig` the signature its API contract is of.
+    fn entry(&self, sig: &syn::Signature) -> Entry {
+        Entry {
+            target: self.target(),
+            attribute: self.attribute(),
+            signature: sig.to_token_stream().to_string(),
+            unreplaceable: self.unreplaceable.map(str::to_owned),
         }
-        Ok(shape)
+    }
+}
+
+/// The shape of the point at `target`: `attribute` on a function with signature `sig`, and the
+/// refusal of a function without a replacement cell, naming its `unreplaceable` rule.
+fn shape(
+    target: &str,
+    attribute: &str,
+    sig: &syn::Signature,
+    unreplaceable: Option<&str>,
+) -> Result<point_shape::Shape, String> {
+    let attribute = attribute
+        .parse()
+        .map_err(|e| format!("{target}: attribute {attribute}: {e}"))?;
+    let mut shape = point_shape::shape(attribute, sig).map_err(|e| format!("{target}: {e}"))?;
+    if let Some(rule) = unreplaceable {
+        shape.api_refusal = Some(format!(
+            "the function has no point site: it takes no replacement ({rule})"
+        ));
+    }
+    Ok(shape)
+}
+
+/// One point as the point catalog keeps it: what its records, listeners and dispatch are
+/// generated from, with no source to read.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Entry {
+    /// The function, as an injection's `target` names it.
+    pub target: String,
+    /// The `#[point]` attribute's arguments the staging pass writes on it.
+    pub attribute: String,
+    /// The signature its API contract is of: the source's, before staging rewrote it.
+    pub signature: String,
+    /// The replacement rule that leaves it without a cell, when one does.
+    pub unreplaceable: Option<String>,
+}
+
+impl Entry {
+    /// The point this entry describes.
+    pub fn point(&self) -> Result<GamePoint, String> {
+        let sig: syn::Signature = syn::parse_str(&self.signature)
+            .map_err(|e| format!("{}: signature {}: {e}", self.target, self.signature))?;
+        let shape = shape(
+            &self.target,
+            &self.attribute,
+            &sig,
+            self.unreplaceable.as_deref(),
+        )?;
+        Ok(GamePoint::new(shape, &sig.output, self.target.clone()))
     }
 }
 
@@ -397,21 +437,6 @@ fn scan(root: &Path) -> Result<(Vec<Scanned>, Vec<(String, String)>), String> {
     for file in game_files(&root.join("crates/sunrise-client/src"), true)? {
         files.push((file, None));
     }
-    // The wasm host's listener tests listen at points of their own fixture file.
-    #[cfg(feature = "listener-fixture")]
-    {
-        let path = root.join("crates/sunrise-mod-wasm/tests/fixture/src/points.rs");
-        if path.is_file() {
-            files.push((
-                mod_source::modules::ModuleFile {
-                    module: "listener_fixture".into(),
-                    path,
-                    cfg: Vec::new(),
-                },
-                None,
-            ));
-        }
-    }
     let list = marked(root)?;
     let below = below_points(root)?;
     let mut crates = std::collections::BTreeSet::new();
@@ -475,7 +500,8 @@ fn scan(root: &Path) -> Result<(Vec<Scanned>, Vec<(String, String)>), String> {
     let mut scanned = Vec::new();
     for (file, package) in files {
         let source = fs::read_to_string(&file.path).map_err(|e| e.to_string())?;
-        let parsed = crate::interface_cache::parse(&file.path, &source)?;
+        let parsed =
+            syn::parse_file(&source).map_err(|e| format!("{}: {e}", file.path.display()))?;
         scanned.push(Scanned {
             path: file.path,
             module: file.module,
@@ -676,19 +702,28 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
 
 /// [`game_points`] with the `mod_api` types a record may hold.
 pub(crate) fn points_with(root: &Path, wire: &WireTypes) -> Result<Vec<GamePoint>, String> {
+    entries_with(root, wire)?.iter().map(Entry::point).collect()
+}
+
+/// The catalog entries of the source at `root`, sorted by point name.
+pub(crate) fn entries_with(root: &Path, wire: &WireTypes) -> Result<Vec<Entry>, String> {
     let (scanned, list) = scan(root)?;
-    let mut points = all_points(&scanned, &list, wire)?
-        .into_iter()
-        .map(|(_, found)| point_record(found))
-        .collect::<Result<Vec<_>, _>>()?;
-    points.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(points)
+    let mut entries = Vec::new();
+    for (_, found) in all_points(&scanned, &list, wire)? {
+        let (entry, name) = point_entry(&found)?;
+        entries.push((name, entry));
+    }
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(entries.into_iter().map(|(_, entry)| entry).collect())
+}
+
+/// The point record of `found`, and its catalog entry.
+fn point_record(found: Found<'_>) -> Result<GamePoint, String> {
+    point_entry(&found)?.0.point()
 }
 
 // Both standalone discovery and source staging retain the original API signature.
-fn point_record(found: Found<'_>) -> Result<GamePoint, String> {
-    let target = found.target();
-
+fn point_entry(found: &Found<'_>) -> Result<(Entry, String), String> {
     // Replacement normalizes parameter patterns. Keep the API contract of the original
     // signature, including refusals, rather than promoting a staged function into a point.
     let original = found
@@ -714,12 +749,135 @@ fn point_record(found: Found<'_>) -> Result<GamePoint, String> {
         })
         .map(|text| syn::parse_str::<syn::Signature>(&text).map_err(|e| e.to_string()))
         .transpose()?;
-    let found = Found {
-        sig: original.as_ref().unwrap_or(found.sig),
-        ..found
+    let entry = found.entry(original.as_ref().unwrap_or(found.sig));
+    Ok((entry, found.shape()?.name))
+}
+
+/// The point catalog the staging pass writes into a staged copy, relative to its root. The
+/// points' build scripts generate from it and read no source: a source tree has none, and its
+/// build compiles no point.
+pub const CATALOG: &str = "crates/sunrise-engine-slots/points-catalog.json";
+
+/// The listener fixture's points, relative to the root: what the point build scripts generate
+/// from under their `listener-fixture` feature, for the tests that listen at points.
+pub const FIXTURE: &str = "crates/sunrise-engine-slots/fixture-points.json";
+
+/// The stamp the staging pass writes first into the copy it stages.
+pub(crate) const STAMP: &str = ".sunrise-source-staged";
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct CatalogFile {
+    /// The stamp of the staging pass that wrote it: a catalog belongs to that one copy.
+    stamp: String,
+    points: Vec<Entry>,
+}
+
+/// Write the point catalog of the staged copy at `root`, which carries `stamp`.
+pub(crate) fn write_catalog(root: &Path, stamp: &str, entries: Vec<Entry>) -> Result<(), String> {
+    let path = root.join(CATALOG);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    }
+    let text = serde_json::to_string(&CatalogFile {
+        stamp: stamp.to_owned(),
+        points: entries,
+    })
+    .map_err(|e| e.to_string())?;
+    fs::write(&path, text + "\n").map_err(|e| format!("{}: {e}", path.display()))
+}
+
+fn fixture_entries(root: &Path) -> Result<Vec<Entry>, String> {
+    let path = root.join(FIXTURE);
+    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The listener fixture's points, sorted by name, as `points.json` lists them.
+pub fn fixture_points(root: &Path) -> Result<Vec<GamePoint>, String> {
+    let mut points = fixture_entries(root)?
+        .iter()
+        .map(Entry::point)
+        .collect::<Result<Vec<_>, _>>()?;
+    points.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(points)
+}
+
+/// The points a build compiles, read by the point build scripts.
+#[derive(Debug)]
+pub struct Catalog {
+    /// Every point, sorted by name.
+    pub points: Vec<GamePoint>,
+    /// Whether the build has the points' sites: a staged copy's, or the listener fixture's,
+    /// whose tests call the dispatch as a site would.
+    pub sited: bool,
+}
+
+/// The catalog of the tree at `root`: the staged copy's points, and the fixture's with `fixture`.
+/// It reads no source, and tells the build script's Cargo which files it read. A source tree
+/// without a staging stamp has no points; a stamp without its catalog, or a catalog without
+/// its stamp or with another copy's, is refused.
+pub fn catalog(root: &Path, fixture: bool) -> Result<Catalog, String> {
+    let stamp = root.join(STAMP);
+    let path = root.join(CATALOG);
+    let (mut entries, staged) = match (stamp.is_file(), path.is_file()) {
+        (false, false) => (Vec::new(), false),
+        (true, false) => {
+            return Err(format!(
+                "{}: this copy is staged but has no point catalog ({CATALOG}): staging did not finish; stage a fresh copy",
+                root.display()
+            ));
+        }
+        (false, true) => {
+            return Err(format!(
+                "{}: a point catalog belongs only in a copy sunrise-stage staged, beside its {STAMP}; delete it",
+                path.display()
+            ));
+        }
+        (true, true) => {
+            crate::rerun_if_changed(&stamp.display());
+            crate::rerun_if_changed(&path.display());
+            let stamped =
+                fs::read_to_string(&stamp).map_err(|e| format!("{}: {e}", stamp.display()))?;
+            let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let file: CatalogFile =
+                serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+            if file.stamp != stamped {
+                return Err(format!(
+                    "{}: written by another staging pass than this copy's {STAMP}; stage a fresh copy",
+                    path.display()
+                ));
+            }
+            (file.points, true)
+        }
     };
-    let shape = found.shape()?;
-    Ok(GamePoint::new(shape, &found, target))
+    crate::rerun_if_changed(&root.join(FIXTURE).display());
+    if fixture {
+        entries.extend(fixture_entries(root)?);
+    }
+    let mut points = entries
+        .iter()
+        .map(Entry::point)
+        .collect::<Result<Vec<_>, _>>()?;
+    points.sort_by(|a, b| a.name.cmp(&b.name));
+    let mut unique: Vec<GamePoint> = Vec::with_capacity(points.len());
+    for point in points {
+        match unique.last() {
+            // The fixture names a few game functions: in a staged copy, the very same point.
+            Some(last)
+                if last.name == point.name && last.signature_hash == point.signature_hash => {}
+            Some(last) if last.name == point.name => {
+                return Err(format!(
+                    "{FIXTURE}: point {} differs from the staged game's ({}); make the fixture's signature the game's",
+                    point.name, last.target
+                ));
+            }
+            _ => unique.push(point),
+        }
+    }
+    Ok(Catalog {
+        points: unique,
+        sited: staged || fixture,
+    })
 }
 
 /// What [`stage`] did.
@@ -1864,20 +2022,41 @@ name = 'sunrise-mod-api-gen'
             }
         }
         assert_eq!((staged.points, staged.head_only, staged.refused), (7, 1, 3));
-        let generated = root.join("staged-generated");
-        std::fs::create_dir_all(&generated).unwrap();
-        // Only the stager's stamp on the source copy makes a build one with point sites.
-        for staged in [false, true] {
-            if staged {
-                std::fs::write(root.join(".sunrise-source-staged"), "").unwrap();
-            }
-            crate::build::generate_points_inner(&root, &generated).unwrap();
-            let code = std::fs::read_to_string(generated.join("points_generated.rs")).unwrap();
-            assert_eq!(
-                code.contains("pub const STAGED : bool = true"),
-                staged || cfg!(feature = "listener-fixture")
-            );
-        }
+        // The build scripts read the staged copy's points from its catalog, and only from there.
+        let unstaged = catalog(&root, false).unwrap();
+        assert!(unstaged.points.is_empty() && !unstaged.sited);
+        std::fs::write(root.join(STAMP), "pass 1").unwrap();
+        assert!(
+            catalog(&root, false)
+                .unwrap_err()
+                .contains("staging did not finish")
+        );
+        let entries = entries_with(&root, &WireTypes::new()).unwrap();
+        write_catalog(&root, "pass 1", entries.clone()).unwrap();
+        let staged = catalog(&root, false).unwrap();
+        assert!(staged.sited);
+        assert_eq!(
+            serde_json::to_value(&after).unwrap(),
+            serde_json::to_value(&staged.points).unwrap()
+        );
+        assert_eq!(records(&after), records(&staged.points));
+        assert_eq!(
+            engine_records(&after, None),
+            engine_records(&staged.points, None)
+        );
+        write_catalog(&root, "pass 2", entries).unwrap();
+        assert!(
+            catalog(&root, false)
+                .unwrap_err()
+                .contains("another staging pass")
+        );
+        std::fs::remove_file(root.join(STAMP)).unwrap();
+        assert!(
+            catalog(&root, false)
+                .unwrap_err()
+                .contains("belongs only in a copy")
+        );
+        std::fs::remove_file(root.join(CATALOG)).unwrap();
         let game = std::fs::read_to_string(root.join("crates/sunrise-client/src/game.rs")).unwrap();
         assert!(
             game.contains("#[sunrise_mod_api_macros::point(side = \"both\")] fn tick(")

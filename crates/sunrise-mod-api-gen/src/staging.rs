@@ -38,15 +38,20 @@ pub fn stage(
     mode: Mode,
     build: &Build,
 ) -> Result<Staged, String> {
-    let stamp = root.join(".sunrise-source-staged");
+    let stamp = root.join(points::STAMP);
     if stamp.exists() {
         return Err("source tree is already staged; use a fresh copy of the source".into());
     }
-    std::fs::write(
-        &stamp,
-        "Source staging started. Use a fresh copy to stage again.\n",
-    )
-    .map_err(|error| format!("{}: {error}", stamp.display()))?;
+    // Unique to this pass: the point catalog it writes names it, so no other copy's is read.
+    let stamped = format!(
+        "Source staging started (pass {}-{}). Use a fresh copy to stage again.\n",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| error.to_string())?
+            .as_nanos()
+    );
+    std::fs::write(&stamp, &stamped).map_err(|error| format!("{}: {error}", stamp.display()))?;
     // Listed before any pass rewrites the source: the markers are the source's.
     let started = Instant::now();
     #[derive(serde::Serialize)]
@@ -147,6 +152,15 @@ pub fn stage(
     let text = serde_json::to_string(&Document::new(build, &functions))
         .map_err(|error| error.to_string())?;
     std::fs::write(&path, text + "\n").map_err(|error| format!("{}: {error}", path.display()))?;
+    // Last, from the finished copy: what the point build scripts generate from, so they read
+    // no source. A copy without it is refused as unfinished.
+    let started = Instant::now();
+    let entries = points::entries_with(root, &crate::build::wire_types(root)?)?;
+    points::write_catalog(root, &stamped, entries)?;
+    eprintln!(
+        "stage_phase=point_catalog seconds={:.3}",
+        started.elapsed().as_secs_f64()
+    );
     Ok(Staged {
         points,
         replace,

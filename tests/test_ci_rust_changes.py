@@ -64,7 +64,7 @@ class RustChangesTests(unittest.TestCase):
             "docs/modpacks/atm10-mods.csv", "crates/sunrise-mod-api-gen/coverage-notes.md",
             # A page a Rust test requires to be absent: adding it fails that test.
             "docs/modding/src/reference/hook-notes.md",
-            # A workspace crate's sources under docs/.
+            # The modding book's example crate, Rust under docs/.
             "docs/modding/examples/src/greeter.rs",
         ]:
             with self.subTest(path=path):

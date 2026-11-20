@@ -1,23 +1,9 @@
-//! Emit the fixture's selected catalog through the ordinary point scanner.
-//! Run `cargo run -p sunrise-mod-api-gen --features listener-fixture
-//! --example listener-fixture-catalog -- crates/sunrise-mod-wasm/tests/fixture/points.json`.
+//! Write the listener fixture's catalog, which the wasm fixtures build against:
+//! `cargo run -p sunrise-mod-api-gen --example listener-fixture-catalog -- crates/sunrise-mod-wasm/tests/fixture/points.json`.
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let points = sunrise_mod_api_gen::points::game_points(&root)?;
-    let points: Vec<_> = points
-        .into_iter()
-        .filter(|point| {
-            point.name.starts_with("listener_fixture_")
-                || matches!(
-                    point.name.as_str(),
-                    "tick"
-                        | "game_server_lifecycle_remember_shutdown"
-                        | "game_beacon_average"
-                        | "game_commands_wrap_degrees"
-                )
-        })
-        .collect();
+    let points = sunrise_mod_api_gen::points::fixture_points(&root)?;
     let output = std::env::args_os().nth(1).ok_or("expected output path")?;
     std::fs::write(
         output,

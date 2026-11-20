@@ -34,6 +34,11 @@ class StageBuildData(unittest.TestCase):
             points = documents[PREBUILT.POINTS]["points"]
             self.assertTrue(points)
             self.assertTrue(all(len(point["signature_hash"]) == 32 for point in points))
+            # The point build scripts read the copy's catalog, not its source: it has the points the manifest lists.
+            catalog = json.loads((staged / "crates/sunrise-engine-slots/points-catalog.json").read_text())
+            self.assertEqual(catalog["stamp"], (staged / ".sunrise-source-staged").read_text())
+            self.assertEqual(sorted(entry["target"] for entry in catalog["points"]),
+                             sorted(point["target"] for point in points))
             self.assertTrue(documents[PREBUILT.INTERNALS]["internals"])
             self.assertFalse((ROOT / ".sunrise-source-staged").exists())
         # Staging must not change the tracked source it describes.

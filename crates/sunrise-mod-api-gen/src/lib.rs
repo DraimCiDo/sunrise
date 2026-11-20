@@ -3,9 +3,6 @@ mod catalog;
 mod dispatch_fixtures;
 mod exports;
 mod game_modules;
-mod interface_cache;
-#[cfg(test)]
-mod interface_cache_tests;
 #[cfg(test)]
 mod listener_output_fixture;
 #[cfg(feature = "mixed-output-fixture")]
@@ -643,7 +640,7 @@ thread_local! {
 /// ordinary checkout. A stamp never appears in a tree that was already built: staging writes it
 /// first, into a fresh copy, and refuses a tree that already has one.
 pub(crate) fn rerun_if_staged(root: &std::path::Path) {
-    let stamp = root.join(".sunrise-source-staged");
+    let stamp = root.join(points::STAMP);
     if stamp.is_file() {
         rerun_if_changed(&stamp.display());
     }

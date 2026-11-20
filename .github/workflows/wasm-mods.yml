@@ -98,6 +98,8 @@ jobs:
         id: fixture
         run: |
           cargo build -p cargo-sunrise-mod
+          # The catalog the fixture builds against: the listener fixture's points (crates/sunrise-engine-slots/fixture-points.json).
+          cargo run -q -p sunrise-mod-api-gen --example listener-fixture-catalog -- crates/sunrise-mod-wasm/tests/fixture/points.json
           cd crates/sunrise-mod-wasm/tests/fixture
           "$GITHUB_WORKSPACE/target/debug/cargo-sunrise-mod" sunrise-mod build --wasm --catalog points.json
           "$GITHUB_WORKSPACE/target/debug/cargo-sunrise-mod" sunrise-mod wasm-std "$GITHUB_WORKSPACE/target/sunrise-wasm-std.wasm" --catalog points.json

@@ -1,7 +1,6 @@
 //! Cargo-facing generation: the mod API's and the game's generated files.
 use super::{Catalog, Target, free_function_source, host, sources};
 use quote::ToTokens;
-use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
 mod vocab_boundary;
 
@@ -319,12 +318,6 @@ pub(super) fn wire_types_from_sources(
         ("mod_api_generated.rs", generated.hooks.as_str()),
         ("mod_api_generated_host.rs", generated.host.as_str()),
     ];
-    // The resolution reads the three sources and the indexed crates' files, and nothing a game
-    // edit changes: it is cached by their contents, and recomputed when any of them differs.
-    let name = wire_entry(root, &included)?;
-    if let Some(cached) = crate::interface_cache::load(&name)? {
-        return Ok(cached.lines().map(str::to_owned).collect());
-    }
     // The resolver recurses through the API's types: give it a deep stack.
     let types = std::thread::scope(|scope| {
         std::thread::Builder::new()
@@ -334,84 +327,72 @@ pub(super) fn wire_types_from_sources(
             .join()
             .map_err(|_| "reading the wire types panicked".to_string())?
     })?;
-    let body = types
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>()
-        .join("\n");
-    crate::interface_cache::store(&name, &body)?;
     Ok(types)
 }
 
-/// The cache entry of the wire types resolved from `included` and the indexed crates below `root`.
-fn wire_entry(root: &Path, included: &[(&str, &str)]) -> Result<String, String> {
-    let mut key = Sha256::new();
-    for (name, code) in included {
-        key.update([name.as_bytes(), &[0], code.as_bytes(), &[0]].concat());
-    }
-    for (_, directory) in crate::index::CRATES {
-        hash_tree(root, &root.join(directory), &mut key)?;
-    }
-    Ok(format!("wire-types-{:x}.cache", key.finalize()))
-}
-
-/// Feeds `key` every file below `directory`, in path order: each one's path below `root` and its bytes.
-fn hash_tree(root: &Path, directory: &Path, key: &mut Sha256) -> Result<(), String> {
-    // A tree without one of the crates reads none of it.
-    if !directory.is_dir() {
-        return Ok(());
-    }
-    let mut entries = fs::read_dir(directory)
-        .map_err(|e| format!("{}: {e}", directory.display()))?
-        .map(|entry| entry.map(|entry| entry.path()))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    entries.sort();
-    for path in entries {
-        if path.is_dir() {
-            hash_tree(root, &path, key)?;
-        } else {
-            let bytes = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            let relative = path.strip_prefix(root).unwrap_or(&path);
-            key.update(relative.as_os_str().as_encoded_bytes());
-            key.update([0]);
-            key.update(Sha256::digest(bytes));
-        }
-    }
-    Ok(())
-}
-
-/// `sunrise-mod-points`' generated file: each point's record, `PointId` and typed function constructors,
-/// from the game's source, tracking the game module's files.
+/// `sunrise-mod-points`' generated file: each point's record, `PointId` and typed function
+/// constructors, from the point catalog ([`super::points::catalog`]).
 pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
-    crate::interface_cache::with_cache(out_dir, || {
-        crate::source::with_walk_cache(|| generate_points_inner(root, out_dir))
-    })
+    // Phase durations for CI's build report (points-timing.txt beside the output); never read back.
+    let started = std::time::Instant::now();
+    let mut timing = String::new();
+    let mut phase = |name: &str| {
+        timing.push_str(&format!("{name} {:.2}s\n", started.elapsed().as_secs_f64()));
+    };
+    let catalog = super::points::catalog(root, listener_fixture())?;
+    let selected = selected_points(&catalog.points)?;
+    phase("catalog");
+    let code = super::points::records_selected(&catalog.points, selected.as_ref())
+        + &format!(
+            "/// Whether this build compiled the points' sites into the game: only the prebuilt game, built from a staged copy of the source, has them. A build without them refuses every listener at load.\npub const STAGED: bool = {};\n",
+            catalog.sited
+        );
+    phase("records");
+    let generated = syn::parse_file(&code).map_err(|e| format!("generated Rust: points: {e}"))?;
+    let code = short_lines(generated);
+    phase("format");
+    write_if_changed(out_dir.join("points_generated.rs"), code).map_err(|e| e.to_string())?;
+    phase("written");
+    fs::write(out_dir.join("points-timing.txt"), timing).map_err(|e| e.to_string())
 }
 
-/// Generate the engine-owned point vocabulary and typed dispatch.
+/// Generate the engine-owned point vocabulary and typed dispatch, from the point catalog.
 pub fn generate_engine_points(root: &Path, out_dir: &Path) -> Result<(), String> {
-    crate::interface_cache::with_cache(out_dir, || {
-        crate::source::with_walk_cache(|| {
-            for path in super::points::tracked(root)? {
-                crate::rerun_if_changed(&path.display());
-            }
-            crate::rerun_if_staged(root);
-            let points = super::points::game_points(root)?;
-            println!("cargo:rerun-if-env-changed=SUNRISE_POINT_NAMES");
-            let selected = std::env::var("SUNRISE_POINT_NAMES")
-                .ok()
-                .map(|json| {
-                    serde_json::from_str::<std::collections::BTreeSet<String>>(&json)
-                        .map_err(|error| format!("SUNRISE_POINT_NAMES: {error}"))
-                })
-                .transpose()?;
-            let code = super::points::engine_records(&points, selected.as_ref());
-            let generated = syn::parse_file(&code).map_err(|e| format!("engine points: {e}"))?;
-            let code = short_lines(generated);
-            write_if_changed(out_dir.join("engine_points.rs"), code).map_err(|e| e.to_string())
-        })
-    })
+    let catalog = super::points::catalog(root, listener_fixture())?;
+    let selected = selected_points(&catalog.points)?;
+    let code = super::points::engine_records(&catalog.points, selected.as_ref());
+    let generated = syn::parse_file(&code).map_err(|e| format!("engine points: {e}"))?;
+    let code = short_lines(generated);
+    write_if_changed(out_dir.join("engine_points.rs"), code).map_err(|e| e.to_string())
+}
+
+/// Whether the build script's package builds with its `listener-fixture` feature.
+fn listener_fixture() -> bool {
+    std::env::var_os("CARGO_FEATURE_LISTENER_FIXTURE").is_some()
+}
+
+/// The places `SUNRISE_POINT_NAMES` selects (a wasm mod's build lists the ones it listens at),
+/// each of them a place of `points`; none when it is unset.
+fn selected_points(
+    points: &[super::points::GamePoint],
+) -> Result<Option<std::collections::BTreeSet<String>>, String> {
+    println!("cargo:rerun-if-env-changed=SUNRISE_POINT_NAMES");
+    let Ok(json) = std::env::var("SUNRISE_POINT_NAMES") else {
+        return Ok(None);
+    };
+    let selected: std::collections::BTreeSet<String> =
+        serde_json::from_str(&json).map_err(|error| format!("SUNRISE_POINT_NAMES: {error}"))?;
+    let places: std::collections::BTreeSet<String> = points
+        .iter()
+        .flat_map(|point| [point.name.clone(), format!("{}_return", point.name)])
+        .collect();
+    if let Some(unknown) = selected.iter().find(|name| !places.contains(*name)) {
+        return Err(format!(
+            "SUNRISE_POINT_NAMES: {unknown} is no place of this build's {} points: the catalog the mod was checked against is another build's",
+            points.len()
+        ));
+    }
+    Ok(Some(selected))
 }
 
 /// `file`'s tokens as text with a line break after every item and after every `,` or `;` inside
@@ -456,48 +437,6 @@ fn short_lines(file: syn::File) -> String {
         code.push('\n');
     }
     code
-}
-
-pub(super) fn generate_points_inner(root: &Path, out_dir: &Path) -> Result<(), String> {
-    // Phase durations for CI's build report (points-timing.txt beside the output); never read back.
-    let started = std::time::Instant::now();
-    let mut timing = String::new();
-    let mut phase = |name: &str| {
-        timing.push_str(&format!("{name} {:.2}s\n", started.elapsed().as_secs_f64()));
-    };
-    let src = root.join("crates/sunrise-client/src");
-    crate::rerun_if_changed(&src.join("game.rs").display());
-    crate::rerun_if_changed(&src.join("game").display());
-    for path in super::points::tracked(root)? {
-        crate::rerun_if_changed(&path.display());
-    }
-    phase("tracked");
-    println!("cargo:rerun-if-env-changed=SUNRISE_POINT_NAMES");
-    let selected = std::env::var("SUNRISE_POINT_NAMES")
-        .ok()
-        .map(|json| {
-            serde_json::from_str::<std::collections::BTreeSet<String>>(&json)
-                .map_err(|error| format!("SUNRISE_POINT_NAMES: {error}"))
-        })
-        .transpose()?;
-    // Only a staged copy compiles the points' sites into the game; the wasm host's listener
-    // fixture brings its own.
-    crate::rerun_if_staged(root);
-    let staged =
-        root.join(".sunrise-source-staged").is_file() || cfg!(feature = "listener-fixture");
-    let points = super::points::game_points(root)?;
-    phase("game_points");
-    let code = super::points::records_selected(&points, selected.as_ref())
-        + &format!(
-            "/// Whether this build compiled the points' sites into the game: only the prebuilt game, built from a staged copy of the source, has them. A build without them refuses every listener at load.\npub const STAGED: bool = {staged};\n"
-        );
-    phase("records");
-    let generated = syn::parse_file(&code).map_err(|e| format!("generated Rust: points: {e}"))?;
-    let code = short_lines(generated);
-    phase("format");
-    write_if_changed(out_dir.join("points_generated.rs"), code).map_err(|e| e.to_string())?;
-    phase("written");
-    fs::write(out_dir.join("points-timing.txt"), timing).map_err(|e| e.to_string())
 }
 
 pub(super) fn track(root: &Path, all_game: bool) -> Result<(), String> {
@@ -573,39 +512,5 @@ mod tests {
         assert_eq!(reparsed, original);
         assert!(text.lines().count() > 10);
         assert!(text.contains("\"a, b; c\""));
-    }
-
-    /// A cached wire result follows every input it was derived from: the generated API sources (the
-    /// catalog and hooks) and each indexed crate's files (mod-vocab's among them), and not the game.
-    #[test]
-    fn the_wire_cache_entry_follows_the_catalog_and_vocab_but_not_the_game() {
-        let root = std::env::temp_dir().join(format!("wire-entry-{}", std::process::id()));
-        let vocab = root.join("crates/sunrise-mod-vocab/src");
-        let game = root.join("crates/sunrise-client/src/game");
-        fs::create_dir_all(vocab.join("hooks")).unwrap();
-        fs::create_dir_all(&game).unwrap();
-        fs::write(
-            vocab.join("hooks/delivery.rs"),
-            "pub struct PayloadDeclaration;",
-        )
-        .unwrap();
-        fs::write(game.join("boat.rs"), "fn paddle() {}").unwrap();
-        let entry = |hooks: &str| wire_entry(&root, &[("mod_api_generated.rs", hooks)]).unwrap();
-        let before = entry("pub trait Hooks {}");
-        assert_eq!(before, entry("pub trait Hooks {}"));
-        fs::write(game.join("boat.rs"), "fn paddle() { edited(); }").unwrap();
-        assert_eq!(before, entry("pub trait Hooks {}"), "a game edit");
-        assert_ne!(
-            before,
-            entry("pub trait Hooks { fn added(); }"),
-            "a catalog change"
-        );
-        fs::write(
-            vocab.join("hooks/delivery.rs"),
-            "pub struct PayloadDeclaration { pub delivery: u8 }",
-        )
-        .unwrap();
-        assert_ne!(before, entry("pub trait Hooks {}"), "a vocab change");
-        fs::remove_dir_all(root).unwrap();
     }
 }

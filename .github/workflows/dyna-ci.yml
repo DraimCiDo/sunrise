@@ -699,6 +699,12 @@ jobs:
           PR: ${{ inputs.pr }}
           GH_TOKEN: ${{ github.token }}
         run: python3 tools/ci/surface_report.py
+      # A source tree has no point catalog: the points' records, dispatch and the game's `#[point]` sites compile only
+      # in a staged copy, so a gate checks one, with the modding book's examples that listen at a point.
+      - name: Check a staged copy
+        id: check_a_staged_copy
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false' && (github.event_name == 'pull_request' || inputs.pr != '')) && steps.stage.outcome == 'success' }}
+        run: python3 tools/ci/staged_check.py "$RUNNER_TEMP/staged" --stage-tool "$SUNRISE_STAGE_TOOL"
       - name: Test Rust documentation examples
         id: test_rust_documentation_examples
         if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
@@ -916,6 +922,10 @@ jobs:
         run: python3 tools/ci/reexec_include_ignored.py --check
       # The nested workspaces (telemetry server, registry, wasm fixtures, probes) take game crates by path: a crate that
       # gains a dependency must refresh their own Cargo.lock too, or their --locked builds refuse after merge.
+      - name: Build outputs stay out of Git
+        id: build_outputs_stay_out_of_git
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: python3 tools/ci/check_untracked_outputs.py
       - name: Nested workspaces' lockfiles are current
         id: nested_workspaces_lockfiles_are_current
         if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}

@@ -50,7 +50,7 @@ workspace = true
 # Test instrumentation only; does not alter Wire layout.
 test-copy-probe = []
 runtime-fixture = []
-listener-fixture = ["runtime-fixture", "mod_points/listener-fixture", "sunrise-mod-api-gen/listener-fixture"]
+listener-fixture = ["runtime-fixture", "mod_points/listener-fixture"]
 mixed-output-fixture = ["mod_api/mixed-output-fixture", "sunrise-mod-api-gen/mixed-output-fixture"]
 
 [[test]]

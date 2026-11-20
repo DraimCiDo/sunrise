@@ -5196,14 +5196,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sunrise-modding-examples"
-version = "0.0.0"
-dependencies = [
- "sunrise-mod-api",
- "sunrise-mod-points",
-]
-
-[[package]]
 name = "sunrise-narrator"
 version = "0.1.0"
 dependencies = [

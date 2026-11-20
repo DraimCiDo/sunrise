@@ -1,10 +1,10 @@
 [package]
 name = "sunrise-modding-examples"
 version = "0.0.0"
-edition.workspace = true
-license.workspace = true
+edition = "2024"
+license = "PolyForm-Shield-1.0.0"
 publish = false
-description = "The Rust the modding book includes, so it compiles with the mod API"
+description = "The Rust the modding book includes, so it compiles with the mod API: a workspace of its own, checked in a staged copy, whose point catalog its point example listens at (tools/ci/staged_check.py)"
 
 [lib]
 name = "modding_examples"
@@ -14,5 +14,10 @@ path = "src/lib.rs"
 sunrise-mod-api = { path = "../../../crates/sunrise-mod-api" }
 sunrise-mod-points = { path = "../../../crates/sunrise-mod-points" }
 
-[lints]
-workspace = true
+[lints.clippy]
+too_many_arguments = "allow"
+type_complexity = "allow"
+needless_range_loop = "allow"
+large_enum_variant = "allow"
+
+[workspace]

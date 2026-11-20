@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-sunrise-mod-points = { path = "../../../../sunrise-mod-points" }
+sunrise-mod-points = { path = "../../../../sunrise-mod-points", features = ["listener-fixture"] }
 sunrise-mod-api = { path = "../../../../sunrise-mod-api" }
 wasm-test-library = { path = "../library" }
 

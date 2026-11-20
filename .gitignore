@@ -41,3 +41,5 @@
 
 # Visual Studio editor state.
 .vs/
+# The point catalog sunrise-stage writes into a staged copy; never in a source tree (tools/ci/check_untracked_outputs.py).
+/crates/sunrise-engine-slots/points-catalog.json

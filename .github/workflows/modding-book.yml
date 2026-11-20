@@ -120,7 +120,8 @@ jobs:
           grep -rl __private "${paths[@]}" || status=$?
           test "$status" -eq 1
       - if: steps.book.outputs.present == 'true' && github.event_name != 'pull_request'
-        run: cargo test -p sunrise-modding-examples
+        # The examples listen at a game point, which only a staged copy's catalog has.
+        run: python3 tools/ci/staged_check.py target/staged-examples --examples-only --test-examples
       # book.toml sets build-dir = "../../target/modding-book", relative to docs/modding.
       - if: steps.book.outputs.present == 'true'
         uses: actions/upload-artifact@v4

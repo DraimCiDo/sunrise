@@ -1,0 +1,56 @@
+[
+  {
+    "target": "listener_fixture::mirrors",
+    "attribute": "name = \"listener_fixture_mirrors\", free, mirror(Text = \"::mod_api::Text\", BlockStateId = \"::mod_api::BlockState\")",
+    "signature": "fn mirrors(text: &Text, first: &BlockStateId, second: &BlockStateId)",
+    "unreplaceable": null
+  },
+  {
+    "target": "listener_fixture::no_wire",
+    "attribute": "name = \"listener_fixture_no_wire\", free",
+    "signature": "fn no_wire(value: &RegistrationData)",
+    "unreplaceable": null
+  },
+  {
+    "target": "listener_fixture::sum",
+    "attribute": "name = \"listener_fixture_sum\", free",
+    "signature": "fn sum(a: u32, b: &u32) -> u32",
+    "unreplaceable": null
+  },
+  {
+    "target": "sunrise_client::game::Game<'_>::tick",
+    "attribute": "side = \"both\"",
+    "signature": "fn tick(&mut self) -> Result<()>",
+    "unreplaceable": null
+  },
+  {
+    "target": "sunrise_client::game::level_tick::Game<'_>::tick_world",
+    "attribute": "side = \"both\"",
+    "signature": "fn tick_world(&mut self, running: bool) -> Result<()>",
+    "unreplaceable": null
+  },
+  {
+    "target": "sunrise_client::game::beacon::average",
+    "attribute": "name = \"game_beacon_average\", free",
+    "signature": "fn average(a: u32, b: u32) -> u32",
+    "unreplaceable": null
+  },
+  {
+    "target": "sunrise_client::game::commands::wrap_degrees",
+    "attribute": "name = \"game_commands_wrap_degrees\", free",
+    "signature": "fn wrap_degrees(angle: f32) -> f32",
+    "unreplaceable": null
+  },
+  {
+    "target": "sunrise_client::game::server_lifecycle::remember_shutdown",
+    "attribute": "name = \"game_server_lifecycle_remember_shutdown\", free",
+    "signature": "fn remember_shutdown(failure: &mut Option<String>, message: String)",
+    "unreplaceable": null
+  },
+  {
+    "target": "sunrise_client::game::server_links::list_top",
+    "attribute": "name = \"game_server_links_list_top\", free",
+    "signature": "fn list_top(h: f32, n: usize) -> f32",
+    "unreplaceable": null
+  }
+]

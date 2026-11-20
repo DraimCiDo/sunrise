@@ -33,7 +33,9 @@ The book follows [Diátaxis](https://diataxis.fr): a page is one of four kinds, 
   the Hook notes chapter from those attributes without writing a Markdown source page. To preview just
   that chapter, run `cargo run --quiet -p xtask -- mod-api notes`; do not commit its output.
 - **A guide page:** `docs/modding/src/`. Code in a page is `{{#include}}`d from `docs/modding/examples`, which
-  compiles, so a change to the API that breaks an example fails the build.
+  compiles, so a change to the API that breaks an example fails the build. It is a workspace of its own, built in a
+  staged copy (its point example listens at a game point, and only a staged copy has the point catalog):
+  `python3 tools/ci/staged_check.py target/staged-examples --examples-only`.
 - **A mod API change** updates its fragment `doc` and any page it affects in the same PR.
 - **A new page:** add the file to the folder of its topic. A page `X.md` with a folder `X/` beside it gets the
   folder's pages as its sub-chapters, in file name order (a numeric prefix such as `07-` sets the order where it

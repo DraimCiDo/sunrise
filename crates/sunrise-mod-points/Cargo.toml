@@ -11,7 +11,7 @@ name = "mod_points"
 
 [features]
 # Shared listener integration fixture only; never enabled by gameplay crates.
-listener-fixture = ["sunrise-mod-api-gen/listener-fixture", "sunrise-engine-slots/listener-fixture"]
+listener-fixture = ["sunrise-engine-slots/listener-fixture"]
 wasm-guest = ["sunrise-mod-api/wasm-guest", "sunrise-engine-slots/wasm-guest"]
 
 [dependencies]

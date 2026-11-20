@@ -54,7 +54,7 @@ fn package_info(id: &str) -> mod_api::PackageInfo {
 fn with_guest(conflict: Option<&str>, f: impl FnOnce() + Send) {
     test_stack::on_guest_stack(|| {
         let path = std::env::var("SUNRISE_WASM_FIXTURE").expect(
-            "build tests/fixture with cargo sunrise-mod build --wasm --catalog points.json",
+            "build tests/fixture with cargo sunrise-mod build --wasm --catalog points.json (the listener-fixture-catalog example writes it)",
         );
         let std = std::env::var("SUNRISE_WASM_STD").expect("build the fixture's shared wasm std");
         let path = std::path::Path::new(&path);
