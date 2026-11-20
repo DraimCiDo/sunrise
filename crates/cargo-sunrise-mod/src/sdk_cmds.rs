@@ -12,7 +12,7 @@ use std::path::Path;
 use std::process::{Command, ExitCode};
 use sunrise_mod_package::{
     Manifest, Package,
-    manifest::{MANIFEST, MAX_MANIFEST, MAX_USES, revision},
+    manifest::{MANIFEST, MAX_MANIFEST, MAX_USES},
     sdk::{self, ChangeNote, Index},
 };
 use sunrise_native_build::game_uses;
@@ -252,38 +252,17 @@ fn package_subject(path: &Path) -> Result<Subject, String> {
             &format!("it has a {table} table"),
         )));
     }
-    if package.manifest.native.is_none() && package.manifest.wasm.is_none() {
+    let Some(native) = &package.manifest.native else {
         return Ok(Subject::NotApplicable(content_text(&name)));
-    }
+    };
+    let pin = &native.sunrise;
     let Some(bytes) = Package::entry(path, USES_FILE, MAX_USES)? else {
-        let pin = package
-            .manifest
-            .native
-            .as_ref()
-            .map_or("a build", |native| native.sunrise.as_str());
         return Ok(Subject::NotApplicable(format!(
             "{name} pins build {pin} and its package carries no list of what it uses, so it can't be shown to fit another build. Pack it with `cargo sunrise-mod build`, which writes the list when the mod's code can be read, or repin it with `cargo sunrise-mod update --sunrise <build>` first."
         )));
     };
     let table = UsesTable::read(&bytes).map_err(|e| format!("{USES_FILE}: {e}"))?;
-    // A native mod pins its build in its manifest, a wasm mod in the `Cargo.toml` it packs.
-    let pin = match &package.manifest.native {
-        Some(native) => Some(native.sunrise.clone()),
-        None => Package::entry(path, "Cargo.toml", MAX_MANIFEST)?
-            .and_then(|bytes| String::from_utf8(bytes).ok())
-            .and_then(|text| text.parse::<toml::Table>().ok())
-            .and_then(|cargo| {
-                let sdk = cargo.get("package")?.get("metadata")?.get("sunrise")?;
-                let pin = sdk.get("sdk")?.as_str()?;
-                revision(pin).then(|| pin.to_owned())
-            }),
-    };
-    let Some(pin) = pin else {
-        return Ok(Subject::NotApplicable(format!(
-            "{name}: fit not known; its packed `Cargo.toml` does not pin a full commit SHA (40 lowercase hex digits) in `[package.metadata.sunrise] sdk`. Pack it again with `cargo sunrise-mod build`."
-        )));
-    };
-    if pin != table.made_for {
+    if *pin != table.made_for {
         return Ok(Subject::NotApplicable(format!(
             "{name} pins build {pin} and its list of what it uses was made for {}, so the list says nothing about the pinned build. Pack it again with `cargo sunrise-mod build`.",
             table.made_for
@@ -302,7 +281,7 @@ fn folder_subject(entry: ChildEntry, root: &Path) -> Result<Subject, String> {
         std::fs::read_to_string(root.join(MANIFEST)).map_err(|e| format!("{MANIFEST}: {e}"))?;
     let parsed = Manifest::parse(&manifest)?;
     let name = parsed.name.clone();
-    if parsed.native.is_none() && parsed.wasm.is_none() {
+    if parsed.native.is_none() {
         return Ok(Subject::NotApplicable(content_text(&name)));
     }
     if let Some(table) = game_uses::unjudged(&parsed) {
@@ -580,7 +559,6 @@ pub(crate) fn update_report(
         println!("{name} is made for exactly one build; its declarations are checked as it moves.")
     };
     let parsed = Manifest::parse(&manifest)?;
-    // A wasm mod links by interface: there is no API-use report and no compatibility check.
     if parsed.native.is_none() {
         return Ok(());
     }
@@ -718,33 +696,9 @@ fn report(
     text
 }
 
-/// The targets `cargo check` runs for (`None` is this computer): a project checks the target it
-/// ships for, a native mod's own and a wasm mod's wasm32; `--wasm` and `--native` ask for those
-/// targets instead.
-fn check_targets(native_project: bool, wasm: bool, native: bool) -> Vec<Option<&'static str>> {
-    let mut targets = Vec::new();
-    if native || (!wasm && native_project) {
-        targets.push(None);
-    }
-    if wasm || (!native && !native_project) {
-        targets.push(Some("wasm32-unknown-unknown"));
-    }
-    targets
-}
-
-/// What `check` in a mod folder was asked for.
-#[derive(Debug, PartialEq)]
-pub(crate) struct CheckFlags {
-    pub(crate) uses: bool,
-    pub(crate) wasm: bool,
-    pub(crate) native: bool,
-}
-
-/// `check [--uses] [--wasm] [--native]` in a mod folder: the package rules, `cargo check` for the
-/// project's own target (this computer for a native mod, wasm32 for a wasm mod; `--wasm` or
-/// `--native` asks for that target instead, both flags for both), then what the mod uses of its
-/// pinned build (with `--uses`, each item and the line that brought it in).
-pub(crate) fn check_mod(entry: ChildEntry, flags: CheckFlags) -> Result<(), String> {
+/// `check [--uses]` in a mod folder: the package rules, then `cargo check` and an API use
+/// report for a native mod. `--uses` lists each item and the line that brought it in.
+pub(crate) fn check_mod(entry: ChildEntry, show_uses: bool) -> Result<(), String> {
     let root = Path::new(".");
     let package = Package::read(root)?;
     let files = package.directory_files(root)?;
@@ -762,8 +716,7 @@ pub(crate) fn check_mod(entry: ChildEntry, flags: CheckFlags) -> Result<(), Stri
         );
     }
     crate::check::references(root, &package.manifest)?;
-    let code = package.manifest.native.is_some() || package.manifest.wasm.is_some();
-    if !code {
+    if !package.is_native() {
         println!("{}: the package rules hold.", package.manifest.name);
         return Ok(());
     }
@@ -771,18 +724,13 @@ pub(crate) fn check_mod(entry: ChildEntry, flags: CheckFlags) -> Result<(), Stri
     let sdk = ensure_sdk(root)?;
     let surface = surface_of(&sdk)?;
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let targets = check_targets(package.manifest.native.is_some(), flags.wasm, flags.native);
-    for target in targets {
-        let mut command = Command::new(&cargo);
-        command.arg("check").current_dir(root);
-        if let Some(target) = target {
-            command.args(["--target", target]);
-        }
-        let status = command.status().map_err(|e| format!("cargo check: {e}"))?;
-        if !status.success() {
-            let on = target.unwrap_or("this computer");
-            return Err(format!("cargo check for {on} failed"));
-        }
+    let status = Command::new(cargo)
+        .arg("check")
+        .current_dir(root)
+        .status()
+        .map_err(|e| format!("cargo check: {e}"))?;
+    if !status.success() {
+        return Err(format!("cargo check failed: {status}"));
     }
     match uses_table::scan(entry, root, &surface)? {
         Scanned::Uses(uses) => {
@@ -790,7 +738,7 @@ pub(crate) fn check_mod(entry: ChildEntry, flags: CheckFlags) -> Result<(), Stri
                 "{}",
                 uses_table::summary(&package.manifest.name, &uses, &sdk)
             );
-            if flags.uses {
+            if show_uses {
                 print!("{}", uses_table::list(&uses));
             }
         }
@@ -848,16 +796,6 @@ mod tests {
     }
 
     #[test]
-    fn check_runs_the_projects_own_target_unless_a_flag_asks_for_another() {
-        const WASM: Option<&str> = Some("wasm32-unknown-unknown");
-        assert_eq!(check_targets(true, false, false), [None]);
-        assert_eq!(check_targets(false, false, false), [WASM]);
-        assert_eq!(check_targets(true, true, false), [WASM]);
-        assert_eq!(check_targets(false, false, true), [None]);
-        assert_eq!(check_targets(true, true, true), [None, WASM]);
-    }
-
-    #[test]
     fn a_search_ranks_id_then_counterpart_then_doc_matches() {
         let surface = surface(vec![
             hook(
@@ -890,12 +828,7 @@ mod tests {
     const BUILD: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const OTHER_BUILD: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
-    fn packed_subject(
-        kind: &str,
-        sdk: Option<&str>,
-        wasm: Option<&[u8]>,
-        made_for: &str,
-    ) -> Subject {
+    fn packed_subject(kind: &str, sdk: Option<&str>, made_for: &str) -> Subject {
         let manifest = format!(
             "id='greeter'\nname='Greeter'\nversion='0.1.0'\napi='0.2'\ncapabilities=['registries']\n{kind}"
         );
@@ -909,14 +842,11 @@ mod tests {
             entries: vec![],
         }
         .to_json();
-        let mut files = vec![
+        let files = [
             ("Cargo.toml", cargo.as_bytes()),
             ("src/lib.rs", b"pub fn greet() {}".as_slice()),
             (USES_FILE, uses.as_bytes()),
         ];
-        if let Some(wasm) = wasm {
-            files.push((sunrise_mod_package::manifest::WASM, wasm));
-        }
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("greeter.smod");
         std::fs::write(&path, Package::write_files(&manifest, &files).unwrap()).unwrap();
@@ -924,76 +854,14 @@ mod tests {
     }
 
     #[test]
-    fn packed_wasm_uses_need_a_matching_full_sdk_pin() {
-        use wasm_encoder::{
-            CodeSection, CustomSection, ExportKind, ExportSection, Function, FunctionSection,
-            Instruction, Module, TypeSection,
-        };
-
-        // A minimal shared member with the required guest exports; no wasm toolchain needed.
-        let mut types = TypeSection::new();
-        types.ty().function([], []);
-        let mut functions = FunctionSection::new();
-        functions.function(0);
-        let mut exports = ExportSection::new();
-        exports.export("sunrise_in", ExportKind::Func, 0);
-        exports.export("sunrise_hook", ExportKind::Func, 0);
-        let mut function = Function::new([]);
-        function.instruction(&Instruction::End);
-        let mut code = CodeSection::new();
-        code.function(&function);
-        let mut module = Module::new();
-        module
-            .section(&CustomSection {
-                name: "dylink.0".into(),
-                data: (&[1, 4, 0, 0, 0, 0][..]).into(),
-            })
-            .section(&types)
-            .section(&functions)
-            .section(&exports)
-            .section(&code);
-        let wasm = module.finish();
-        let hash = sunrise_mod_package::manifest::sha512_of(&wasm);
-        let kind = format!("[wasm]\nsha512='{hash}'\ntoolchain='test'\n");
-        let stale_list = "the list says nothing about the pinned build";
-        let unknown_pin = "fit not known; its packed `Cargo.toml` does not pin a full commit SHA";
-        for (pin, made_for, refusal) in [
-            (Some(BUILD), BUILD, None),
-            (Some(BUILD), OTHER_BUILD, Some(stale_list)),
-            (None, BUILD, Some(unknown_pin)),
-            // Matching aliases still do not establish a build.
-            (Some("nightly"), "nightly", Some(unknown_pin)),
-        ] {
-            let subject = packed_subject(&kind, pin, Some(&wasm), made_for);
-            match (subject, refusal) {
-                (Subject::Table { name, table, .. }, None) => {
-                    assert_eq!(name, "Greeter");
-                    assert_eq!(table.made_for, made_for);
-                }
-                (Subject::NotApplicable(message), Some(reason)) => {
-                    assert!(message.contains("Greeter"), "{message}");
-                    assert!(message.contains(reason), "{message}");
-                    assert!(
-                        message.contains("Pack it again with `cargo sunrise-mod build`"),
-                        "{message}"
-                    );
-                }
-                _ => {
-                    panic!("unexpected packaged wasm fit subject for {pin:?}, made for {made_for}")
-                }
-            }
-        }
-    }
-
-    #[test]
     fn packed_native_uses_follow_the_manifest_pin_not_cargo_metadata() {
         let kind = format!("[native]\ngame='26.3'\nsunrise='{BUILD}'\n");
         assert!(matches!(
-            packed_subject(&kind, Some(OTHER_BUILD), None, BUILD),
+            packed_subject(&kind, Some(OTHER_BUILD), BUILD),
             Subject::Table { table, .. } if table.made_for == BUILD
         ));
         assert!(matches!(
-            packed_subject(&kind, Some(OTHER_BUILD), None, OTHER_BUILD),
+            packed_subject(&kind, Some(OTHER_BUILD), OTHER_BUILD),
             Subject::NotApplicable(message) if message.contains("the list says nothing about the pinned build")
         ));
     }
@@ -1007,18 +875,11 @@ mod tests {
     }
 
     #[test]
-    fn a_wasm_mods_update_report_reads_neither_the_sdk_nor_the_source() {
+    fn a_content_mods_update_report_does_not_access_the_sdk() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("src")).unwrap();
         std::fs::write(
             dir.path().join(MANIFEST),
             "id = \"greeter\"\nname = \"Greeter\"\nversion = \"0.1.0\"\napi = \"0.2\"\ncapabilities = [\"registries\"]\n",
-        )
-        .unwrap();
-        // Source the scan cannot read, and no fetched SDK: a native mod would fail on either.
-        std::fs::write(
-            dir.path().join("src/lib.rs"),
-            "include!(concat!(env!(\"OUT_DIR\"), \"/b.rs\"));\n",
         )
         .unwrap();
         assert_eq!(

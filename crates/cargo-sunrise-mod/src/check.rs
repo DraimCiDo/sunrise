@@ -38,7 +38,6 @@ impl Report {
             "sha256": self.sha256,
             "size": self.size,
             "signed": self.signed,
-            "wasm": self.facts.wasm,
         })
     }
 
@@ -92,9 +91,7 @@ impl Report {
         if self.kind == Kind::NativeMod {
             out += "  native source: unsandboxed; not executed by the registry check. Compile and test against the exact pinned Sunrise and Mixins revisions before review.\n";
         }
-        if self.kind == Kind::Mod && self.facts.wasm {
-            out += "  WebAssembly code: runs sandboxed in the game, within its time and memory limits; not executed by the registry check\n";
-        } else if self.kind == Kind::Mod {
+        if self.kind == Kind::Mod {
             out += "  no code: content only, nothing to run\n";
         }
         out
@@ -324,28 +321,5 @@ mod tests {
             assert!(text.contains(word), "{text}");
         }
         assert_eq!(report.json()["dependencies"], dependencies);
-    }
-
-    #[test]
-    fn a_wasm_mod_is_reported_as_code_and_a_content_mod_as_none() {
-        let report = |wasm| Report {
-            kind: Kind::Mod,
-            facts: Facts {
-                id: Some("m".into()),
-                version: Some("1.0.0".into()),
-                wasm,
-                ..Facts::default()
-            },
-            sha256: "0".repeat(64),
-            size: 1,
-            signed: false,
-        };
-        let wasm = report(true);
-        assert!(wasm.text().contains("WebAssembly code: runs sandboxed"));
-        assert!(!wasm.text().contains("no code"));
-        assert_eq!(wasm.json()["wasm"], true);
-        let content = report(false);
-        assert!(content.text().contains("no code: content only"));
-        assert_eq!(content.json()["wasm"], false);
     }
 }
