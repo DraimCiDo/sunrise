@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_pickup_arrow",
+        native = "fn native_player_pickup_arrow(&mut self, player: u128, name: &str, entity_id: u32, item: &str)"
     )]
     fn player_pickup_arrow();
 }

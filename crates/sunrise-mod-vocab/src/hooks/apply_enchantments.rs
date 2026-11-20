@@ -21,7 +21,8 @@ pub trait Hooks {
         scope = "item",
         key = "stack",
         host = "read",
-        neoforge = "IItemExtension.applyEnchantments"
+        neoforge = "IItemExtension.applyEnchantments",
+        native = "fn native_apply_enchantments(&self, stack: &ItemStack, enchantments: &[(std::sync::Arc<str>, u32)], result: &mut ItemStack)"
     )]
     fn apply_enchantments();
 }

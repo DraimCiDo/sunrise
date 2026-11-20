@@ -17,7 +17,9 @@ pub trait Hooks {
         contract = "listen",
         scope = "item",
         key = "stack",
-        neoforge = "none (vanilla Item.inventoryTick; NeoForge adds no event or extension for it); PlayerTickEvent ticks the player, not each stack"
+        neoforge = "none (vanilla Item.inventoryTick; NeoForge adds no event or extension for it); PlayerTickEvent ticks the player, not each stack",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_inventory_tick",
+        native = "fn native_inventory_tick(&mut self, stack: &ItemStack, slot: i32, selected: bool)"
     )]
     fn inventory_tick();
 }

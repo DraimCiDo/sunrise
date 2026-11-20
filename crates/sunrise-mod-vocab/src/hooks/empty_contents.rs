@@ -28,7 +28,8 @@ pub trait Hooks {
         out = "answer",
         scope = "item",
         key = "stack",
-        neoforge = "IDispensibleContainerItemExtension.emptyContents"
+        neoforge = "IDispensibleContainerItemExtension.emptyContents",
+        native = "fn native_empty_contents(&mut self, player: Option<PlayerRef>, pos: BlockPos, hit: Option<(BlockPos, Direction)>, stack: &ItemStack, answer: &mut Option<bool>)"
     )]
     fn empty_contents();
 }

@@ -13,7 +13,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "EntityTeleportEvent.TeleportCommand",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_teleport_command(&mut self, dimension: &str, entity: u32, from: [f64; 3], to: &mut [f64; 3], cancel: &mut bool)"
     )]
     fn teleport_command();
 }

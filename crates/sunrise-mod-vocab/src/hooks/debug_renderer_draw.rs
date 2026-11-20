@@ -10,7 +10,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "RegisterDebugRenderersEvent (registration only; no per-frame event)",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_debug_renderer_draw(&self, id: &str, view: &mod_api::WorldRenderView, draw: &mut sunrise_client::world_geometry::WorldGeometry)"
     )]
     fn debug_renderer_draw();
 }

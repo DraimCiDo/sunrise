@@ -17,7 +17,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no flight toggle event; Bukkit's PlayerToggleFlightEvent)",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_toggle_flight",
+        native = "fn native_player_toggle_flight(&mut self, player: u128, name: &str, flying: bool, cancel: &mut bool)"
     )]
     fn player_toggle_flight();
 }

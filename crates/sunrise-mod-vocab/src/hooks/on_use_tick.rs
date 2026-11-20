@@ -16,7 +16,9 @@ pub trait Hooks {
         contract = "listen",
         scope = "item",
         key = "stack",
-        neoforge = "LivingEntityUseItemEvent.Tick"
+        neoforge = "LivingEntityUseItemEvent.Tick",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_on_use_tick",
+        native = "fn native_on_use_tick(&mut self, stack: &ItemStack, entity: Option<i32>, remaining: i32)"
     )]
     fn on_use_tick();
 }

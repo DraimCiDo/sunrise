@@ -17,7 +17,8 @@ pub trait Hooks {
         out = "hidden",
         scope = "block",
         key = "state",
-        neoforge = "IBlockExtension.shouldHideAdjacentFluidFace"
+        neoforge = "IBlockExtension.shouldHideAdjacentFluidFace",
+        native = "fn native_should_hide_adjacent_fluid_face(&self, state: BlockStateId, direction: Direction, fluid: mod_api::FluidState, hidden: &mut bool)"
     )]
     fn should_hide_adjacent_fluid_face();
 }

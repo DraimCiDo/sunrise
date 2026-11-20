@@ -16,7 +16,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "PlayerEvent.LoadFromFile (not cancellable)",
-        cancellable = false
+        cancellable = false,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_load_from_file",
+        native = "fn native_player_load_from_file(&mut self, player: u128, name: &str, directory: &std::path::Path)"
     )]
     fn player_load_from_file();
 }

@@ -16,7 +16,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "RenderTooltipEvent.Pre",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_render_tooltip_pre(&self, call: mod_api::__private::RenderTooltipPreCall<'_>)"
     )]
     fn render_tooltip_pre(
         draw: &mut dyn DrawContext,

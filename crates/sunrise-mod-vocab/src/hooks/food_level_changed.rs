@@ -16,7 +16,9 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "cancel",
-        neoforge = "none (vanilla: FoodData; Bukkit's FoodLevelChangeEvent)"
+        neoforge = "none (vanilla: FoodData; Bukkit's FoodLevelChangeEvent)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_food_level_changed",
+        native = "fn native_food_level_changed(&mut self, player: u128, name: &str, from: i32, to: &mut i32, cancel: &mut bool)"
     )]
     fn food_level_changed();
 }

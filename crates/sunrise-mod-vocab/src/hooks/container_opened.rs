@@ -22,7 +22,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "none (not NeoForge's PlayerContainerEvent.Open: this hook can cancel the opening)",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_container_opened",
+        native = "fn native_container_opened(&mut self, player: u128, name: &str, kind: &str, pos: Option<[i32; 3]>, cancel: &mut bool)"
     )]
     fn container_opened();
 }

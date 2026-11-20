@@ -43,7 +43,8 @@ replay agree."#]
         non_exhaustive = true,
         event_per_listener = true,
         target = "sunrise_client::game::native_hooks::friction::FrictionView<'_>::native_friction",
-        neoforge = "IBlockExtension.getFriction"
+        neoforge = "IBlockExtension.getFriction",
+        native = "fn native_friction(&self, pos: BlockPos, state: BlockStateId, entity: Option<(u32, &str)>, friction: &mut f32)"
     )]
     fn friction();
 }

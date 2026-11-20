@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_entity_portal",
+        native = "fn native_entity_portal(&mut self, dimension: &str, entity: u32, pos: [i32; 3])"
     )]
     fn entity_portal();
 }

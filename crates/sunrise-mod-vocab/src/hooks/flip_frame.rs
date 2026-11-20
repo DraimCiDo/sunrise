@@ -31,6 +31,11 @@ Where a frame goes decides what "presented" means when the hook runs:
 - Offscreen, with no swapchain (for example, agent control): the frame has
   been submitted to its offscreen target.
 "#]
-    #[hook(side = "client", contract = "listen", neoforge = "FlipFrameEvent")]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        neoforge = "FlipFrameEvent",
+        native = "fn native_flip_frame(&mut self)"
+    )]
     fn flip_frame();
 }

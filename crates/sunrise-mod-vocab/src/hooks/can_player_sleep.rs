@@ -14,7 +14,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "CanPlayerSleepEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_can_player_sleep(&mut self, player: u128, name: &str, pos: [i32; 3], problem: &mut Option<String>)"
     )]
     fn can_player_sleep();
 }

@@ -22,7 +22,9 @@ pub trait Hooks {
         side = "server",
         contract = "collect",
         out = "types",
-        neoforge = "RegisterDataMapTypesEvent"
+        neoforge = "RegisterDataMapTypesEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_data_map_types",
+        native = "fn native_data_map_types(&mut self, types: &mut Vec<DataMapType>)"
     )]
     fn data_map_types();
 }

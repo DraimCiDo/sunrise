@@ -34,7 +34,8 @@ is not active is never asked, so with none active a view only compares the selec
         contract = "collect",
         out = "renderers",
         context = "registration",
-        neoforge = "RegisterDebugRenderersEvent"
+        neoforge = "RegisterDebugRenderersEvent",
+        native = "fn native_register_debug_renderers(context: &mod_api::RegistrationContext, renderers: &mut Vec<DebugRenderer>)"
     )]
     fn register_debug_renderers();
 }

@@ -21,7 +21,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "PlayerEvent.PlayerChangeGameModeEvent",
-        version = 2
+        version = 2,
+        native = "fn native_player_game_mode_changed(&mut self, player: u128, name: &str, from: GameMode, to: &mut GameMode, cancel: &mut bool)"
     )]
     fn player_game_mode_changed();
 }

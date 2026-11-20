@@ -8,7 +8,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_raid_state_change",
+        native = "fn native_raid_state_change(&mut self, raid: mod_api::RaidRef, pos: [i32; 3], state: &str)"
     )]
     fn raid_state_change();
 }

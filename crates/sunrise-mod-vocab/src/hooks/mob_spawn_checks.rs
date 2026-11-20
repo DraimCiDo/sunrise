@@ -10,7 +10,8 @@ pub trait Hooks {
         contract = "listen",
         host = "read",
         neoforge = "MobSpawnEvent.SpawnPlacementCheck",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_mob_spawn_placement_check(&self, call: mod_api::__private::MobSpawnPlacementCheckCall<'_>)"
     )]
     fn mob_spawn_placement_check(
         dimension: &str,
@@ -28,7 +29,8 @@ pub trait Hooks {
         contract = "listen",
         host = "read",
         neoforge = "MobSpawnEvent.PositionCheck",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_mob_spawn_position_check(&self, call: mod_api::__private::MobSpawnPositionCheckCall<'_>)"
     )]
     fn mob_spawn_position_check(
         dimension: &str,

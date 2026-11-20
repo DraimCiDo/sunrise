@@ -14,7 +14,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (vanilla ExperienceOrb.canMerge; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla ExperienceOrb.canMerge; NeoForge adds no event or extension for it)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_experience_orb_can_merge",
+        native = "fn native_experience_orb_can_merge(&mut self, dimension: &str, into: u32, from: u32, into_value: i32, from_value: i32, can_merge: &mut bool)"
     )]
     fn experience_orb_can_merge();
 }

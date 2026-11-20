@@ -12,7 +12,8 @@ pub trait Hooks {
         out = "answer",
         scope = "item",
         key = "stack",
-        neoforge = "IItemExtension.onItemUseFirst"
+        neoforge = "IItemExtension.onItemUseFirst",
+        native = "fn native_on_item_use_first(&mut self, stack: &mod_api::ItemStack, click: &BlockClick<'_>, answer: &mut Option<mod_api::InteractionResult>)"
     )]
     fn on_item_use_first();
 }

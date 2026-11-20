@@ -24,7 +24,8 @@ pub trait Hooks {
         key = "state",
         out = "answer",
         target = "sunrise_client::game::native_hooks::place_liquid::GameLevel<'_>::native_place_liquid",
-        neoforge = "none (vanilla LiquidBlockContainer.placeLiquid)"
+        neoforge = "none (vanilla LiquidBlockContainer.placeLiquid)",
+        native = "fn native_place_liquid(&mut self, ticks: &mut Ticks, pos: BlockPos, state: BlockStateId, fluid: mod_api::FluidState, answer: &mut Option<bool>)"
     )]
     fn place_liquid();
 }

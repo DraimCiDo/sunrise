@@ -8,7 +8,9 @@ pub trait Hooks {
         side = "client",
         contract = "replace",
         out = "zoom",
-        neoforge = "none (Sunrise-only; ViewportEvent.ComputeFov is the nearest way to change the view)"
+        neoforge = "none (Sunrise-only; ViewportEvent.ComputeFov is the nearest way to change the view)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_zoom",
+        native = "fn native_zoom(&self, zoom: &mut Option<mod_api::Zoom>)"
     )]
     fn zoom();
 }

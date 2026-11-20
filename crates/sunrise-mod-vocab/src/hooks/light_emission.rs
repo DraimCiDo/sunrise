@@ -31,7 +31,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         host = "read",
-        neoforge = "IBlockExtension.getLightEmission, IBlockStateExtension.getLightEmission"
+        neoforge = "IBlockExtension.getLightEmission, IBlockStateExtension.getLightEmission",
+        native = "fn native_light_emission(&self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, emission: &mut Option<u8>)"
     )]
     fn light_emission();
 }

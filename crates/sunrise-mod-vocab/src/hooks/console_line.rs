@@ -18,7 +18,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no log event; mods add a Log4j appender)",
-        paper = "none (plugins add a Log4j appender)"
+        paper = "none (plugins add a Log4j appender)",
+        native = "fn native_console_line(&mut self, level: &str, thread: &str, message: &str)"
     )]
     fn console_line();
 }

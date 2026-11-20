@@ -21,7 +21,7 @@ fn only_container_loot_filled_changes_when_stack_count_marker_is_removed() {
                 emit(
                     &root,
                     catalog.hooks.iter().filter(|hook| !is_render(hook)),
-                    &methods,
+                    Some(&methods),
                     &catalog.draw_contexts,
                 )
                 .unwrap()
@@ -116,7 +116,7 @@ fn declared_stack_collectors_use_the_same_count_conversion() {
     let method: syn::ItemFn = syn::parse_quote! {
         fn native_any_collector(&mut self, call: AnyCollectorCall<'_>) { let _ = (call,); }
     };
-    let sources = emit(&root, std::iter::once(&hook), &[method], &[]).unwrap();
+    let sources = emit(&root, std::iter::once(&hook), Some(&[method]), &[]).unwrap();
     assert!(sources.fire.contains("try_into_engine_preserving_count"));
     assert!(
         sources

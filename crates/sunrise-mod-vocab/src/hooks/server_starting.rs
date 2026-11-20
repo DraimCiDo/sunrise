@@ -12,7 +12,9 @@ pub trait Hooks {
         contract = "listen",
         neoforge = "ServerStartingEvent",
         cancellable = false,
-        version = 2
+        version = 2,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_server_starting",
+        native = "fn native_server_starting(&mut self, dedicated: bool)"
     )]
     fn server_starting();
 }

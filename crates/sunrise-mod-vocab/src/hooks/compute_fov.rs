@@ -8,7 +8,9 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "ViewportEvent.ComputeFov"
+        neoforge = "ViewportEvent.ComputeFov",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_compute_fov",
+        native = "fn native_compute_fov(&self, partial: f32, camera: [f64; 3], degrees: &mut f32)"
     )]
     fn compute_fov();
 }

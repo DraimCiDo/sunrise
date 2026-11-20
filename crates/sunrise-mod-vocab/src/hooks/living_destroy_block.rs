@@ -14,7 +14,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "LivingDestroyBlockEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_living_destroy_block(&mut self, entity: u32, kind: &str, pos: [i32; 3], state: BlockStateId, cancel: &mut bool)"
     )]
     fn living_destroy_block();
 }

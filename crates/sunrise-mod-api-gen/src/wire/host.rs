@@ -1207,7 +1207,7 @@ pub fn generate_coverage(root: &std::path::Path) -> Result<String, String> {
 }
 
 fn host_and_coverage(root: &std::path::Path) -> Result<(String, String), String> {
-    let generated = crate::sources(root, crate::FillMode::Require)?;
+    let generated = crate::sources(root, None)?;
     let (providers, provider_sources) = crate::capability_providers::generate(root, &[])?;
     for path in provider_sources {
         crate::rerun_if_changed(&path.display());
@@ -1373,7 +1373,6 @@ mod tests {
             "crates/sunrise-mod-vocab/src/lib.rs",
             "crates/sunrise-mod-vocab/src/host/draw.rs",
             "crates/sunrise-mod-vocab/src/exports/generated_host.rs",
-            "crates/sunrise-client/src/game/native_hooks",
         ] {
             assert!(
                 watched.iter().any(|path| path.ends_with(needed)),

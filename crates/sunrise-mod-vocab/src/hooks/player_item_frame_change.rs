@@ -8,7 +8,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_item_frame_change",
+        native = "fn native_player_item_frame_change(&mut self, player: u128, name: &str, entity_id: u32, action: &str, item: &str, rotation: u8)"
     )]
     fn player_item_frame_change();
 }

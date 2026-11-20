@@ -27,7 +27,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         host = "read",
-        neoforge = "IBlockExtension.getEnchantPowerBonus, IBlockStateExtension.getEnchantPowerBonus"
+        neoforge = "IBlockExtension.getEnchantPowerBonus, IBlockStateExtension.getEnchantPowerBonus",
+        native = "fn native_enchant_power_bonus(&self, state: BlockStateId, pos: BlockPos, table_pos: BlockPos, power: &mut f32)"
     )]
     fn enchant_power_bonus();
 }

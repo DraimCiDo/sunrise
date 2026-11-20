@@ -50,7 +50,8 @@ fn dimension_transition_screen_draw(
         contract = "collect",
         out = "screens",
         context = "registration",
-        neoforge = "RegisterDimensionTransitionScreenEvent"
+        neoforge = "RegisterDimensionTransitionScreenEvent",
+        native = "fn native_register_dimension_transition_screen(context: &mod_api::RegistrationContext, screens: &mut Vec<mod_api::DimensionTransitionScreen>)"
     )]
     fn register_dimension_transition_screen();
 }

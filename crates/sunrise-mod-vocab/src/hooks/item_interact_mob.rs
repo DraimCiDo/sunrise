@@ -17,7 +17,8 @@ pub trait Hooks {
         out = "result",
         scope = "item",
         key = "stack",
-        neoforge = "none (Item.interactLivingEntity)"
+        neoforge = "none (Item.interactLivingEntity)",
+        native = "fn native_item_interact_mob(&mut self, hand: Hand, entity: i32, kind: &str, stack: &ItemStack, result: &mut Option<mod_api::InteractionResult>)"
     )]
     fn item_interact_mob();
 }

@@ -7,7 +7,8 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerBrewedPotionEvent"
+        neoforge = "PlayerBrewedPotionEvent",
+        native = "fn native_player_brewed_potion(&mut self, player: u128, player_entity_id: i32, stack: &ItemStack)"
     )]
     fn player_brewed_potion();
 }

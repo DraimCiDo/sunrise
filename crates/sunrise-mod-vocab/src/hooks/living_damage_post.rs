@@ -23,7 +23,8 @@ pub trait Hooks {
         host = "hit",
         neoforge = "LivingDamageEvent.Post",
         version = 2,
-        target = "sunrise_client::game::native_hooks::living_damage_post::HitLevel<'_>::native_living_damage_post"
+        target = "sunrise_client::game::native_hooks::living_damage_post::HitLevel<'_>::native_living_damage_post",
+        native = "fn native_living_damage_post(&mut self, entity: i32, kind: &str, source: &HurtSource<'_>, container: &mod_api::DamageContainer)"
     )]
     fn living_damage_post();
 }

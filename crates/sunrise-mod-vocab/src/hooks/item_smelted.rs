@@ -14,7 +14,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "PlayerEvent.ItemSmeltedEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_item_smelted(&mut self, player: u128, player_entity_id: i32, stack: Option<&ItemStack>, amount_removed: u32)"
     )]
     fn item_smelted();
 }

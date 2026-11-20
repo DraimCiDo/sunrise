@@ -9,7 +9,9 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "RenderGuiLayerEvent.Post",
-        cancellable = false
+        cancellable = false,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_gui_layer_post",
+        native = "fn native_gui_layer_post(&self, layer: &str, draw: &mut HudBatch)"
     )]
     fn gui_layer_post();
 }

@@ -17,7 +17,8 @@ pub trait Hooks {
         contract = "listen",
         scope = "block",
         key = "state",
-        neoforge = "IFallableExtension.fallingTick"
+        neoforge = "IFallableExtension.fallingTick",
+        native = "fn native_falling_tick(&mut self, state: BlockStateId, pos: BlockPos, entity: EntityRef)"
     )]
     fn falling_tick();
 }

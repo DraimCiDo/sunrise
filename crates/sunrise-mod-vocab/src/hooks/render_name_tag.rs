@@ -6,7 +6,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "RenderNameTagEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_render_name_tag(&self, entity_id: u32, kind: &str, vanilla_visible: bool, visible: &mut bool, text: &mut Option<String>)"
     )]
     fn render_name_tag();
 }

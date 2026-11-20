@@ -22,7 +22,9 @@ pub trait Hooks {
         contract = "replace",
         out = "can_eat",
         host = "read",
-        neoforge = "none (vanilla Player.canEat; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla Player.canEat; NeoForge adds no event or extension for it)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_can_eat",
+        native = "fn native_can_eat(&self, player: PlayerRef, stack: Option<&ItemStack>, vanilla_can_eat: bool, can_eat: &mut Option<bool>)"
     )]
     fn can_eat();
 }

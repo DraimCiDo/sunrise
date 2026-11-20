@@ -12,7 +12,9 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "ran",
-        neoforge = "none (a command's executor is part of the Brigadier node added in RegisterCommandsEvent; CommandEvent only watches executions)"
+        neoforge = "none (a command's executor is part of the Brigadier node added in RegisterCommandsEvent; CommandEvent only watches executions)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_run_mod_command",
+        native = "fn native_run_mod_command(&mut self, source: &CommandSource, command: &CommandInvocation, ran: &mut bool)"
     )]
     fn run_mod_command();
 }

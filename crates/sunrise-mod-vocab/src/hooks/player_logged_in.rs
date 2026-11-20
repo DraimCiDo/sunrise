@@ -9,7 +9,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerEvent.PlayerLoggedInEvent"
+        neoforge = "PlayerEvent.PlayerLoggedInEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_logged_in",
+        native = "fn native_player_logged_in(&mut self, player: u128, name: &str)"
     )]
     fn player_logged_in();
 }

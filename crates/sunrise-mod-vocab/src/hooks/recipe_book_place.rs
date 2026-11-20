@@ -31,7 +31,8 @@ pub trait Hooks {
         contract = "listen",
         scope = "menu",
         key = "menu",
-        neoforge = "none (vanilla RecipeBookMenu.handlePlacement, which each menu overrides; no event)"
+        neoforge = "none (vanilla RecipeBookMenu.handlePlacement, which each menu overrides; no event)",
+        native = "fn native_recipe_book_place(&mut self, call: mod_api::__private::RecipeBookPlaceCall<'_>)"
     )]
     fn recipe_book_place(
         menu: &str,

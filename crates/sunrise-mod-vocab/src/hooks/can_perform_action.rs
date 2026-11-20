@@ -27,7 +27,8 @@ pub trait Hooks {
         scope = "item",
         key = "stack",
         host = "read",
-        neoforge = "IItemExtension.canPerformAction"
+        neoforge = "IItemExtension.canPerformAction",
+        native = "fn native_can_perform_action(&self, stack: &ItemStack, ability: &str, can_perform: &mut bool)"
     )]
     fn can_perform_action();
 }

@@ -20,7 +20,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "none (vanilla AbstractContainerMenu.clicked; NeoForge adds no event or extension for it)",
-        version = 2
+        version = 2,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_menu_clicked",
+        native = "fn native_menu_clicked(&mut self, uuid: u128, window: i32, slot: i32, button: i32, mode: i32)"
     )]
     fn menu_clicked();
 }

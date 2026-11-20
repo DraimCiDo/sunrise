@@ -11,7 +11,8 @@ pub trait Hooks {
         host = "level",
         target = "sunrise_client::game::native_hooks::block_landing::HitLevel<'_>::native_fall_on",
         neoforge = "LivingFallEvent",
-        version = 2
+        version = 2,
+        native = "fn native_fall_on(&mut self, call: super::fire::FallOnCall<'_>)"
     )]
     fn fall_on(
         dimension: &str,
@@ -32,7 +33,8 @@ pub trait Hooks {
         key = "state",
         host = "level",
         target = "sunrise_client::game::native_hooks::block_landing::HitLevel<'_>::native_bounce_on",
-        neoforge = "none (vanilla Block.bounceOn; IBlockExtension.getBounceRestitution only returns a factor)"
+        neoforge = "none (vanilla Block.bounceOn; IBlockExtension.getBounceRestitution only returns a factor)",
+        native = "fn native_bounce_on(&mut self, call: super::fire::BounceOnCall<'_>)"
     )]
     fn bounce_on(
         dimension: &str,

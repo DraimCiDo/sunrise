@@ -55,7 +55,8 @@ pub trait Hooks {
         host = "read",
         cancellable = false,
         version = 5,
-        neoforge = "none (vanilla Slot.mayPlace and mayPickup; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla Slot.mayPlace and mayPickup; NeoForge adds no event or extension for it)",
+        native = "fn native_menu_slot_rules(&self, call: mod_api::__private::MenuSlotRulesCall<'_>)"
     )]
     fn menu_slot_rules(
         menu: &str,

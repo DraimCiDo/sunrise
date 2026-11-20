@@ -25,7 +25,9 @@ pub trait Hooks {
         version = 3,
         out = "cancel",
         neoforge = "EntityTeleportEvent.EnderPearl",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_ender_pearl_teleport",
+        native = "fn native_ender_pearl_teleport(&mut self, call: mod_api::__private::EnderPearlTeleportCall<'_>)"
     )]
     fn ender_pearl_teleport(
         owner: EntityRef,
@@ -44,7 +46,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_entities_load",
+        native = "fn native_entities_load(&mut self, dimension: &str, chunk: [i32; 2], count: usize)"
     )]
     fn entities_load();
 }

@@ -159,7 +159,7 @@ fn on_stack(run: impl FnOnce() + Send + 'static) {
 fn only_can_equip_changes_when_prepared_marker_is_removed() {
     on_stack(|| {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let sources = crate::sources(&root, crate::FillMode::Require).unwrap();
+        let sources = crate::sources(&root, Some(crate::FillMode::Require)).unwrap();
         let providers = crate::capability_providers::generate(&root, &[]).unwrap().0;
         let included = [
             ("mod_api_generated.rs", sources.hooks.as_str()),

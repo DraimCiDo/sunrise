@@ -14,7 +14,8 @@ pub trait Hooks {
         contract = "listen",
         scope = "block",
         key = "state",
-        neoforge = "none (vanilla Block.setPlacedBy)"
+        neoforge = "none (vanilla Block.setPlacedBy)",
+        native = "fn native_set_placed_by(&mut self, level: LevelRef, pos: [i32; 3], state: BlockStateId, placer: Option<EntityRef>, stack: Option<&ItemStack>)"
     )]
     fn set_placed_by();
 }

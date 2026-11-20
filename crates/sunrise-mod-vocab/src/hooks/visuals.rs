@@ -8,7 +8,9 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "none (Sunrise-only; NeoForge has no counterpart)"
+        neoforge = "none (Sunrise-only; NeoForge has no counterpart)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_visuals",
+        native = "fn native_visuals(&self, rims: &mut Vec<BlockRim>, lights: &mut Vec<ColoredLight>)"
     )]
     fn visuals();
 }

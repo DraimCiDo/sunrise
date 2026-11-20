@@ -31,7 +31,8 @@ pub trait Hooks {
         key = "state",
         host = "level",
         target = "sunrise_client::game::native_hooks::bounce_restitution::HitLevel<'_>::native_bounce_restitution",
-        neoforge = "IBlockExtension.getBounceRestitution"
+        neoforge = "IBlockExtension.getBounceRestitution",
+        native = "fn native_bounce_restitution(&self, entity: i32, kind: &str, state: BlockStateId, pos: BlockPos, factor: &mut f32)"
     )]
     fn bounce_restitution();
 }

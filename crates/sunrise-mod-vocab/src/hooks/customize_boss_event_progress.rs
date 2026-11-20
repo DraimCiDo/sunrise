@@ -16,7 +16,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "CustomizeGuiOverlayEvent.BossEventProgress",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_customize_boss_event_progress(&self, bar: &mod_api::ClientBossBar, x: &mut i32, y: &mut i32, increment: &mut i32, cancel: &mut bool)"
     )]
     fn customize_boss_event_progress();
 }

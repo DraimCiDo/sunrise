@@ -24,7 +24,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "EnchantedEntityLootEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_enchanted_entity_loot(&mut self, entity: LivingRef, source: &HurtSource<'_>, attacker: Option<EntityRef>, enchantment: &Identifier, level: &mut u32)"
     )]
     fn enchanted_entity_loot();
 }

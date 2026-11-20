@@ -14,7 +14,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "LivingConversionEvent.Pre",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_living_conversion_pre(&mut self, entity: u32, kind: &str, outcome: &str, cancel: &mut bool)"
     )]
     fn living_conversion_pre();
 }

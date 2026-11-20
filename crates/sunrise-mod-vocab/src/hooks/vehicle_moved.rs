@@ -17,7 +17,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no vehicle move event; EntityTickEvent covers the tick)"
+        neoforge = "none (NeoForge has no vehicle move event; EntityTickEvent covers the tick)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_vehicle_moved",
+        native = "fn native_vehicle_moved(&mut self, player: Option<u128>, kind: &str, from: [f64; 3], to: [f64; 3])"
     )]
     fn vehicle_moved();
 }

@@ -31,7 +31,8 @@ in the renderer section instead. It is the switch of the `DebugRenderer` with it
         contract = "collect",
         out = "entries",
         context = "registration",
-        neoforge = "RegisterDebugEntriesEvent"
+        neoforge = "RegisterDebugEntriesEvent",
+        native = "fn native_register_debug_entries(context: &mod_api::RegistrationContext, entries: &mut Vec<DebugEntry>)"
     )]
     fn register_debug_entries();
 }

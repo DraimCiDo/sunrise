@@ -7,7 +7,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event; Bukkit's PlayerLevelChangeEvent)",
-        paper = "PlayerLevelChangeEvent"
+        paper = "PlayerLevelChangeEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_level_change",
+        native = "fn native_player_level_change(&mut self, player: u128, name: &str, from: i32, to: i32)"
     )]
     fn player_level_change();
 }

@@ -11,7 +11,9 @@ pub trait Hooks {
         out = "cancel",
         host = "read",
         neoforge = "none (NeoForge has no such event; Bukkit's InventoryMoveItemEvent)",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_inventory_move_item",
+        native = "fn native_inventory_move_item(&self, source: [i32; 3], destination: [i32; 3], item: &str, cancel: &mut bool)"
     )]
     fn inventory_move_item();
 }

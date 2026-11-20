@@ -13,7 +13,8 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "RenderTooltipEvent.Texture"
+        neoforge = "RenderTooltipEvent.Texture",
+        native = "fn native_render_tooltip_texture(&self, stack: Option<&ItemStack>, texture: &mut Option<Identifier>, background: &mut u32, border_top: &mut u32, border_bottom: &mut u32)"
     )]
     fn render_tooltip_texture();
 }

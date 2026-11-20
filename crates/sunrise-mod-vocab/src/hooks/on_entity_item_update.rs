@@ -17,7 +17,8 @@ pub trait Hooks {
         out = "canceled",
         scope = "item",
         key = "stack",
-        neoforge = "IItemExtension.onEntityItemUpdate"
+        neoforge = "IItemExtension.onEntityItemUpdate",
+        native = "fn native_on_entity_item_update(&mut self, call: mod_api::__private::OnEntityItemUpdateCall<'_>)"
     )]
     fn on_entity_item_update(stack: &ItemStack, item: ItemEntityRef, canceled: &mut bool);
 }

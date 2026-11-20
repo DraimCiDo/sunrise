@@ -14,7 +14,9 @@ pub trait Hooks {
         side = "client",
         contract = "collect",
         out = "layers",
-        neoforge = "none (SelectMusicEvent swaps the one track; NeoForge has no layered music)"
+        neoforge = "none (SelectMusicEvent swaps the one track; NeoForge has no layered music)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_music_layers",
+        native = "fn native_music_layers(&self, layers: &mut Vec<MusicLayer>)"
     )]
     fn music_layers();
 }

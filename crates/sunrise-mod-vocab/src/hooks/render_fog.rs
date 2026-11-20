@@ -8,7 +8,9 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "ViewportEvent.RenderFog"
+        neoforge = "ViewportEvent.RenderFog",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_render_fog",
+        native = "fn native_render_fog(&self, partial: f32, camera: [f64; 3], fog_type: mod_api::client::fog::FogType, fog: &mut mod_api::client::fog::FogData)"
     )]
     fn render_fog();
 }

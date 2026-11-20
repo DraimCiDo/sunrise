@@ -25,7 +25,8 @@ Sunrise ticks vanilla's spawners where it always has: the trader, patrol, cat an
         contract = "listen",
         host = "read",
         neoforge = "ModifyCustomSpawnersEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_modify_custom_spawners(&self, dimension: &str, spawners: &mut mod_api::CustomSpawners)"
     )]
     fn modify_custom_spawners();
 
@@ -41,7 +42,8 @@ Sunrise ticks vanilla's spawners where it always has: the trader, patrol, cat an
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "ModifyCustomSpawnersEvent"
+        neoforge = "ModifyCustomSpawnersEvent",
+        native = "fn native_custom_spawner_tick(&mut self, dimension: &str, key: mod_api::SpawnerKey, spawn_enemies: bool)"
     )]
     fn custom_spawner_tick();
 }

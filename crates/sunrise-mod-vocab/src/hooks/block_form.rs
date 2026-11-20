@@ -11,7 +11,8 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
         cancellable = true,
-        target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_block_form"
+        target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_block_form",
+        native = "fn native_block_form(&self, dimension: LevelDimension, pos: BlockPos, from: BlockStateId, to: BlockStateId, cancel: &mut bool)"
     )]
     fn block_form();
 }

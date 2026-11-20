@@ -9,7 +9,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "ClientPlayerNetworkEvent.LoggingIn",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_client_player_logging_in(&mut self, player_id: i32, uuid: u128)"
     )]
     fn client_player_logging_in();
 }

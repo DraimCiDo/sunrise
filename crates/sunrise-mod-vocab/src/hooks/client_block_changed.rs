@@ -30,7 +30,8 @@ viewing is not told."##]
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "none (vanilla ClientLevel.setBlock; NeoForge adds no client event for it)"
+        neoforge = "none (vanilla ClientLevel.setBlock; NeoForge adds no client event for it)",
+        native = "fn native_client_block_changed(&self, dimension: &str, pos: BlockPos, old: BlockStateId, new: BlockStateId, predicted: bool)"
     )]
     fn client_block_changed();
 }

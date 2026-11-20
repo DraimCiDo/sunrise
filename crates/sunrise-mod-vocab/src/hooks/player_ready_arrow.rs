@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's PlayerReadyArrow)"
+        neoforge = "none (NeoForge has no such event; Bukkit's PlayerReadyArrow)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_ready_arrow",
+        native = "fn native_player_ready_arrow(&mut self, player: u128, name: &str, arrow: &str)"
     )]
     fn player_ready_arrow();
 }

@@ -9,7 +9,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event; Bukkit's WorldBorderBoundsChangeFinish)",
-        cancellable = false
+        cancellable = false,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_world_border_bounds_change_finish",
+        native = "fn native_world_border_bounds_change_finish(&mut self)"
     )]
     fn world_border_bounds_change_finish();
 }

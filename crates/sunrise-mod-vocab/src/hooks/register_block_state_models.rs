@@ -61,7 +61,8 @@ layer on its own, as vanilla does: a refused layer leaves the states to the laye
         contract = "collect",
         out = "definitions",
         context = "registration",
-        neoforge = "RegisterBlockStateModels"
+        neoforge = "RegisterBlockStateModels",
+        native = "fn native_register_block_state_models(context: &mod_api::RegistrationContext, definitions: &mut Vec<String>)"
     )]
     fn register_block_state_models();
 }

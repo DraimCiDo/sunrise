@@ -2,7 +2,13 @@
 
 A new hook needs its declaration in the area file of `crates/sunrise-mod-vocab/src/hooks/` (`///` lines and
 `#[hook(side = "server", contract = "cancel", out = "cancel")]` on `fn name();`; the argument list is in that folder's `mod.rs`), its `native_*` function with the placeholder body
-`let _ = (every, parameter);` (all its parameters, in order), and a run of `cargo run -p xtask -- mod-api`.
+`let _ = (every, parameter);` (all its parameters, in order), and a run of
+`cargo run -p sunrise-mod-api-gen --bin sunrise-stage -- hooks .` (or `cargo run -p xtask -- mod-api`, which does
+the same and more). It writes the function's signature into the declaration as `native = "fn native_…(…)"`
+(and `target`, or `direct`, where the hook needs one): the vocabulary and every crate below the game generate the
+hook from the declaration alone, and the game's own build refuses a function whose signature is not its
+declaration's. Run it again after changing a hook function's signature. It needs no vocabulary build, so it runs
+when that build refuses a declaration with no `native`.
 Put that function in `crates/sunrise-client/src/game/native_hooks/<area>.rs`, matching the declaration's
 area filename. Alternatively, a named hook may live in any logical module under `game/`, including
 area folders, `mod.rs` and `#[path]` modules. Its target must name that module and

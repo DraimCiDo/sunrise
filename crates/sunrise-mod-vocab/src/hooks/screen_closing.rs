@@ -6,7 +6,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "ScreenEvent.Closing",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_screen_closing(&self, screen: &ScreenView<'_>)"
     )]
     fn screen_closing();
 }

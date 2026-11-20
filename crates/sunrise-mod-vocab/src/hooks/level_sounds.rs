@@ -22,7 +22,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "PlayLevelSoundEvent.AtPosition",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_play_level_sound_at_position(&mut self, call: mod_api::__private::PlayLevelSoundAtPositionCall<'_>)"
     )]
     fn play_level_sound_at_position(
         level: LevelRef,
@@ -54,7 +55,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "PlayLevelSoundEvent.AtEntity",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_play_level_sound_at_entity(&mut self, call: mod_api::__private::PlayLevelSoundAtEntityCall<'_>)"
     )]
     fn play_level_sound_at_entity(
         entity: EntityRef,

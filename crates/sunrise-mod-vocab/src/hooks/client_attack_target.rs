@@ -17,7 +17,8 @@ pub trait Hooks {
         out = "canceled",
         neoforge = "AttackEntityEvent",
         cancellable = true,
-        version = 2
+        version = 2,
+        native = "fn native_client_attack_target(&mut self, targets: &mut Vec<EntityRef>, canceled: &mut bool)"
     )]
     fn client_attack_target();
 }

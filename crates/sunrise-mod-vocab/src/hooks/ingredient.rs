@@ -37,7 +37,9 @@ pub trait Hooks {
         context = "data_load",
         version = 3,
         target = "sunrise_client_lib::crafting::native_hooks::native_ingredient",
-        neoforge = "ICustomIngredient"
+        neoforge = "ICustomIngredient",
+        direct = true,
+        native = "fn native_ingredient(context: &sunrise_world::native_load_context::LoadContext, kind: &str, data: &sunrise_core::nbt::Compound, items: &mut Vec<String>)"
     )]
     fn ingredient();
 }

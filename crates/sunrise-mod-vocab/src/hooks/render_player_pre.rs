@@ -16,7 +16,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "RenderPlayerEvent.Pre",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_render_player_pre(&self, player: &MobRender<'_>, who: &PlayerRender<'_>, draw: &mut BlockEntityDraw, hidden: &mut HiddenParts, canceled: &mut bool)"
     )]
     fn render_player_pre();
 }

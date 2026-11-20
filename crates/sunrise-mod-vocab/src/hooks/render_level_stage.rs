@@ -31,7 +31,8 @@ weather stages. Nothing is dropped, and the order between stages is kept."#]
         side = "client",
         contract = "listen",
         neoforge = "RenderLevelStageEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_render_level_stage(&self, stage: mod_api::RenderLevelStage, view: &mod_api::WorldRenderView, draw: &mut sunrise_client::world_geometry::WorldGeometry)"
     )]
     fn render_level_stage();
 }

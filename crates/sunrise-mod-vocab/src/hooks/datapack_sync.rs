@@ -15,7 +15,9 @@ pub trait Hooks {
         side = "server",
         contract = "collect",
         out = "recipe_types",
-        neoforge = "OnDatapackSyncEvent"
+        neoforge = "OnDatapackSyncEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_datapack_sync",
+        native = "fn native_datapack_sync(&mut self, call: mod_api::__private::DatapackSyncCall<'_>)"
     )]
     fn datapack_sync(player: PlayerRef, recipe_types: &mut Vec<String>);
 }

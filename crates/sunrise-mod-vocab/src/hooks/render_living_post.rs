@@ -18,7 +18,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "RenderLivingEvent.Post",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_render_living_post(&self, entity: &MobRender<'_>, parts: Option<&PosedParts>, draw: &mut BlockEntityDraw)"
     )]
     fn render_living_post();
 }

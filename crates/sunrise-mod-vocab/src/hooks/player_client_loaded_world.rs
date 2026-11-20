@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's PlayerClientLoadedWorld)"
+        neoforge = "none (NeoForge has no such event; Bukkit's PlayerClientLoadedWorld)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_client_loaded_world",
+        native = "fn native_player_client_loaded_world(&mut self, player: u128, name: &str)"
     )]
     fn player_client_loaded_world();
 }

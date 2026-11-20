@@ -37,7 +37,8 @@ components, as before."##]
         contract = "listen",
         scope = "item",
         key = "stack",
-        neoforge = "none (FluidUtil.getFirstStackContained over Capabilities.Fluid.ITEM, read by DynamicFluidContainerModel; Sunrise's ITEM_FLUIDS needs a server place, so the client model asks the item)"
+        neoforge = "none (FluidUtil.getFirstStackContained over Capabilities.Fluid.ITEM, read by DynamicFluidContainerModel; Sunrise's ITEM_FLUIDS needs a server place, so the client model asks the item)",
+        native = "fn native_contained_fluid(&self, stack: &mod_api::ItemStack, fluid: &mut Option<mod_api::FluidKey>)"
     )]
     fn contained_fluid();
 }

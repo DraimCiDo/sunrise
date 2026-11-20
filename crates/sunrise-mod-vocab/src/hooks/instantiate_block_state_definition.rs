@@ -13,7 +13,8 @@ pub trait Hooks {
         out = "models",
         context = "registration",
         neoforge = "none (CustomBlockModelDefinition.instantiate of a type RegisterBlockStateModels registers; NeoForge adds no event for it)",
-        target = "sunrise_client_render::mod_block_state_models::native_instantiate_block_state_definition"
+        target = "sunrise_client_render::mod_block_state_models::native_instantiate_block_state_definition",
+        native = "fn native_instantiate_block_state_definition(context: &RegistrationContext, definition_type: &str, block: &Identifier, config: &Tag, states: &[std::collections::BTreeMap<String, String>], models: &mut Vec<BlockStateModelPick>)"
     )]
     fn instantiate_block_state_definition();
 }

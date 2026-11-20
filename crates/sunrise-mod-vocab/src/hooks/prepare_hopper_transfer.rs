@@ -8,7 +8,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no hopper event)"
+        neoforge = "none (NeoForge has no hopper event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_prepare_hopper_transfer",
+        native = "fn native_prepare_hopper_transfer(&mut self, pos: [i32; 3])"
     )]
     fn prepare_hopper_transfer();
 }

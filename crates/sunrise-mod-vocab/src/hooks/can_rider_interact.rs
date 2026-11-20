@@ -18,7 +18,9 @@ pub trait Hooks {
         out = "allowed",
         scope = "entity",
         key = "entity",
-        neoforge = "IEntityExtension.canRiderInteract"
+        neoforge = "IEntityExtension.canRiderInteract",
+        target = "sunrise_client::game::native_hooks::client_pick::Game<'_>::native_can_rider_interact",
+        native = "fn native_can_rider_interact(&mut self, call: mod_api::__private::CanRiderInteractCall<'_>)"
     )]
     fn can_rider_interact(entity: EntityRef, allowed: &mut bool);
 }

@@ -11,7 +11,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge's PlayerDestroyItemEvent carries the original stack and a hand, which armour has not; this hook only listens and names the slot instead. Bukkit's PlayerItemBreakEvent)"
+        neoforge = "none (NeoForge's PlayerDestroyItemEvent carries the original stack and a hand, which armour has not; this hook only listens and names the slot instead. Bukkit's PlayerItemBreakEvent)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_destroy_item",
+        native = "fn native_player_destroy_item(&mut self, player: u128, name: &str, item: &str, slot: &str)"
     )]
     fn player_destroy_item();
 }

@@ -16,7 +16,8 @@ pub trait Hooks {
         contract = "collect",
         out = "sources",
         neoforge = "none (Sunrise mod crafting menus lend ingredient containers)",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_recipe_sources(&mut self, player: u128, menu: &str, pos: [i32; 3], sources: &mut Vec<[i32; 3]>)"
     )]
     fn recipe_sources();
 }

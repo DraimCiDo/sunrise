@@ -31,7 +31,8 @@ already at a sprite's name wins over the sprite."#]
         contract = "collect",
         out = "atlases",
         context = "registration",
-        neoforge = "RegisterTextureAtlasesEvent"
+        neoforge = "RegisterTextureAtlasesEvent",
+        native = "fn native_register_texture_atlases(context: &mod_api::RegistrationContext, atlases: &mut Vec<TextureAtlasRegistration>)"
     )]
     fn register_texture_atlases();
 }

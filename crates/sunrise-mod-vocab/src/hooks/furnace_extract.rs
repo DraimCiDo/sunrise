@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_furnace_extract",
+        native = "fn native_furnace_extract(&mut self, player: u128, name: &str, pos: [i32; 3], item: &str, count: u32)"
     )]
     fn furnace_extract();
 }

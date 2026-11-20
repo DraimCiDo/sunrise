@@ -694,7 +694,7 @@ mod tests {
     fn staged_identifier_exposure_does_not_add_backing_storage_to_wire_layouts() {
         std::thread::Builder::new().stack_size(64 << 20).spawn(|| {
             let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-            let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+            let generated = crate::sources(&root, Some(crate::FillMode::Require)).unwrap();
             let included = [
                 ("mod_api_generated.rs", generated.hooks.as_str()),
                 ("mod_api_generated_host.rs", generated.host.as_str()),

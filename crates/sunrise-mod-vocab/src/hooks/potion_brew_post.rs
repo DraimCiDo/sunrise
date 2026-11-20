@@ -11,7 +11,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "PotionBrewEvent.Post",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_potion_brew_post(&mut self, pos: [i32; 3], stacks: &mut [Option<ItemStack>; 5])"
     )]
     fn potion_brew_post();
 }

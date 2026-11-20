@@ -6,7 +6,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "AnvilCraftEvent.Post"
+        neoforge = "AnvilCraftEvent.Post",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_anvil_craft_post",
+        native = "fn native_anvil_craft_post(&mut self, player: u128, name: &str, pos: [i32; 3], craft: &mod_api::item::menu::AnvilCraft)"
     )]
     fn anvil_craft_post();
 }

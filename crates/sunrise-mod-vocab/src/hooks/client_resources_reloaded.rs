@@ -11,7 +11,9 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "ClientResourceLoadFinishedEvent"
+        neoforge = "ClientResourceLoadFinishedEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_client_resources_reloaded",
+        native = "fn native_client_resources_reloaded(&mut self)"
     )]
     fn client_resources_reloaded();
 }

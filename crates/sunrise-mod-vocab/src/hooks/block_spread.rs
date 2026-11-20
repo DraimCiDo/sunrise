@@ -12,7 +12,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_block_spread",
-        neoforge = "none (BlockEvent.FluidPlaceBlockEvent covers only fluids making stone and the like, not flow or fire spread)"
+        neoforge = "none (BlockEvent.FluidPlaceBlockEvent covers only fluids making stone and the like, not flow or fire spread)",
+        native = "fn native_block_spread(&self, dimension: LevelDimension, kind: &str, from: BlockPos, to: BlockPos, canceled: &mut bool)"
     )]
     fn block_spread();
 }

@@ -15,7 +15,9 @@ pub trait Hooks {
         out = "tag",
         scope = "block_entity",
         key = "entity",
-        neoforge = "none (vanilla BlockEntity.getUpdateTag; NeoForge adds no event or extension for it); IBlockEntityExtension.handleUpdateTag is the client half"
+        neoforge = "none (vanilla BlockEntity.getUpdateTag; NeoForge adds no event or extension for it); IBlockEntityExtension.handleUpdateTag is the client half",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_block_entity_update_tag",
+        native = "fn native_block_entity_update_tag(pos: [i32; 3], entity: &ModBlockEntity, tag: &mut Option<Compound>)"
     )]
     fn block_entity_update_tag();
 }

@@ -31,6 +31,8 @@
 //! | `cancellable` | whether the NeoForge counterpart event is cancellable (documentation, not the contract) |
 //! | `version` | the contract version an injection's `hook_version` names; left out when it is 1 |
 //! | `target` | the game function that fires it; left out when it is `Game::native_<name>` in `native_hooks/<area>.rs` |
+//! | `native` | the target function's signature, as its crate defines it: the hook's arguments are generated from it, so no build below the game reads the game, and the game's own build refuses a definition that differs; written, with `target` and `direct`, by `cargo run -p sunrise-mod-api-gen --bin sunrise-stage -- hooks` |
+//! | `direct` | `true` on a target outside the game crate that calls its own `dispatch_<name>`; another calls the callback the game installs |
 //!
 //! Every hook needs `///` lines: they are the rustdoc of its trait method, and a hook without them
 //! is refused. `HookId` values are process-local dispatch indexes, not persistent API identities.

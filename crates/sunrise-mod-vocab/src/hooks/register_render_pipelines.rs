@@ -76,7 +76,8 @@ game reaches."#]
         out = "pipelines",
         collect_validator = "crate::client::render_pipeline::validate_render_pipelines",
         context = "registration",
-        neoforge = "RegisterRenderPipelinesEvent"
+        neoforge = "RegisterRenderPipelinesEvent",
+        native = "fn native_register_render_pipelines(context: &mod_api::RegistrationContext, pipelines: &mut Vec<mod_api::RenderPipeline>)"
     )]
     fn register_render_pipelines();
 }

@@ -11,7 +11,8 @@ pub trait Hooks {
         side = "both",
         contract = "collect",
         out = "projectile",
-        neoforge = "LivingGetProjectileEvent"
+        neoforge = "LivingGetProjectileEvent",
+        native = "fn native_living_get_projectile(&mut self, player: Option<u128>, name: &str, entity: Option<u32>, kind: &str, weapon: &ItemStack, projectile: &mut Option<ItemStack>)"
     )]
     fn living_get_projectile();
 }

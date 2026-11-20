@@ -17,7 +17,8 @@ pub trait Hooks {
         key = "item",
         out = "answer",
         target = "sunrise_client::game::native_hooks::must_survive::GameLevel<'_>::native_must_survive",
-        neoforge = "none (vanilla BlockItem.mustSurvive)"
+        neoforge = "none (vanilla BlockItem.mustSurvive)",
+        native = "fn native_must_survive(&self, item: &str, answer: &mut Option<bool>)"
     )]
     fn must_survive();
 }

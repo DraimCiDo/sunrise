@@ -32,7 +32,8 @@ pub fn write_if_changed(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> std:
 /// Generate only this crate's files, tracking every source read by the generator.
 /// `root` is supplied at run time by the consuming crate's build script.
 pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), String> {
-    track(root, !matches!(&target, Target::Vocab))?;
+    let game = matches!(&target, Target::Client);
+    track(root, game)?;
     let inventory = if matches!(target, Target::Vocab) {
         let path = root.join("tools/layering/mod_vocab_state.json");
         crate::rerun_if_changed(&path.display());
@@ -48,7 +49,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
     if matches!(&target, Target::Client) {
         crate::rerun_if_staged(root);
     }
-    let generated = sources(root, super::FillMode::Require)?;
+    let generated = sources(root, game.then_some(super::FillMode::Require))?;
     let outputs = match target {
         Target::Client => vec![
             (
@@ -236,26 +237,11 @@ pub fn generate_render(root: &Path, out_dir: &Path) -> Result<(), String> {
             .join("crates/sunrise-mod-render/src/render.rs")
             .display(),
     );
-    let source = super::dispatch::render(root, &Catalog::load_declarations(root)?)?.render_dispatch;
-    use syn::spanned::Spanned;
-    let file = syn::parse_file(&source).map_err(|error| error.to_string())?;
-    let lines: Vec<_> = std::iter::once(0)
-        .chain(source.match_indices('\n').map(|(index, _)| index + 1))
-        .collect();
-    let offset = |point: proc_macro2::LineColumn| lines[point.line - 1] + point.column;
-    let mut records = String::from("use super::*;\n");
-    for item in file.items {
-        let syn::Item::Struct(record) = item else {
-            continue;
-        };
-        let start = record
-            .attrs
-            .iter()
-            .find(|attr| !attr.path().is_ident("doc"))
-            .map_or_else(|| record.vis.span().start(), |attr| attr.span().start());
-        records.push_str(&source[offset(start)..offset(record.span().end())]);
-        records.push('\n');
-    }
+    // The render hooks' records, each as the dispatch emits it.
+    let records = format!(
+        "use super::*;\n{}",
+        super::dispatch::render(root, &Catalog::load(root)?, true)?.render_dispatch
+    );
     syn::parse_file(&records).map_err(|error| error.to_string())?;
     write_if_changed(out_dir.join("native_render_generated.rs"), records)
         .map_err(|error| error.to_string())
@@ -303,7 +289,7 @@ pub(crate) fn wire_types(root: &Path) -> Result<std::collections::BTreeSet<Strin
     if !root.join("crates/sunrise-mod-vocab/src/hooks").is_dir() {
         return Ok(Default::default());
     }
-    let generated = sources(root, super::FillMode::Require)?;
+    let generated = sources(root, None)?;
     wire_types_from_sources(root, &generated)
 }
 
@@ -439,7 +425,10 @@ fn short_lines(file: syn::File) -> String {
     code
 }
 
-pub(super) fn track(root: &Path, all_game: bool) -> Result<(), String> {
+/// Tracks what the hooks' sources are generated from: the vocabulary's declarations, exports
+/// and parts, and with `game` (the game's own build, which checks the game against them) every
+/// game file and each target of another crate.
+pub(super) fn track(root: &Path, game: bool) -> Result<(), String> {
     fn directory(path: &Path, extension: &str, recursive: bool) -> Result<(), String> {
         // Track the directory as well: adding a helper source or fragment changes the inputs.
         crate::rerun_if_changed(&path.display());
@@ -469,17 +458,16 @@ pub(super) fn track(root: &Path, all_game: bool) -> Result<(), String> {
         "rs",
         false,
     )?;
-    if all_game {
-        directory(&root.join("crates/sunrise-client/src/game"), "rs", true)?;
-        crate::rerun_if_changed(&root.join("crates/sunrise-client/src/game.rs").display());
-    } else {
-        directory(
-            &root.join("crates/sunrise-client/src/game/native_hooks"),
-            "rs",
-            false,
-        )?;
+    if !game {
+        return Ok(());
     }
+    directory(&root.join("crates/sunrise-client/src/game"), "rs", true)?;
+    crate::rerun_if_changed(&root.join("crates/sunrise-client/src/game.rs").display());
+    // Render hooks' functions are checked by `sunrise-mod-render`'s own build.
     for hook in Catalog::load(root)?.hooks {
+        if super::dispatch::is_render(&hook) {
+            continue;
+        }
         if let Some((krate, path)) = free_function_source(&hook.target) {
             let (module, _) = path.rsplit_once("::").ok_or("target missing module")?;
             let path = root

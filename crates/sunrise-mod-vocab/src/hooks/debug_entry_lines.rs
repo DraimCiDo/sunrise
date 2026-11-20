@@ -9,7 +9,8 @@ pub trait Hooks {
         contract = "collect",
         out = "lines",
         cancellable = false,
-        neoforge = "RegisterDebugEntriesEvent"
+        neoforge = "RegisterDebugEntriesEvent",
+        native = "fn native_debug_entry_lines(&self, id: &str, lines: &mut Vec<String>)"
     )]
     fn debug_entry_lines();
 }

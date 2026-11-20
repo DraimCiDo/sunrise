@@ -15,7 +15,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "ExtractBlockScreenEffectEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_extract_block_screen_effect(&self, effect: mod_api::BlockScreenEffect, state: BlockStateId, pos: BlockPos, partial_tick: f32, canceled: &mut bool, custom_draw: &mut bool)"
     )]
     #[notes = r##"## Block screen effects
 

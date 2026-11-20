@@ -12,7 +12,8 @@ pub trait Hooks {
         contract = "collect",
         out = "properties",
         context = "registration",
-        neoforge = "RegisterSelectItemModelPropertyEvent"
+        neoforge = "RegisterSelectItemModelPropertyEvent",
+        native = "fn native_register_select_item_model_property(context: &mod_api::RegistrationContext, properties: &mut Vec<String>)"
     )]
     #[notes = r##"## Categorical item model properties
 

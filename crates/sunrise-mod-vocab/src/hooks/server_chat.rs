@@ -18,7 +18,8 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "ServerChatEvent",
         cancellable = true,
-        version = 2
+        version = 2,
+        native = "fn native_server_chat(&mut self, call: mod_api::__private::ServerChatCall<'_>)"
     )]
     fn server_chat(
         player_id: i32,

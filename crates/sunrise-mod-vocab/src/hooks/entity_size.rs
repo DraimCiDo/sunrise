@@ -37,7 +37,8 @@ pub trait Hooks {
         out = "size",
         host = "read",
         neoforge = "EntityEvent.Size",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_entity_size(&self, entity: EntityRef, pose: mod_api::Pose, old_size: [f32; 3], size: &mut [f32; 3])"
     )]
     fn entity_size();
 }

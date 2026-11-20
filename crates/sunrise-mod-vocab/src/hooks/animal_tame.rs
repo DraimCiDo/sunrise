@@ -13,7 +13,8 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "AnimalTameEvent",
         paper = "EntityTameEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_animal_tame(&mut self, tamer: u128, tamer_entity_id: i32, entity: u32, kind: &str, cancel: &mut bool)"
     )]
     fn animal_tame();
 }

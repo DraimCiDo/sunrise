@@ -15,7 +15,8 @@ pub trait Hooks {
         out = "can_harvest",
         scope = "block",
         key = "state",
-        neoforge = "IBlockExtension.canHarvestBlock"
+        neoforge = "IBlockExtension.canHarvestBlock",
+        native = "fn native_can_harvest_block(&mut self, player: u32, pos: [i32; 3], state: BlockStateId, can_harvest: &mut bool)"
     )]
     fn can_harvest_block();
 }

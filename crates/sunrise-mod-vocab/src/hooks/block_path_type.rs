@@ -23,7 +23,8 @@ pub trait Hooks {
         key = "state",
         host = "level",
         target = "sunrise_client::game::native_hooks::block_path_type::ReadLevel<'_,'_>::native_block_path_type",
-        neoforge = "IBlockExtension.getBlockPathType"
+        neoforge = "IBlockExtension.getBlockPathType",
+        native = "fn native_block_path_type(&self, pos: BlockPos, state: BlockStateId, path_type: &mut Option<mod_api::PathType>)"
     )]
     fn block_path_type();
 }

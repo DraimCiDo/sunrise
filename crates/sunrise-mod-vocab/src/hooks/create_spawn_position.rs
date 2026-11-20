@@ -8,7 +8,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "LevelEvent.CreateSpawnPosition",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_create_spawn_position(&mut self, position: &mut [i32; 3], rotation: &mut [f32; 2], cancel: &mut bool)"
     )]
     fn create_spawn_position();
 }

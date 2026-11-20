@@ -24,7 +24,8 @@ pub trait Hooks {
         key = "id",
         target = "sunrise_client::game::native_hooks::block_entity_load_additional::GameLevel<'_>::native_block_entity_load_additional",
         neoforge = "none (vanilla BlockEntity.loadAdditional; NeoForge adds no event for this moment)",
-        version = 2
+        version = 2,
+        native = "fn native_block_entity_load_additional(&self, id: mod_api::BlockEntityTypeKey, entity: BlockEntityRef, pos: [i32; 3], level: LevelRef, tag: &Compound)"
     )]
     fn block_entity_load_additional();
 }

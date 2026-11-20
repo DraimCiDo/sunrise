@@ -15,7 +15,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge's LivingUseTotemEvent can cancel the save; this hook only listens. Bukkit's EntityResurrectEvent)"
+        neoforge = "none (NeoForge's LivingUseTotemEvent can cancel the save; this hook only listens. Bukkit's EntityResurrectEvent)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_totem",
+        native = "fn native_player_totem(&mut self, player: u128, name: &str)"
     )]
     fn player_totem();
 }

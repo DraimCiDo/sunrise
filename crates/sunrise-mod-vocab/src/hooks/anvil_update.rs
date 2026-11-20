@@ -16,7 +16,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "AnvilUpdateEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_anvil_update(&mut self, player: u128, player_entity_id: i32, pos: [i32; 3], update: &mut mod_api::item::menu::AnvilUpdate, cancel: &mut bool)"
     )]
     fn anvil_update();
 }

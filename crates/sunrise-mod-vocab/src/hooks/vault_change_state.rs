@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_vault_change_state",
+        native = "fn native_vault_change_state(&mut self, dimension: &str, pos: [i32; 3], state: &str)"
     )]
     fn vault_change_state();
 }

@@ -8,7 +8,12 @@ pub(super) fn append(catalog: &mut Catalog, methods: &mut Vec<syn::ItemFn>) -> R
         r#"
         pub trait Hooks {
             /// Test-only stack-list, scalar and cancellation boundary contract.
-            #[hook(side = "server", contract = "cancel", out = "cancel")]
+            #[hook(
+                side = "server",
+                contract = "cancel",
+                out = "cancel",
+                native = "fn native_mixed_output_fixture(&mut self, mode: u8, drops: &mut Vec<ItemStack>, damage: &mut i32, cancel: &mut bool)"
+            )]
             fn mixed_output_fixture();
         }
         "#

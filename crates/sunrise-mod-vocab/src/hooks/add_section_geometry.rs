@@ -51,7 +51,8 @@ resources reload, and when a mod calls `ClientHost::refresh_render_visibility` a
         side = "client",
         contract = "listen",
         context = "registration",
-        neoforge = "AddSectionGeometryEvent"
+        neoforge = "AddSectionGeometryEvent",
+        native = "fn native_add_section_geometry(context: &mod_api::RegistrationContext, renderers: &mut dyn mod_api::SectionGeometryRenderers)"
     )]
     fn add_section_geometry();
 }

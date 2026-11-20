@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_entities_unload",
+        native = "fn native_entities_unload(&mut self, dimension: &str, chunk: [i32; 2], count: usize)"
     )]
     fn entities_unload();
 }

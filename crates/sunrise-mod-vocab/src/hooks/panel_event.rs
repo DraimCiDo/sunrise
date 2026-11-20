@@ -10,7 +10,9 @@ pub trait Hooks {
         side = "client",
         version = 2,
         contract = "listen",
-        neoforge = "none (Sunrise-only; NeoForge has no counterpart)"
+        neoforge = "none (Sunrise-only; NeoForge has no counterpart)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_panel_event",
+        native = "fn native_panel_event(&mut self, mod_id: &str, event: &PanelEvent)"
     )]
     fn panel_event();
 }

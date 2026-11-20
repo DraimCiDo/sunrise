@@ -12,7 +12,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         host = "read",
-        neoforge = "AddServerReloadListenersEvent"
+        neoforge = "AddServerReloadListenersEvent",
+        native = "fn native_add_server_reload_listeners(&self, listeners: &mut dyn ServerReloadListeners)"
     )]
     fn add_server_reload_listeners();
 }

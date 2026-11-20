@@ -13,7 +13,9 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "PlayerSwitchHotbarSlotEvent.Pre",
         paper = "PlayerItemHeldEvent",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_switch_hotbar_slot_pre",
+        native = "fn native_player_switch_hotbar_slot_pre(&mut self, player: u128, player_entity_id: i32, old_slot: i32, new_slot: i32, cancel: &mut bool)"
     )]
     fn player_switch_hotbar_slot_pre();
 }

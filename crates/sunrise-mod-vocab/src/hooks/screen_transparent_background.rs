@@ -28,7 +28,8 @@ and from `farmland_trample`, the farmland-specific in-write event."#]
         neoforge = "ScreenEvent.Render.Pre (transparent background)",
         cancellable = true,
         out = "canceled",
-        target = "sunrise_client::game::native_hooks::screen_transparent_background::Game<'_>::native_screen_transparent_background"
+        target = "sunrise_client::game::native_hooks::screen_transparent_background::Game<'_>::native_screen_transparent_background",
+        native = "fn native_screen_transparent_background(&self, screen: &str, batch: &mut HudBatch, canceled: &mut bool)"
     )]
     fn screen_transparent_background();
 }

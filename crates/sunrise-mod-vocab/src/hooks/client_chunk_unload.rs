@@ -28,7 +28,8 @@ column belonged to: on a dimension change, the old one."##]
         side = "client",
         contract = "listen",
         neoforge = "ChunkEvent.Unload",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_client_chunk_unload(&mut self, dimension: &str, chunk: [i32; 2])"
     )]
     fn client_chunk_unload();
 }

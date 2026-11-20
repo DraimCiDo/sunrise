@@ -12,7 +12,9 @@ pub trait Hooks {
         contract = "listen",
         scope = "item",
         key = "stack",
-        neoforge = "none (vanilla Item.hurtEnemy; NeoForge adds no event or extension for it); LivingDamageEvent.Post comes later"
+        neoforge = "none (vanilla Item.hurtEnemy; NeoForge adds no event or extension for it); LivingDamageEvent.Post comes later",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_hurt_enemy",
+        native = "fn native_hurt_enemy(&mut self, stack: &ItemStack, entity: u32, kind: &str)"
     )]
     fn hurt_enemy();
 }

@@ -16,7 +16,9 @@ pub trait Hooks {
         contract = "collect",
         out = "items",
         context = "registration",
-        neoforge = "RegisterEvent"
+        neoforge = "RegisterEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_items",
+        native = "fn native_items(context: &mod_api::RegistrationContext, items: &mut Vec<mod_api::Item>)"
     )]
     fn items();
 }

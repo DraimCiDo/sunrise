@@ -9,7 +9,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_teleport_end_gateway",
+        native = "fn native_player_teleport_end_gateway(&mut self, player: u128, name: &str, gateway: [i32; 3], cancel: &mut bool)"
     )]
     fn player_teleport_end_gateway();
 }

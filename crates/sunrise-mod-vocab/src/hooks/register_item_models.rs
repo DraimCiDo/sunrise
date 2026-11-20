@@ -56,7 +56,8 @@ and the item draws the missing model."#]
         contract = "collect",
         out = "models",
         context = "registration",
-        neoforge = "RegisterItemModelsEvent"
+        neoforge = "RegisterItemModelsEvent",
+        native = "fn native_register_item_models(context: &mod_api::RegistrationContext, models: &mut Vec<String>)"
     )]
     fn register_item_models();
 }

@@ -17,7 +17,8 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "VanillaGameEvent",
         version = 2,
-        cancellable = true
+        cancellable = true,
+        native = "fn native_vanilla_game_event(&mut self, dimension: &str, event: &str, pos: [f64; 3], cause: Option<u32>, affected_state: Option<BlockStateId>, cancel: &mut bool)"
     )]
     fn vanilla_game_event();
 }

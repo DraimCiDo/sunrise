@@ -8,7 +8,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "ClientPlayerNetworkEvent.LoggingOut",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_client_player_logging_out(&mut self, player_id: Option<i32>, uuid: Option<u128>)"
     )]
     fn client_player_logging_out();
 }

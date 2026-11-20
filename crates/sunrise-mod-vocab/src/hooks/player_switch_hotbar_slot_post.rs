@@ -10,7 +10,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "PlayerSwitchHotbarSlotEvent.Post",
-        cancellable = false
+        cancellable = false,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_switch_hotbar_slot_post",
+        native = "fn native_player_switch_hotbar_slot_post(&mut self, player: u128, player_entity_id: i32, old_slot: i32, new_slot: i32)"
     )]
     fn player_switch_hotbar_slot_post();
 }

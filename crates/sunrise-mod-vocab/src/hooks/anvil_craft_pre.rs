@@ -8,7 +8,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "AnvilCraftEvent.Pre",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_anvil_craft_pre",
+        native = "fn native_anvil_craft_pre(&mut self, player: u128, name: &str, pos: [i32; 3], craft: &mod_api::item::menu::AnvilCraft, cancel: &mut bool)"
     )]
     fn anvil_craft_pre();
 }

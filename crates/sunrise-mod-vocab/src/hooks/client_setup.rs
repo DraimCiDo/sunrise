@@ -17,7 +17,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "FMLClientSetupEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_client_setup(&mut self)"
     )]
     fn client_setup();
 }

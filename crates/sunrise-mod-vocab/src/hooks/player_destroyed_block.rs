@@ -19,7 +19,8 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no event for Block.destroy; BreakEvent fires before the removal)"
+        neoforge = "none (NeoForge has no event for Block.destroy; BreakEvent fires before the removal)",
+        native = "fn native_player_destroyed_block(&mut self, pos: [i32; 3], state: BlockStateId, block_entity: Option<Compound>)"
     )]
     fn player_destroyed_block();
 }

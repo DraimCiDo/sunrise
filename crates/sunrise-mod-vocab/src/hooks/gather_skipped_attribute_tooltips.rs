@@ -17,7 +17,8 @@ pub trait Hooks {
         contract = "listen",
         neoforge = "GatherSkippedAttributeTooltipsEvent",
         cancellable = false,
-        version = 2
+        version = 2,
+        native = "fn native_gather_skipped_attribute_tooltips(&self, call: mod_api::__private::GatherSkippedAttributeTooltipsCall<'_>)"
     )]
     fn gather_skipped_attribute_tooltips(
         player: Option<u128>,

@@ -19,7 +19,9 @@ pub trait Hooks {
         out = "answer",
         scope = "item",
         key = "stack",
-        neoforge = "none (vanilla DispenserBlock.getDispenseMethod; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla DispenserBlock.getDispenseMethod; NeoForge adds no event or extension for it)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_dispense_item",
+        native = "fn native_dispense_item(&mut self, dimension: &str, pos: [i32; 3], facing: Direction, stack: &ItemStack, answer: &mut Option<mod_api::Dispensed>)"
     )]
     fn dispense_item();
 }

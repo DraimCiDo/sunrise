@@ -11,7 +11,9 @@ pub trait Hooks {
         contract = "listen",
         context = "chunk_disk",
         target = "mod_api::chunk_disk::native_chunk_data_save",
-        neoforge = "ChunkDataEvent.Save"
+        neoforge = "ChunkDataEvent.Save",
+        native = "fn native_chunk_data_save(context: &OwningChunkDisk<'_>, data: &mut ChunkDiskData)",
+        direct = true
     )]
     fn chunk_data_save();
 }

@@ -18,7 +18,8 @@ pub trait Hooks {
         host = "hit",
         neoforge = "LivingShieldBlockEvent",
         version = 3,
-        target = "sunrise_client::game::native_hooks::living_shield_block::HitLevel<'_>::native_living_shield_block"
+        target = "sunrise_client::game::native_hooks::living_shield_block::HitLevel<'_>::native_living_shield_block",
+        native = "fn native_living_shield_block(&mut self, entity: i32, kind: &str, source: &HurtSource<'_>, damage: f32, original_blocked: bool, block: &mut ShieldBlock)"
     )]
     fn living_shield_block();
 }

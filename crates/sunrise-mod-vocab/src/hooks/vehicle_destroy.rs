@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's VehicleDestroyEvent)"
+        neoforge = "none (NeoForge has no such event; Bukkit's VehicleDestroyEvent)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_vehicle_destroy",
+        native = "fn native_vehicle_destroy(&mut self, kind: &str, pos: [f64; 3])"
     )]
     fn vehicle_destroy();
 }

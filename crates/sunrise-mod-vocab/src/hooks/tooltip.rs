@@ -23,7 +23,9 @@ pub trait Hooks {
         scope = "item",
         key = "stack",
         neoforge = "ItemTooltipEvent",
-        version = 2
+        version = 2,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_tooltip",
+        native = "fn native_tooltip(&self, stack: &ItemStack, context: &mod_api::TooltipAppendContext, lines: &mut Vec<(Text, u32)>)"
     )]
     fn tooltip();
 }

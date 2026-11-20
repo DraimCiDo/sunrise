@@ -9,7 +9,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "PlayerEvent.BreakSpeed",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_player_break_speed(&mut self, player: u32, pos: [i32; 3], state: u32, original_speed: f32, new_speed: &mut f32, canceled: &mut bool)"
     )]
     fn player_break_speed();
 }

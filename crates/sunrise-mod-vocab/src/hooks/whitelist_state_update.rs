@@ -7,7 +7,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event; Bukkit's WhitelistToggleEvent)",
-        paper = "WhitelistToggleEvent"
+        paper = "WhitelistToggleEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_whitelist_state_update",
+        native = "fn native_whitelist_state_update(&mut self, enabled: bool)"
     )]
     fn whitelist_state_update();
 }

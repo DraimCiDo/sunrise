@@ -13,7 +13,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no sprint event)"
+        neoforge = "none (NeoForge has no sprint event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_sprint",
+        native = "fn native_player_sprint(&mut self, player: u128, name: &str, sprinting: bool)"
     )]
     fn player_sprint();
 }

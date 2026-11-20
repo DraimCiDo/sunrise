@@ -8,7 +8,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's BlockDamageAbortEvent)"
+        neoforge = "none (NeoForge has no such event; Bukkit's BlockDamageAbortEvent)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_block_damage_abort",
+        native = "fn native_block_damage_abort(&mut self, player: u128, name: &str, pos: [i32; 3])"
     )]
     fn block_damage_abort();
 }

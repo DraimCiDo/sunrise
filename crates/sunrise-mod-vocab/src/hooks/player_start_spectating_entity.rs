@@ -11,7 +11,8 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        native = "fn native_player_start_spectating_entity(&mut self, player: u128, name: &str, entity_id: i32)"
     )]
     fn player_start_spectating_entity();
 }

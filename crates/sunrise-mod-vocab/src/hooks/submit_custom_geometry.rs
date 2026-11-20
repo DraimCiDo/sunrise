@@ -51,7 +51,8 @@ sends nothing and reads nothing the client does not already hold."#]
         side = "client",
         contract = "listen",
         neoforge = "SubmitCustomGeometryEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_submit_custom_geometry(&self, view: &mod_api::WorldRenderView, draw: &mut sunrise_client::world_geometry::WorldGeometry)"
     )]
     fn submit_custom_geometry();
 }

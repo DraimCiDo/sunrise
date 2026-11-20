@@ -14,7 +14,8 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "none (NeoForge 26.3 has no glowing or team colour override)"
+        neoforge = "none (NeoForge 26.3 has no glowing or team colour override)",
+        native = "fn native_entity_outline(&self, entity_id: u32, kind: &str, outline: &mut Option<u32>)"
     )]
     fn entity_outline();
 }

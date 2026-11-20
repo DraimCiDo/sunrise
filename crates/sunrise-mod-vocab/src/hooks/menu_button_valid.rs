@@ -15,7 +15,9 @@ there is no shared range. Only an accepted ID reaches `menu_button`."#]
         scope = "menu",
         key = "menu",
         host = "read",
-        neoforge = "none (vanilla menu button ids are handled by their menu implementation)"
+        neoforge = "none (vanilla menu button ids are handled by their menu implementation)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_menu_button_valid",
+        native = "fn native_menu_button_valid(&self, menu: &str, block: Option<&str>, id: i32, accepted: &mut bool)"
     )]
     fn menu_button_valid();
 }

@@ -17,7 +17,8 @@ pub trait Hooks {
         contract = "listen",
         scope = "menu",
         key = "menu",
-        neoforge = "none (vanilla RecipeBookComponent.fillGhostRecipe, which each book component overrides; no event)"
+        neoforge = "none (vanilla RecipeBookComponent.fillGhostRecipe, which each book component overrides; no event)",
+        native = "fn native_recipe_book_ghost(&self, call: mod_api::__private::RecipeBookGhostCall<'_>)"
     )]
     fn recipe_book_ghost(
         menu: &str,

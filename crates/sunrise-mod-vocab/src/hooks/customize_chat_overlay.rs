@@ -13,7 +13,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "CustomizeGuiOverlayEvent.Chat",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_customize_chat_overlay(&mut self, gui_width: i32, gui_height: i32, focused: bool, x: &mut i32, y: &mut i32)"
     )]
     fn customize_chat_overlay();
 }

@@ -20,7 +20,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "none (Bukkit's PlayerLoginEvent; NeoForge's PlayerNegotiationEvent is not cancellable)",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_login",
+        native = "fn native_player_login(&mut self, player: u128, name: &str, cancel: &mut bool, reason: &mut Option<Text>)"
     )]
     fn player_login();
 }

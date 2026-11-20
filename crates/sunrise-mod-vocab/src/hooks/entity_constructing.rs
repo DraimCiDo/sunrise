@@ -21,7 +21,8 @@ pub trait Hooks {
     #[hook(
         side = "both",
         contract = "listen",
-        neoforge = "EntityEvent.EntityConstructing"
+        neoforge = "EntityEvent.EntityConstructing",
+        native = "fn native_entity_constructing(&mut self, holder: mod_api::Holder, kind: &str)"
     )]
     fn entity_constructing();
 }

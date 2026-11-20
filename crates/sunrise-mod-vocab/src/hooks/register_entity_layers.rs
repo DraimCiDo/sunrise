@@ -73,7 +73,8 @@ layers, in a follow-up of #860, which lifts their refusal."#]
         side = "client",
         contract = "listen",
         context = "registration",
-        neoforge = "EntityRenderersEvent.AddLayers"
+        neoforge = "EntityRenderersEvent.AddLayers",
+        native = "fn native_register_entity_layers(context: &mod_api::RegistrationContext, layers: &mut dyn EntityLayers)"
     )]
     fn register_entity_layers();
 }

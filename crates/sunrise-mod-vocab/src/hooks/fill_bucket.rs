@@ -10,7 +10,9 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "canceled",
-        neoforge = "none (NeoForge 26.3 has no bucket-fill event)"
+        neoforge = "none (NeoForge 26.3 has no bucket-fill event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_fill_bucket",
+        native = "fn native_fill_bucket(&mut self, stack: &ItemStack, pos: [i32; 3], canceled: &mut bool)"
     )]
     fn fill_bucket();
 }

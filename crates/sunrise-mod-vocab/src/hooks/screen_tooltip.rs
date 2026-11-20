@@ -23,7 +23,9 @@ pub trait Hooks {
         out = "lines",
         scope = "menu",
         key = "menu",
-        neoforge = "none (see screen)"
+        neoforge = "none (see screen)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_screen_tooltip",
+        native = "fn native_screen_tooltip(&self, call: mod_api::__private::ScreenTooltipCall<'_>)"
     )]
     fn screen_tooltip(
         menu: &str,

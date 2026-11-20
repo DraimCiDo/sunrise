@@ -17,7 +17,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerRespawnPositionEvent"
+        neoforge = "PlayerRespawnPositionEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_respawn_position",
+        native = "fn native_player_respawn_position(&mut self, call: mod_api::__private::PlayerRespawnPositionCall<'_>)"
     )]
     fn player_respawn_position(
         player: PlayerRef,
@@ -37,7 +39,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerEvent.PlayerRespawnEvent"
+        neoforge = "PlayerEvent.PlayerRespawnEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_respawned",
+        native = "fn native_player_respawned(&mut self, player: u128, name: &str)"
     )]
     fn player_respawned();
 }

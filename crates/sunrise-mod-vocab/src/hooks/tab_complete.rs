@@ -9,7 +9,9 @@ pub trait Hooks {
         side = "server",
         contract = "collect",
         out = "suggestions",
-        neoforge = "none (NeoForge has no generic tab completion event)"
+        neoforge = "none (NeoForge has no generic tab completion event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_tab_complete",
+        native = "fn native_tab_complete(&mut self, player: u128, name: &str, command: &str, range: [usize; 2], suggestions: &mut Vec<Suggestion>)"
     )]
     fn tab_complete();
 }

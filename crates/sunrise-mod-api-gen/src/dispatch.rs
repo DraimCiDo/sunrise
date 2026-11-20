@@ -45,20 +45,118 @@ pub(super) fn is_render(hook: &Hook) -> bool {
     hook.target.starts_with("mod_render::render::")
 }
 
-/// Render emission reads only the catalog and its native raw target signatures.
-pub(super) fn render(root: &Path, catalog: &Catalog) -> Result<HookSources, String> {
+/// A hook's target function as its declaration states it (`native = "fn …"`), with an empty body.
+fn declared_function(hook: &Hook, function: &str) -> Result<syn::ItemFn, String> {
+    let name = &hook.name;
+    let text = hook.native.as_deref().ok_or_else(|| {
+        format!(
+            "{name}: its declaration has no `native` signature of {function}: run `cargo run -p sunrise-mod-api-gen --bin sunrise-stage -- hooks`, which writes it from the game"
+        )
+    })?;
+    let sig: syn::Signature =
+        syn::parse_str(text).map_err(|error| format!("{name}: native = {text:?}: {error}"))?;
+    if sig.ident != function {
+        return Err(format!(
+            "{name}: native = {text:?} names {}, not {function}",
+            sig.ident
+        ));
+    }
+    Ok(syn::ItemFn {
+        attrs: Vec::new(),
+        vis: syn::Visibility::Inherited,
+        sig,
+        block: Box::new(syn::parse_quote!({})),
+    })
+}
+
+/// A hook's target function where it is defined: a free function of another crate, a method of
+/// `game/native_hooks`, or a named `Game` method elsewhere in the game.
+pub(super) fn defined_function(
+    root: &Path,
+    hook: &Hook,
+    function: &str,
+    external: Option<&(&str, String)>,
+    methods: &[syn::ItemFn],
+) -> Result<syn::ItemFn, String> {
+    if let Some((krate, path)) = external {
+        let (module, _) = path
+            .rsplit_once("::")
+            .ok_or_else(|| format!("wrong target for {}", hook.name))?;
+        let path = root
+            .join("crates")
+            .join(krate)
+            .join("src")
+            .join(format!("{}.rs", module.replace("::", "/")));
+        let source = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let file = syn::parse_file(&source).map_err(|e| e.to_string())?;
+        let functions: Vec<_> = file
+            .items
+            .into_iter()
+            .filter_map(|item| match item {
+                Item::Fn(function) => Some(function),
+                _ => None,
+            })
+            .collect();
+        return Ok(one_function(functions.iter(), function)?.clone());
+    }
+    if hook
+        .target
+        .starts_with("sunrise_client::game::native_hooks::")
+    {
+        Ok(one_function(methods.iter(), function)?.clone())
+    } else {
+        super::named_hooks::resolve(root, &hook.target, &hook.name)
+    }
+}
+
+/// A signature's tokens, whatever trailing comma its parameter list has.
+pub(super) fn signature_tokens(sig: &syn::Signature) -> String {
+    let mut sig = sig.clone();
+    if sig.inputs.trailing_punct() {
+        let last = sig.inputs.pop().map(syn::punctuated::Pair::into_value);
+        sig.inputs.extend(last);
+    }
+    sig.to_token_stream().to_string()
+}
+
+/// Refuses a definition whose signature is not its declaration's.
+fn same_signature(
+    name: &str,
+    function: &str,
+    declared: &syn::ItemFn,
+    defined: &syn::ItemFn,
+) -> Result<(), String> {
+    let (declared, defined) = (
+        signature_tokens(&declared.sig),
+        signature_tokens(&defined.sig),
+    );
+    if declared != defined {
+        return Err(format!(
+            "{name}: {function} is `{defined}` where it is defined, `{declared}` in its declaration: run `cargo run -p sunrise-mod-api-gen --bin sunrise-stage -- hooks` after changing it"
+        ));
+    }
+    Ok(())
+}
+
+/// Render emission: the catalog's render hooks, with `check` their declared targets checked
+/// against `sunrise-mod-render`'s functions, which that crate's own build does.
+pub(super) fn render(root: &Path, catalog: &Catalog, check: bool) -> Result<HookSources, String> {
     emit(
         root,
         catalog.hooks.iter().filter(|hook| is_render(hook)),
-        &[],
+        check.then_some(&[][..]),
         &catalog.draw_contexts,
     )
 }
 
+/// The hooks' generated sources. Each hook's target function is its declaration's `native`
+/// signature; with `game`, the native methods of `game/native_hooks` (the game's own build, or
+/// a tool), every target is read where it is defined, checked against its declaration, and
+/// its body decides the placeholder fills.
 pub(super) fn emit<'a>(
     root: &Path,
     hooks: impl Iterator<Item = &'a Hook>,
-    methods: &[syn::ItemFn],
+    game: Option<&[syn::ItemFn]>,
     contexts: &[DrawContext],
 ) -> Result<HookSources, String> {
     let mut hook_ids = String::new();
@@ -99,60 +197,69 @@ pub(super) fn emit<'a>(
             ))
             .map_err(|error| format!("invalid declared signature for {name}: {error}"))?;
             (method, format!("dispatch_{name}"))
-        } else if let Some((krate, path)) = external {
-            let Some((module, function)) = path.rsplit_once("::") else {
-                return Err(format!("wrong target for {name}"));
-            };
-            if function != if is_render { name } else { &native } {
-                return Err(format!("wrong target for {name}"));
-            }
-            let path = root
-                .join("crates")
-                .join(krate)
-                .join("src")
-                .join(format!("{}.rs", module.replace("::", "/")));
-            let source =
-                fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            let file = syn::parse_file(&source).map_err(|e| e.to_string())?;
-            let functions: Vec<_> = file
-                .items
-                .into_iter()
-                .filter_map(|item| match item {
-                    Item::Fn(function) => Some(function),
-                    _ => None,
-                })
-                .collect();
-            (
-                one_function(functions.iter(), function)?.clone(),
-                // A hook in the mod API crate, or in a crate above it, calls its dispatch
-                // directly; one below it calls the callback the game installs.
-                if matches!(krate, "sunrise-mod-api" | "sunrise-client-render")
-                    || super::has_call(
-                        &one_function(functions.iter(), function)?.block,
-                        &format!("dispatch_{name}"),
-                    )
-                {
-                    format!("dispatch_{name}")
-                } else {
-                    name.to_owned()
-                },
-            )
         } else {
-            if !target.starts_with("sunrise_client::game::")
-                || !target.ends_with(&format!("::{native}"))
-            {
-                return Err(format!("wrong target for {name}"));
+            let function = if is_render {
+                name.to_owned()
+            } else {
+                native.clone()
+            };
+            match &external {
+                Some((_, path)) if path.rsplit_once("::").map(|(_, f)| f) != Some(&function) => {
+                    return Err(format!("wrong target for {name}"));
+                }
+                None if !target.starts_with("sunrise_client::game::")
+                    || !target.ends_with(&format!("::{native}")) =>
+                {
+                    return Err(format!("wrong target for {name}"));
+                }
+                _ => {}
             }
-            (
-                if target.starts_with("sunrise_client::game::native_hooks::") {
-                    one_function(methods.iter(), &native)?.clone()
-                } else {
-                    super::named_hooks::resolve(root, target, name)?
-                },
-                format!("dispatch_{name}"),
-            )
+            // A hook in a crate that reaches its dispatch calls it; one below calls the
+            // callback the game installs.
+            let calls_dispatch = external.is_none()
+                || hook.direct
+                || external
+                    .as_ref()
+                    .is_some_and(|(krate, _)| *krate == "sunrise-client-render");
+            let call = if calls_dispatch {
+                format!("dispatch_{name}")
+            } else {
+                name.to_owned()
+            };
+            match game {
+                None => (declared_function(hook, &function)?, call),
+                Some(methods) => {
+                    let defined =
+                        defined_function(root, hook, &function, external.as_ref(), methods)?;
+                    // A declaration without one is refused where the game is not read.
+                    if hook.native.is_some() {
+                        same_signature(
+                            name,
+                            &function,
+                            &declared_function(hook, &function)?,
+                            &defined,
+                        )?;
+                    }
+                    if let Some((krate, _)) = &external
+                        && *krate != "sunrise-client-render"
+                    {
+                        let calls = super::has_call(&defined.block, &format!("dispatch_{name}"));
+                        if calls != hook.direct {
+                            return Err(format!(
+                                "{name}: {function} {} dispatch_{name}: {} `direct = true` on its declaration",
+                                if calls { "calls" } else { "does not call" },
+                                if calls { "add" } else { "remove" }
+                            ));
+                        }
+                    }
+                    (defined, call)
+                }
+            }
         };
-        let fill = !declaration_only && !is_render && needs_fill(&method, &call, in_game)?;
+        let fill = game.is_some()
+            && !declaration_only
+            && !is_render
+            && needs_fill(&method, &call, in_game)?;
         let sig = &method.sig;
         let mut native_args = Vec::new();
         let mut receiver_mut = None;
@@ -2326,7 +2433,7 @@ mod tests {
     #[ignore = "daily"]
     fn setting_changes_notify_only_the_owner() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let sources = super::super::sources(&root, super::super::FillMode::Require).unwrap();
+        let sources = super::super::sources(&root, Some(super::super::FillMode::Require)).unwrap();
         let file = syn::parse_file(&sources.hooks).unwrap();
         let function = file
             .items
@@ -2580,14 +2687,14 @@ fn main() {{ game::run(std::env::args_os().nth(1).unwrap().into()); }}
         let declared = emit(
             &root,
             std::iter::once(&hook),
-            std::slice::from_ref(&method),
+            Some(std::slice::from_ref(&method)),
             &[],
         )
         .unwrap();
         assert!(declared.dispatch.contains("disabled_owner_slot"));
         assert!(declared.dispatch.contains("*handled = true;"));
         hook.inert = None;
-        let undeclared = emit(&root, std::iter::once(&hook), &[method], &[]).unwrap();
+        let undeclared = emit(&root, std::iter::once(&hook), Some(&[method]), &[]).unwrap();
         assert!(!undeclared.dispatch.contains("disabled_owner_slot"));
     }
 
@@ -2610,7 +2717,7 @@ fn main() {{ game::run(std::env::args_os().nth(1).unwrap().into()); }}
                 let _ = (entries,);
             }
         };
-        let sources = emit(&root, std::iter::once(&hook), &[method], &[]).unwrap();
+        let sources = emit(&root, std::iter::once(&hook), Some(&[method]), &[]).unwrap();
         let (traits, dispatch) = (sources.traits, sources.dispatch);
         let program = format!(
             r#"
@@ -2687,7 +2794,7 @@ fn main() {{
                 let _ = (entries,);
             }
         };
-        let refused = emit(&root, std::iter::once(&hook), &[method], &[]).err();
+        let refused = emit(&root, std::iter::once(&hook), Some(&[method]), &[]).err();
         assert_eq!(
             refused.as_deref(),
             Some("gather: output must be Vec<Answered<T>>")
@@ -2705,7 +2812,7 @@ fn main() {{
     #[ignore = "daily"]
     fn scoped_native_hook_uses_selected_host_and_game_hooks_keep_their_receiver() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let fire = super::super::sources(&root, super::super::FillMode::Require)
+        let fire = super::super::sources(&root, Some(super::super::FillMode::Require))
             .unwrap()
             .fire;
         let compact: String = fire.chars().filter(|c| !c.is_whitespace()).collect();
@@ -2719,7 +2826,7 @@ fn main() {{
     #[ignore = "daily"]
     fn a_worldgen_part_method_takes_the_worldgen_context_and_reads_the_published_table() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let hooks = super::super::sources(&root, super::super::FillMode::Require)
+        let hooks = super::super::sources(&root, Some(super::super::FillMode::Require))
             .unwrap()
             .hooks;
         let compact: String = hooks.chars().filter(|c| !c.is_whitespace()).collect();

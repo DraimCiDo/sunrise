@@ -15,7 +15,8 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event; Bukkit's EntityChangeBlockEvent is cancellable)",
         cancellable = true,
         out = "cancel",
-        target = "sunrise_client::game::native_hooks::entity_change_block_pre::Game<'_>::native_entity_change_block_pre"
+        target = "sunrise_client::game::native_hooks::entity_change_block_pre::Game<'_>::native_entity_change_block_pre",
+        native = "fn native_entity_change_block_pre(&mut self, call: super::fire::EntityChangeBlockPreCall<'_>)"
     )]
     fn entity_change_block_pre(
         player: Option<u128>,

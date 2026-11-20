@@ -8,7 +8,8 @@ pub trait Hooks {
         side = "both",
         contract = "listen",
         neoforge = "GameShuttingDownEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_game_shutting_down(&mut self)"
     )]
     fn game_shutting_down();
 }

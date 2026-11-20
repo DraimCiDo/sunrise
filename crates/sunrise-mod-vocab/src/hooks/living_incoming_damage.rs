@@ -32,7 +32,8 @@ pub trait Hooks {
         host = "hit",
         neoforge = "LivingIncomingDamageEvent",
         version = 3,
-        target = "sunrise_client::game::native_hooks::base::HitLevel<'_>::native_living_incoming_damage"
+        target = "sunrise_client::game::native_hooks::base::HitLevel<'_>::native_living_incoming_damage",
+        native = "fn native_living_incoming_damage(&mut self, call: mod_api::__private::LivingIncomingDamageCall<'_>)"
     )]
     fn living_incoming_damage(
         entity: i32,

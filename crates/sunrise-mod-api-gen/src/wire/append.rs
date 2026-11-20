@@ -271,7 +271,7 @@ mod tests {
     fn append_shape_requires_public_untransformed_typed_pushes() {
         let run = || {
             let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-            let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+            let generated = crate::sources(&root, Some(crate::FillMode::Require)).unwrap();
             let providers = crate::capability_providers::generate(&root, &[]).unwrap().0;
             let included = [
                 ("mod_api_generated.rs", generated.hooks.as_str()),

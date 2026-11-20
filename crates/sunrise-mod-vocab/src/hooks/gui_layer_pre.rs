@@ -24,7 +24,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "RenderGuiLayerEvent.Pre",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_gui_layer_pre",
+        native = "fn native_gui_layer_pre(&self, layer: &str, draw: &mut HudBatch, canceled: &mut bool)"
     )]
     fn gui_layer_pre();
 }

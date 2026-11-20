@@ -15,7 +15,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "LevelEvent.Load",
-        cancellable = false
+        cancellable = false,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_level_load",
+        native = "fn native_level_load(&mut self, dimension: &str)"
     )]
     fn level_load();
 }

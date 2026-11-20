@@ -12,7 +12,8 @@ pub trait Hooks {
         neoforge = "BlockDropsEvent",
         cancellable = true,
         version = 2,
-        target = "sunrise_client::game::native_hooks::block_drops::GameLevel<'_>::native_block_drops"
+        target = "sunrise_client::game::native_hooks::block_drops::GameLevel<'_>::native_block_drops",
+        native = "fn native_block_drops(&self, call: super::fire::BlockDropsCall<'_>)"
     )]
     fn block_drops(
         dimension: LevelDimension,

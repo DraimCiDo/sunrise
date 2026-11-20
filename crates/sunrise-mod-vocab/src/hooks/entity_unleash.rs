@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's EntityUnleashEvent)"
+        neoforge = "none (NeoForge has no such event; Bukkit's EntityUnleashEvent)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_entity_unleash",
+        native = "fn native_entity_unleash(&mut self, entity: u32, kind: &str)"
     )]
     fn entity_unleash();
 }

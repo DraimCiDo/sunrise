@@ -25,7 +25,9 @@ pub trait Hooks {
         contract = "collect",
         out = "canceled",
         neoforge = "EntityTickEvent.Pre",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_entity_tick_pre",
+        native = "fn native_entity_tick_pre(&mut self, dimension: &str, entities: &[u32], kinds: &[&str], canceled: &mut Vec<u32>)"
     )]
     fn entity_tick_pre();
 }

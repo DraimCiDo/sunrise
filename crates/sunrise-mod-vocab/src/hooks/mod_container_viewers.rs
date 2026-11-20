@@ -19,7 +19,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         version = 2,
-        neoforge = "none (vanilla ContainerOpenersCounter; NeoForge adds no event or extension for it); PlayerContainerEvent.Open and Close fire per player"
+        neoforge = "none (vanilla ContainerOpenersCounter; NeoForge adds no event or extension for it); PlayerContainerEvent.Open and Close fire per player",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_mod_container_viewers",
+        native = "fn native_mod_container_viewers(&mut self, dimension: &str, pos: [i32; 3], viewers: u32, previous: u32)"
     )]
     fn mod_container_viewers();
 }

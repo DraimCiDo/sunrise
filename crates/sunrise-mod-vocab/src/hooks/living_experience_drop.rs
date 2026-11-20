@@ -12,7 +12,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "LivingExperienceDropEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_living_experience_drop(&mut self, entity: u32, kind: &str, attacking_player: Option<u128>, original: i32, amount: &mut i32, cancel: &mut bool)"
     )]
     fn living_experience_drop();
 }

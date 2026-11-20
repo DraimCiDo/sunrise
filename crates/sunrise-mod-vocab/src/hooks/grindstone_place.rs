@@ -13,7 +13,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "GrindstoneEvent.OnPlaceItem",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_grindstone_place(&mut self, player: u128, player_entity_id: i32, pos: [i32; 3], place: &mut mod_api::item::menu::GrindstonePlace, cancel: &mut bool)"
     )]
     fn grindstone_place();
 }

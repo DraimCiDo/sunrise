@@ -16,7 +16,8 @@ pub trait Hooks {
         out = "reaction",
         scope = "block",
         key = "state",
-        neoforge = "IBlockExtension.getPistonPushReaction"
+        neoforge = "IBlockExtension.getPistonPushReaction",
+        native = "fn native_piston_push_reaction(state: BlockStateId, reaction: &mut Option<mod_api::PushReaction>)"
     )]
     fn piston_push_reaction();
 }

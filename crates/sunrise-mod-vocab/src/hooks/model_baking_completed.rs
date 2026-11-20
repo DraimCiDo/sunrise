@@ -23,7 +23,8 @@ fires it."#]
         side = "client",
         contract = "listen",
         cancellable = false,
-        neoforge = "ModelEvent.BakingCompleted"
+        neoforge = "ModelEvent.BakingCompleted",
+        native = "fn native_model_baking_completed(&mut self)"
     )]
     fn model_baking_completed();
 }

@@ -12,7 +12,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "RenderGuiEvent.Pre",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_render_gui_pre(&self, canceled: &mut bool)"
     )]
     fn render_gui_pre();
 }

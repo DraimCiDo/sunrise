@@ -12,7 +12,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         version = 2,
-        neoforge = "RenderFrameEvent.Post"
+        neoforge = "RenderFrameEvent.Post",
+        native = "fn native_render_frame_post(&mut self, elapsed: Duration, world_partial_tick: f32, partial_tick: f32)"
     )]
     fn render_frame_post();
 }

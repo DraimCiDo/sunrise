@@ -20,7 +20,8 @@ pub trait Hooks {
         scope = "item",
         key = "stack",
         host = "read",
-        neoforge = "IItemExtension.isNotReplaceableByPickAction"
+        neoforge = "IItemExtension.isNotReplaceableByPickAction",
+        native = "fn native_is_not_replaceable_by_pick_action(&self, player: u128, stack: &ItemStack, slot: u32, not_replaceable: &mut bool)"
     )]
     fn is_not_replaceable_by_pick_action();
 }

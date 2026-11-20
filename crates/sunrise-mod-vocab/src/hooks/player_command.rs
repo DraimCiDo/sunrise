@@ -19,7 +19,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "CommandEvent",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_command",
+        native = "fn native_player_command(&mut self, player: u128, name: &str, command: &str, canceled: &mut bool, replies: &mut Vec<Text>)"
     )]
     fn player_command();
 }

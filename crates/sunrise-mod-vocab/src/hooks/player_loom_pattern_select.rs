@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_loom_pattern_select",
+        native = "fn native_player_loom_pattern_select(&mut self, player: u128, name: &str, pattern: i32)"
     )]
     fn player_loom_pattern_select();
 }

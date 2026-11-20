@@ -27,7 +27,8 @@ pub trait Hooks {
         inert = "signal",
         key = "state",
         target = "sunrise_client::game::native_hooks::base::LevelView<'_>::native_may_place_on",
-        neoforge = "IBlockExtension.canSustainPlant"
+        neoforge = "IBlockExtension.canSustainPlant",
+        native = "fn native_may_place_on(&self, dimension: LevelDimension, state: BlockStateId, ground: BlockStateId, ground_pos: BlockPos, may: &mut Option<bool>, inert: &mut bool)"
     )]
     fn may_place_on();
 }

@@ -13,7 +13,9 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "none (NeoForge adds ColorResolvers with RegisterColorHandlersEvent.ColorResolvers; it does not retint a biome's own colours)"
+        neoforge = "none (NeoForge adds ColorResolvers with RegisterColorHandlersEvent.ColorResolvers; it does not retint a biome's own colours)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_biome_colors",
+        native = "fn native_biome_colors(&self, biome: &str, colors: &mut BiomeColors)"
     )]
     fn biome_colors();
 }

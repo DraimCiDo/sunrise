@@ -21,7 +21,8 @@ return `None`. A builder can retain this snapshot and place its blocks over time
         out = "cancel",
         host = "read",
         neoforge = "FinalizeSpawnEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_finalize_spawn(&self, call: mod_api::__private::FinalizeSpawnCall<'_>)"
     )]
     fn finalize_spawn(
         dimension: &str,

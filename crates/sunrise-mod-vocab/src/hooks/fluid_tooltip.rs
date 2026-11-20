@@ -15,7 +15,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "FluidTooltipEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_fluid_tooltip(&self, call: mod_api::__private::FluidTooltipCall<'_>)"
     )]
     fn fluid_tooltip(stack: &FluidStack, lines: &mut Vec<(Text, u32)>);
 }

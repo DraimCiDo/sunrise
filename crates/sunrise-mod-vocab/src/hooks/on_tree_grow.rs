@@ -42,7 +42,9 @@ pub trait Hooks {
         inert = "*soil = Some(None);",
         key = "state",
         target = "mod_api::world::ground::native_on_tree_grow",
-        neoforge = "IBlockExtension.onTreeGrow"
+        neoforge = "IBlockExtension.onTreeGrow",
+        direct = true,
+        native = "fn native_on_tree_grow(context: &crate::OwningWorldgen<'_>, state: BlockState, pos: [i32; 3], random: &mut dyn RandomSource, soil: &mut Option<Option<BlockState>>)"
     )]
     fn on_tree_grow();
 }

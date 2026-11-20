@@ -25,7 +25,8 @@ the server named it. An integrated world's own chunks have the server's
         side = "client",
         contract = "listen",
         neoforge = "ChunkEvent.Load",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_client_chunk_load(&mut self, dimension: &str, chunk: [i32; 2])"
     )]
     fn client_chunk_load();
 }

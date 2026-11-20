@@ -13,7 +13,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "ScreenEvent.Preedit.Pre",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_screen_preedit_pre(&self, screen: &ScreenView<'_>, full_text: &str, caret_position: usize, blocks: &[String], focused_block: usize, canceled: &mut bool)"
     )]
     fn screen_preedit_pre();
     /// After a screen's preedit handler (`ScreenEvent.Preedit.Post`) and only
@@ -24,7 +25,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "ScreenEvent.Preedit.Post",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_screen_preedit_post(&self, screen: &ScreenView<'_>, full_text: &str, caret_position: usize, blocks: &[String], focused_block: usize)"
     )]
     fn screen_preedit_post();
     /// Ahead of the effect panels beside the survival and creative
@@ -44,7 +46,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "ScreenEvent.RenderInventoryMobEffects",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_screen_render_inventory_mob_effects(&self, screen: &ScreenView<'_>, available_space: i32, compact: &mut bool, horizontal_offset: &mut i32, canceled: &mut bool)"
     )]
     fn screen_render_inventory_mob_effects();
 }

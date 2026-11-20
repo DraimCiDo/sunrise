@@ -41,7 +41,8 @@ pub trait Hooks {
         out = "canceled",
         host = "level",
         neoforge = "LivingKnockBackEvent",
-        target = "sunrise_client::game::native_hooks::base::HitLevel<'_>::native_living_knockback"
+        target = "sunrise_client::game::native_hooks::base::HitLevel<'_>::native_living_knockback",
+        native = "fn native_living_knockback(&mut self, call: mod_api::__private::LivingKnockbackCall<'_>)"
     )]
     fn living_knockback(
         entity: i32,

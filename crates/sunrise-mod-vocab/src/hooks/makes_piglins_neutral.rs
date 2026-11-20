@@ -20,7 +20,8 @@ pub trait Hooks {
         scope = "item",
         key = "stack",
         host = "read",
-        neoforge = "IItemExtension.makesPiglinsNeutral"
+        neoforge = "IItemExtension.makesPiglinsNeutral",
+        native = "fn native_makes_piglins_neutral(&self, stack: &ItemStack, wearer: LivingRef, neutral: &mut bool)"
     )]
     fn makes_piglins_neutral();
 }

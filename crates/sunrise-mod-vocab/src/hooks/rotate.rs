@@ -28,7 +28,9 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         target = "mod_api::world::rotation::native_rotate",
-        neoforge = "IBlockExtension.rotate"
+        neoforge = "IBlockExtension.rotate",
+        direct = true,
+        native = "fn native_rotate(context: &crate::OwningWorldgen<'_>, state: BlockState, pos: [i32; 3], rotation: StructureRotation, rotated: &mut BlockState)"
     )]
     fn rotate();
 }

@@ -6,7 +6,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         neoforge = "IBlockExtension.onNeighborChange",
-        target = "sunrise_client::game::native_hooks::block_entity_neighbors::GameLevel<'_>::native_on_neighbor_change"
+        target = "sunrise_client::game::native_hooks::block_entity_neighbors::GameLevel<'_>::native_on_neighbor_change",
+        native = "fn native_on_neighbor_change(&self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, neighbor: BlockPos)"
     )]
     fn on_neighbor_change();
 }

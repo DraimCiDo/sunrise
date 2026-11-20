@@ -19,7 +19,8 @@ namespace. This adds no sequence engine and no per-tick registry lookup."#]
         side = "server",
         contract = "listen",
         host = "read",
-        neoforge = "RegisterGameTestsEvent"
+        neoforge = "RegisterGameTestsEvent",
+        native = "fn native_register_game_tests(&self, functions: &mut dyn GameTests)"
     )]
     fn register_game_tests();
 }

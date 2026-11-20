@@ -11,7 +11,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "PlayerXpEvent.PickupXp",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_pickup_xp",
+        native = "fn native_pickup_xp(&mut self, player: u128, dimension: &str, orb: u32, value: &mut i32, count: &mut u32, canceled: &mut bool)"
     )]
     fn pickup_xp();
 }

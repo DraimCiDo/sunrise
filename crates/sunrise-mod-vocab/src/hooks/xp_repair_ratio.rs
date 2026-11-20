@@ -22,7 +22,8 @@ pub trait Hooks {
         scope = "item",
         key = "stack",
         host = "read",
-        neoforge = "IItemExtension.getXpRepairRatio"
+        neoforge = "IItemExtension.getXpRepairRatio",
+        native = "fn native_xp_repair_ratio(&self, player: u128, stack: &ItemStack, experience: u32, ratio: &mut f32)"
     )]
     fn xp_repair_ratio();
 }

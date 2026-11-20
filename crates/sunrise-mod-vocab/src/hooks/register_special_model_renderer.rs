@@ -84,7 +84,8 @@ answer draw the missing model, logged once for the model."#]
         side = "client",
         contract = "listen",
         context = "registration",
-        neoforge = "RegisterSpecialModelRendererEvent"
+        neoforge = "RegisterSpecialModelRendererEvent",
+        native = "fn native_register_special_model_renderer(context: &mod_api::RegistrationContext, renderers: &mut dyn SpecialModelRenderers)"
     )]
     fn register_special_model_renderer();
 }

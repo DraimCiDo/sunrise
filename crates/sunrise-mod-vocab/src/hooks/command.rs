@@ -24,7 +24,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_update_shape",
-        neoforge = "none (vanilla BlockBehaviour.updateShape; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla BlockBehaviour.updateShape; NeoForge adds no event or extension for it)",
+        native = "fn native_update_shape(&self, ticks: &mut Ticks, call: super::fire::UpdateShapeCall<'_>)"
     )]
     fn update_shape(
         dimension: LevelDimension,
@@ -44,7 +45,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "ran",
         version = 2,
-        neoforge = "none (ClientChatEvent is for chat messages; client commands are added by RegisterClientCommandsEvent)"
+        neoforge = "none (ClientChatEvent is for chat messages; client commands are added by RegisterClientCommandsEvent)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_command",
+        native = "fn native_command(&mut self, command: &str, ran: &mut bool)"
     )]
     fn command();
 }

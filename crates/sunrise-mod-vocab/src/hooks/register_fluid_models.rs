@@ -12,7 +12,8 @@ pub trait Hooks {
         contract = "collect",
         out = "models",
         context = "registration",
-        neoforge = "RegisterFluidModelsEvent"
+        neoforge = "RegisterFluidModelsEvent",
+        native = "fn native_register_fluid_models(context: &mod_api::RegistrationContext, models: &mut Vec<mod_api::FluidModel>)"
     )]
     fn register_fluid_models();
 }

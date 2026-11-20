@@ -42,7 +42,8 @@ an edit; registry resolution and generator-specific decoding still run when open
         contract = "collect",
         out = "editors",
         context = "registration",
-        neoforge = "RegisterPresetEditorsEvent"
+        neoforge = "RegisterPresetEditorsEvent",
+        native = "fn native_register_preset_editors(context: &mod_api::RegistrationContext, editors: &mut Vec<mod_api::PresetEditor>)"
     )]
     fn register_preset_editors();
 }

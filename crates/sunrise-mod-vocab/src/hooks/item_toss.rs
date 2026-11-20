@@ -8,7 +8,8 @@ pub trait Hooks {
         out = "canceled",
         neoforge = "ItemTossEvent",
         cancellable = true,
-        version = 2
+        version = 2,
+        native = "fn native_item_toss(&mut self, player: u128, item: ItemEntityRef, canceled: &mut bool)"
     )]
     fn item_toss();
 }

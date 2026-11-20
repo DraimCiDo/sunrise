@@ -24,7 +24,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         host = "read",
-        neoforge = "IBlockExtension.getRespawnPosition, IBlockStateExtension.getRespawnPosition"
+        neoforge = "IBlockExtension.getRespawnPosition, IBlockStateExtension.getRespawnPosition",
+        native = "fn native_respawn_position(&self, state: BlockStateId, pos: BlockPos, entity_type: &str, orientation: f32, position: &mut Option<([f64; 3], f32, f32)>)"
     )]
     fn respawn_position();
 }

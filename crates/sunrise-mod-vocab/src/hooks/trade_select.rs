@@ -6,7 +6,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_trade_select",
+        native = "fn native_trade_select(&mut self, player: u128, name: &str, villager: Option<u32>, index: usize)"
     )]
     fn trade_select();
 }

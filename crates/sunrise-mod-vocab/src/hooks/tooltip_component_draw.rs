@@ -13,7 +13,9 @@ pub trait Hooks {
         contract = "listen",
         scope = "item",
         key = "stack",
-        neoforge = "RegisterClientTooltipComponentFactoriesEvent"
+        neoforge = "RegisterClientTooltipComponentFactoriesEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_tooltip_component_draw",
+        native = "fn native_tooltip_component_draw(&self, stack: &ItemStack, draw: &mut HudBatch, origin: [f32; 2], size: [f32; 2])"
     )]
     fn tooltip_component_draw();
 }

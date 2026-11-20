@@ -17,7 +17,8 @@ pub trait Hooks {
         context = "data_load",
         version = 2,
         target = "sunrise_world::item_defaults::native_modify_default_components",
-        neoforge = "ModifyDefaultComponentsEvent"
+        neoforge = "ModifyDefaultComponentsEvent",
+        native = "fn native_modify_default_components(context: &LoadContext, item: &str, components: &mut Map<String, Value>)"
     )]
     fn modify_default_components();
 }

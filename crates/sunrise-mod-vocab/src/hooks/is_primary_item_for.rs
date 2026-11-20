@@ -27,7 +27,8 @@ pub trait Hooks {
         key = "stack",
         host = "read",
         version = 2,
-        neoforge = "IItemExtension.isPrimaryItemFor"
+        neoforge = "IItemExtension.isPrimaryItemFor",
+        native = "fn native_is_primary_item_for(&self, stack: &ItemStack, enchantment: &str, primary: &mut bool)"
     )]
     fn is_primary_item_for();
 }

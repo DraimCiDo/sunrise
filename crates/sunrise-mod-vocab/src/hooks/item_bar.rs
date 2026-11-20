@@ -12,7 +12,9 @@ pub trait Hooks {
         contract = "listen",
         scope = "item",
         key = "stack",
-        neoforge = "none (vanilla Item.isBarVisible/getBarWidth/getBarColor; RegisterItemDecorationsEvent registers decorators, not bar queries)"
+        neoforge = "none (vanilla Item.isBarVisible/getBarWidth/getBarColor; RegisterItemDecorationsEvent registers decorators, not bar queries)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_item_bar",
+        native = "fn native_item_bar(&self, stack: &ItemStack, bar: &mut Option<(i32, u32)>)"
     )]
     fn item_bar();
 }

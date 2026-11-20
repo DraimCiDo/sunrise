@@ -36,7 +36,9 @@ pub trait Hooks {
         cancellable = true,
         isolate = true,
         neoforge = "none (fork addition; see travel-and-move.md, #2308)",
-        target = "sunrise_client_lib::move_gate::native_entity_move"
+        target = "sunrise_client_lib::move_gate::native_entity_move",
+        direct = true,
+        native = "fn native_entity_move(context: &LoopContext, entity: u32, kind: &str, cause: MoveCause, delta: &mut [f64; 3], canceled: &mut bool)"
     )]
     fn entity_move();
 }

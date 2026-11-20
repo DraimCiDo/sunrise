@@ -14,7 +14,8 @@ pub trait Hooks {
         out = "canceled",
         neoforge = "ItemStackedOnOtherEvent",
         cancellable = true,
-        version = 3
+        version = 3,
+        native = "fn native_item_stacked_on_other(&mut self, event: &mod_api::item::menu::StackedOnOther, result: &mut mod_api::item::menu::StackedOnOtherResult, canceled: &mut bool)"
     )]
     fn item_stacked_on_other();
 }

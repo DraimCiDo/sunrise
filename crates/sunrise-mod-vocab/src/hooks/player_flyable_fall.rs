@@ -9,7 +9,8 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerFlyableFallEvent"
+        neoforge = "PlayerFlyableFallEvent",
+        native = "fn native_player_flyable_fall(&mut self, player: u128, player_entity_id: i32, name: &str, distance: f64, multiplier: f32)"
     )]
     fn player_flyable_fall();
 }

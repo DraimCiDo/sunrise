@@ -7,7 +7,8 @@ pub trait Hooks {
         contract = "replace",
         out = "applicable",
         neoforge = "MobEffectEvent.Applicable",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_mob_effect_applicable(&mut self, entity: LivingRef, effect: EffectKey, applicable: &mut Option<mod_api::EffectApplicable>)"
     )]
     fn mob_effect_applicable();
     /// NeoForge's `MobEffectEvent.Expired`, vanilla `LivingEntity.tickEffects`: the resolved `EffectKey` `effect` (`minecraft:speed`, amplifier `amplifier`) on the living entity `entity` (a [`LivingRef`], the player's own included) counted down to nothing and is about to leave. Cancel and the effect stays, kept at no ticks and asked again next tick; unanswered, the expiry runs. Fires only on the tick an effect actually expires, never per tick. Server-side.
@@ -18,7 +19,8 @@ pub trait Hooks {
         host = "read",
         neoforge = "MobEffectEvent.Expired",
         paper = "EntityPotionEffectEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_mob_effect_expired(&self, entity: LivingRef, effect: EffectKey, amplifier: i32, cancel: &mut bool)"
     )]
     fn mob_effect_expired();
     /// NeoForge's `MobEffectEvent.Remove`, vanilla `LivingEntity.removeEffect`: the resolved `EffectKey` `effect` (`minecraft:speed`, amplifier `amplifier`) on the living entity `entity` (a [`LivingRef`], the player's own included) is about to be removed by any path that walks the vanilla funnel: a command or milk for the player, a cure for a zombie villager, a mod's removal helper. Cancel and the effect stays. Server-side.
@@ -28,7 +30,8 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "MobEffectEvent.Remove",
         paper = "EntityPotionEffectEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_mob_effect_remove(&mut self, entity: LivingRef, effect: EffectKey, amplifier: i32, cancel: &mut bool)"
     )]
     fn mob_effect_remove();
 }

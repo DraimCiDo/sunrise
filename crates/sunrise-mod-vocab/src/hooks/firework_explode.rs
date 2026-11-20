@@ -6,7 +6,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_firework_explode",
+        native = "fn native_firework_explode(&mut self, entity: u32, pos: [f64; 3], bursts: usize)"
     )]
     fn firework_explode();
 }

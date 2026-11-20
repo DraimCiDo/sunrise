@@ -12,7 +12,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "EntityJoinLevelEvent, FinalizeSpawnEvent"
+        neoforge = "EntityJoinLevelEvent, FinalizeSpawnEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_mob_spawned",
+        native = "fn native_mob_spawned(&mut self, dimension: &str, kind: &str, pos: [f64; 3], natural: bool)"
     )]
     fn mob_spawned();
 }

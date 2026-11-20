@@ -61,7 +61,8 @@ and ask the resolver again."#]
         side = "client",
         contract = "listen",
         context = "registration",
-        neoforge = "RegisterColorHandlersEvent.ColorResolvers"
+        neoforge = "RegisterColorHandlersEvent.ColorResolvers",
+        native = "fn native_register_color_resolvers(context: &mod_api::RegistrationContext, resolvers: &mut dyn ColorResolvers)"
     )]
     fn register_color_resolvers();
 }

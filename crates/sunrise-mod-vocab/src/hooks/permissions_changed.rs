@@ -14,7 +14,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "PermissionsChangedEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_permissions_changed(&mut self, player: u128, player_entity_id: Option<i32>, name: &str, old: PermissionLevel, new: PermissionLevel, cancel: &mut bool)"
     )]
     fn permissions_changed();
 }

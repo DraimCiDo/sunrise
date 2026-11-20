@@ -12,7 +12,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "PlayerEvent.ItemSmithedEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_player_item_smithed(&mut self, player: u128, player_entity_id: i32, inputs: &[Option<ItemStack>; 3], result: &ItemStack)"
     )]
     fn player_item_smithed();
 }

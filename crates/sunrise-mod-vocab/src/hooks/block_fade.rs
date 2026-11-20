@@ -10,7 +10,8 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
         cancellable = true,
-        target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_block_fade"
+        target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_block_fade",
+        native = "fn native_block_fade(&self, dimension: LevelDimension, pos: BlockPos, from: BlockStateId, to: BlockStateId, cancel: &mut bool)"
     )]
     fn block_fade();
 }

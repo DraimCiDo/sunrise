@@ -13,7 +13,8 @@ pub trait Hooks {
         side = "both",
         contract = "collect",
         out = "configs",
-        neoforge = "ModContainer.registerConfig"
+        neoforge = "ModContainer.registerConfig",
+        native = "fn native_register_configs(&mut self, configs: &mut Vec<mod_api::Config>)"
     )]
     fn register_configs();
     /// A registered config was read (`ModConfigEvent.Loading`): `config`
@@ -27,7 +28,8 @@ pub trait Hooks {
         side = "both",
         contract = "listen",
         neoforge = "ModConfigEvent.Loading",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_config_loading(&mut self, config: &ConfigFile)"
     )]
     fn config_loading();
     /// A loaded config's file changed on disk (`ModConfigEvent.Reloading`):
@@ -39,7 +41,8 @@ pub trait Hooks {
         side = "both",
         contract = "listen",
         neoforge = "ModConfigEvent.Reloading",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_config_reloading(&mut self, config: &ConfigFile)"
     )]
     fn config_reloading();
     /// A `Server` config is dropped as its server stops
@@ -50,7 +53,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "ModConfigEvent.Unloading",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_config_unloading(&mut self, config: &ConfigFile)"
     )]
     fn config_unloading();
 }

@@ -60,7 +60,8 @@ controller's are."#]
         side = "client",
         contract = "listen",
         context = "registration",
-        neoforge = "RegisterParticleProvidersEvent"
+        neoforge = "RegisterParticleProvidersEvent",
+        native = "fn native_register_particle_providers(context: &mod_api::RegistrationContext, providers: &mut dyn ParticleProviders)"
     )]
     fn register_particle_providers();
 }

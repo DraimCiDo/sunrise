@@ -11,7 +11,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's VehicleDamageEvent)",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_vehicle_damage",
+        native = "fn native_vehicle_damage(&mut self, kind: &str, damage: &mut f32, cancel: &mut bool)"
     )]
     fn vehicle_damage();
 }

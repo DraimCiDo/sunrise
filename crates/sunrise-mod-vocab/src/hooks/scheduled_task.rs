@@ -31,7 +31,8 @@ deadline to its own storage and schedules again when the world opens."#]
         side = "server",
         contract = "listen",
         neoforge = "none (vanilla MinecraftServer.tell(TickTask); NeoForge adds no event for it)",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_scheduled_task(&mut self, id: TaskId, owner: &str, token: u64)"
     )]
     fn scheduled_task();
 }

@@ -6,7 +6,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's BlockDispenseLoot)"
+        neoforge = "none (NeoForge has no such event; Bukkit's BlockDispenseLoot)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_vault_loot",
+        native = "fn native_vault_loot(&mut self, pos: [i32; 3], item: &str)"
     )]
     fn vault_loot();
 }

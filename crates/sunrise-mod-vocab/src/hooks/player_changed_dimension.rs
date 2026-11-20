@@ -24,7 +24,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerEvent.PlayerChangedDimensionEvent"
+        neoforge = "PlayerEvent.PlayerChangedDimensionEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_changed_dimension",
+        native = "fn native_player_changed_dimension(&mut self, player: u128, name: &str, from: &str, to: &str)"
     )]
     fn player_changed_dimension();
 }

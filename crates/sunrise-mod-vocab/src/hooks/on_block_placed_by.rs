@@ -35,7 +35,8 @@ subscribed Part cost one `item_listens` lookup and no stack conversion.
         scope = "item",
         key = "stack",
         neoforge = "BlockItemExtension.onBlockPlacedBy",
-        version = 3
+        version = 3,
+        native = "fn native_on_block_placed_by(&mut self, call: super::fire::OnBlockPlacedByCall<'_>)"
     )]
     fn on_block_placed_by(
         stack: &ItemStack,

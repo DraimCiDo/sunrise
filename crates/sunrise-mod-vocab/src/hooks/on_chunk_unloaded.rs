@@ -37,7 +37,8 @@ subscribed costs one check."##]
         contract = "listen",
         scope = "block_entity",
         key = "entity",
-        neoforge = "IBlockEntityExtension.onChunkUnloaded"
+        neoforge = "IBlockEntityExtension.onChunkUnloaded",
+        native = "fn native_on_chunk_unloaded(&mut self, pos: [i32; 3], block_entity: BlockEntityRef, entity: &ModBlockEntity)"
     )]
     fn on_chunk_unloaded();
 }

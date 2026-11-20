@@ -12,7 +12,8 @@ pub trait Hooks {
         cancellable = false,
         version = 2,
         target = "sunrise_client_lib::motion::native_living_jump_power",
-        neoforge = "none (vanilla LivingEntity.getJumpPower; not LivingEvent.LivingJumpEvent)"
+        neoforge = "none (vanilla LivingEntity.getJumpPower; not LivingEvent.LivingJumpEvent)",
+        native = "fn native_living_jump_power(context: &LoopContext, entity: u32, kind: &str, power: &mut f32)"
     )]
     fn living_jump_power();
     /// A living entity's movement speed (`LivingEntity.getSpeed`) is about to drive its travel on the ground and through fluids. `entity` is its id and `kind` its type; a mod may change `speed`. Fires on both sides, on the client's replayed ticks too, with the loop `context` of the side that ticks the entity (its registries, settings and mod list): register the mod on both, and keep the listener a pure function of its inputs so prediction and the server agree. Beyond NeoForge: there is no counterpart. Diverges from upstream: new hook.
@@ -23,7 +24,8 @@ pub trait Hooks {
         cancellable = false,
         version = 2,
         target = "sunrise_client_lib::motion::native_living_speed",
-        neoforge = "none (vanilla LivingEntity.getSpeed; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla LivingEntity.getSpeed; NeoForge adds no event or extension for it)",
+        native = "fn native_living_speed(context: &LoopContext, entity: u32, kind: &str, speed: &mut f32)"
     )]
     fn living_speed();
     /// A living entity's airborne acceleration (`LivingEntity.getFlyingSpeed`) is about to be used by its travel. `entity` is its id and `kind` its type; a mod may change `speed`. Fires on both sides, on the client's replayed ticks too, with the loop `context` of the side that ticks the entity (its registries, settings and mod list): register the mod on both, and keep the listener a pure function of its inputs so prediction and the server agree. Beyond NeoForge: there is no counterpart. Diverges from upstream: new hook.
@@ -34,7 +36,8 @@ pub trait Hooks {
         cancellable = false,
         version = 2,
         target = "sunrise_client_lib::motion::native_living_flying_speed",
-        neoforge = "none (vanilla LivingEntity.getFlyingSpeed; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla LivingEntity.getFlyingSpeed; NeoForge adds no event or extension for it)",
+        native = "fn native_living_flying_speed(context: &LoopContext, entity: u32, kind: &str, speed: &mut f32)"
     )]
     fn living_flying_speed();
 }

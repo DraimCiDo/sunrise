@@ -149,6 +149,13 @@ pub struct Hook {
     pub non_exhaustive: bool,
     /// Rebuild a listener event from its original inputs for every subscriber.
     pub event_per_listener: bool,
+    /// The target function's signature as its crate defines it (`native = "fn native_x(&mut self,
+    /// …)"`): what the hook's arguments are generated from, so no build below the game reads the
+    /// game. The game's own build refuses a definition that differs from it.
+    pub native: Option<String>,
+    /// A target outside the game crate that calls its own dispatch (`dispatch_<name>`), where
+    /// another calls the callback the game installs.
+    pub direct: bool,
 }
 
 /// A drawing surface of the game's that drawing hooks get as a trait object (the catalog's
@@ -278,6 +285,9 @@ struct HookEntry {
     non_exhaustive: bool,
     #[serde(default)]
     event_per_listener: bool,
+    native: Option<String>,
+    #[serde(default)]
+    direct: bool,
     inert: Option<String>,
     neoforge: Option<serde_json::Value>,
     fabric: Option<serde_json::Value>,
@@ -433,6 +443,8 @@ impl Hook {
             stack_count: entry.stack_count,
             non_exhaustive: entry.non_exhaustive,
             event_per_listener: entry.event_per_listener,
+            native: entry.native,
+            direct: entry.direct,
         })
     }
 }
@@ -492,8 +504,8 @@ pub const DECLARATIONS: &str = "crates/sunrise-mod-vocab/src/hooks";
 /// What the catalog was declared in before the declarations: a file here is refused, never ignored.
 pub(crate) const RETIRED: &[&str] = &["native-hooks.json", "tools/native-hook-fragments"];
 
-/// A declaration's inferred target, resolved to the definition's module by `Catalog::load`.
-/// Parsing declarations alone does not require engine sources (render-record generation).
+/// A declaration's target when it names none: the `native_hooks` module of its own file's area.
+/// A hook whose native function lives in another module names its `target`.
 fn default_target(name: &str, area: &str) -> String {
     format!("sunrise_client::game::native_hooks::{area}::Game<'_>::native_{name}")
 }
@@ -708,20 +720,10 @@ impl Declared {
 
 impl Catalog {
     /// The catalog of the checkout at `root`: every file of the declarations directory, `base.rs` first and
-    /// then by name, so the order never depends on a list a PR edits.
-    /// The retired JSON catalog is refused wherever it still exists.
+    /// then by name, so the order never depends on a list a PR edits. It reads the declarations
+    /// alone; the game's own build checks the game's definitions against them
+    /// (`hook_targets::check`). The retired JSON catalog is refused wherever it still exists.
     pub fn load(root: &Path) -> Result<Self, CatalogError> {
-        let mut catalog = Self::load_declarations(root)?;
-        crate::hook_targets::resolve(root, &mut catalog).map_err(|error| {
-            CatalogError::Declaration {
-                path: "native hook definitions".into(),
-                error,
-            }
-        })?;
-        Ok(catalog)
-    }
-
-    pub(crate) fn load_declarations(root: &Path) -> Result<Self, CatalogError> {
         let read_error = |path: &Path, e: std::io::Error| CatalogError::Read {
             path: path.display().to_string(),
             error: e.to_string(),
@@ -878,6 +880,8 @@ impl Hook {
             stack_count: None,
             non_exhaustive: false,
             event_per_listener: false,
+            native: None,
+            direct: false,
         }
     }
 }
@@ -999,7 +1003,7 @@ mod tests {
             (&base, HOOK),
             (&index, "mod base;\nmod alpha;"),
         ]);
-        let catalog = Catalog::load_declarations(&root).unwrap();
+        let catalog = Catalog::load(&root).unwrap();
         let names = catalog
             .hooks
             .iter()
@@ -1007,10 +1011,10 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(names, ["one", "two"], "base.rs first, then by name");
         fs::remove_file(root.join(&index)).unwrap();
-        assert_eq!(Catalog::load_declarations(&root).unwrap().hooks.len(), 2);
+        assert_eq!(Catalog::load(&root).unwrap().hooks.len(), 2);
         fs::write(root.join(DECLARATIONS).join("not-valid.rs"), HOOK).unwrap();
         assert!(
-            Catalog::load_declarations(&root)
+            Catalog::load(&root)
                 .unwrap_err()
                 .to_string()
                 .contains("invalid hook declaration filename")

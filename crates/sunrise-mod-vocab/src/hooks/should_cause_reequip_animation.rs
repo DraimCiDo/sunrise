@@ -18,7 +18,8 @@ pub trait Hooks {
         contract = "listen",
         scope = "item",
         key = "stack",
-        neoforge = "IItemExtension.shouldCauseReequipAnimation"
+        neoforge = "IItemExtension.shouldCauseReequipAnimation",
+        native = "fn native_should_cause_reequip_animation(&self, stack: &ItemStack, old: Option<&ItemStack>, hand: Hand, slot_changed: bool, reequip: &mut bool)"
     )]
     fn should_cause_reequip_animation();
 }

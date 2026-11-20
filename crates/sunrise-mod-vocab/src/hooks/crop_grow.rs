@@ -14,7 +14,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "CropGrowEvent.Pre",
-        target = "sunrise_client::game::native_hooks::crop_grow::GameLevel<'_>::native_crop_grow_pre"
+        target = "sunrise_client::game::native_hooks::crop_grow::GameLevel<'_>::native_crop_grow_pre",
+        native = "fn native_crop_grow_pre(&mut self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, result: &mut TriState)"
     )]
     fn crop_grow_pre();
     /// A crop-like block grew (NeoForge's `CropGrowEvent.Post`).
@@ -29,7 +30,8 @@ pub trait Hooks {
         contract = "listen",
         neoforge = "CropGrowEvent.Post",
         version = 2,
-        target = "sunrise_client::game::native_hooks::crop_grow::GameLevel<'_>::native_crop_grow_post"
+        target = "sunrise_client::game::native_hooks::crop_grow::GameLevel<'_>::native_crop_grow_post",
+        native = "fn native_crop_grow_post(&mut self, dimension: LevelDimension, pos: BlockPos, original_state: BlockStateId, state: BlockStateId)"
     )]
     fn crop_grow_post();
 }

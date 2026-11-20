@@ -43,7 +43,8 @@ white, decided once at load, and so does an entry no mod answers; an item with n
         contract = "collect",
         out = "sources",
         context = "registration",
-        neoforge = "RegisterColorHandlersEvent.ItemTintSources"
+        neoforge = "RegisterColorHandlersEvent.ItemTintSources",
+        native = "fn native_register_item_tint_sources(context: &mod_api::RegistrationContext, sources: &mut Vec<String>)"
     )]
     fn register_item_tint_sources();
 }

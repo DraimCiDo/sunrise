@@ -48,7 +48,8 @@ a group as in the built-in one."#]
         contract = "collect",
         out = "groups",
         context = "registration",
-        neoforge = "RegisterParticleGroupsEvent"
+        neoforge = "RegisterParticleGroupsEvent",
+        native = "fn native_register_particle_groups(context: &mod_api::RegistrationContext, groups: &mut Vec<ParticleGroup>)"
     )]
     fn register_particle_groups();
 }

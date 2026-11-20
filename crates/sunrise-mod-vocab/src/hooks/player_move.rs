@@ -56,7 +56,8 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no player move event; PlayerTickEvent covers the tick)",
         paper = "PlayerMoveEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_player_move(&mut self, player: u128, from: [f64; 3], from_rotation: [f32; 2], to: [f64; 3], to_rotation: [f32; 2], cancel: &mut bool)"
     )]
     fn player_move();
 }

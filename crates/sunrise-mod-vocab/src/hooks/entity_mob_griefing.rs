@@ -21,7 +21,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         host = "read",
-        neoforge = "EntityMobGriefingEvent"
+        neoforge = "EntityMobGriefingEvent",
+        native = "fn native_entity_mob_griefing(&self, entity: EntityRef, can_grief: &mut bool)"
     )]
     fn entity_mob_griefing();
 }

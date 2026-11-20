@@ -41,7 +41,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "PlayerInteractEvent.RightClickBlock",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_right_click_block",
+        native = "fn native_right_click_block(&mut self, click: &BlockClick<'_>, use_block: &mut TriState, use_item: &mut TriState, cancellation_result: &mut mod_api::InteractionResult, canceled: &mut bool)"
     )]
     fn right_click_block();
 }

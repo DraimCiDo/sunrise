@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_swap_with_equipment_slot",
+        native = "fn native_player_swap_with_equipment_slot(&mut self, player: u128, name: &str, slot: &str)"
     )]
     fn player_swap_with_equipment_slot();
 }

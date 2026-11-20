@@ -9,7 +9,9 @@ pub trait Hooks {
         side = "client",
         contract = "collect",
         out = "layers",
-        neoforge = "none (Sunrise-only; NeoForge has no counterpart)"
+        neoforge = "none (Sunrise-only; NeoForge has no counterpart)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_emissive",
+        native = "fn native_emissive(&self, layers: &mut Vec<(&'static str, &'static str)>)"
     )]
     fn emissive();
 }

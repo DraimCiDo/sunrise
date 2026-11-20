@@ -18,7 +18,8 @@ pub trait Hooks {
         context = "data_load",
         version = 2,
         target = "sunrise_world::loot::native_loot_table_load",
-        neoforge = "LootTableLoadEvent"
+        neoforge = "LootTableLoadEvent",
+        native = "fn native_loot_table_load(context: &LoadContext, id: &str, table: &mut Value)"
     )]
     fn loot_table_load();
 }

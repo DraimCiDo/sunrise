@@ -30,7 +30,8 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "cancel",
-        neoforge = "none (NeoForge has no such event; Immersive Portals' Portal.canTeleportEntity)"
+        neoforge = "none (NeoForge has no such event; Immersive Portals' Portal.canTeleportEntity)",
+        native = "fn native_player_passage_cross(&mut self, player: PlayerRef, passage: mod_api::PassageId, from: mod_api::Vec3, cancel: &mut bool)"
     )]
     fn player_passage_cross();
 }

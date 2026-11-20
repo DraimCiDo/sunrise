@@ -26,7 +26,9 @@ pub trait Hooks {
         contract = "listen",
         scope = "menu",
         key = "menu",
-        neoforge = "none (see screen)"
+        neoforge = "none (see screen)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_screen_draw",
+        native = "fn native_screen_draw(&self, call: mod_api::__private::ScreenDrawCall<'_>)"
     )]
     fn screen_draw(
         menu: &str,

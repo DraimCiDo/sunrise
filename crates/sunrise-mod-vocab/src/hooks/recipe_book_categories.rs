@@ -10,7 +10,8 @@ pub trait Hooks {
     #[hook(
         side = "both",
         contract = "listen",
-        neoforge = "none (RegisterRecipeBookSearchCategoriesEvent registers search groups only, not a recipe type's categories)"
+        neoforge = "none (RegisterRecipeBookSearchCategoriesEvent registers search groups only, not a recipe type's categories)",
+        native = "fn native_recipe_book_categories(&mut self, categories: &mut Vec<RecipeBookCategory>)"
     )]
     fn recipe_book_categories();
 }

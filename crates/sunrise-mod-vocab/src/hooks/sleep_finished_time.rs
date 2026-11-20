@@ -32,7 +32,9 @@ pub trait Hooks {
         out = "canceled",
         neoforge = "SleepFinishedTimeEvent",
         cancellable = true,
-        version = 2
+        version = 2,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_sleep_finished_time",
+        native = "fn native_sleep_finished_time(&mut self, dimension: &str, current: i64, new_time: i64, adjustment: &mut ClockAdjustment, canceled: &mut bool)"
     )]
     fn sleep_finished_time();
 }

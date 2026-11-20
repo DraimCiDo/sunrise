@@ -24,7 +24,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "RenderLivingEvent.Pre",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_render_living_pre(&self, entity: &MobRender<'_>, draw: &mut BlockEntityDraw, hidden: &mut HiddenParts, canceled: &mut bool)"
     )]
     fn render_living_pre();
 }

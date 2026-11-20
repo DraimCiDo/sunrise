@@ -36,7 +36,8 @@ its item draws the missing model."#]
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "RegisterConditionalItemModelPropertyEvent"
+        neoforge = "RegisterConditionalItemModelPropertyEvent",
+        native = "fn native_item_model_property(&self, property: &str, stack: &mod_api::ItemStack, bundle_selected: i32, value: &mut bool)"
     )]
     fn item_model_property();
 }

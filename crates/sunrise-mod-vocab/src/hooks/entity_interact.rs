@@ -18,7 +18,9 @@ pub trait Hooks {
         version = 2,
         contract = "replace",
         out = "result",
-        neoforge = "PlayerInteractEvent.EntityInteract"
+        neoforge = "PlayerInteractEvent.EntityInteract",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_entity_interact",
+        native = "fn native_entity_interact(&mut self, hand: Hand, entity: i32, kind: &str, stack: Option<&ItemStack>, result: &mut Option<mod_api::InteractionResult>)"
     )]
     fn entity_interact();
 }

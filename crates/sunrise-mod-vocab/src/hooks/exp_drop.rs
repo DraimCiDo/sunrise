@@ -10,7 +10,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         target = "sunrise_client::game::native_hooks::exp_drop::GameLevel<'_>::native_exp_drop",
-        neoforge = "IBlockExtension.getExpDrop"
+        neoforge = "IBlockExtension.getExpDrop",
+        native = "fn native_exp_drop(&self, call: super::fire::ExpDropCall<'_>)"
     )]
     fn exp_drop(
         dimension: LevelDimension,

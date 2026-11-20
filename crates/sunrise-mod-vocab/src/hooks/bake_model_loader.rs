@@ -11,7 +11,8 @@ pub trait Hooks {
         out = "quads",
         context = "registration",
         neoforge = "none (vanilla UnbakedGeometry.bake of a loader ModelEvent.RegisterLoaders registers; NeoForge adds no event for it)",
-        target = "sunrise_client_render::mod_model_loaders::native_bake_model_loader"
+        target = "sunrise_client_render::mod_model_loaders::native_bake_model_loader",
+        native = "fn native_bake_model_loader(context: &RegistrationContext, loader: &str, model: &str, config: &Tag, quads: &mut Vec<ModelLoaderQuad>)"
     )]
     fn bake_model_loader();
 }

@@ -18,7 +18,9 @@ take or give what the player carries. A blockless menu supplies None for the pos
         contract = "listen",
         scope = "menu",
         key = "menu",
-        neoforge = "none (NeoForge has no such event; vanilla AbstractContainerMenu.clickMenuButton)"
+        neoforge = "none (NeoForge has no such event; vanilla AbstractContainerMenu.clickMenuButton)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_menu_button",
+        native = "fn native_menu_button(&mut self, menu: &str, block: Option<&str>, context: &mod_api::item::menu::MenuButtonContext, entity: Option<&mut ModBlockEntity>, carried: &mut Option<mod_api::ItemStack>)"
     )]
     fn menu_button();
 }

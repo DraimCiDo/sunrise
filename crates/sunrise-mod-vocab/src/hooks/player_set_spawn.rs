@@ -15,7 +15,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "PlayerSetSpawnEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_player_set_spawn(&mut self, call: mod_api::__private::PlayerSetSpawnCall<'_>)"
     )]
     fn player_set_spawn(
         player: u128,

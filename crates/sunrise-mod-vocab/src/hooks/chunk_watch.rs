@@ -12,7 +12,8 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "ChunkWatchEvent.Watch"
+        neoforge = "ChunkWatchEvent.Watch",
+        native = "fn native_chunk_watch(&mut self, player: PlayerRef, chunk: ChunkRef)"
     )]
     fn chunk_watch();
     /// `chunk`'s packet went to `player` (NeoForge's `ChunkWatchEvent.Sent`,
@@ -23,7 +24,8 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "ChunkWatchEvent.Sent"
+        neoforge = "ChunkWatchEvent.Sent",
+        native = "fn native_chunk_sent(&mut self, player: PlayerRef, chunk: ChunkRef)"
     )]
     fn chunk_sent();
     /// `player` stopped watching `chunk` (NeoForge's `ChunkWatchEvent.UnWatch`,
@@ -36,7 +38,8 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "ChunkWatchEvent.UnWatch"
+        neoforge = "ChunkWatchEvent.UnWatch",
+        native = "fn native_chunk_unwatch(&mut self, player: PlayerRef, chunk: ChunkRef)"
     )]
     fn chunk_unwatch();
 }

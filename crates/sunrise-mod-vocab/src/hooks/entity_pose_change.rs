@@ -6,7 +6,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_entity_pose_change",
+        native = "fn native_entity_pose_change(&mut self, player: u128, name: &str, from: &str, to: &str)"
     )]
     fn entity_pose_change();
 }

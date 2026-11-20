@@ -20,7 +20,8 @@ pub trait Hooks {
         inert = "*handled = true;",
         key = "state",
         target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_random_tick",
-        neoforge = "none (vanilla BlockBehaviour.randomTick; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla BlockBehaviour.randomTick; NeoForge adds no event or extension for it)",
+        native = "fn native_random_tick(&mut self, ticks: &mut Ticks, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, handled: &mut bool)"
     )]
     fn random_tick();
 }

@@ -13,7 +13,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "GatherEffectScreenTooltipsEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_gather_effect_screen_tooltips(&self, screen: &ScreenView<'_>, effect: &ActiveEffect, tooltip: &mut Vec<(Text, u32)>)"
     )]
     fn gather_effect_screen_tooltips();
 }

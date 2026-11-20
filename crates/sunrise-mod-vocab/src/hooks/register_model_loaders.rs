@@ -53,7 +53,8 @@ logged as an error naming it and the model, which then draws only its elements."
         contract = "collect",
         out = "loaders",
         context = "registration",
-        neoforge = "ModelEvent.RegisterLoaders"
+        neoforge = "ModelEvent.RegisterLoaders",
+        native = "fn native_register_model_loaders(context: &mod_api::RegistrationContext, loaders: &mut Vec<String>)"
     )]
     fn register_model_loaders();
 }

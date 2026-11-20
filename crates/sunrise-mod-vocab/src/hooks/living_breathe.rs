@@ -33,7 +33,8 @@ pub trait Hooks {
         contract = "listen",
         neoforge = "LivingBreatheEvent",
         cancellable = false,
-        version = 3
+        version = 3,
+        native = "fn native_living_breathe(&mut self, entity: mod_api::LivingRef, can_breathe: &mut bool, consume: &mut i32, refill: &mut i32)"
     )]
     fn living_breathe();
 }

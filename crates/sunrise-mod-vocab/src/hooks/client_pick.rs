@@ -23,7 +23,8 @@ pub trait Hooks {
         contract = "collect",
         out = "result",
         event_per_listener = true,
-        neoforge = "none (vanilla Minecraft.pick, before tick inputs and frame extraction)"
+        neoforge = "none (vanilla Minecraft.pick, before tick inputs and frame extraction)",
+        native = "fn native_client_pick(&mut self, call: mod_api::__private::ClientPickCall<'_>)"
     )]
     fn client_pick(
         partial_tick: f32,

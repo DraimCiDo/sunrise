@@ -25,7 +25,8 @@ pub trait Hooks {
         contract = "collect",
         out = "right",
         neoforge = "none (a NeoForge mod reads AbstractContainerScreen.leftPos and cannot move it)",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_screen_room(&self, screen: &ScreenView<'_>, right: &mut f32)"
     )]
     fn screen_room();
 }

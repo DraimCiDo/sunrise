@@ -18,7 +18,8 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "AddClientReloadListenersEvent"
+        neoforge = "AddClientReloadListenersEvent",
+        native = "fn native_add_client_reload_listeners(&self, listeners: &mut dyn ClientReloadListeners)"
     )]
     fn add_client_reload_listeners();
 }

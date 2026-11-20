@@ -14,7 +14,8 @@ pub trait Hooks {
         contract = "listen",
         scope = "block_entity",
         key = "id",
-        neoforge = "IBlockEntityExtension.onLoad"
+        neoforge = "IBlockEntityExtension.onLoad",
+        native = "fn native_block_entity_on_load(&mut self, call: mod_api::__private::BlockEntityOnLoadCall)"
     )]
     fn block_entity_on_load(id: BlockEntityTypeKey, entity: BlockEntityRef);
 }

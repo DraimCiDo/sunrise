@@ -13,7 +13,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "PotionBrewEvent.Pre",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_potion_brew_pre(&mut self, pos: [i32; 3], stacks: &mut [Option<ItemStack>; 5], cancel: &mut bool)"
     )]
     fn potion_brew_pre();
 }

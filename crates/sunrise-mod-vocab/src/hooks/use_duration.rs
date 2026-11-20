@@ -19,7 +19,9 @@ pub trait Hooks {
         scope = "item",
         key = "stack",
         host = "read",
-        neoforge = "none (vanilla Item.getUseDuration; NeoForge adds no event or extension for it); LivingEntityUseItemEvent.Start can set a use's duration"
+        neoforge = "none (vanilla Item.getUseDuration; NeoForge adds no event or extension for it); LivingEntityUseItemEvent.Start can set a use's duration",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_use_duration",
+        native = "fn native_use_duration(&self, stack: &ItemStack, duration: &mut i32)"
     )]
     fn use_duration();
 }

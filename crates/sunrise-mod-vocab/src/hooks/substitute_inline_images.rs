@@ -19,7 +19,8 @@ pub trait Hooks {
         contract = "collect",
         out = "images",
         answered_by = "mod",
-        neoforge = "none (vanilla ChatComponent and AbstractSignRenderer.submitSignText)"
+        neoforge = "none (vanilla ChatComponent and AbstractSignRenderer.submitSignText)",
+        native = "fn native_substitute_inline_images(&self, call: mod_api::__private::SubstituteInlineImagesCall<'_>)"
     )]
     fn substitute_inline_images(run: &str, images: &mut Vec<Answered<InlineImageReplacement>>);
 }

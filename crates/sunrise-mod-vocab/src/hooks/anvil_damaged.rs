@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_anvil_damaged",
+        native = "fn native_anvil_damaged(&mut self, dimension: &str, pos: [i32; 3], from: &str, to: &str)"
     )]
     fn anvil_damaged();
 }

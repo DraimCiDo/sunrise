@@ -25,7 +25,8 @@ pub trait Hooks {
         scope = "block_entity",
         key = "entity",
         non_exhaustive = true,
-        neoforge = "none (vanilla Container.canPlaceItem; the item capability wraps this decision)"
+        neoforge = "none (vanilla Container.canPlaceItem; the item capability wraps this decision)",
+        native = "fn native_can_place_item(entity: &ModBlockEntity, slot: usize, stack: &mod_api::ItemStack, allowed: &mut Option<bool>)"
     )]
     fn can_place_item();
 }

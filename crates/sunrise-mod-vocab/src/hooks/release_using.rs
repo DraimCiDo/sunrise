@@ -15,7 +15,9 @@ pub trait Hooks {
         contract = "listen",
         scope = "item",
         key = "stack",
-        neoforge = "LivingEntityUseItemEvent.Stop"
+        neoforge = "LivingEntityUseItemEvent.Stop",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_release_using",
+        native = "fn native_release_using(&mut self, stack: &ItemStack, entity: Option<i32>, time_left: i32, used: &mut bool)"
     )]
     fn release_using();
 }

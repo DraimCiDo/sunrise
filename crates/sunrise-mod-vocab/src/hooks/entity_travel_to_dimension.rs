@@ -29,7 +29,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "EntityTravelToDimensionEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_entity_travel_to_dimension(&mut self, entity: EntityRef, dimension: &str, cause: &str, cancel: &mut bool)"
     )]
     fn entity_travel_to_dimension();
 }

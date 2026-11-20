@@ -15,7 +15,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no resource-pack status event)"
+        neoforge = "none (NeoForge has no resource-pack status event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_resource_pack_status",
+        native = "fn native_resource_pack_status(&mut self, player: u128, name: &str, status: i32)"
     )]
     fn resource_pack_status();
 }

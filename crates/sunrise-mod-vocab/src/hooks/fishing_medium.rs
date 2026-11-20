@@ -25,7 +25,8 @@ pub trait Hooks {
         contract = "replace",
         out = "medium",
         answered_by = "mod",
-        neoforge = "none (NeoForge's ItemFishedEvent fires after the loot roll, in FishingHook.retrieve)"
+        neoforge = "none (NeoForge's ItemFishedEvent fires after the loot roll, in FishingHook.retrieve)",
+        native = "fn native_fishing_medium(&mut self, level: LevelRef, bobber: EntityRef, position: [f64; 3], owner: Option<PlayerRef>, owner_position: Option<[f64; 3]>, medium: &mut Option<Answered<mod_api::FishingMedium>>)"
     )]
     fn fishing_medium();
 }

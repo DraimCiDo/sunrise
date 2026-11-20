@@ -13,7 +13,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "PlayerEvent.Clone (not cancellable)",
-        cancellable = false
+        cancellable = false,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_clone",
+        native = "fn native_player_clone(&mut self, player: u128, name: &str, was_death: bool, original: mod_api::OriginalPlayerRef)"
     )]
     fn player_clone();
 }

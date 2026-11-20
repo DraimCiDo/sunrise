@@ -12,7 +12,8 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "BlockGrowFeatureEvent",
         cancellable = true,
-        target = "sunrise_client::game::native_hooks::block_grow_feature::GameLevel<'_>::native_block_grow_feature"
+        target = "sunrise_client::game::native_hooks::block_grow_feature::GameLevel<'_>::native_block_grow_feature",
+        native = "fn native_block_grow_feature(&mut self, dimension: LevelDimension, pos: BlockPos, feature: &mut Option<String>, cancel: &mut bool)"
     )]
     fn block_grow_feature();
 }

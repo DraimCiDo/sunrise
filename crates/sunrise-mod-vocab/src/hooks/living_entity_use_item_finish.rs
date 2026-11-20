@@ -21,7 +21,9 @@ pub trait Hooks {
     #[hook(
         side = "both",
         contract = "listen",
-        neoforge = "LivingEntityUseItemEvent.Finish"
+        neoforge = "LivingEntityUseItemEvent.Finish",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_living_entity_use_item_finish",
+        native = "fn native_living_entity_use_item_finish(&mut self, stack: &ItemStack, entity: Option<i32>, hand: Hand, duration: i32, result: &mut Option<ItemStack>)"
     )]
     fn living_entity_use_item_finish();
 }

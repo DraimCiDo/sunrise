@@ -13,7 +13,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "LoadingValidationCallback",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_validate_tickets(&mut self, dimension: &str, controller: TicketController, validation: &mut dyn mod_api::TicketValidation)"
     )]
     fn validate_tickets();
 }

@@ -14,7 +14,9 @@ pub trait Hooks {
         contract = "listen",
         scope = "item",
         key = "stack",
-        neoforge = "IItemDecorator.render"
+        neoforge = "IItemDecorator.render",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_item_decorations",
+        native = "fn native_item_decorations(&self, stack: &ItemStack, x: f32, y: f32, draw: &mut HudBatch)"
     )]
     fn item_decorations();
 }

@@ -43,7 +43,8 @@ pub trait Hooks {
         host = "read",
         target = "sunrise_client::game::native_hooks::can_equip::NativeHookHost<'_>::native_can_equip",
         cancellable = false,
-        neoforge = "IItemExtension.canEquip"
+        neoforge = "IItemExtension.canEquip",
+        native = "fn native_can_equip(&self, stack: &mod_api::ItemStack, slot: &str, entity: LivingRef, kind: &str, can_equip: &mut bool)"
     )]
     fn can_equip();
 }

@@ -18,7 +18,8 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "none (NeoForge has no viewed levels)"
+        neoforge = "none (NeoForge has no viewed levels)",
+        native = "fn native_viewed_level_sound(&mut self, call: mod_api::__private::ViewedLevelSoundCall<'_>)"
     )]
     fn viewed_level_sound(
         level: LevelRef,

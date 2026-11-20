@@ -15,7 +15,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "SweepAttackEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_sweep_attack(&mut self, target: &str, vanilla_sweep: bool, sweeping: &mut bool, canceled: &mut bool)"
     )]
     fn sweep_attack();
 }

@@ -78,7 +78,8 @@ isn't `width * height * 4` or whose side is over 32768 pixels, are logged and sk
         contract = "collect",
         out = "sources",
         context = "registration",
-        neoforge = "RegisterSpriteSourcesEvent"
+        neoforge = "RegisterSpriteSourcesEvent",
+        native = "fn native_register_sprite_sources(context: &mod_api::RegistrationContext, sources: &mut Vec<String>)"
     )]
     fn register_sprite_sources();
 }

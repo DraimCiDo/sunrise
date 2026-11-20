@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's EntityDropItemEvent)"
+        neoforge = "none (NeoForge has no such event; Bukkit's EntityDropItemEvent)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_entity_drop_item",
+        native = "fn native_entity_drop_item(&mut self, entity: u32, item: &str, count: i32, pos: [f64; 3])"
     )]
     fn entity_drop_item();
 }

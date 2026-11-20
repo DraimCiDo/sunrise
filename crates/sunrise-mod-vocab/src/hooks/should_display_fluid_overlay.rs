@@ -17,7 +17,8 @@ pub trait Hooks {
         out = "overlay",
         scope = "block",
         key = "state",
-        neoforge = "IBlockExtension.shouldDisplayFluidOverlay"
+        neoforge = "IBlockExtension.shouldDisplayFluidOverlay",
+        native = "fn native_should_display_fluid_overlay(&self, state: BlockStateId, fluid: mod_api::FluidState, overlay: &mut bool)"
     )]
     fn should_display_fluid_overlay();
 }

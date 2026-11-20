@@ -10,7 +10,8 @@ pub trait Hooks {
         contract = "collect",
         out = "professions",
         context = "registration",
-        neoforge = "RegisterEvent"
+        neoforge = "RegisterEvent",
+        native = "fn native_register_villager_professions(context: &mod_api::RegistrationContext, professions: &mut dyn VillagerProfessions)"
     )]
     fn register_villager_professions();
 }

@@ -10,7 +10,8 @@ pub trait Hooks {
         out = "cancel",
         host = "read",
         neoforge = "BlockEvent.BlockToolModificationEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_block_tool_modification(&self, stack: &ItemStack, tool: &ToolUse, final_state: &mut Option<BlockStateId>, cancel: &mut bool)"
     )]
     fn block_tool_modification();
 }

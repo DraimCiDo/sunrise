@@ -41,7 +41,8 @@ The sprite is the entity texture ID and the tint is `0xRRGGBB`."#]
         contract = "collect",
         out = "layers",
         context = "registration",
-        neoforge = "EntityRenderersEvent.RegisterLayerDefinitions"
+        neoforge = "EntityRenderersEvent.RegisterLayerDefinitions",
+        native = "fn native_register_layer_definitions(context: &mod_api::RegistrationContext, layers: &mut Vec<(String, LayerDefinition)>)"
     )]
     fn register_layer_definitions();
 }

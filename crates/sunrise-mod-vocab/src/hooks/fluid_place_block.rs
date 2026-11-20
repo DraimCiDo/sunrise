@@ -10,7 +10,8 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "BlockEvent.FluidPlaceBlockEvent",
         cancellable = true,
-        target = "sunrise_client::game::native_hooks::fluid_place_block::GameLevel<'_>::native_fluid_place_block"
+        target = "sunrise_client::game::native_hooks::fluid_place_block::GameLevel<'_>::native_fluid_place_block",
+        native = "fn native_fluid_place_block(&self, dimension: LevelDimension, pos: BlockPos, liquid_pos: BlockPos, state: BlockStateId, new_state: &mut BlockStateId, cancel: &mut bool)"
     )]
     fn fluid_place_block();
 }

@@ -49,7 +49,8 @@ holds the open back; a changed version never does.
         out = "resolved",
         collect_validator = "crate::game::mismatch_resolution::attribute",
         version = 2,
-        neoforge = "ModMismatchEvent"
+        neoforge = "ModMismatchEvent",
+        native = "fn native_mod_mismatch(&mut self, mismatches: &[mod_api::ModMismatch], resolved: &mut Vec<mod_api::ModMismatchResolution>)"
     )]
     fn mod_mismatch();
 }

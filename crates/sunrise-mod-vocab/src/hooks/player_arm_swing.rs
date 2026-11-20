@@ -13,7 +13,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "AdvancementEvent.AdvancementProgressEvent",
-        cancellable = false
+        cancellable = false,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_advancement_progress",
+        native = "fn native_player_advancement_progress(&mut self, call: mod_api::__private::PlayerAdvancementProgressCall<'_>)"
     )]
     fn player_advancement_progress(
         player: u128,
@@ -28,7 +30,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's PlayerAnimationEvent)"
+        neoforge = "none (NeoForge has no such event; Bukkit's PlayerAnimationEvent)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_arm_swing",
+        native = "fn native_player_arm_swing(&mut self, player: u128, name: &str, hand: &str)"
     )]
     fn player_arm_swing();
 }

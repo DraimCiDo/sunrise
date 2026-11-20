@@ -9,7 +9,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event; Bukkit's PlayerRecipeBookSettingsChange)",
-        paper = "PlayerRecipeBookSettingsChangeEvent"
+        paper = "PlayerRecipeBookSettingsChangeEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_recipe_book_settings_change",
+        native = "fn native_player_recipe_book_settings_change(&mut self, player: u128, name: &str, book: mod_api::RecipeBookIdentity, open: bool, filtering: bool)"
     )]
     fn player_recipe_book_settings_change();
 }

@@ -12,7 +12,8 @@ pub trait Hooks {
         out = "outcome",
         answered_by = "mod",
         neoforge = "ScreenEvent.Opening",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_screen_opening(&self, current: &ScreenView<'_>, new: &ScreenView<'_>, outcome: &mut Option<Answered<ScreenOpening>>)"
     )]
     fn screen_opening();
 }

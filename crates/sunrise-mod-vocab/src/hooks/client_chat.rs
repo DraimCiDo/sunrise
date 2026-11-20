@@ -9,7 +9,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "ClientChatEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_client_chat(&mut self, player_id: i32, player_uuid: u128, original_message: &str, message: &mut String, cancel: &mut bool)"
     )]
     fn client_chat();
 }

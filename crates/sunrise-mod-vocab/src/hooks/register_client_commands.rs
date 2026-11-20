@@ -13,7 +13,9 @@ pub trait Hooks {
         side = "client",
         contract = "collect",
         out = "commands",
-        neoforge = "RegisterClientCommandsEvent"
+        neoforge = "RegisterClientCommandsEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_register_client_commands",
+        native = "fn native_register_client_commands(&mut self, commands: &mut Vec<mod_api::Command>)"
     )]
     fn register_client_commands();
 }

@@ -16,7 +16,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "RenderTooltipEvent.GatherComponents",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_render_tooltip_gather_components(&self, stack: &ItemStack, screen_width: i32, screen_height: i32, elements: &mut Vec<TooltipElement>, max_width: &mut i32, cancel: &mut bool)"
     )]
     fn render_tooltip_gather_components();
 }

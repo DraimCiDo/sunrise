@@ -41,7 +41,8 @@ Wire. No wasm registration runs partially or silently omits metadata."#]
         contract = "collect",
         out = "extensions",
         context = "registration",
-        neoforge = "ExtendPoiTypesEvent"
+        neoforge = "ExtendPoiTypesEvent",
+        native = "fn native_extend_poi_types(context: &mod_api::RegistrationContext, extensions: &mut dyn PoiTypeExtensions)"
     )]
     fn extend_poi_types();
 }

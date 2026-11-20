@@ -20,7 +20,9 @@ pub trait Hooks {
         side = "server",
         contract = "collect",
         out = "names",
-        neoforge = "none (NeoForge 26.3 has no such event)"
+        neoforge = "none (NeoForge 26.3 has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_commands_sent",
+        native = "fn native_player_commands_sent(&mut self, player: u128, name: &str, names: &mut Vec<String>)"
     )]
     fn player_commands_sent();
 }

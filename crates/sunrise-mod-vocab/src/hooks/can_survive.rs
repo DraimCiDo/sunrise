@@ -30,7 +30,8 @@ pub trait Hooks {
         inert = "signal",
         key = "state",
         target = "sunrise_client::game::native_hooks::base::LevelView<'_>::native_can_survive",
-        neoforge = "none (vanilla BlockBehaviour.canSurvive; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla BlockBehaviour.canSurvive; NeoForge adds no event or extension for it)",
+        native = "fn native_can_survive(&self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, survives: &mut Option<bool>, inert: &mut bool)"
     )]
     fn can_survive();
 }

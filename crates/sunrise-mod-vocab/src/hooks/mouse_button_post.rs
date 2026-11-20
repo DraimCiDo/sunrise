@@ -6,7 +6,9 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "InputEvent.MouseButton.Post"
+        neoforge = "InputEvent.MouseButton.Post",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_mouse_button_post",
+        native = "fn native_mouse_button_post(&mut self, button: i32, pressed: bool, modifiers: u32)"
     )]
     fn mouse_button_post();
 }

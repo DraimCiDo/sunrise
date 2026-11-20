@@ -12,7 +12,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "ExplosionEvent.Start",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_explosion_start(&mut self, explosion: &ExplosionStart<'_>, cancel: &mut bool)"
     )]
     fn explosion_start();
 }

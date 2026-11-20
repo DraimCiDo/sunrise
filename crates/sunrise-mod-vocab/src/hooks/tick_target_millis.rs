@@ -13,7 +13,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         cancellable = false,
-        neoforge = "none (vanilla Minecraft.getTickTargetMillis; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla Minecraft.getTickTargetMillis; NeoForge adds no event or extension for it)",
+        native = "fn native_tick_target_millis(&self, millis: &mut f32)"
     )]
     fn tick_target_millis();
 }

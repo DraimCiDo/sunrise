@@ -9,7 +9,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_time_skip",
+        native = "fn native_time_skip(&mut self, dimension: &str, from: i64, to: i64, cause: &str, cancel: &mut bool)"
     )]
     fn time_skip();
 }

@@ -27,7 +27,9 @@ pub trait Hooks {
         out = "canceled",
         cancellable = true,
         version = 2,
-        neoforge = "none (vanilla ExperienceOrb.tryMergeToExisting; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla ExperienceOrb.tryMergeToExisting; NeoForge adds no event or extension for it)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_experience_orb_merge",
+        native = "fn native_experience_orb_merge(&mut self, call: mod_api::__private::ExperienceOrbMergeCall<'_>)"
     )]
     fn experience_orb_merge(
         dimension: &str,

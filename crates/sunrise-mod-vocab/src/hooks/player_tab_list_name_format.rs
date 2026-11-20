@@ -14,7 +14,8 @@ pub trait Hooks {
         neoforge = "PlayerEvent.TabListNameFormat",
         cancellable = false,
         version = 2,
-        target = "sunrise_client_lib::lan::hub::native_player_tab_list_name_format"
+        target = "sunrise_client_lib::lan::hub::native_player_tab_list_name_format",
+        native = "fn native_player_tab_list_name_format(context: &LoopContext, player: u128, name: &str, display_name: &mut Option<Text>)"
     )]
     fn player_tab_list_name_format();
 }

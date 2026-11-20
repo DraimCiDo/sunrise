@@ -19,7 +19,8 @@ pub trait Hooks {
         key = "item",
         out = "answer",
         target = "sunrise_client::game::native_hooks::placement_context::GameLevel<'_>::native_placement_context",
-        neoforge = "none (vanilla BlockItem.updatePlacementContext)"
+        neoforge = "none (vanilla BlockItem.updatePlacementContext)",
+        native = "fn native_placement_context(&self, item: &str, context: &PlacementContext, answer: &mut Option<Option<mod_api::PlacementContext>>)"
     )]
     fn placement_context();
 }

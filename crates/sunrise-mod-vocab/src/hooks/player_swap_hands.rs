@@ -17,7 +17,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         version = 2,
-        neoforge = "LivingSwapItemsEvent.Hands"
+        neoforge = "LivingSwapItemsEvent.Hands",
+        native = "fn native_player_swap_hands(&mut self, player: u128, name: &str, to_main_hand: &mut Option<ItemStack>, to_off_hand: &mut Option<ItemStack>, cancel: &mut bool)"
     )]
     fn player_swap_hands();
 }

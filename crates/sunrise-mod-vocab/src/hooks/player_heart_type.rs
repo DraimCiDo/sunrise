@@ -12,7 +12,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "PlayerHeartTypeEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_player_heart_type(&mut self, kind: &mut mod_api::client::hud_layout::HeartKind)"
     )]
     fn player_heart_type();
 }

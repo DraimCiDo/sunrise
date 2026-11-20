@@ -8,7 +8,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "ClientStoppedEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_client_stopped(&mut self)"
     )]
     fn client_stopped();
 }

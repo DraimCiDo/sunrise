@@ -8,7 +8,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's ExplosionPrimeEvent)"
+        neoforge = "none (NeoForge has no such event; Bukkit's ExplosionPrimeEvent)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_explosion_prime",
+        native = "fn native_explosion_prime(&mut self, center: [f64; 3], radius: f32)"
     )]
     fn explosion_prime();
 }

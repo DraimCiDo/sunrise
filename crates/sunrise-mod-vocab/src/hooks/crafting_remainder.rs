@@ -25,7 +25,8 @@ retaining the initial data remainder; native panics retain normal Part attributi
         contract = "listen",
         scope = "item",
         key = "stack",
-        neoforge = "IItemExtension.getCraftingRemainder(ItemStack)"
+        neoforge = "IItemExtension.getCraftingRemainder(ItemStack)",
+        native = "fn native_crafting_remainder(&self, stack: &ItemStack, remainder: &mut Option<ItemStack>)"
     )]
     fn crafting_remainder();
 }

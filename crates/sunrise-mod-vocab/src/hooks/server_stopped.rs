@@ -13,7 +13,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "ServerStoppedEvent",
-        cancellable = false
+        cancellable = false,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_server_stopped",
+        native = "fn native_server_stopped(&mut self, dedicated: bool)"
     )]
     fn server_stopped();
 }

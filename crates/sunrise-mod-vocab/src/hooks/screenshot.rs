@@ -19,7 +19,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "ScreenshotEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_screenshot(&mut self, image: &mut ScreenshotImage, file_name: &mut String, message: &mut Option<Text>, cancel: &mut bool)"
     )]
     fn screenshot();
 }

@@ -11,7 +11,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "ViewportEvent.ComputeCameraAngles",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_camera_pose(&self, partial: f32, position: &mut [f64; 3], yaw: &mut f32, pitch: &mut f32)"
     )]
     fn camera_pose();
 }

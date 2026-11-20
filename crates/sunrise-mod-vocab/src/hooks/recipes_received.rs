@@ -15,7 +15,9 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "RecipesReceivedEvent"
+        neoforge = "RecipesReceivedEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_recipes_received",
+        native = "fn native_recipes_received(&mut self, recipe_types: &[String])"
     )]
     fn recipes_received();
 }

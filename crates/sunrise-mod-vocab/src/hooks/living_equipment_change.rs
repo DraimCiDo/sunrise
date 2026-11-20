@@ -27,7 +27,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "LivingEquipmentChangeEvent",
-        cancellable = false
+        cancellable = false,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_living_equipment_change",
+        native = "fn native_living_equipment_change(&mut self, entity: u32, kind: &str, slot: &str, from: Option<&ItemStack>, to: Option<&ItemStack>)"
     )]
     fn living_equipment_change();
 }

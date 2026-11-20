@@ -26,7 +26,8 @@ pub trait Hooks {
         scope = "item",
         key = "stack",
         version = 2,
-        neoforge = "IItemExtension.damageItem"
+        neoforge = "IItemExtension.damageItem",
+        native = "fn native_damage_item(&mut self, stack: &ItemStack, entity: Option<LivingRef>, amount: &mut i32, canceled: &mut bool, break_now: &mut bool)"
     )]
     fn damage_item();
 }

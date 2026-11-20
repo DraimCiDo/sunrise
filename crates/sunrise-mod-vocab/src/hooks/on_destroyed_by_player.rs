@@ -23,7 +23,8 @@ pub trait Hooks {
         out = "destroyed",
         scope = "block",
         key = "state",
-        neoforge = "IBlockExtension.onDestroyedByPlayer"
+        neoforge = "IBlockExtension.onDestroyedByPlayer",
+        native = "fn native_on_destroyed_by_player(&mut self, player: u128, pos: [i32; 3], state: BlockStateId, tool: Option<&ItemStack>, will_harvest: bool, destroyed: &mut Option<bool>)"
     )]
     fn on_destroyed_by_player();
 }

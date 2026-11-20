@@ -26,7 +26,8 @@ pub trait Hooks {
         host = "read",
         target = "sunrise_client::game::native_hooks::living_change_target::NativeHookHost<'_>::native_living_change_target",
         neoforge = "LivingChangeTargetEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_living_change_target(&self, call: mod_api::__private::LivingChangeTargetCall<'_>)"
     )]
     fn living_change_target(
         mob: MobRef,

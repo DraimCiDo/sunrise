@@ -10,7 +10,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "RenderItemInFrameEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_render_item_in_frame(&self, entity_id: u32, pos: [i32; 3], stack: &ItemStack, canceled: &mut bool)"
     )]
     fn render_item_in_frame();
 }

@@ -10,7 +10,8 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's BellRingEvent)",
         cancellable = true,
-        target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_bell_ring"
+        target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_bell_ring",
+        native = "fn native_bell_ring(&self, dimension: LevelDimension, player: Option<u128>, pos: BlockPos, cancel: &mut bool)"
     )]
     fn bell_ring();
 }

@@ -35,7 +35,8 @@ draws under F1 uses `Hooks::gui_render_post`."#]
         contract = "collect",
         out = "layers",
         context = "registration",
-        neoforge = "RegisterGuiLayersEvent"
+        neoforge = "RegisterGuiLayersEvent",
+        native = "fn native_register_gui_layers(context: &mod_api::RegistrationContext, layers: &mut Vec<GuiLayer>)"
     )]
     fn register_gui_layers();
 }

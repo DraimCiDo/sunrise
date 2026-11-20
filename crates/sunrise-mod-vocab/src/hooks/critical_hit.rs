@@ -16,7 +16,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "CriticalHitEvent",
-        cancellable = false
+        cancellable = false,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_critical_hit",
+        native = "fn native_critical_hit(&mut self, target_kind: &str, vanilla_critical: bool, critical: &mut bool, damage_multiplier: &mut f32)"
     )]
     fn critical_hit();
 }

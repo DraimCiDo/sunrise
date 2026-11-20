@@ -16,7 +16,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_smoke_source",
-        neoforge = "none (vanilla CampfireBlock.isSmokeSource; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla CampfireBlock.isSmokeSource; NeoForge adds no event or extension for it)",
+        native = "fn native_smoke_source(&self, dimension: LevelDimension, state: BlockStateId, smoke: &mut Option<bool>)"
     )]
     fn smoke_source();
 }

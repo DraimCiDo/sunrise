@@ -11,7 +11,8 @@ pub trait Hooks {
         out = "canceled",
         host = "read",
         neoforge = "LevelEvent.PotentialSpawns",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_potential_spawns(&self, dimension: &str, category: &str, pos: [i32; 3], entries: &mut Vec<SpawnEntry>, canceled: &mut bool)"
     )]
     fn potential_spawns();
 }

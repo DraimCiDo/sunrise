@@ -13,7 +13,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's PlayerShearEntityEvent)",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_shear_entity",
+        native = "fn native_player_shear_entity(&mut self, player: u128, name: &str, entity_id: i32, off_hand: bool, cancel: &mut bool)"
     )]
     fn player_shear_entity();
 }

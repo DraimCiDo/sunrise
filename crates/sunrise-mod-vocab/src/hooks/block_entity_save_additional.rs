@@ -31,7 +31,8 @@ pub trait Hooks {
         key = "id",
         target = "sunrise_client::game::native_hooks::block_entity_save_additional::GameLevel<'_>::native_block_entity_save_additional",
         neoforge = "none (vanilla BlockEntity.saveAdditional; NeoForge adds no event for this moment)",
-        version = 2
+        version = 2,
+        native = "fn native_block_entity_save_additional(&self, id: mod_api::BlockEntityTypeKey, entity: BlockEntityRef, pos: [i32; 3], level: LevelRef, tag: &mut Compound)"
     )]
     fn block_entity_save_additional();
 }

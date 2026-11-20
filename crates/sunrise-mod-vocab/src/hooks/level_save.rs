@@ -9,7 +9,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "LevelEvent.Save",
-        paper = "WorldSaveEvent"
+        paper = "WorldSaveEvent",
+        native = "fn native_level_save(&mut self, dimension: &str)"
     )]
     fn level_save();
 }

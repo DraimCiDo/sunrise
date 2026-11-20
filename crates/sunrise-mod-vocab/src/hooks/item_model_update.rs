@@ -15,7 +15,8 @@ pub trait Hooks {
         side = "client",
         version = 2,
         contract = "listen",
-        neoforge = "none (vanilla ItemModel.update of a type RegisterItemModelsEvent registers; NeoForge adds no event for it)"
+        neoforge = "none (vanilla ItemModel.update of a type RegisterItemModelsEvent registers; NeoForge adds no event for it)",
+        native = "fn native_item_model_update(&self, call: mod_api::__private::ItemModelUpdateCall<'_>)"
     )]
     fn item_model_update(
         kind: &str,

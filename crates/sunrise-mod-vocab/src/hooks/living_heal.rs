@@ -11,7 +11,8 @@ pub trait Hooks {
         context = "loop",
         neoforge = "LivingHealEvent",
         version = 2,
-        target = "sunrise_client_lib::hunger::native_living_heal"
+        target = "sunrise_client_lib::hunger::native_living_heal",
+        native = "fn native_living_heal(context: &LoopContext, entity: u32, amount: &mut f32, cancel: &mut bool)"
     )]
     fn living_heal();
 }

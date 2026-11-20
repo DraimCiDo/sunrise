@@ -16,7 +16,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (EntityTeleportEvent.TeleportCommand fires before the move and can cancel it; this hook is told after the move)"
+        neoforge = "none (EntityTeleportEvent.TeleportCommand fires before the move and can cancel it; this hook is told after the move)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_teleported",
+        native = "fn native_player_teleported(&mut self, player: u128, name: &str, from: [f64; 3], to: [f64; 3], dimension: &str)"
     )]
     fn player_teleported();
 }

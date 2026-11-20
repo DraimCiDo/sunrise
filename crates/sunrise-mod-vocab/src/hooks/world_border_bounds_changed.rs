@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_world_border_bounds_changed",
+        native = "fn native_world_border_bounds_changed(&mut self)"
     )]
     fn world_border_bounds_changed();
 }

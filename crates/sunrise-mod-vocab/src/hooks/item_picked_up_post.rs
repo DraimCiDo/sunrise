@@ -19,7 +19,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "ItemEntityPickupEvent.Post",
-        version = 3
+        version = 3,
+        target = "sunrise_client::game::native_hooks::item_picked_up::Game<'_>::native_item_picked_up_post",
+        native = "fn native_item_picked_up_post(&mut self, player: u128, item: ItemEntityRef, original: &ItemStack, remaining: &mut Option<ItemStack>)"
     )]
     fn item_picked_up_post();
 }

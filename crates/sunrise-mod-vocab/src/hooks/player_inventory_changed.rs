@@ -5,7 +5,8 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (vanilla InventoryChangeTrigger; NeoForge adds no event)"
+        neoforge = "none (vanilla InventoryChangeTrigger; NeoForge adds no event)",
+        native = "fn native_player_inventory_changed(&mut self, player: u128, stacks: &[Option<ItemStack>])"
     )]
     fn player_inventory_changed();
 }

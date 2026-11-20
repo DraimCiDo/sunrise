@@ -21,7 +21,9 @@ pub trait Hooks {
         side = "server",
         contract = "collect",
         out = "files",
-        neoforge = "AddPackFindersEvent"
+        neoforge = "AddPackFindersEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_data_pack_files",
+        native = "fn native_data_pack_files(&mut self, files: &mut Vec<(String, Vec<u8>)>)"
     )]
     fn data_pack_files();
 }

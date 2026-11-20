@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_lectern_page_change",
+        native = "fn native_player_lectern_page_change(&mut self, player: u128, name: &str, pos: [i32; 3], page: i32)"
     )]
     fn player_lectern_page_change();
 }

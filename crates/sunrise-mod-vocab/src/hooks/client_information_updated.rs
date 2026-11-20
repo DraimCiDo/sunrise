@@ -13,7 +13,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "ClientInformationUpdatedEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_client_information_updated(&mut self, player: u128, player_entity_id: i32, name: &str, old: &mod_api::ClientInfo, new: &mod_api::ClientInfo)"
     )]
     fn client_information_updated();
 }

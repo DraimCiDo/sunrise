@@ -15,7 +15,8 @@ pub trait Hooks {
         contract = "collect",
         out = "links",
         neoforge = "none (Sunrise mod menus expose linked container slots)",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_menu_links(&mut self, player: u128, menu: &str, pos: [i32; 3], links: &mut Vec<[i32; 3]>)"
     )]
     fn menu_links();
 }

@@ -2,6 +2,11 @@
 //! source copy, then write the build data (`points.json`, `internals.json`, `loops.json`) with the
 //! header naming COMMIT, the source's full commit sha (#589). Never run on a working tree.
 //!
+//! `sunrise-stage hooks ROOT`: write each hook declaration's target signature from the game
+//! (`native`, and `target` or `direct` where it needs one) and fill new native hooks'
+//! placeholders, as `cargo run -p xtask -- mod-api` does. It builds without the vocabulary, so it
+//! runs when the vocabulary's build refuses a declaration that lacks one.
+//!
 //! `sunrise-stage surface ROOT OUT [--without-calls] [--with-points-and-loops] [--with-internals]`:
 //! write the SDK surface (`surface.json`) of the source tree at ROOT to OUT, and nothing else. It
 //! only reads the tree, so a working tree is fine. The engine options are for comparisons: choose
@@ -29,6 +34,15 @@ use std::path::PathBuf;
 use sunrise_mod_api_gen::staging::{self, Mode};
 use sunrise_mod_api_gen::surface::{ExportOptions, export_with};
 
+fn hooks(args: &[PathBuf]) {
+    let [root] = args else {
+        fail("usage: sunrise-stage hooks ROOT")
+    };
+    sunrise_mod_api_gen::generated_on_stdout();
+    if let Err(error) = sunrise_mod_api_gen::fill_hooks(root) {
+        fail(error)
+    }
+}
 fn surface(args: &[PathBuf]) {
     let [root, out, flags @ ..] = args else {
         fail(
@@ -288,6 +302,7 @@ fn main() {
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
     match args.first().and_then(|c| c.to_str()) {
         Some("surface") => return surface(&args[1..]),
+        Some("hooks") => return hooks(&args[1..]),
         Some("uses") => return uses_command(entry, &args[1..]),
         Some("fits") => fits_command(&args[1..]),
         Some("surface-diff") => surface_diff(&args[1..]),
@@ -295,7 +310,7 @@ fn main() {
     }
     let usage = || {
         eprintln!(
-            "usage: sunrise-stage ROOT POINTS_JSON INTERNALS_JSON COMMIT [--sync-internals]\n       sunrise-stage surface ROOT OUT [--without-calls] [--with-points-and-loops] [--with-internals]\n       sunrise-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--api-notes-only] [--landed SHA] [--json OUT] [--gate]\n       sunrise-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]\n       sunrise-stage fits USES_JSON TARGET_SURFACE"
+            "usage: sunrise-stage ROOT POINTS_JSON INTERNALS_JSON COMMIT [--sync-internals]\n       sunrise-stage surface ROOT OUT [--without-calls] [--with-points-and-loops] [--with-internals]\n       sunrise-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--api-notes-only] [--landed SHA] [--json OUT] [--gate]\n       sunrise-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]\n       sunrise-stage fits USES_JSON TARGET_SURFACE\n       sunrise-stage hooks ROOT"
         );
         std::process::exit(2)
     };

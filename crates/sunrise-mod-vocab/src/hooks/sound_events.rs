@@ -11,7 +11,8 @@ pub trait Hooks {
         context = "loop",
         neoforge = "PlaySoundEvent",
         cancellable = false,
-        target = "sunrise_client_render::sound_engine::hooks::native_play_sound"
+        target = "sunrise_client_render::sound_engine::hooks::native_play_sound",
+        native = "fn native_play_sound(context: &sunrise_world::native_load_context::LoopContext, instance: u64, starting: bool, original: &SoundPlay, sound: &mut Option<SoundPlay>)"
     )]
     /// `instance` is an engine-local sound instance id, unchanged across its live updates.
     fn play_sound();
@@ -22,7 +23,8 @@ pub trait Hooks {
         context = "loop",
         neoforge = "PlaySoundSourceEvent",
         cancellable = false,
-        target = "sunrise_client_render::sound_engine::hooks::native_play_sound_source"
+        target = "sunrise_client_render::sound_engine::hooks::native_play_sound_source",
+        native = "fn native_play_sound_source(context: &sunrise_world::native_load_context::LoopContext, sound: &SoundPlay, channel: &ChannelRef)"
     )]
     fn play_sound_source();
     /// A streamed sound (music, a record) has started on `channel` (`PlayStreamingSourceEvent`): `sound` is what is playing, after `play_sound`'s edits. A notice: the channel is an id only and gives no control. Other sounds fire `play_sound_source` instead. Client-side only.
@@ -32,7 +34,8 @@ pub trait Hooks {
         context = "loop",
         neoforge = "PlayStreamingSourceEvent",
         cancellable = false,
-        target = "sunrise_client_render::sound_engine::hooks::native_play_streaming_source"
+        target = "sunrise_client_render::sound_engine::hooks::native_play_streaming_source",
+        native = "fn native_play_streaming_source(context: &sunrise_world::native_load_context::LoopContext, sound: &SoundPlay, channel: &ChannelRef)"
     )]
     fn play_streaming_source();
     /// The sound engine opened its output (`SoundEngineLoadEvent`): once at window start, after each resource reload (with the `context` of the new resource generation) and when the output device changes. Nothing fires with no sound output (no device, or audio turned off). Client-side only.
@@ -42,7 +45,8 @@ pub trait Hooks {
         context = "loop",
         neoforge = "SoundEngineLoadEvent",
         cancellable = false,
-        target = "sunrise_client_render::sound_engine::hooks::native_sound_engine_load"
+        target = "sunrise_client_render::sound_engine::hooks::native_sound_engine_load",
+        native = "fn native_sound_engine_load(context: &sunrise_world::native_load_context::LoopContext)"
     )]
     fn sound_engine_load();
 }

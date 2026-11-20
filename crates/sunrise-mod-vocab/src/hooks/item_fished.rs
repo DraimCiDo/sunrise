@@ -23,7 +23,8 @@ pub trait Hooks {
         contract = "collect",
         out = "drops",
         neoforge = "ItemFishedEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_item_fished(&mut self, player: u128, player_entity_id: i32, fished: &ItemFished, drops: &mut Vec<ItemStack>, rod_damage: &mut i32, cancel: &mut bool)"
     )]
     fn item_fished();
 }

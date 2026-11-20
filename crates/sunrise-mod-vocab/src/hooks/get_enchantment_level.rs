@@ -16,7 +16,9 @@ pub trait Hooks {
         side = "both",
         contract = "listen",
         neoforge = "GetEnchantmentLevelEvent",
-        target = "mod_api::item::enchantments::native_get_enchantment_level"
+        target = "mod_api::item::enchantments::native_get_enchantment_level",
+        direct = true,
+        native = "fn native_get_enchantment_level(stack: &ItemStack, target: Option<&Identifier>, enchantments: &mut ItemEnchantments)"
     )]
     fn get_enchantment_level();
 }

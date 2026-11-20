@@ -11,7 +11,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (vanilla's `LivingEntity.onEquipItem`; `living_equipment_change` is the `LivingEquipmentChangeEvent` counterpart)"
+        neoforge = "none (vanilla's `LivingEntity.onEquipItem`; `living_equipment_change` is the `LivingEquipmentChangeEvent` counterpart)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_on_equip",
+        native = "fn native_on_equip(&mut self, slot: &str, new: Option<&ItemStack>)"
     )]
     fn on_equip();
 }

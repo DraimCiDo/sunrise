@@ -11,7 +11,8 @@ pub trait Hooks {
         contract = "replace",
         out = "result",
         neoforge = "PlayerSpawnPhantomsEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_player_spawn_phantoms(&mut self, player: u128, name: &str, pos: [i32; 3], result: &mut Option<PhantomSpawnResult>, phantoms: &mut Option<i32>)"
     )]
     fn player_spawn_phantoms();
 }

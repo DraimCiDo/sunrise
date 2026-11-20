@@ -14,7 +14,8 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's CauldronLevelChangeEvent)",
         cancellable = true,
-        target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_cauldron_level_changed"
+        target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_cauldron_level_changed",
+        native = "fn native_cauldron_level_changed(&self, call: mod_api::__private::CauldronLevelChangedCall<'_>)"
     )]
     fn cauldron_level_changed(
         dimension: LevelDimension,
@@ -50,7 +51,9 @@ pub trait Hooks {
         version = 2,
         out = "cancel",
         neoforge = "EntityTeleportEvent.ItemConsumption",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_item_consumption_teleport",
+        native = "fn native_item_consumption_teleport(&mut self, consumer: mod_api::LivingRef, consumed: &mod_api::ItemStack, from: [f64; 3], target: &mut [f64; 3], cancel: &mut bool)"
     )]
     fn item_consumption_teleport();
 }

@@ -22,7 +22,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         target = "sunrise_client::game::native_hooks::explosion_resistance::GameLevel<'_>::native_explosion_resistance",
-        neoforge = "IBlockExtension.getExplosionResistance"
+        neoforge = "IBlockExtension.getExplosionResistance",
+        native = "fn native_explosion_resistance(&self, pos: BlockPos, state: BlockStateId, explosion: &ExplosionStart<'_>, resistance: &mut Option<f32>)"
     )]
     fn explosion_resistance();
 }

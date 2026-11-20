@@ -9,7 +9,8 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no direct equivalent; Bukkit's InventoryPickupItemEvent)",
         cancellable = true,
-        target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_hopper_pickup_item"
+        target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_hopper_pickup_item",
+        native = "fn native_hopper_pickup_item(&self, dimension: LevelDimension, pos: BlockPos, item: &str, count: u32, cancel: &mut bool)"
     )]
     fn hopper_pickup_item();
 }

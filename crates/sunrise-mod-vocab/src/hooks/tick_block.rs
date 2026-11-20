@@ -21,7 +21,8 @@ pub trait Hooks {
         key = "state",
         version = 2,
         target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_tick_block",
-        neoforge = "none (vanilla BlockBehaviour.tick; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla BlockBehaviour.tick; NeoForge adds no event or extension for it)",
+        native = "fn native_tick_block(&mut self, ticks: &mut Ticks, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, handled: &mut bool)"
     )]
     fn tick_block();
 }

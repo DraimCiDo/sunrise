@@ -29,7 +29,8 @@ pub trait Hooks {
         key = "state",
         host = "read",
         target = "sunrise_client::game::native_hooks::can_entity_destroy::Game<'_>::native_can_entity_destroy",
-        neoforge = "IBlockExtension.canEntityDestroy"
+        neoforge = "IBlockExtension.canEntityDestroy",
+        native = "fn native_can_entity_destroy(&self, pos: BlockPos, state: BlockStateId, entity: EntityRef, may_destroy: &mut Option<bool>)"
     )]
     fn can_entity_destroy();
 }

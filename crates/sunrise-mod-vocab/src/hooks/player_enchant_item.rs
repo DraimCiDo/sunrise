@@ -10,7 +10,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "PlayerEnchantItemEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_player_enchant_item(&mut self, player: u128, player_entity_id: i32, item: &ItemStack, enchantments: &[(std::sync::Arc<str>, u32)])"
     )]
     fn player_enchant_item();
 }

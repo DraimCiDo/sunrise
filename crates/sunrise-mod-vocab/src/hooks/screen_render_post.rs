@@ -23,7 +23,9 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "ScreenEvent.Render.Post",
-        cancellable = false
+        cancellable = false,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_screen_render_post",
+        native = "fn native_screen_render_post(&self, draw: &mut HudBatch, screen: &ScreenView<'_>)"
     )]
     fn screen_render_post();
 }

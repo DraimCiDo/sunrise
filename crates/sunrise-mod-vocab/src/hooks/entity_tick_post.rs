@@ -14,7 +14,9 @@ pub trait Hooks {
         version = 3,
         contract = "listen",
         neoforge = "EntityTickEvent.Post",
-        cancellable = false
+        cancellable = false,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_entity_tick_post",
+        native = "fn native_entity_tick_post(&mut self, dimension: &str, entities: &[u32], kinds: &[&str])"
     )]
     fn entity_tick_post();
 }

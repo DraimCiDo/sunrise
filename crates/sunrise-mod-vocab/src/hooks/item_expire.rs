@@ -11,7 +11,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "ItemExpireEvent",
-        cancellable = false
+        cancellable = false,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_item_expire",
+        native = "fn native_item_expire(&mut self, entity: u32, stack: &ItemStack, extra_life: &mut i32)"
     )]
     fn item_expire();
 }

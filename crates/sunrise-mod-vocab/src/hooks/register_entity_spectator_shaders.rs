@@ -41,7 +41,8 @@ fn register_entity_spectator_shaders(
         contract = "collect",
         out = "shaders",
         context = "registration",
-        neoforge = "RegisterEntitySpectatorShadersEvent"
+        neoforge = "RegisterEntitySpectatorShadersEvent",
+        native = "fn native_register_entity_spectator_shaders(context: &mod_api::RegistrationContext, shaders: &mut Vec<mod_api::EntitySpectatorShader>)"
     )]
     fn register_entity_spectator_shaders();
 }

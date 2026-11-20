@@ -23,7 +23,8 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "ChunkTicketLevelUpdatedEvent"
+        neoforge = "ChunkTicketLevelUpdatedEvent",
+        native = "fn native_chunk_ticket_level_updated(&mut self, chunk: ChunkRef, old: mod_api::ChunkTicketLevel, new: mod_api::ChunkTicketLevel)"
     )]
     fn chunk_ticket_level_updated();
 }

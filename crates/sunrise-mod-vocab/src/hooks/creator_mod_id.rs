@@ -16,7 +16,8 @@ pub trait Hooks {
         scope = "item",
         key = "stack",
         host = "read",
-        neoforge = "IItemExtension.getCreatorModId"
+        neoforge = "IItemExtension.getCreatorModId",
+        native = "fn native_creator_mod_id(&self, stack: &ItemStack, mod_id: &mut Option<String>)"
     )]
     fn creator_mod_id();
 }

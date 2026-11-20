@@ -30,7 +30,8 @@ existing `client_setup` and `client_stopping` hooks, with no parallel aliases."#
         side = "client",
         contract = "listen",
         cancellable = false,
-        neoforge = "RenderGuiEvent.Post"
+        neoforge = "RenderGuiEvent.Post",
+        native = "fn native_gui_render_post(&self, batch: &mut HudBatch, gui_hidden: bool, focused: bool)"
     )]
     fn gui_render_post();
 }

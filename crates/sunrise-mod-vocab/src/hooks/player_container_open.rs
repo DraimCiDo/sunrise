@@ -24,7 +24,9 @@ pub trait Hooks {
         version = 2,
         contract = "listen",
         neoforge = "PlayerContainerEvent.Open",
-        cancellable = false
+        cancellable = false,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_container_open",
+        native = "fn native_player_container_open(&mut self, player: u128, name: &str, dimension: &str, menu_type: &str, pos: Option<[i32; 3]>, menu: Option<mod_api::MenuRef>)"
     )]
     fn player_container_open();
 }

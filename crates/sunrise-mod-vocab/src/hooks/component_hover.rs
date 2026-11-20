@@ -15,7 +15,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "none (vanilla GuiGraphicsExtractor.componentHoverEffect; NeoForge adds no event)",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_component_hover(&self, call: mod_api::__private::ComponentHoverCall<'_>)"
     )]
     fn component_hover(
         draw: &mut dyn DrawContext,

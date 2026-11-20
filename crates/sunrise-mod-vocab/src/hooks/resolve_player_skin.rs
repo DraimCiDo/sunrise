@@ -15,7 +15,8 @@ pub trait Hooks {
         contract = "collect",
         out = "selection",
         version = 1,
-        neoforge = "none (vanilla AbstractClientPlayer.getSkin)"
+        neoforge = "none (vanilla AbstractClientPlayer.getSkin)",
+        native = "fn native_resolve_player_skin(&self, selection: &mut Option<mod_api::PlayerSkinOverride>)"
     )]
     fn resolve_player_skin();
 }

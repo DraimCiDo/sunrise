@@ -10,7 +10,8 @@ pub trait Hooks {
         neoforge = "BlockEvent.FarmlandTrampleEvent",
         cancellable = true,
         version = 2,
-        target = "sunrise_client_lib::landing::native_farmland_trample"
+        target = "sunrise_client_lib::landing::native_farmland_trample",
+        native = "fn native_farmland_trample(context: &LoopContext, entity: u32, pos: [i32; 3], state: u32, distance: f64, cancel: &mut bool)"
     )]
     fn farmland_trample();
 }

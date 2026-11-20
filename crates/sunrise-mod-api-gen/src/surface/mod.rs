@@ -246,7 +246,7 @@ pub fn export_with(root: &Path, options: ExportOptions) -> Result<Export, String
 
 fn export_here(root: &Path, options: ExportOptions) -> Result<Export, String> {
     let catalog = Catalog::load(root).map_err(|e| e.to_string())?;
-    let generated = crate::sources(root, crate::FillMode::Require)?;
+    let generated = crate::sources(root, None)?;
     let included = [
         (crate::host::AREAS_OUTPUT, generated.areas.as_str()),
         ("mod_api_generated.rs", generated.hooks.as_str()),

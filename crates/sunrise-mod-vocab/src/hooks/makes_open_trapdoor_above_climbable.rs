@@ -10,7 +10,8 @@ pub trait Hooks {
         key = "state",
         cancellable = false,
         target = "sunrise_client_lib::motion::ladder::native_makes_open_trapdoor_above_climbable",
-        neoforge = "IBlockExtension.makesOpenTrapdoorAboveClimbable"
+        neoforge = "IBlockExtension.makesOpenTrapdoorAboveClimbable",
+        native = "fn native_makes_open_trapdoor_above_climbable(context: &LoopContext, state: BlockStateId, pos: BlockPos, trapdoor: BlockStateId, climbable: &mut bool)"
     )]
     fn makes_open_trapdoor_above_climbable();
 }

@@ -9,7 +9,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         cancellable = true,
-        neoforge = "ExtractBlockOutlineRenderStateEvent"
+        neoforge = "ExtractBlockOutlineRenderStateEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_block_highlight",
+        native = "fn native_block_highlight(&self, pos: [i32; 3], state: BlockStateId, partial: f32, canceled: &mut bool)"
     )]
     fn block_highlight();
 }

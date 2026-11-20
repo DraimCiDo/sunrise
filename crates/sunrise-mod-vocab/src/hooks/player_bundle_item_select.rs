@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's PlayerBundleItemSelect)"
+        neoforge = "none (NeoForge has no such event; Bukkit's PlayerBundleItemSelect)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_bundle_item_select",
+        native = "fn native_player_bundle_item_select(&mut self, player: u128, name: &str, slot: i32, index: i32)"
     )]
     fn player_bundle_item_select();
 }

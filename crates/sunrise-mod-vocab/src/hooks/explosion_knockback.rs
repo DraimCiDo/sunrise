@@ -13,7 +13,8 @@ pub trait Hooks {
         contract = "collect",
         out = "knockback_velocity",
         neoforge = "ExplosionKnockbackEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_explosion_knockback(&mut self, dimension: &str, center: [f64; 3], blocks: &[[i32; 3]], entity: Option<u32>, knockback_velocity: &mut [f64; 3])"
     )]
     fn explosion_knockback();
 }

@@ -9,7 +9,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's PlayerBedEnterEvent)",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_bed_enter",
+        native = "fn native_player_bed_enter(&mut self, player: u128, name: &str, pos: [i32; 3], cancel: &mut bool)"
     )]
     fn player_bed_enter();
 }

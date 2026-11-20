@@ -18,7 +18,8 @@ pub trait Hooks {
         side = "both",
         contract = "listen",
         version = 2,
-        neoforge = "BuildCreativeModeTabContentsEvent"
+        neoforge = "BuildCreativeModeTabContentsEvent",
+        native = "fn native_build_creative_mode_tab_contents(&mut self, tab: &str, features: Vec<String>, permissions: mod_api::CreativeTabPermissions, edit: mod_api::CreativeTabEdit)"
     )]
     fn build_creative_mode_tab_contents();
 }

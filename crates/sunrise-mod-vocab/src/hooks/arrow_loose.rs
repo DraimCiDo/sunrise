@@ -15,7 +15,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "ArrowLooseEvent",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_arrow_loose",
+        native = "fn native_arrow_loose(&mut self, stack: &ItemStack, has_ammo: bool, charge: &mut i32, canceled: &mut bool)"
     )]
     fn arrow_loose();
 }

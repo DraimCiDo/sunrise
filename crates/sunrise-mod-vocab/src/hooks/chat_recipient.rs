@@ -20,7 +20,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "hidden",
         neoforge = "none (NeoForge sends a chat line to every player; it has no per-receiver event)",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_chat_recipient(&mut self, sender: u128, sender_name: &str, message: &str, recipient: u128, hidden: &mut bool)"
     )]
     fn chat_recipient();
 }

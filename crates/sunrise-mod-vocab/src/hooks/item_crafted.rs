@@ -18,7 +18,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "PlayerEvent.ItemCraftedEvent",
-        version = 2
+        version = 2,
+        native = "fn native_item_crafted(&mut self, player: u128, recipe: &str, stack: &ItemStack, inputs: &[Option<ItemStack>])"
     )]
     fn item_crafted();
 }

@@ -11,7 +11,9 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "none (vanilla FramerateLimitTracker.getFramerateLimit fires no event)",
-        cancellable = false
+        cancellable = false,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_framerate_limit",
+        native = "fn native_framerate_limit(&self, focused: bool, minimized: bool, in_world: bool, limit: &mut i32)"
     )]
     fn framerate_limit();
 }

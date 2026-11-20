@@ -16,7 +16,8 @@ pub trait Hooks {
         key = "state",
         out = "answer",
         host = "read",
-        neoforge = "none (vanilla Block.isPossibleToRespawnInThis)"
+        neoforge = "none (vanilla Block.isPossibleToRespawnInThis)",
+        native = "fn native_is_possible_to_respawn_in(&self, state: BlockStateId, answer: &mut Option<bool>)"
     )]
     fn is_possible_to_respawn_in();
 }

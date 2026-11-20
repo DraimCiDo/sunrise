@@ -23,7 +23,9 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no sign-editing event)",
         cancellable = true,
-        version = 2
+        version = 2,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_sign_changed",
+        native = "fn native_sign_changed(&mut self, call: mod_api::__private::SignChangedCall<'_>)"
     )]
     fn sign_changed(
         player: u128,
@@ -47,7 +49,9 @@ pub trait Hooks {
         answered_by = "mod",
         version = 2,
         context = "registration",
-        neoforge = "ModelEvent.RegisterStandalone"
+        neoforge = "ModelEvent.RegisterStandalone",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_standalone_models",
+        native = "fn native_standalone_models(context: &mod_api::RegistrationContext, models: &mut Vec<String>, forms: &mut Vec<mod_api::Answered<mod_api::StandaloneModelForm>>)"
     )]
     fn standalone_models();
 }

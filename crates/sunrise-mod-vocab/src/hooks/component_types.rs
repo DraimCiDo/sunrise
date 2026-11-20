@@ -8,7 +8,9 @@ pub trait Hooks {
         contract = "collect",
         out = "types",
         context = "registration",
-        neoforge = "RegisterEvent"
+        neoforge = "RegisterEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_component_types",
+        native = "fn native_component_types(context: &mod_api::RegistrationContext, types: &mut Vec<String>)"
     )]
     fn component_types();
 }

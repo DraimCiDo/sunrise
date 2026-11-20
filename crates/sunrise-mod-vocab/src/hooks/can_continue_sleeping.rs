@@ -15,7 +15,8 @@ pub trait Hooks {
         contract = "replace",
         out = "may_continue",
         neoforge = "CanContinueSleepingEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_can_continue_sleeping(&mut self, entity: u128, name: &str, kind: &str, pos: [i32; 3], problem: Option<SleepProblem>, may_continue: &mut Option<bool>)"
     )]
     fn can_continue_sleeping();
 }

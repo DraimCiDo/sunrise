@@ -29,7 +29,9 @@ pub trait Hooks {
         out = "result",
         scope = "item",
         key = "stack",
-        neoforge = "UseItemOnBlockEvent"
+        neoforge = "UseItemOnBlockEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_use_on",
+        native = "fn native_use_on(&mut self, call: mod_api::__private::UseOnCall<'_>)"
     )]
     fn use_on(
         stack: &ItemStack,
@@ -69,7 +71,9 @@ pub trait Hooks {
         out = "result",
         scope = "item",
         key = "stack",
-        neoforge = "PlayerInteractEvent.RightClickItem"
+        neoforge = "PlayerInteractEvent.RightClickItem",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_use_item",
+        native = "fn native_use_item(&mut self, call: mod_api::__private::UseItemCall<'_>)"
     )]
     fn use_item(
         stack: &ItemStack,

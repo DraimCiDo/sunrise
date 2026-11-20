@@ -33,7 +33,9 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "collect",
         out = "blocks",
         context = "registration",
-        neoforge = "RegisterEvent"
+        neoforge = "RegisterEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_blocks",
+        native = "fn native_blocks(context: &mod_api::RegistrationContext, blocks: &mut Vec<mod_api::Block>)"
     )]
     fn blocks();
 }

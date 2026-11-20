@@ -35,7 +35,12 @@ pub fn source(root: &Path) -> Result<String, String> {
             self.fire_stack(drops);
         }
     };
-    let generated = dispatch::emit(root, catalog.hooks.iter(), &[method, scalar, stack], &[])?;
+    let generated = dispatch::emit(
+        root,
+        catalog.hooks.iter(),
+        Some(&[method, scalar, stack]),
+        &[],
+    )?;
     Ok(include_str!("listener_output_fixture.in")
         .replace(
             "/* DISPATCH */",

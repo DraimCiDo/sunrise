@@ -10,7 +10,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Paper's PlayerItemCooldownEvent)",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_item_cooldown",
+        native = "fn native_player_item_cooldown(&mut self, player: u128, name: &str, item: &str, ticks: i32, cancel: &mut bool)"
     )]
     fn player_item_cooldown();
 }

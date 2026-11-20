@@ -9,7 +9,8 @@ pub trait Hooks {
         side = "client",
         contract = "cancel",
         out = "canceled",
-        neoforge = "none (client mining prediction)"
+        neoforge = "none (client mining prediction)",
+        native = "fn native_client_mining_predict(&self, prediction: ClientMiningPrediction, canceled: &mut bool)"
     )]
     fn client_mining_predict();
 }

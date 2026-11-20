@@ -39,7 +39,8 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "MobSplitEvent",
         paper = "SlimeSplitEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_mob_split(&mut self, call: mod_api::__private::MobSplitCall<'_>)"
     )]
     fn mob_split(
         dimension: &str,

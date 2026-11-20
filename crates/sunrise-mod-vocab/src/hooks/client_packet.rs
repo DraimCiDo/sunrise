@@ -51,7 +51,8 @@ send path checks one flag and builds nothing."#]
         contract = "listen",
         cancellable = false,
         version = 2,
-        neoforge = "none (NeoForge has no raw play-packet receive event)"
+        neoforge = "none (NeoForge has no raw play-packet receive event)",
+        native = "fn native_client_packet(&mut self, packet: &ClientPacket)"
     )]
     fn client_packet();
 }

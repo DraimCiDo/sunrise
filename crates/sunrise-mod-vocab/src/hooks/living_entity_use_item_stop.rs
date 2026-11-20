@@ -15,7 +15,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "LivingEntityUseItemEvent.Stop",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_living_entity_use_item_stop",
+        native = "fn native_living_entity_use_item_stop(&mut self, stack: &ItemStack, entity: Option<i32>, hand: Hand, duration: i32, canceled: &mut bool)"
     )]
     fn living_entity_use_item_stop();
 }

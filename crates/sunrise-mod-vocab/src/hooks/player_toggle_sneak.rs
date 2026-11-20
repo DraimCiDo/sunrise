@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's PlayerToggleSneakEvent)"
+        neoforge = "none (NeoForge has no such event; Bukkit's PlayerToggleSneakEvent)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_toggle_sneak",
+        native = "fn native_player_toggle_sneak(&mut self, player: u128, name: &str, sneaking: bool)"
     )]
     fn player_toggle_sneak();
 }

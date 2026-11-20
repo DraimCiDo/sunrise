@@ -21,7 +21,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         host = "read",
-        neoforge = "IBlockExtension.getAdjacentBlockPathType"
+        neoforge = "IBlockExtension.getAdjacentBlockPathType",
+        native = "fn native_adjacent_block_path_type(&self, pos: BlockPos, state: BlockStateId, path_type: mod_api::PathType, adjacent: &mut Option<mod_api::PathType>)"
     )]
     fn adjacent_block_path_type();
 }

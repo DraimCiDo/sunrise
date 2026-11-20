@@ -20,6 +20,11 @@ pub trait Hooks {
     /// Runs in Reloading: published asset/data queries can rebind caches,
     /// including on first open; world handles and transactions remain
     /// unavailable.
-    #[hook(side = "both", contract = "listen", neoforge = "DataMapsUpdatedEvent")]
+    #[hook(
+        side = "both",
+        contract = "listen",
+        neoforge = "DataMapsUpdatedEvent",
+        native = "fn native_data_maps_updated(&mut self, registry: &str, cause: mod_api::DataMapsUpdateCause)"
+    )]
     fn data_maps_updated();
 }

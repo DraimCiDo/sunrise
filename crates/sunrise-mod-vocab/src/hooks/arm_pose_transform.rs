@@ -13,7 +13,8 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "HumanoidModel.ArmPose"
+        neoforge = "HumanoidModel.ArmPose",
+        native = "fn native_arm_pose_transform(&self, pose: mod_api::CustomArmPose, humanoid: &mod_api::HumanoidRenderState<'_>, right_arm: bool, angles: &mut mod_api::ArmAngles)"
     )]
     fn arm_pose_transform();
 }

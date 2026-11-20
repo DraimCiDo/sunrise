@@ -11,7 +11,8 @@ pub trait Hooks {
         out = "cancel",
         scope = "block",
         key = "state",
-        neoforge = "IClientBlockExtensions.playHitSound"
+        neoforge = "IClientBlockExtensions.playHitSound",
+        native = "fn native_play_hit_sound(&mut self, call: super::fire::PlayHitSoundCall<'_>)"
     )]
     fn play_hit_sound(state: BlockState, pos: BlockPos, face: Direction, cancel: &mut bool);
 }

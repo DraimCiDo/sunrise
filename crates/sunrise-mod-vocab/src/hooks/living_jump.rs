@@ -9,7 +9,8 @@ pub trait Hooks {
         context = "loop",
         neoforge = "LivingEvent.LivingJumpEvent",
         version = 3,
-        target = "sunrise_client_lib::motion::native_living_jump"
+        target = "sunrise_client_lib::motion::native_living_jump",
+        native = "fn native_living_jump(context: &LoopContext, entity: u32, kind: &str, velocity: [f64; 3])"
     )]
     fn living_jump();
 }

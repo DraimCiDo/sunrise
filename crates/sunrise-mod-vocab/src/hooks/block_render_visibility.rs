@@ -8,7 +8,8 @@ pub trait Hooks {
         out = "hidden",
         scope = "block",
         key = "state",
-        neoforge = "none (Sunrise-only; NeoForge has no counterpart)"
+        neoforge = "none (Sunrise-only; NeoForge has no counterpart)",
+        native = "fn native_block_render_visibility(&self, state: BlockStateId, hidden: &mut bool)"
     )]
     fn block_render_visibility();
 }

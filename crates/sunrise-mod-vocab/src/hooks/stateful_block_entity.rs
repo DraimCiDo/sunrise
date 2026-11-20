@@ -12,7 +12,8 @@ trait Hooks {
         host = "read",
         scope = "block_entity",
         key = "block",
-        neoforge = "none (static factory ownership for vanilla EntityBlock.newBlockEntity)"
+        neoforge = "none (static factory ownership for vanilla EntityBlock.newBlockEntity)",
+        native = "fn native_stateful_block_entity(&self, block: &str, stateful: &mut bool)"
     )]
     fn stateful_block_entity();
 }

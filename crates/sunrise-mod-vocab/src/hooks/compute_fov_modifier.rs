@@ -8,7 +8,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "ComputeFovModifierEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_compute_fov_modifier(&self, player: &mod_api::client::camera::FovPlayer, base: f32, modifier: &mut f32)"
     )]
     fn compute_fov_modifier();
 }

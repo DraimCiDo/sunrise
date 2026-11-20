@@ -13,7 +13,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "UseItemOnBlockEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_use_item_on_block(&mut self, click: &BlockClick<'_>, phase: UsePhase, cancellation_result: &mut mod_api::InteractionResult, canceled: &mut bool)"
     )]
     fn use_item_on_block();
 }

@@ -11,6 +11,11 @@ pub trait Hooks {
     /// orb tick (vanilla keeps the player it follows while they stay
     /// within 8 blocks), so this is asked every tick for each orb: answer
     /// fast.
-    #[hook(side = "server", contract = "listen", neoforge = "XpOrbTargetingEvent")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "XpOrbTargetingEvent",
+        native = "fn native_xp_orb_targeting(&mut self, orb: EntityRef, scan_distance: f64, following: &mut Option<PlayerRef>)"
+    )]
     fn xp_orb_targeting();
 }

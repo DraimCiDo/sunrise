@@ -12,7 +12,9 @@ pub trait Hooks {
         contract = "listen",
         scope = "item",
         key = "stack",
-        neoforge = "none (vanilla Item.getUseAnimation; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla Item.getUseAnimation; NeoForge adds no event or extension for it)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_use_animation",
+        native = "fn native_use_animation(&self, stack: &ItemStack, animation: &mut UseAnimation)"
     )]
     fn use_animation();
 }

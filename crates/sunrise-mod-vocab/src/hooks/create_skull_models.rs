@@ -51,7 +51,8 @@ it is a skull is not covered yet."#]
         contract = "collect",
         out = "models",
         context = "registration",
-        neoforge = "EntityRenderersEvent.CreateSkullModels"
+        neoforge = "EntityRenderersEvent.CreateSkullModels",
+        native = "fn native_create_skull_models(context: &mod_api::RegistrationContext, models: &mut Vec<SkullModel>)"
     )]
     fn create_skull_models();
 }

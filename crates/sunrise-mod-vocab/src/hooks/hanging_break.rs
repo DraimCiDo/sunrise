@@ -20,7 +20,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         cancellable = true,
-        neoforge = "none (vanilla hanging entity breaking; NeoForge adds no event or extension for it); AttackEntityEvent fires for players only"
+        neoforge = "none (vanilla hanging entity breaking; NeoForge adds no event or extension for it); AttackEntityEvent fires for players only",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_hanging_break",
+        native = "fn native_hanging_break(&mut self, player: Option<u128>, kind: &str, pos: [i32; 3], cancel: &mut bool)"
     )]
     fn hanging_break();
 }

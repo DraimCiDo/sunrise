@@ -9,7 +9,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "LivingConversionEvent.Post",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_living_conversion_post(&mut self, entity: u32, kind: &str, converted: u32, converted_kind: &str)"
     )]
     fn living_conversion_post();
 }

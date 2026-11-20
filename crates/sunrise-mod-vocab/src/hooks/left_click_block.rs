@@ -14,7 +14,9 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "canceled",
-        neoforge = "PlayerInteractEvent.LeftClickBlock"
+        neoforge = "PlayerInteractEvent.LeftClickBlock",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_left_click_block",
+        native = "fn native_left_click_block(&mut self, pos: [i32; 3], face: [i32; 3], state: BlockStateId, canceled: &mut bool)"
     )]
     fn left_click_block();
 }

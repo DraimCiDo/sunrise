@@ -14,7 +14,9 @@ pub trait Hooks {
         context = "loop",
         version = 2,
         target = "sunrise_client_lib::crafting::native_hooks::native_ingredient_test",
-        neoforge = "ICustomIngredient"
+        neoforge = "ICustomIngredient",
+        direct = true,
+        native = "fn native_ingredient_test(context: &sunrise_world::native_load_context::LoopContext, kind: &str, data: &sunrise_core::nbt::Compound, stack: &mod_api::ItemStack, accept: &mut bool)"
     )]
     fn ingredient_test();
 }

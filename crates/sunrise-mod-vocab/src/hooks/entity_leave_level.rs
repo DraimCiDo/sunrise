@@ -23,7 +23,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "EntityLeaveLevelEvent",
-        version = 3
+        version = 3,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_entity_leave_level",
+        native = "fn native_entity_leave_level(&mut self, dimension: &str, entity: u32, kind: &str)"
     )]
     fn entity_leave_level();
 }

@@ -18,7 +18,8 @@ pub trait Hooks {
         out = "canceled",
         scope = "item",
         key = "stack",
-        neoforge = "IItemExtension.onDroppedByPlayer"
+        neoforge = "IItemExtension.onDroppedByPlayer",
+        native = "fn native_on_dropped_by_player(&mut self, player: PlayerRef, stack: &ItemStack, all: bool, canceled: &mut bool)"
     )]
     fn on_dropped_by_player();
 }

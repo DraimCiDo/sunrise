@@ -11,7 +11,8 @@ pub trait Hooks {
         scope = "block",
         inert = "*answer = Some(InteractionResult::Pass);",
         key = "state",
-        neoforge = "none (vanilla BlockBehaviour.useWithoutItem; PlayerInteractEvent.RightClickBlock cancels or answers before it)"
+        neoforge = "none (vanilla BlockBehaviour.useWithoutItem; PlayerInteractEvent.RightClickBlock cancels or answers before it)",
+        native = "fn native_use_without_item(&mut self, state: BlockStateId, click: &BlockClick<'_>, answer: &mut Option<mod_api::InteractionResult>)"
     )]
     fn use_without_item();
 }

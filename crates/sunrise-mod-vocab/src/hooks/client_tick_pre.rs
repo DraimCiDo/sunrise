@@ -8,7 +8,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "ClientTickEvent.Pre",
-        fabric = "ClientTickEvents.START_CLIENT_TICK"
+        fabric = "ClientTickEvents.START_CLIENT_TICK",
+        native = "fn native_client_tick_pre(&mut self)"
     )]
     fn client_tick_pre();
 }

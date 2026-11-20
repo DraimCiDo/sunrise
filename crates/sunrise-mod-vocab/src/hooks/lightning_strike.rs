@@ -10,7 +10,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_lightning_strike",
+        native = "fn native_lightning_strike(&mut self, player: Option<u128>, pos: [i32; 3], cause: &str, cancel: &mut bool)"
     )]
     fn lightning_strike();
 }

@@ -6,7 +6,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_prepare_item_enchant",
+        native = "fn native_prepare_item_enchant(&mut self, player: u128, name: &str, pos: [i32; 3], costs: &mut [i32; 3])"
     )]
     fn prepare_item_enchant();
 }

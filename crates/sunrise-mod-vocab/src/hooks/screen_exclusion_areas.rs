@@ -12,7 +12,8 @@ pub trait Hooks {
         contract = "collect",
         out = "areas",
         cancellable = false,
-        neoforge = "none (NeoForge has no counterpart in the game; recipe viewers define their own API)"
+        neoforge = "none (NeoForge has no counterpart in the game; recipe viewers define their own API)",
+        native = "fn native_screen_exclusion_areas(&self, screen: &ScreenView<'_>, areas: &mut Vec<[f32; 4]>)"
     )]
     fn screen_exclusion_areas();
 }

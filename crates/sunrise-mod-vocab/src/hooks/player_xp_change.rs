@@ -12,7 +12,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "PlayerXpEvent.XpChange",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_player_xp_change(&mut self, player: u128, player_entity_id: i32, name: &str, amount: &mut i32, cancel: &mut bool)"
     )]
     fn player_xp_change();
 }

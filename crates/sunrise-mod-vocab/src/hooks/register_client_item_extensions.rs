@@ -8,7 +8,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         context = "registration",
-        neoforge = "RegisterClientExtensionsEvent"
+        neoforge = "RegisterClientExtensionsEvent",
+        native = "fn native_register_client_item_extensions(context: &mod_api::RegistrationContext, extensions: &mut dyn mod_api::ClientItemExtensionsRegistrar)"
     )]
     fn register_client_item_extensions();
 }

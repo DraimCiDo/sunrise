@@ -1396,7 +1396,7 @@ pub(super) fn dispatch(
 fn a_reborrowed_array_has_no_redundant_parentheses() {
     // `-D warnings` lint jobs refuse `unused_parens` in the generated host.
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+    let generated = crate::sources(&root, Some(crate::FillMode::Require)).unwrap();
     let included = [
         ("mod_api_generated.rs", generated.hooks.as_str()),
         ("mod_api_generated_host.rs", generated.host.as_str()),

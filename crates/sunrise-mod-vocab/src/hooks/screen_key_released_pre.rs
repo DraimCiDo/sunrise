@@ -9,7 +9,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "ScreenEvent.KeyReleased.Pre",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_screen_key_released_pre",
+        native = "fn native_screen_key_released_pre(&self, screen: &ScreenView<'_>, key: &str, modifiers: u32, canceled: &mut bool)"
     )]
     fn screen_key_released_pre();
 }

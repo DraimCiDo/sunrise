@@ -19,7 +19,8 @@ pub trait Hooks {
         side = "client",
         contract = "replace",
         out = "pose",
-        neoforge = "IClientItemExtensions.getArmPose"
+        neoforge = "IClientItemExtensions.getArmPose",
+        native = "fn native_get_arm_pose(&self, entity_id: u32, hand: Hand, stack: &mod_api::ItemStack, humanoid: &mod_api::HumanoidRenderState<'_>, pose: &mut Option<mod_api::ArmPose>)"
     )]
     fn get_arm_pose();
 }

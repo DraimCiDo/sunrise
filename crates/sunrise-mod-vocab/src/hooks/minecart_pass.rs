@@ -10,7 +10,8 @@ pub trait Hooks {
         contract = "listen",
         scope = "block",
         key = "state",
-        neoforge = "none (Forge's IBaseRailExtension.onMinecartPass is gone in NeoForge 26.3)"
+        neoforge = "none (Forge's IBaseRailExtension.onMinecartPass is gone in NeoForge 26.3)",
+        native = "fn native_minecart_pass(&mut self, state: BlockStateId, pos: BlockPos, entity: EntityRef)"
     )]
     fn minecart_pass();
 }

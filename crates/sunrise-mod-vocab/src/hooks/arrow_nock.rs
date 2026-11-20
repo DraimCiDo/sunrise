@@ -9,7 +9,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "ArrowNockEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_arrow_nock(&mut self, player: u128, name: &str, bow: &ItemStack, hand: Hand, has_ammo: bool, cancel: &mut bool)"
     )]
     fn arrow_nock();
 }

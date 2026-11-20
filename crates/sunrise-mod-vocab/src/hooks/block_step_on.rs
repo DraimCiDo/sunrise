@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (vanilla Block.stepOn; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla Block.stepOn; NeoForge adds no event or extension for it)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_block_step_on",
+        native = "fn native_block_step_on(dimension: &str, entity: i32, kind: &str, state: BlockStateId, position: [i32; 3])"
     )]
     fn block_step_on();
 }

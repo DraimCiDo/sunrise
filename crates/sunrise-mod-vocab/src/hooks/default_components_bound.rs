@@ -18,7 +18,8 @@ pub trait Hooks {
     #[hook(
         side = "both",
         contract = "listen",
-        neoforge = "DefaultDataComponentsBoundEvent"
+        neoforge = "DefaultDataComponentsBoundEvent",
+        native = "fn native_default_components_bound(&mut self, cause: mod_api::TagsUpdateCause)"
     )]
     #[notes = r##"## When the notice fires, per side and cause
 

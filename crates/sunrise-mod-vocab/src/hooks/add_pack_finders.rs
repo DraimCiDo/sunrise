@@ -39,6 +39,11 @@ screens, for a compatibility pack or texture override players should not see.
 A hidden pack still loads when selected, so pair it with `always_active` for one
 that is always on. `/datapack list` and `/datapack enable|disable` still name
 hidden data packs for operators."##]
-    #[hook(side = "both", contract = "listen", neoforge = "AddPackFindersEvent")]
+    #[hook(
+        side = "both",
+        contract = "listen",
+        neoforge = "AddPackFindersEvent",
+        native = "fn native_add_pack_finders(&mut self, packs: &mut dyn mod_api::PackFinders)"
+    )]
     fn add_pack_finders();
 }

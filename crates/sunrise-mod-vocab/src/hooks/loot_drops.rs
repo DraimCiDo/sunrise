@@ -33,7 +33,9 @@ pub trait Hooks {
         side = "server",
         contract = "collect",
         out = "drops",
-        neoforge = "LivingDropsEvent, BlockDropsEvent"
+        neoforge = "LivingDropsEvent, BlockDropsEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_loot_drops",
+        native = "fn native_loot_drops(&mut self, context: &LootDrops<'_>, drops: &mut Vec<ItemStack>)"
     )]
     fn loot_drops();
 }

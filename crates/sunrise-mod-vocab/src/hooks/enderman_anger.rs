@@ -13,7 +13,8 @@ pub trait Hooks {
         out = "cancel",
         host = "read",
         neoforge = "EndermanAngerEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_enderman_anger(&self, enderman: EntityRef, player: PlayerRef, cancel: &mut bool)"
     )]
     fn enderman_anger();
 }

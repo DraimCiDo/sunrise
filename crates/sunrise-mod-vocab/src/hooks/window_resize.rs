@@ -8,7 +8,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "WindowResizeEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_window_resize(&mut self, width: u32, height: u32, gui_width: u32, gui_height: u32)"
     )]
     fn window_resize();
 }

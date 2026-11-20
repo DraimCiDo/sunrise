@@ -10,7 +10,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_entity_teleport",
+        native = "fn native_entity_teleport(&mut self, dimension: &str, entity: u32, from: [f64; 3], to: [f64; 3])"
     )]
     fn entity_teleport();
 }

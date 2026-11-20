@@ -8,7 +8,8 @@ pub trait Hooks {
         contract = "listen",
         scope = "block",
         key = "state",
-        neoforge = "IBlockExtension.onBlockExploded"
+        neoforge = "IBlockExtension.onBlockExploded",
+        native = "fn native_on_block_exploded(&mut self, pos: BlockPos, state: BlockStateId, block_entity: Option<BlockEntityRef>, explosion: &ExplosionStart<'_>)"
     )]
     fn on_block_exploded();
 }

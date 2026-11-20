@@ -16,7 +16,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "RenderArmEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_render_arm(&self, player: u128, player_entity_id: i32, left: bool, draw: &mut BlockEntityDraw, canceled: &mut bool)"
     )]
     fn render_arm();
 }

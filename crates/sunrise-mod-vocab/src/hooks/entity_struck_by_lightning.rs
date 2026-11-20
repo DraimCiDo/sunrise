@@ -14,7 +14,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "EntityStruckByLightningEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_entity_struck_by_lightning(&mut self, entity: EntityRef, bolt: EntityRef, cancel: &mut bool)"
     )]
     fn entity_struck_by_lightning();
 }

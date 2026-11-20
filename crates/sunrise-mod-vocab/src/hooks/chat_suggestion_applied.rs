@@ -3,7 +3,8 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "none (vanilla command suggestions; NeoForge adds no event)"
+        neoforge = "none (vanilla command suggestions; NeoForge adds no event)",
+        native = "fn native_chat_suggestion_applied(&self, original: &str, start: usize, end: usize, suggestion: &str, input: &str)"
     )]
     fn chat_suggestion_applied();
 }

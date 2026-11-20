@@ -10,7 +10,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "RenderGuiLayerEvent.Pre, RenderGuiLayerEvent.Post",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_gui_layer_draw(&self, layer: &str, draw: &mut HudBatch)"
     )]
     fn gui_layer_draw();
 }

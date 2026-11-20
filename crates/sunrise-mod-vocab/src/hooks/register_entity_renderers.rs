@@ -88,7 +88,8 @@ its type draws as it would without one."#]
         side = "client",
         contract = "listen",
         context = "registration",
-        neoforge = "EntityRenderersEvent.RegisterRenderers"
+        neoforge = "EntityRenderersEvent.RegisterRenderers",
+        native = "fn native_register_entity_renderers(context: &mod_api::RegistrationContext, renderers: &mut dyn EntityRenderers)"
     )]
     fn register_entity_renderers();
 }

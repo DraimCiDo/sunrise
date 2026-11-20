@@ -15,7 +15,8 @@ pub trait Hooks {
         contract = "listen",
         scope = "block_entity",
         key = "entity",
-        neoforge = "none (post-merge notice; IBlockEntityExtension.onDataPacket and handleUpdateTag are related loading paths, not counterparts)"
+        neoforge = "none (post-merge notice; IBlockEntityExtension.onDataPacket and handleUpdateTag are related loading paths, not counterparts)",
+        native = "fn native_block_entity_data_received(&self, entity: BlockEntityRef, source: BlockEntityDataSource, tag: &sunrise_core::nbt::Compound)"
     )]
     fn block_entity_data_received();
 }

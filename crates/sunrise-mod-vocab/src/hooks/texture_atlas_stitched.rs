@@ -12,7 +12,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         cancellable = false,
-        neoforge = "TextureAtlasStitchedEvent"
+        neoforge = "TextureAtlasStitchedEvent",
+        native = "fn native_texture_atlas_stitched(&mut self, atlas: mod_api::TextureAtlas)"
     )]
     fn texture_atlas_stitched();
 }

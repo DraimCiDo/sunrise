@@ -22,7 +22,8 @@ pub trait Hooks {
         contract = "listen",
         neoforge = "AddAttributeTooltipsEvent",
         cancellable = false,
-        version = 2
+        version = 2,
+        native = "fn native_add_attribute_tooltips(&self, call: mod_api::__private::AddAttributeTooltipsCall<'_>)"
     )]
     fn add_attribute_tooltips(
         player: Option<u128>,

@@ -7,7 +7,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "ClientPauseChangeEvent.Pre",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_client_pause_change_pre(&mut self, paused: bool, cancel: &mut bool)"
     )]
     fn client_pause_change_pre();
     /// NeoForge's `ClientPauseChangeEvent.Post`: the pause state changed.
@@ -15,7 +16,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "ClientPauseChangeEvent.Post",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_client_pause_change_post(&mut self, paused: bool)"
     )]
     fn client_pause_change_post();
 }

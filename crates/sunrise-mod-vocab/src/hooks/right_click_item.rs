@@ -12,7 +12,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "PlayerInteractEvent.RightClickItem",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_right_click_item(&mut self, click: &ItemClick<'_>, cancellation_result: &mut mod_api::InteractionResult, canceled: &mut bool)"
     )]
     fn right_click_item();
 }

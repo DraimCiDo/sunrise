@@ -23,7 +23,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "RenderHandEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_render_hand(&self, render: &mut HandRender<'_>, draw: &mut BlockEntityDraw, canceled: &mut bool)"
     )]
     fn render_hand();
 }

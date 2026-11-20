@@ -10,7 +10,8 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's BlockBurnEvent)",
         cancellable = true,
-        target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_block_burn"
+        target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_block_burn",
+        native = "fn native_block_burn(&self, dimension: LevelDimension, pos: BlockPos, cancel: &mut bool)"
     )]
     fn block_burn();
 }

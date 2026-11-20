@@ -7,7 +7,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "ClientPlayerNetworkEvent.Clone",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_client_player_clone(&mut self, old_id: i32, new_id: i32, uuid: u128, died: bool, dimension_changed: bool)"
     )]
     fn client_player_clone();
 }

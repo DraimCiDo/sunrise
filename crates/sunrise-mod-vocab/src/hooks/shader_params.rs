@@ -11,7 +11,9 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "none (Sunrise-only; NeoForge has no counterpart)"
+        neoforge = "none (Sunrise-only; NeoForge has no counterpart)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_shader_params",
+        native = "fn native_shader_params(&self, partial: f32, params: &mut [[f32; 4]; 8])"
     )]
     fn shader_params();
 }

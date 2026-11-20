@@ -43,7 +43,9 @@ pub trait Hooks {
         key = "entity",
         neoforge = "none (a Java menu overrides AbstractContainerMenu.quickMoveStack; no event)",
         cancellable = true,
-        version = 3
+        version = 3,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_menu_quick_move",
+        native = "fn native_menu_quick_move(&mut self, pos: [i32; 3], entity: &mut ModBlockEntity, container_slots: usize, slot: usize, stack: &mut Option<mod_api::ItemStack>, handled: &mut bool)"
     )]
     fn menu_quick_move();
 }

@@ -11,7 +11,8 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
         cancellable = true,
-        target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_fluid_level_change"
+        target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_fluid_level_change",
+        native = "fn native_fluid_level_change(&self, dimension: LevelDimension, pos: BlockPos, fluid: &str, from: i32, to: i32, cancel: &mut bool)"
     )]
     fn fluid_level_change();
 }

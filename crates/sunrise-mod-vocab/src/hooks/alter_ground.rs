@@ -39,7 +39,9 @@ pub trait Hooks {
         out = "provider",
         context = "worldgen",
         target = "mod_api::world::ground::native_alter_ground",
-        neoforge = "AlterGroundEvent"
+        neoforge = "AlterGroundEvent",
+        direct = true,
+        native = "fn native_alter_ground(context: &crate::OwningWorldgen<'_>, logs: &[[i32; 3]], leaves: &[[i32; 3]], roots: &[[i32; 3]], positions: &[[i32; 3]], provider: &mut GroundProvider)"
     )]
     fn alter_ground();
 }

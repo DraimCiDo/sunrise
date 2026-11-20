@@ -16,7 +16,8 @@ pub trait Hooks {
         contract = "listen",
         scope = "item",
         key = "stack",
-        neoforge = "IItemExtension.getHighlightTip"
+        neoforge = "IItemExtension.getHighlightTip",
+        native = "fn native_highlight_tip(&self, stack: &ItemStack, name: &mut Text)"
     )]
     fn highlight_tip();
 }

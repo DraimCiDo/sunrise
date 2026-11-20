@@ -11,7 +11,8 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "RegisterColorHandlersEvent.ItemTintSources (registration only)"
+        neoforge = "RegisterColorHandlersEvent.ItemTintSources (registration only)",
+        native = "fn native_item_tint_source(&self, source: &str, config: &sunrise_core::nbt::Tag, stack: &mod_api::ItemStack, bundle_selected: i32, color: &mut u32)"
     )]
     fn item_tint_source();
 }

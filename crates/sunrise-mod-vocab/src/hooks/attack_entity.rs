@@ -15,7 +15,9 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "canceled",
-        neoforge = "AttackEntityEvent"
+        neoforge = "AttackEntityEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_attack_entity",
+        native = "fn native_attack_entity(&mut self, entity: i32, kind: &str, pos: [f64; 3], canceled: &mut bool)"
     )]
     fn attack_entity();
 }

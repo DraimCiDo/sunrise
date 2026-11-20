@@ -19,7 +19,8 @@ pub trait Hooks {
         out = "positions",
         scope = "block",
         key = "state",
-        neoforge = "none (vanilla LevelRenderer.destroyBlockProgress)"
+        neoforge = "none (vanilla LevelRenderer.destroyBlockProgress)",
+        native = "fn native_break_progress_positions(&mut self, call: super::fire::BreakProgressPositionsCall<'_>)"
     )]
     fn break_progress_positions(
         level: LevelRef,

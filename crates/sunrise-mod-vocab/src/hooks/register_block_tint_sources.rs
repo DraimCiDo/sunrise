@@ -58,7 +58,8 @@ a pack change or F3+T. Fluids take their colour from their fluid model, not from
         side = "client",
         contract = "listen",
         context = "registration",
-        neoforge = "RegisterColorHandlersEvent.BlockTintSources"
+        neoforge = "RegisterColorHandlersEvent.BlockTintSources",
+        native = "fn native_register_block_tint_sources(context: &mod_api::RegistrationContext, sources: &mut dyn BlockTintSources)"
     )]
     fn register_block_tint_sources();
 }

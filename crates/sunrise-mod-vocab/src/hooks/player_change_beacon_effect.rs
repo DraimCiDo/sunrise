@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_change_beacon_effect",
+        native = "fn native_player_change_beacon_effect(&mut self, player: u128, name: &str, pos: [i32; 3], primary: Option<EffectKey>, secondary: Option<EffectKey>)"
     )]
     fn player_change_beacon_effect();
 }

@@ -7,7 +7,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "ScreenEvent.Init.Post",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_screen_init_post(&self, screen: &ScreenView<'_>)"
     )]
     fn screen_init_post();
 }

@@ -5,14 +5,16 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "ClientPlayerNetworkEvent.LoggingOut"
+        neoforge = "ClientPlayerNetworkEvent.LoggingOut",
+        native = "fn native_client_disconnecting(&self)"
     )]
     fn client_disconnecting();
     /// The normal menu blur request, before finite/range validation. None disables it.
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "none (NeoForge has no menu blur event)"
+        neoforge = "none (NeoForge has no menu blur event)",
+        native = "fn native_menu_background(&self, radius: &mut Option<f32>)"
     )]
     fn menu_background();
 }

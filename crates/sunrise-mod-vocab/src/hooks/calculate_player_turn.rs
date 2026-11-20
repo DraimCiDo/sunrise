@@ -10,7 +10,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "CalculatePlayerTurnEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_calculate_player_turn(&self, player_entity_id: i32, player_uuid: u128, mouse_sensitivity: &mut f64, cinematic_camera_enabled: &mut bool)"
     )]
     fn calculate_player_turn();
 }

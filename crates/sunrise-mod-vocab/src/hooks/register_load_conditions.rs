@@ -11,7 +11,8 @@ pub trait Hooks {
         contract = "collect",
         out = "conditions",
         context = "registration",
-        neoforge = "RegisterEvent"
+        neoforge = "RegisterEvent",
+        native = "fn native_register_load_conditions(context: &mod_api::RegistrationContext, conditions: &mut dyn LoadConditions)"
     )]
     fn register_load_conditions();
 }

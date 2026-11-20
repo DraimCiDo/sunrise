@@ -68,7 +68,8 @@ write is in progress."#]
         side = "both",
         contract = "listen",
         neoforge = "EntityEvent.EnteringSection",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_entity_entering_section(&mut self, entity: EntityRef, old_section: [i32; 3], new_section: [i32; 3], chunk_changed: bool)"
     )]
     fn entity_entering_section();
 }

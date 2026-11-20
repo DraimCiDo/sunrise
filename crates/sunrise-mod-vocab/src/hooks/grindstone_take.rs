@@ -14,7 +14,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "GrindstoneEvent.OnTakeItem",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_grindstone_take(&mut self, player: u128, player_entity_id: i32, pos: [i32; 3], take: &mut mod_api::item::menu::GrindstoneTake, cancel: &mut bool)"
     )]
     fn grindstone_take();
 }

@@ -17,7 +17,9 @@ pub trait Hooks {
         out = "button",
         scope = "menu",
         key = "menu",
-        neoforge = "none (see screen)"
+        neoforge = "none (see screen)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_screen_click",
+        native = "fn native_screen_click(&self, menu: &str, block: Option<&str>, data: &[i32], at: [f32; 2], right: bool, button: &mut Option<i32>)"
     )]
     fn screen_click();
 }

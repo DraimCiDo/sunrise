@@ -16,7 +16,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         version = 2,
-        neoforge = "InputEvent.Key"
+        neoforge = "InputEvent.Key",
+        native = "fn native_input_key(&mut self, key: &str, layout_key: Option<&str>, raw_code: u32, action: mod_api::KeyAction, modifiers: u32)"
     )]
     fn input_key();
 }

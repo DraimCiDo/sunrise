@@ -12,7 +12,8 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "BlockEvent.PortalSpawnEvent",
         cancellable = true,
-        target = "sunrise_client::game::native_hooks::portal_spawn::GameLevel<'_>::native_portal_spawn"
+        target = "sunrise_client::game::native_hooks::portal_spawn::GameLevel<'_>::native_portal_spawn",
+        native = "fn native_portal_spawn(&self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, shape: PortalShape, cancel: &mut bool)"
     )]
     fn portal_spawn();
 }

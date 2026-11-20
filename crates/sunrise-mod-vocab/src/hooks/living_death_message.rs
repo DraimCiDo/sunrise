@@ -6,7 +6,8 @@ pub trait Hooks {
         side = "server",
         contract = "collect",
         out = "message",
-        neoforge = "none (vanilla TamableAnimal.die owner message; separate from living death)"
+        neoforge = "none (vanilla TamableAnimal.die owner message; separate from living death)",
+        native = "fn native_living_death_message(&mut self, entity: u32, kind: &str, message: &mut Option<Text>)"
     )]
     fn living_death_message();
 }

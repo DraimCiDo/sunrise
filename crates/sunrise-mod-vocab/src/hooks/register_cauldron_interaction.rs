@@ -9,7 +9,8 @@ pub trait Hooks {
         side = "both",
         contract = "listen",
         context = "registration",
-        neoforge = "RegisterCauldronInteractionEvent"
+        neoforge = "RegisterCauldronInteractionEvent",
+        native = "fn native_register_cauldron_interaction(context: &mod_api::RegistrationContext, interactions: &mut dyn CauldronInteractions)"
     )]
     fn register_cauldron_interaction();
 }

@@ -29,7 +29,8 @@ pub trait Hooks {
         key = "state",
         version = 2,
         target = "sunrise_client::game::native_hooks::connects_to::GameLevel<'_>::native_connects_to",
-        neoforge = "none (vanilla FenceBlock.connectsTo / WallBlock.connectsTo / IronBarsBlock.attachsTo)"
+        neoforge = "none (vanilla FenceBlock.connectsTo / WallBlock.connectsTo / IronBarsBlock.attachsTo)",
+        native = "fn native_connects_to(&self, call: super::fire::ConnectsToCall<'_>)"
     )]
     fn connects_to(
         dimension: LevelDimension,

@@ -16,7 +16,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         fabric = "ServerLivingEntityEvents.AFTER_DEATH",
-        neoforge = "none (LivingDeathEvent fires before the death)"
+        neoforge = "none (LivingDeathEvent fires before the death)",
+        native = "fn native_living_death_post(&mut self, entity: u32, damage_type: &str, attacker: u32)"
     )]
     fn living_death_post();
 }

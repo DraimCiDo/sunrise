@@ -9,7 +9,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "InputEvent.MouseButton.Pre",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_mouse_button_pre",
+        native = "fn native_mouse_button_pre(&mut self, button: i32, pressed: bool, modifiers: u32, canceled: &mut bool)"
     )]
     fn mouse_button_pre();
 }

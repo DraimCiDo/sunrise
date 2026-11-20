@@ -22,7 +22,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "ItemTooltipEvent",
-        version = 2
+        version = 2,
+        native = "fn native_item_tooltip(&self, call: mod_api::__private::ItemTooltipCall<'_>)"
     )]
     fn item_tooltip(
         player: u128,

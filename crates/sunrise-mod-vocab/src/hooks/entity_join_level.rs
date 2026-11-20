@@ -9,7 +9,13 @@ pub trait Hooks {
     /// under `/tick freeze`, but not while the level is paused.
     /// On the server, neither player tick hook fires for a spectator whose
     /// bounds touch an unloaded chunk; that player's body tick is skipped.
-    #[hook(side = "both", contract = "listen", neoforge = "PlayerTickEvent.Pre")]
+    #[hook(
+        side = "both",
+        contract = "listen",
+        neoforge = "PlayerTickEvent.Pre",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_tick_pre",
+        native = "fn native_player_tick_pre(&mut self, call: mod_api::__private::PlayerTickPreCall)"
+    )]
     fn player_tick_pre(player: PlayerRef);
     /// After a player's tick on both logical sides (NeoForge 26.3
     /// `PlayerTickEvent.Post`). Non-cancellable, including death-screen ticks.
@@ -19,7 +25,13 @@ pub trait Hooks {
     /// see only the state available to that client, not future server updates.
     /// On the server, neither player tick hook fires for a spectator whose
     /// bounds touch an unloaded chunk; that player's body tick is skipped.
-    #[hook(side = "both", contract = "listen", neoforge = "PlayerTickEvent.Post")]
+    #[hook(
+        side = "both",
+        contract = "listen",
+        neoforge = "PlayerTickEvent.Post",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_tick_post",
+        native = "fn native_player_tick_post(&mut self, call: mod_api::__private::PlayerTickPostCall)"
+    )]
     fn player_tick_post(player: PlayerRef);
     /// An entity joins the server level `dimension` (NeoForge's
     /// `EntityJoinLevelEvent`): vanilla's `PersistentEntitySectionManager.addEntity`.
@@ -59,7 +71,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "EntityJoinLevelEvent",
-        version = 3
+        version = 3,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_entity_join_level",
+        native = "fn native_entity_join_level(&mut self, dimension: &str, entity: u32, kind: &str, pos: [f64; 3], loaded_from_disk: bool, canceled: &mut bool)"
     )]
     fn entity_join_level();
 }

@@ -30,7 +30,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "LivingDropsEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_living_drops(&mut self, call: mod_api::__private::LivingDropsCall<'_>)"
     )]
     fn living_drops(
         entity: u32,
@@ -59,7 +60,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "GetEquipmentDropChanceEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_get_equipment_drop_chance(&mut self, call: mod_api::__private::GetEquipmentDropChanceCall<'_>)"
     )]
     fn get_equipment_drop_chance(
         entity: u32,

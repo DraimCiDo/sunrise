@@ -14,7 +14,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "BonemealEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_bonemeal(&mut self, call: super::fire::BonemealCall<'_>)"
     )]
     fn bonemeal(
         dimension: LevelDimension,

@@ -12,7 +12,9 @@ pub trait Hooks {
         scope = "block_entity",
         key = "block",
         host = "read",
-        neoforge = "none (vanilla EntityBlock.getTicker; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla EntityBlock.getTicker; NeoForge adds no event or extension for it)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_block_entity_ticks",
+        native = "fn native_block_entity_ticks(&self, block: &str, ticks: &mut bool)"
     )]
     fn block_entity_ticks();
 }

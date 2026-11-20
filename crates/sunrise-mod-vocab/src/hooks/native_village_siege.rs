@@ -8,7 +8,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "VillageSiegeEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_village_siege(&mut self, dimension: &str, player: u128, attempted_pos: [f64; 3], canceled: &mut bool)"
     )]
     fn village_siege();
 }

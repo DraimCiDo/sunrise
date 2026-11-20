@@ -10,7 +10,9 @@ pub trait Hooks {
         out = "cancel",
         host = "read",
         neoforge = "none (NeoForge has no such event; Bukkit's BroadcastMessageEvent)",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_broadcast_message",
+        native = "fn native_broadcast_message(&self, line: &mut Text, cancel: &mut bool)"
     )]
     fn broadcast_message();
 }

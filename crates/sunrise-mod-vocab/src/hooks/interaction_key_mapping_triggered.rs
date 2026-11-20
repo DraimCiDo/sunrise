@@ -30,7 +30,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "ProjectileImpactEvent",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_projectile_impact",
+        native = "fn native_projectile_impact(&mut self, call: mod_api::__private::ProjectileImpactCall<'_>)"
     )]
     fn projectile_impact(
         dimension: &str,
@@ -74,7 +76,9 @@ pub trait Hooks {
         out = "canceled",
         neoforge = "EntityMountEvent",
         version = 2,
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_entity_mount",
+        native = "fn native_entity_mount(&mut self, call: mod_api::__private::EntityMountCall<'_>)"
     )]
     fn entity_mount(
         dimension: &str,
@@ -101,7 +105,9 @@ pub trait Hooks {
         out = "canceled",
         neoforge = "InputEvent.InteractionKeyMappingTriggered",
         version = 2,
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::interaction::Game<'_>::native_interaction_key_mapping_triggered",
+        native = "fn native_interaction_key_mapping_triggered(&mut self, key: InteractionKey, hand: Hand, attempt: InteractionAttempt, swing_hand: &mut bool, canceled: &mut bool)"
     )]
     fn interaction_key_mapping_triggered();
 }

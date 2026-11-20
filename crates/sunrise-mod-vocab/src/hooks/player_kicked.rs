@@ -8,7 +8,9 @@ pub trait Hooks {
         side = "server",
         version = 2,
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's PlayerKickEvent)"
+        neoforge = "none (NeoForge has no such event; Bukkit's PlayerKickEvent)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_kicked",
+        native = "fn native_player_kicked(&mut self, player: u128, name: &str, reason: &str)"
     )]
     fn player_kicked();
 }

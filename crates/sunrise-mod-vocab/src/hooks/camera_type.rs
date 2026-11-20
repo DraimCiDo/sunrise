@@ -13,7 +13,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         cancellable = false,
-        neoforge = "none (NeoForge has no camera type event)"
+        neoforge = "none (NeoForge has no camera type event)",
+        native = "fn native_camera_type_cycle(&mut self, previous: mod_api::CameraType, next: &mut mod_api::CameraType)"
     )]
     fn camera_type_cycle();
 }

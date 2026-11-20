@@ -24,7 +24,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "none (Bukkit's PlayerArmorStandManipulateEvent)",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_armor_stand_manipulate",
+        native = "fn native_armor_stand_manipulate(&mut self, player: u128, name: &str, stand_id: i32, slot: &str, cancel: &mut bool)"
     )]
     fn armor_stand_manipulate();
 }

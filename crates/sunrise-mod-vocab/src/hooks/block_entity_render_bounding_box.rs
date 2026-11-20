@@ -15,7 +15,9 @@ pub trait Hooks {
         out = "bounds",
         scope = "block_entity",
         key = "block",
-        neoforge = "IBlockEntityRendererExtension.getRenderBoundingBox"
+        neoforge = "IBlockEntityRendererExtension.getRenderBoundingBox",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_block_entity_render_bounding_box",
+        native = "fn native_block_entity_render_bounding_box(&self, pos: [i32; 3], block: &str, state: BlockStateId, entity: &ModBlockEntity, bounds: &mut [f32; 6])"
     )]
     fn block_entity_render_bounding_box();
 }

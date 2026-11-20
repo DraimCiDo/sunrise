@@ -26,7 +26,8 @@ pub trait Hooks {
         contract = "listen",
         scope = "block_entity",
         key = "entity",
-        neoforge = "none (vanilla BlockEntityTicker; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla BlockEntityTicker; NeoForge adds no event or extension for it)",
+        native = "fn native_block_entity_tick(&mut self, reply: &mut mod_api::BlockEntityTickReply, pos: [i32; 3], entity: &mut ModBlockEntity)"
     )]
     fn block_entity_tick();
 }

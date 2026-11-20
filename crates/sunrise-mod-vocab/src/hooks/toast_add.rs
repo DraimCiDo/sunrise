@@ -14,7 +14,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "ToastAddEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_toast_add(&self, kind: mod_api::ToastKind, title: &mut Text, description: &mut Option<Text>, cancel: &mut bool)"
     )]
     fn toast_add();
 }

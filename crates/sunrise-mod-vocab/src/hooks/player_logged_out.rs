@@ -14,7 +14,9 @@ pub trait Hooks {
         side = "server",
         version = 2,
         contract = "listen",
-        neoforge = "PlayerEvent.PlayerLoggedOutEvent"
+        neoforge = "PlayerEvent.PlayerLoggedOutEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_logged_out",
+        native = "fn native_player_logged_out(&mut self, player: u128, name: &str)"
     )]
     fn player_logged_out();
 }

@@ -34,7 +34,8 @@ stop-sleeping, and client metadata resets do not emit this server hook.
         contract = "listen",
         neoforge = "PlayerWakeUpEvent",
         cancellable = false,
-        version = 2
+        version = 2,
+        native = "fn native_player_bed_leave(&mut self, player: u128, name: &str, pos: [i32; 3], wake_immediately: bool, update_level: bool)"
     )]
     fn player_bed_leave();
 }

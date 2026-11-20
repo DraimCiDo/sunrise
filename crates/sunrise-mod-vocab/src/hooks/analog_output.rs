@@ -24,7 +24,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_analog_output",
-        neoforge = "none (vanilla BlockBehaviour.getAnalogOutputSignal; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla BlockBehaviour.getAnalogOutputSignal; NeoForge adds no event or extension for it)",
+        native = "fn native_analog_output(&mut self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, face: Direction, output: &mut i32)"
     )]
     fn analog_output();
 }

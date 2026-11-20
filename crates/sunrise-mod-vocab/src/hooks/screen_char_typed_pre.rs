@@ -41,7 +41,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "ScreenEvent.CharacterTyped.Pre",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_screen_char_typed_pre",
+        native = "fn native_screen_char_typed_pre(&self, screen: &ScreenView<'_>, c: char, modifiers: u32, field: &mut Option<mod_api::client::widgets::TextEdit>, canceled: &mut bool)"
     )]
     fn screen_char_typed_pre();
 }

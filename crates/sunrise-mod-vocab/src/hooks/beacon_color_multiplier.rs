@@ -20,7 +20,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         host = "read",
-        neoforge = "IBlockExtension.getBeaconColorMultiplier, IBlockStateExtension.getBeaconColorMultiplier"
+        neoforge = "IBlockExtension.getBeaconColorMultiplier, IBlockStateExtension.getBeaconColorMultiplier",
+        native = "fn native_beacon_color_multiplier(&self, state: BlockStateId, pos: BlockPos, beacon_pos: BlockPos, color: &mut Option<u32>)"
     )]
     fn beacon_color_multiplier();
 }

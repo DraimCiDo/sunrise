@@ -29,7 +29,9 @@ pub trait Hooks {
         key = "stack",
         cancellable = false,
         target = "sunrise_client_lib::menu::container_items::native_can_fit_inside_container_items",
-        neoforge = "IItemExtension.canFitInsideContainerItems"
+        neoforge = "IItemExtension.canFitInsideContainerItems",
+        direct = true,
+        native = "fn native_can_fit_inside_container_items(context: &LoopContext, stack: &mod_api::ItemStack, fits: &mut bool)"
     )]
     fn can_fit_inside_container_items();
 }

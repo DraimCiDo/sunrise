@@ -18,7 +18,8 @@ With no `custom_draw` set the hook is never asked, so a mod that only listens he
         side = "client",
         contract = "listen",
         neoforge = "CustomBlockScreenEffectRenderer",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_block_screen_effect_draw(&self, call: super::fire::BlockScreenEffectDrawCall<'_>)"
     )]
     fn block_screen_effect_draw(
         effect: mod_api::BlockScreenEffect,

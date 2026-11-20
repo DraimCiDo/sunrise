@@ -6,7 +6,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_exp_bottle",
+        native = "fn native_exp_bottle(&mut self, pos: [f64; 3], experience: u32)"
     )]
     fn exp_bottle();
 }

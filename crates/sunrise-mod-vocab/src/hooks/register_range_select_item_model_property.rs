@@ -39,7 +39,8 @@ registered twice is logged and left out. A property no mod registers reads 0, de
         contract = "collect",
         out = "properties",
         context = "registration",
-        neoforge = "RegisterRangeSelectItemModelPropertyEvent"
+        neoforge = "RegisterRangeSelectItemModelPropertyEvent",
+        native = "fn native_register_range_select_item_model_property(context: &mod_api::RegistrationContext, properties: &mut Vec<String>)"
     )]
     fn register_range_select_item_model_property();
 }

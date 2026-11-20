@@ -12,7 +12,8 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "NoteBlockEvent.Change",
         cancellable = true,
-        target = "sunrise_client::game::native_hooks::native_note_block_change::GameLevel<'_>::native_note_block_change"
+        target = "sunrise_client::game::native_hooks::native_note_block_change::GameLevel<'_>::native_note_block_change",
+        native = "fn native_note_block_change(&self, context: &NoteBlockChange, new_note: &mut i32, cancel: &mut bool)"
     )]
     fn note_block_change();
 }

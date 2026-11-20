@@ -23,7 +23,9 @@ pub trait Hooks {
         out = "offer",
         neoforge = "TradeWithVillagerEvent",
         cancellable = false,
-        version = 2
+        version = 2,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_trade_with_villager",
+        native = "fn native_trade_with_villager(&mut self, merchant: u32, kind: &str, offer: &mut MerchantOffer)"
     )]
     fn trade_with_villager();
 }

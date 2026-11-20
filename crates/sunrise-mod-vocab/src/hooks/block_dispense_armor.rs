@@ -9,7 +9,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_block_dispense_armor",
+        native = "fn native_block_dispense_armor(&mut self, dimension: &str, pos: [i32; 3], item: &str, target: &str)"
     )]
     fn block_dispense_armor();
 }

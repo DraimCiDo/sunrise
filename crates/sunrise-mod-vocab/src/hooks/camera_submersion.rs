@@ -18,7 +18,8 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "none (vanilla Camera.getFluidInCamera; NeoForge adds no event for it)"
+        neoforge = "none (vanilla Camera.getFluidInCamera; NeoForge adds no event for it)",
+        native = "fn native_camera_submersion(&self, camera: [f64; 3], fog_type: &mut mod_api::client::fog::FogType)"
     )]
     fn camera_submersion();
 }

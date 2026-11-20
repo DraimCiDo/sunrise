@@ -7,7 +7,8 @@ pub trait Hooks {
         contract = "collect",
         out = "can_harvest",
         neoforge = "PlayerEvent.HarvestCheck",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_player_harvest_check(&mut self, player: u32, pos: [i32; 3], state: u32, can_harvest: &mut bool)"
     )]
     fn player_harvest_check();
 }

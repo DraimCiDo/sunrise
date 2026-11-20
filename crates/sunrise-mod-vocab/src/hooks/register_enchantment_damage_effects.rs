@@ -26,7 +26,8 @@ nodes retain the vanilla evaluator without constructing API weapon snapshots."#]
         contract = "collect",
         out = "effects",
         context = "registration",
-        neoforge = "RegisterEvent"
+        neoforge = "RegisterEvent",
+        native = "fn native_register_enchantment_damage_effects(context: &mod_api::RegistrationContext, effects: &mut dyn EnchantmentDamageEffects)"
     )]
     fn register_enchantment_damage_effects();
 }

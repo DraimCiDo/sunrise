@@ -23,7 +23,8 @@ pub trait Hooks {
         out = "cancel",
         version = 2,
         neoforge = "ClientChatReceivedEvent, ClientChatReceivedEvent.Player, ClientChatReceivedEvent.System",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_client_chat_received(&mut self, call: mod_api::__private::ClientChatReceivedCall<'_>)"
     )]
     fn client_chat_received(
         system: bool,

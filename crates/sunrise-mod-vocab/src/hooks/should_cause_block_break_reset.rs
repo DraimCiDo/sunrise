@@ -19,7 +19,8 @@ pub trait Hooks {
         contract = "listen",
         scope = "item",
         key = "stack",
-        neoforge = "IItemExtension.shouldCauseBlockBreakReset"
+        neoforge = "IItemExtension.shouldCauseBlockBreakReset",
+        native = "fn native_should_cause_block_break_reset(&self, stack: &ItemStack, held: Option<&ItemStack>, reset: &mut bool)"
     )]
     fn should_cause_block_break_reset();
 }

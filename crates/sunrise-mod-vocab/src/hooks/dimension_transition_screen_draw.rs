@@ -8,7 +8,8 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "RegisterDimensionTransitionScreenEvent (registration only)"
+        neoforge = "RegisterDimensionTransitionScreenEvent (registration only)",
+        native = "fn native_dimension_transition_screen_draw(&self, screen: &str, reason: mod_api::DimensionTransitionReason, progress: Option<f32>, draw: &mut HudBatch)"
     )]
     fn dimension_transition_screen_draw();
 }

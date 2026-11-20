@@ -16,7 +16,8 @@ pub trait Hooks {
         host = "read",
         target = "sunrise_client::game::native_hooks::living_change_target::NativeHookHost<'_>::native_mob_despawn",
         neoforge = "MobDespawnEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_mob_despawn(&self, dimension: &str, mob: MobRef, kind: &str, pos: [f64; 3], result: &mut Despawn)"
     )]
     fn mob_despawn();
 }

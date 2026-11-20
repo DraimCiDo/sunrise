@@ -10,7 +10,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "ScreenEvent.MouseDragged.Pre",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_screen_mouse_dragged_pre",
+        native = "fn native_screen_mouse_dragged_pre(&self, screen: &ScreenView<'_>, button: i32, delta: [f32; 2], modifiers: u32, canceled: &mut bool)"
     )]
     fn screen_mouse_dragged_pre();
 }

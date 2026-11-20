@@ -8,7 +8,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "ClientTickEvent.Post",
-        fabric = "ClientTickEvents.END_CLIENT_TICK"
+        fabric = "ClientTickEvents.END_CLIENT_TICK",
+        native = "fn native_client_tick_post(&mut self)"
     )]
     fn client_tick_post();
 }

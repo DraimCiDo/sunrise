@@ -9,7 +9,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "MobEffectEvent.Added"
+        neoforge = "MobEffectEvent.Added",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_mob_effect_added",
+        native = "fn native_mob_effect_added(&mut self, effect: EffectKey, entity: Option<i32>, amplifier: i32)"
     )]
     fn mob_effect_added();
 }

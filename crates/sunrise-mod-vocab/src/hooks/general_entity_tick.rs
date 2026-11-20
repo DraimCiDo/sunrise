@@ -21,7 +21,8 @@ pub trait Hooks {
         contract = "listen",
         scope = "entity",
         key = "kind",
-        neoforge = "none (vanilla Entity.tick has no part-scoped counterpart; NeoForge's EntityTickEvent is the global pre/post pair)"
+        neoforge = "none (vanilla Entity.tick has no part-scoped counterpart; NeoForge's EntityTickEvent is the global pre/post pair)",
+        native = "fn native_general_entity_tick(&mut self, kind: &str, entity: mod_api::EntityRef)"
     )]
     fn general_entity_tick();
 }

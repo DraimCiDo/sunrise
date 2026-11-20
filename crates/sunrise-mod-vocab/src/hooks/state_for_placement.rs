@@ -65,7 +65,8 @@ before returning it: `setPlacedBy` does not recheck its companion cell.
         scope = "block",
         key = "state",
         target = "sunrise_client::game::native_hooks::base::LevelView<'_>::native_state_for_placement",
-        neoforge = "none (vanilla Block.getStateForPlacement; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla Block.getStateForPlacement; NeoForge adds no event or extension for it)",
+        native = "fn native_state_for_placement(&self, dimension: LevelDimension, state: BlockStateId, context: &PlacementContext, fluid: mod_api::FluidState, answer: &mut Option<Option<BlockStateId>>)"
     )]
     fn state_for_placement();
 }

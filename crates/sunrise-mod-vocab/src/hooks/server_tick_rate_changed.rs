@@ -10,7 +10,8 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (vanilla MinecraftServer.onTickRateChanged; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla MinecraftServer.onTickRateChanged; NeoForge adds no event or extension for it)",
+        native = "fn native_server_tick_rate_changed(&mut self)"
     )]
     fn server_tick_rate_changed();
 }

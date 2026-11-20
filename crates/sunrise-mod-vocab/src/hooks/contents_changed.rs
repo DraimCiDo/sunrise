@@ -9,7 +9,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         neoforge = "none (Container.setChanged has no bus event)",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_contents_changed(&mut self, level: LevelRef, pos: BlockPos, state: BlockStateId, observer: Option<BlockEntityRef>)"
     )]
     fn contents_changed();
 }

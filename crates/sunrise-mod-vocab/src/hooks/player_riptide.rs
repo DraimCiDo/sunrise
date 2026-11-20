@@ -8,7 +8,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's PlayerRiptideEvent)"
+        neoforge = "none (NeoForge has no such event; Bukkit's PlayerRiptideEvent)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_riptide",
+        native = "fn native_player_riptide(&mut self, player: u128, name: &str)"
     )]
     fn player_riptide();
 }

@@ -13,7 +13,8 @@ pub trait Hooks {
         contract = "listen",
         neoforge = "MovementInputUpdateEvent",
         version = 2,
-        cancellable = false
+        cancellable = false,
+        native = "fn native_movement_input(&self, call: mod_api::__private::MovementInputCall<'_>)"
     )]
     fn movement_input(
         forward: &mut f32,

@@ -17,7 +17,8 @@ kept and vanilla's list goes out. The window's own player draws its swirls from 
         contract = "listen",
         host = "read",
         neoforge = "EffectParticleModificationEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_effect_particle_modification(&self, entity: LivingRef, effect: &ActiveEffect, original_particle: &ParticleOptions, particle: &mut Option<ParticleOptions>, visible: &mut bool)"
     )]
     fn effect_particle_modification();
 }

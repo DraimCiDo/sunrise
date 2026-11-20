@@ -16,7 +16,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         host = "read",
-        neoforge = "LivingEvent.LivingVisibilityEvent"
+        neoforge = "LivingEvent.LivingVisibilityEvent",
+        native = "fn native_living_visibility(&self, entity: LivingRef, looking: Option<EntityRef>, visibility: &mut f64)"
     )]
     fn living_visibility();
 }

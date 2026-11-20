@@ -17,7 +17,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         target = "sunrise_client::game::native_hooks::is_fire_source::GameLevel<'_>::native_is_fire_source",
-        neoforge = "IBlockExtension.isFireSource"
+        neoforge = "IBlockExtension.isFireSource",
+        native = "fn native_is_fire_source(&self, dimension: LevelDimension, state: BlockStateId, pos: BlockPos, source: &mut Option<bool>)"
     )]
     fn is_fire_source();
 }

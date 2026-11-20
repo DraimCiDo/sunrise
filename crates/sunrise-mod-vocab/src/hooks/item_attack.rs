@@ -17,7 +17,8 @@ pub trait Hooks {
         out = "canceled",
         scope = "item",
         key = "stack",
-        neoforge = "IItemExtension.onLeftClickEntity"
+        neoforge = "IItemExtension.onLeftClickEntity",
+        native = "fn native_on_left_click_entity(&mut self, player: u128, stack: &ItemStack, entity: i32, kind: &str, canceled: &mut bool)"
     )]
     fn on_left_click_entity();
     /// `IItemExtension.onEntitySwing`: the player in place (`entity`, its
@@ -34,7 +35,8 @@ pub trait Hooks {
         out = "canceled",
         scope = "item",
         key = "stack",
-        neoforge = "IItemExtension.onEntitySwing"
+        neoforge = "IItemExtension.onEntitySwing",
+        native = "fn native_on_entity_swing(&mut self, stack: &ItemStack, entity: Option<i32>, hand: Hand, canceled: &mut bool)"
     )]
     fn on_entity_swing();
 }

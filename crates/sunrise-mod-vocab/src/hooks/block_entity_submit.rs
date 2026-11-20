@@ -20,7 +20,9 @@ pub trait Hooks {
         contract = "listen",
         scope = "block_entity",
         key = "block",
-        neoforge = "EntityRenderersEvent.RegisterRenderers"
+        neoforge = "EntityRenderersEvent.RegisterRenderers",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_block_entity_submit",
+        native = "fn native_block_entity_submit(&self, pos: [i32; 3], block: &str, state: BlockStateId, entity: &ModBlockEntity, draw: &mut BlockEntityDraw)"
     )]
     fn block_entity_submit();
 }

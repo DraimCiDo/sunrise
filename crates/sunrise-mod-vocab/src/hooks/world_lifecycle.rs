@@ -9,7 +9,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         version = 2,
-        neoforge = "ServerStartingEvent, ServerStartedEvent, ServerStoppingEvent, ServerStoppedEvent"
+        neoforge = "ServerStartingEvent, ServerStartedEvent, ServerStoppingEvent, ServerStoppedEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_world_lifecycle",
+        native = "fn native_world_lifecycle(&mut self, context: &LifecycleContext, phase: WorldPhase, error_text: &str)"
     )]
     fn world_lifecycle();
 }

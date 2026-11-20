@@ -12,7 +12,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "EnchantmentLevelSetEvent",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_enchantment_level_set(&mut self, pos: [i32; 3], offer: &mod_api::item::stations::EnchantmentRow<'_>, level: &mut i32)"
     )]
     fn enchantment_level_set();
 }

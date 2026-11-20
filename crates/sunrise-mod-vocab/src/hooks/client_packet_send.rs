@@ -19,7 +19,8 @@ pub trait Hooks {
         out = "canceled",
         cancellable = false,
         version = 2,
-        neoforge = "none (NeoForge has no raw play-packet send event)"
+        neoforge = "none (NeoForge has no raw play-packet send event)",
+        native = "fn native_client_packet_send(&self, packet: &ClientPacket, canceled: &mut bool)"
     )]
     fn client_packet_send();
 }

@@ -11,7 +11,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "RenderPlayerEvent.Post",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_render_player_post(&self, player: &MobRender<'_>, who: &PlayerRender<'_>, parts: Option<&PosedParts>, draw: &mut BlockEntityDraw)"
     )]
     fn render_player_post();
 }

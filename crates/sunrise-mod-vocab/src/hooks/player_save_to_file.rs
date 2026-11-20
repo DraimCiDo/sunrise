@@ -20,7 +20,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "PlayerEvent.SaveToFile (not cancellable)",
-        cancellable = false
+        cancellable = false,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_save_to_file",
+        native = "fn native_player_save_to_file(&mut self, player: u128, name: &str, directory: &std::path::Path)"
     )]
     fn player_save_to_file();
 }

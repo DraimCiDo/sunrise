@@ -29,7 +29,8 @@ pub trait Hooks {
             "IBlockExtension.getFlammability",
             "IBlockExtension.getFireSpreadSpeed",
             "IBlockExtension.isFlammable"
-        ]
+        ],
+        native = "fn native_fire_odds(&self, dimension: LevelDimension, state: BlockStateId, pos: BlockPos, face: Direction, odds: &mut Option<(i32, i32)>)"
     )]
     fn fire_odds();
 }

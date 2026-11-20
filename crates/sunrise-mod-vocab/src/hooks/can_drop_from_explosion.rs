@@ -20,7 +20,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         target = "sunrise_client::game::native_hooks::can_drop_from_explosion::GameLevel<'_>::native_can_drop_from_explosion",
-        neoforge = "IBlockExtension.canDropFromExplosion"
+        neoforge = "IBlockExtension.canDropFromExplosion",
+        native = "fn native_can_drop_from_explosion(&self, pos: BlockPos, state: BlockStateId, explosion: &ExplosionStart<'_>, drops: &mut Option<bool>)"
     )]
     fn can_drop_from_explosion();
 }

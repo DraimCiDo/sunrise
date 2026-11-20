@@ -12,7 +12,8 @@ pub trait Hooks {
         cancellable = false,
         version = 2,
         target = "sunrise_client_lib::motion::native_fluid_flow",
-        neoforge = "none (vanilla FlowingFluid.getFlow; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla FlowingFluid.getFlow; NeoForge adds no event or extension for it)",
+        native = "fn native_fluid_flow(context: &LoopContext, fluid: &str, pos: BlockPos, flow: &mut [f64; 3])"
     )]
     fn fluid_flow();
 }

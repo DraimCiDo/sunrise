@@ -6,7 +6,8 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "claimed",
-        neoforge = "PlayerInteractEvent.EntityInteractSpecific"
+        neoforge = "PlayerInteractEvent.EntityInteractSpecific",
+        native = "fn native_entity_interact_specific(&mut self, entity: i32, kind: &str, stack: Option<&ItemStack>, location: [f64; 3], claimed: &mut bool)"
     )]
     fn entity_interact_specific();
 }

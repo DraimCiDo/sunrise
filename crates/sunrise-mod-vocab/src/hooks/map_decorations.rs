@@ -19,7 +19,9 @@ pub trait Hooks {
         contract = "collect",
         out = "decorations",
         neoforge = "MapDecorationType",
-        cancellable = false
+        cancellable = false,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_map_decorations",
+        native = "fn native_map_decorations(&self, map: &mod_api::MapInfo<'_>, decorations: &mut Vec<mod_api::MapDecoration>)"
     )]
     fn map_decorations();
 }

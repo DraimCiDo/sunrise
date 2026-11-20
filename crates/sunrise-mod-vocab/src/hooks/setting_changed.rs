@@ -10,7 +10,9 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         owner = "mod_id",
-        neoforge = "ModConfigEvent.Reloading (a ModConfigSpec value set on the config screen)"
+        neoforge = "ModConfigEvent.Reloading (a ModConfigSpec value set on the config screen)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_setting_changed",
+        native = "fn native_setting_changed(&mut self, mod_id: &str, key: &str)"
     )]
     fn setting_changed();
 }

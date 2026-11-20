@@ -11,7 +11,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "DifficultyChangeEvent"
+        neoforge = "DifficultyChangeEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_difficulty_changed",
+        native = "fn native_difficulty_changed(&mut self, from: &str, to: &str)"
     )]
     fn difficulty_changed();
 }

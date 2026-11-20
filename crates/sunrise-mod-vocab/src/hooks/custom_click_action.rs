@@ -11,7 +11,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "CustomClickActionEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_custom_click_action(&mut self, player: u128, player_entity_id: i32, name: &str, id: &str, payload: Option<&Tag>, cancel: &mut bool)"
     )]
     fn custom_click_action();
 }

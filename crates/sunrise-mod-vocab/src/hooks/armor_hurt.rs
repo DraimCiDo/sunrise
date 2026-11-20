@@ -17,7 +17,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "ArmorHurtEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_armor_hurt(&mut self, player: Option<u128>, entity: u32, kind: &str, source: &HurtSource<'_>, entries: &mut Vec<mod_api::ArmorHurt>, cancel: &mut bool)"
     )]
     fn armor_hurt();
 }

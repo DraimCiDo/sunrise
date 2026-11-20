@@ -30,7 +30,8 @@ client through the item's component, not through that packet."#]
         contract = "collect",
         out = "types",
         context = "registration",
-        neoforge = "RegisterEvent"
+        neoforge = "RegisterEvent",
+        native = "fn native_map_decoration_types(context: &mod_api::RegistrationContext, types: &mut Vec<MapDecorationType>)"
     )]
     fn map_decoration_types();
 }

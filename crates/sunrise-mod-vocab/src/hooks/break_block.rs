@@ -18,7 +18,9 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "canceled",
-        neoforge = "BreakBlockEvent"
+        neoforge = "BreakBlockEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_break_block",
+        native = "fn native_break_block(&mut self, pos: [i32; 3], state: BlockStateId, canceled: &mut bool, exp_to_drop: &mut Option<u32>)"
     )]
     fn break_block();
 }

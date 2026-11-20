@@ -7,7 +7,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)",
-        version = 2
+        version = 2,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_spawn_change",
+        native = "fn native_spawn_change(&mut self, dimension: &str, pos: [i32; 3], angle: [f32; 2])"
     )]
     fn spawn_change();
 }

@@ -23,7 +23,8 @@ pub trait Hooks {
         contract = "collect",
         out = "blocks",
         version = 2,
-        neoforge = "ExplosionEvent.Detonate"
+        neoforge = "ExplosionEvent.Detonate",
+        native = "fn native_explosion_detonate(&mut self, dimension: &str, center: [f64; 3], blocks: &mut Vec<[i32; 3]>, entities: &mut Vec<EntityRef>)"
     )]
     fn explosion_detonate();
 }

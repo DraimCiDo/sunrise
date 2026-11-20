@@ -10,7 +10,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Paper's PlayerPickItemEvent)",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_pick_item",
+        native = "fn native_player_pick_item(&mut self, player: u128, name: &str, from_entity: bool, pos: [i32; 3], entity_id: i32, cancel: &mut bool)"
     )]
     fn player_pick_item();
 }

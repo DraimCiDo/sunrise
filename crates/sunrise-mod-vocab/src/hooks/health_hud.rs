@@ -13,7 +13,9 @@ pub trait Hooks {
         side = "client",
         contract = "replace",
         out = "draws",
-        neoforge = "RenderGuiLayerEvent.Pre"
+        neoforge = "RenderGuiLayerEvent.Pre",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_health_hud",
+        native = "fn native_health_hud(&mut self, inputs: &mod_api::client::hud_layout::HealthInputs, wi: i32, hi: i32, draws: &mut Option<Vec<GuiDraw>>)"
     )]
     fn health_hud();
 }

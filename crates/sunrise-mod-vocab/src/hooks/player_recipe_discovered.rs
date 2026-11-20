@@ -9,7 +9,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's PlayerRecipeDiscoverEvent)",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_recipe_discovered",
+        native = "fn native_player_recipe_discovered(&mut self, player: u128, name: &str, recipe: &str, cancel: &mut bool)"
     )]
     fn player_recipe_discovered();
 }

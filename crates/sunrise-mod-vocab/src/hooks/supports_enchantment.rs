@@ -28,7 +28,8 @@ pub trait Hooks {
         scope = "item",
         key = "stack",
         host = "read",
-        neoforge = "IItemExtension.supportsEnchantment"
+        neoforge = "IItemExtension.supportsEnchantment",
+        native = "fn native_supports_enchantment(&self, stack: &ItemStack, enchantment: &str, answer: &mut Option<bool>)"
     )]
     fn supports_enchantment();
 }

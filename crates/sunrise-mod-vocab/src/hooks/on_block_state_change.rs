@@ -26,7 +26,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         target = "sunrise_client::game::native_hooks::on_block_state_change::GameLevel<'_>::native_on_block_state_change",
-        neoforge = "IBlockExtension.onBlockStateChange"
+        neoforge = "IBlockExtension.onBlockStateChange",
+        native = "fn native_on_block_state_change(&self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, old: BlockStateId, new: BlockStateId, predicted: bool)"
     )]
     fn on_block_state_change();
 }

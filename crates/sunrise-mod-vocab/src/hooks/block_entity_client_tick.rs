@@ -35,7 +35,8 @@ once it is removed, replaced or unloaded: stop what you keep for it then. It nev
         contract = "listen",
         scope = "block_entity",
         key = "entity",
-        neoforge = "none (vanilla BlockEntityTicker from EntityBlock.getTicker with the client level; NeoForge adds no event)"
+        neoforge = "none (vanilla BlockEntityTicker from EntityBlock.getTicker with the client level; NeoForge adds no event)",
+        native = "fn native_block_entity_client_tick(&mut self, pos: [i32; 3], block_entity: BlockEntityRef, state: BlockStateId, entity: &ModBlockEntity)"
     )]
     fn block_entity_client_tick();
 }

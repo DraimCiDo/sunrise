@@ -22,7 +22,9 @@ pub trait Hooks {
         contract = "listen",
         version = 2,
         neoforge = "PlayerEvent.StartTracking",
-        cancellable = false
+        cancellable = false,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_start_tracking",
+        native = "fn native_player_start_tracking(&mut self, player: u128, name: &str, entity: u32, uuid: u128, kind: &str)"
     )]
     fn player_start_tracking();
 }

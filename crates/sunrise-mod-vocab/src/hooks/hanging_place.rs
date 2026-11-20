@@ -18,7 +18,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         cancellable = true,
-        neoforge = "none (vanilla HangingEntityItem.useOn; NeoForge adds no event or extension for it); PlayerInteractEvent.RightClickBlock fires before it"
+        neoforge = "none (vanilla HangingEntityItem.useOn; NeoForge adds no event or extension for it); PlayerInteractEvent.RightClickBlock fires before it",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_hanging_place",
+        native = "fn native_hanging_place(&mut self, player: u128, name: &str, kind: &str, pos: [i32; 3], cancel: &mut bool)"
     )]
     fn hanging_place();
 }

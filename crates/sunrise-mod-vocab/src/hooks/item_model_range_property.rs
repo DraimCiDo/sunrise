@@ -10,7 +10,8 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "RegisterRangeSelectItemModelPropertyEvent"
+        neoforge = "RegisterRangeSelectItemModelPropertyEvent",
+        native = "fn native_item_model_range_property(&self, property: &str, stack: &mod_api::ItemStack, bundle_selected: i32, value: &mut f32)"
     )]
     fn item_model_range_property();
 }

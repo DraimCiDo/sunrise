@@ -23,7 +23,8 @@ pub trait Hooks {
         inert = "*valid = Some(false);",
         key = "state",
         target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_is_valid_bonemeal_target",
-        neoforge = "none (vanilla BonemealableBlock.isValidBonemealTarget; NeoForge adds no event or extension for it); BonemealEvent fires when meal is used, before the block's contract"
+        neoforge = "none (vanilla BonemealableBlock.isValidBonemealTarget; NeoForge adds no event or extension for it); BonemealEvent fires when meal is used, before the block's contract",
+        native = "fn native_is_valid_bonemeal_target(&self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, valid: &mut Option<bool>)"
     )]
     fn is_valid_bonemeal_target();
 }

@@ -15,7 +15,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         target = "sunrise_client::game::native_hooks::on_caught_fire::GameLevel<'_>::native_on_caught_fire",
-        neoforge = "IBlockExtension.onCaughtFire"
+        neoforge = "IBlockExtension.onCaughtFire",
+        native = "fn native_on_caught_fire(&mut self, ticks: &mut Ticks, dimension: LevelDimension, state: BlockStateId, pos: BlockPos, face: Direction)"
     )]
     fn on_caught_fire();
 }

@@ -22,7 +22,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         target = "sunrise_client::game::native_hooks::on_destroyed_by_push_reaction::GameLevel<'_>::native_on_destroyed_by_push_reaction",
-        neoforge = "IBlockExtension.onDestroyedByPushReaction"
+        neoforge = "IBlockExtension.onDestroyedByPushReaction",
+        native = "fn native_on_destroyed_by_push_reaction(&mut self, ticks: &mut Ticks, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, direction: Direction, fluid: mod_api::FluidState)"
     )]
     fn on_destroyed_by_push_reaction();
 }

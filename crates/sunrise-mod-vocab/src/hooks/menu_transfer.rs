@@ -31,7 +31,8 @@ for a LAN host's own player: the game is the server there, and asks the part on 
         out = "result",
         scope = "menu",
         key = "menu",
-        neoforge = "none (JEI IRecipeTransferHandler, which each mod implements for its menus)"
+        neoforge = "none (JEI IRecipeTransferHandler, which each mod implements for its menus)",
+        native = "fn native_menu_transfer(&mut self, call: mod_api::__private::MenuTransferCall<'_>)"
     )]
     fn menu_transfer(
         player: u128,

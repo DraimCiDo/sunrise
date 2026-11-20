@@ -11,6 +11,12 @@ pub trait Hooks {
     /// such entry is told once a hit, and once for each mob a sweep lands on.
     /// A hit on a player, and an entry inside `minecraft:all_of`, aren't told
     /// yet. An unclaimed kind does nothing.
-    #[hook(side = "server", contract = "listen", neoforge = "RegisterEvent")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "RegisterEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_enchant_effect",
+        native = "fn native_enchant_effect(&mut self, enchantment: &str, kind: &str, data: &sunrise_core::nbt::Tag, level: u32, victim: u32)"
+    )]
     fn enchant_effect();
 }

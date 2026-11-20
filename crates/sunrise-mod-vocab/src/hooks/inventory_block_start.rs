@@ -10,7 +10,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_inventory_block_start",
+        native = "fn native_inventory_block_start(&mut self, player: u128, name: &str, pos: [i32; 3], cancel: &mut bool)"
     )]
     fn inventory_block_start();
 }

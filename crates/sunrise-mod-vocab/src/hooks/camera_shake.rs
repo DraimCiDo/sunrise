@@ -11,7 +11,9 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "ViewportEvent.ComputeCameraAngles"
+        neoforge = "ViewportEvent.ComputeCameraAngles",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_camera_shake",
+        native = "fn native_camera_shake(&self, partial: f32, shake: &mut Shake)"
     )]
     fn camera_shake();
 }

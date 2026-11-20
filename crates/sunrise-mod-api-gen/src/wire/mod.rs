@@ -1124,7 +1124,7 @@ mod tests {
             .stack_size(64 << 20)
             .spawn(|| {
                 let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-                let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+                let generated = crate::sources(&root, Some(crate::FillMode::Require)).unwrap();
                 let included = [
                     ("mod_api_generated.rs", generated.hooks.as_str()),
                     ("mod_api_generated_host.rs", generated.host.as_str()),
@@ -1191,7 +1191,7 @@ mod tests {
             .stack_size(64 << 20)
             .spawn(|| {
                 let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-                let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+                let generated = crate::sources(&root, Some(crate::FillMode::Require)).unwrap();
                 let hooks = crate::Catalog::load(&root).unwrap().hooks;
                 let subscriptions = |hooks_source: &str| {
                     let included = [
@@ -1238,7 +1238,7 @@ mod tests {
             .stack_size(64 << 20)
             .spawn(|| {
                 let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-                let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+                let generated = crate::sources(&root, Some(crate::FillMode::Require)).unwrap();
                 let included = [
                     ("mod_api_generated.rs", generated.hooks.as_str()),
                     ("mod_api_generated_host.rs", generated.host.as_str()),
@@ -1304,7 +1304,7 @@ mod tests {
             .stack_size(64 << 20)
             .spawn(|| {
                 let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-                let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+                let generated = crate::sources(&root, Some(crate::FillMode::Require)).unwrap();
                 let included = [
                     ("mod_api_generated.rs", generated.hooks.as_str()),
                     ("mod_api_generated_host.rs", generated.host.as_str()),
@@ -1348,7 +1348,7 @@ mod tests {
             .stack_size(64 << 20)
             .spawn(|| {
                 let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-                let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+                let generated = crate::sources(&root, Some(crate::FillMode::Require)).unwrap();
                 let included = [
                     ("mod_api_generated.rs", generated.hooks.as_str()),
                     ("mod_api_generated_host.rs", generated.host.as_str()),
@@ -1383,7 +1383,7 @@ mod tests {
             .stack_size(64 << 20)
             .spawn(|| {
                 let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-                let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+                let generated = crate::sources(&root, Some(crate::FillMode::Require)).unwrap();
                 let included = [
                     ("mod_api_generated.rs", generated.hooks.as_str()),
                     ("mod_api_generated_host.rs", generated.host.as_str()),
@@ -1409,7 +1409,7 @@ mod tests {
             .stack_size(64 << 20)
             .spawn(|| {
                 let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-                let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+                let generated = crate::sources(&root, Some(crate::FillMode::Require)).unwrap();
                 let providers = crate::capability_providers::generate(&root, &[]).unwrap().0;
                 let included = [
                     ("mod_api_generated.rs", generated.hooks.as_str()),
@@ -1530,7 +1530,7 @@ mod tests {
             .stack_size(64 << 20)
             .spawn(|| {
                 let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-                let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+                let generated = crate::sources(&root, Some(crate::FillMode::Require)).unwrap();
                 let included = [
                     ("mod_api_generated.rs", generated.hooks.as_str()),
                     ("mod_api_generated_host.rs", generated.host.as_str()),

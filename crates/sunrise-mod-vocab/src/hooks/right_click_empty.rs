@@ -7,7 +7,8 @@ pub trait Hooks {
         side = "client",
         contract = "listen",
         neoforge = "PlayerInteractEvent.RightClickEmpty",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_right_click_empty(&mut self, hand: Hand)"
     )]
     fn right_click_empty();
 }

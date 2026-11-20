@@ -24,7 +24,8 @@ pub trait Hooks {
         scope = "item",
         key = "stack",
         host = "read",
-        neoforge = "IItemExtension.isPiglinCurrency"
+        neoforge = "IItemExtension.isPiglinCurrency",
+        native = "fn native_is_piglin_currency(&self, stack: &ItemStack, currency: &mut bool)"
     )]
     fn is_piglin_currency();
 }

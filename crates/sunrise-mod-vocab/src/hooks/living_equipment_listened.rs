@@ -14,7 +14,9 @@ pub trait Hooks {
         contract = "collect",
         out = "listened",
         cancellable = false,
-        neoforge = "none (Sunrise-only; NeoForge has no counterpart); an opt-in gate for a hook"
+        neoforge = "none (Sunrise-only; NeoForge has no counterpart); an opt-in gate for a hook",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_living_equipment_listened",
+        native = "fn native_living_equipment_listened(&mut self, listened: &mut bool)"
     )]
     fn living_equipment_listened();
 }

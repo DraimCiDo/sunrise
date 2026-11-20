@@ -18,7 +18,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         cancellable = true,
-        neoforge = "none (NeoForge has no TNT priming event; the primed TNT entity joins with EntityJoinLevelEvent)"
+        neoforge = "none (NeoForge has no TNT priming event; the primed TNT entity joins with EntityJoinLevelEvent)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_tnt_primed",
+        native = "fn native_tnt_primed(&mut self, player: Option<u128>, pos: [i32; 3], cancel: &mut bool)"
     )]
     fn tnt_primed();
 }

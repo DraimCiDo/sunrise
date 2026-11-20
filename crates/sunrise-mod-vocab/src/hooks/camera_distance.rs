@@ -8,7 +8,9 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "CalculateDetachedCameraDistanceEvent"
+        neoforge = "CalculateDetachedCameraDistanceEvent",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_camera_distance",
+        native = "fn native_camera_distance(&self, partial: f32, mirrored: bool, entity: &mod_api::client::camera::CameraEntity, distance: &mut f32)"
     )]
     fn camera_distance();
 }

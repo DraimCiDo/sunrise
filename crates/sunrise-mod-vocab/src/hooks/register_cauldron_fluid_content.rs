@@ -39,7 +39,8 @@ is used on it is not part of this hook."#]
         contract = "collect",
         out = "contents",
         context = "registration",
-        neoforge = "RegisterCauldronFluidContentEvent"
+        neoforge = "RegisterCauldronFluidContentEvent",
+        native = "fn native_register_cauldron_fluid_content(context: &mod_api::RegistrationContext, contents: &mut dyn CauldronFluidContents)"
     )]
     fn register_cauldron_fluid_content();
 }

@@ -16,7 +16,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         target = "sunrise_client::game::native_hooks::block_sticky::GameLevel<'_>::native_is_slime_block",
-        neoforge = "IBlockExtension.isSlimeBlock"
+        neoforge = "IBlockExtension.isSlimeBlock",
+        native = "fn native_is_slime_block(&self, dimension: LevelDimension, state: BlockStateId, slime: &mut bool)"
     )]
     fn is_slime_block();
     /// Whether the block state this part is attached to is sticky to a piston
@@ -35,7 +36,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         target = "sunrise_client::game::native_hooks::block_sticky::GameLevel<'_>::native_is_sticky_block",
-        neoforge = "IBlockExtension.isStickyBlock"
+        neoforge = "IBlockExtension.isStickyBlock",
+        native = "fn native_is_sticky_block(&self, dimension: LevelDimension, state: BlockStateId, sticky: &mut bool)"
     )]
     fn is_sticky_block();
     /// Whether the block state this part is attached to sticks to `other`, the state beside it
@@ -55,7 +57,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         target = "sunrise_client::game::native_hooks::block_sticky::GameLevel<'_>::native_can_stick_to",
-        neoforge = "IBlockExtension.canStickTo"
+        neoforge = "IBlockExtension.canStickTo",
+        native = "fn native_can_stick_to(&self, dimension: LevelDimension, state: BlockStateId, other: BlockStateId, sticks: &mut bool)"
     )]
     fn can_stick_to();
 }

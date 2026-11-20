@@ -7,7 +7,9 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_raid_spawn_wave",
+        native = "fn native_raid_spawn_wave(&mut self, raid: i32, pos: [i32; 3], wave: i32, raiders: usize)"
     )]
     fn raid_spawn_wave();
 }

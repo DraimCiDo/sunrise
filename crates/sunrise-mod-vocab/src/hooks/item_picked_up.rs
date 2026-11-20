@@ -17,7 +17,8 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "ItemEntityPickupEvent.Pre",
-        version = 2
+        version = 2,
+        native = "fn native_item_picked_up(&mut self, player: u128, item: ItemEntityRef, can_pickup: &mut TriState)"
     )]
     fn item_picked_up();
 }

@@ -141,10 +141,12 @@ mod tests {
             .clone();
         hook.name = "probe".into();
         hook.target = target.into();
+        hook.native = None;
+        hook.direct = false;
         hook.call.clear();
         hook.context = None;
         hook.owner = None;
-        let emitted = dispatch::emit(&root, std::iter::once(&hook), &[], &[]).unwrap();
+        let emitted = dispatch::emit(&root, std::iter::once(&hook), Some(&[]), &[]).unwrap();
         assert!(emitted.dispatch.contains("dispatch_probe"));
         assert!(emitted.fills.is_empty());
 

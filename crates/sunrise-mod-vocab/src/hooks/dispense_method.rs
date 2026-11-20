@@ -22,7 +22,8 @@ pub trait Hooks {
         scope = "block",
         inert = "signal",
         key = "state",
-        neoforge = "none (vanilla DispenserBlock.getDispenseMethod; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla DispenserBlock.getDispenseMethod; NeoForge adds no event or extension for it)",
+        native = "fn native_dispense_method(&mut self, dimension: &str, pos: [i32; 3], facing: Direction, state: BlockStateId, stack: &ItemStack, answer: &mut Option<mod_api::Dispensed>, inert: &mut bool)"
     )]
     fn dispense_method();
 }

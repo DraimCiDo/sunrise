@@ -13,7 +13,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         host = "read",
-        neoforge = "IBlockExtension.getCloneItemStack"
+        neoforge = "IBlockExtension.getCloneItemStack",
+        native = "fn native_clone_item_stack(&self, dimension: LevelDimension, pos: BlockPos, block: &str, state: BlockStateId, include_data: bool, stack: &mut Option<ItemStack>)"
     )]
     fn clone_item_stack();
 }

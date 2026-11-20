@@ -19,7 +19,9 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "cancel",
-        neoforge = "none (NeoForge's ItemFishedEvent fires after the loot roll, in FishingHook.retrieve; Bukkit's PlayerFishEvent)"
+        neoforge = "none (NeoForge's ItemFishedEvent fires after the loot roll, in FishingHook.retrieve; Bukkit's PlayerFishEvent)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_fish",
+        native = "fn native_player_fish(&mut self, player: u128, name: &str, state: i32, cancel: &mut bool)"
     )]
     fn player_fish();
 }

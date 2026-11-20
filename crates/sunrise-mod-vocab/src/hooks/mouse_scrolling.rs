@@ -10,7 +10,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "InputEvent.MouseScrollingEvent",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_mouse_scrolling",
+        native = "fn native_mouse_scrolling(&mut self, scroll: [f64; 2], accumulated: [i32; 2], buttons: [bool; 3], cursor: [f32; 2], modifiers: u32, canceled: &mut bool)"
     )]
     fn mouse_scrolling();
 }

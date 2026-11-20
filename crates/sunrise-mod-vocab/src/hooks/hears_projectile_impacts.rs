@@ -12,7 +12,9 @@ pub trait Hooks {
         contract = "collect",
         out = "hears",
         host = "read",
-        neoforge = "none (Sunrise-only; NeoForge has no counterpart); an opt-in gate for a hook"
+        neoforge = "none (Sunrise-only; NeoForge has no counterpart); an opt-in gate for a hook",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_hears_projectile_impacts",
+        native = "fn native_hears_projectile_impacts(&self, hears: &mut bool)"
     )]
     fn hears_projectile_impacts();
 }

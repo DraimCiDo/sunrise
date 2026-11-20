@@ -40,7 +40,8 @@ when the menu opens: a menu with none does no work for this hook."##]
         version = 2,
         non_exhaustive = true,
         target = "sunrise_client_lib::lan::menu::native_menu_still_valid",
-        neoforge = "none (vanilla AbstractContainerMenu.stillValid, which each menu overrides)"
+        neoforge = "none (vanilla AbstractContainerMenu.stillValid, which each menu overrides)",
+        native = "fn native_menu_still_valid(context: &LoopContext, player: u128, menu: &str, pos: Option<[i32; 3]>, eye: [f64; 3], valid: &mut bool)"
     )]
     fn menu_still_valid();
 }

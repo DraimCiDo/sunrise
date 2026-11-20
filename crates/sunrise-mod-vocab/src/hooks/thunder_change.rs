@@ -9,7 +9,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_thunder_change",
+        native = "fn native_thunder_change(&mut self, dimension: &str, thundering: bool, cancel: &mut bool)"
     )]
     fn thunder_change();
 }

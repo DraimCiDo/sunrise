@@ -18,7 +18,8 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_block_signal",
-        neoforge = "none (vanilla BlockBehaviour.getSignal and getDirectSignal; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla BlockBehaviour.getSignal and getDirectSignal; NeoForge adds no event or extension for it)",
+        native = "fn native_block_signal(&self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, face: Direction, direct: bool, signal: &mut i32)"
     )]
     fn block_signal();
 }

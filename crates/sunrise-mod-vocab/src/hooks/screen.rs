@@ -23,7 +23,9 @@ pub trait Hooks {
         scope = "menu",
         key = "menu",
         host = "read",
-        neoforge = "RegisterMenuScreensEvent.register (one screen per menu type, whatever opened the menu; Sunrise's is a layout value and three drawing and input hooks, not a Screen class)"
+        neoforge = "RegisterMenuScreensEvent.register (one screen per menu type, whatever opened the menu; Sunrise's is a layout value and three drawing and input hooks, not a Screen class)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_screen",
+        native = "fn native_screen(&self, menu: &str, block: Option<&str>, screen: &mut Option<mod_api::Screen>)"
     )]
     fn screen();
 }

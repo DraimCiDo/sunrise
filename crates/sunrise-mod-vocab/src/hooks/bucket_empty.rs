@@ -16,7 +16,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "none (vanilla BucketItem.emptyContents; NeoForge has no matching event)",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_bucket_empty",
+        native = "fn native_bucket_empty(&mut self, player: u128, name: &str, pos: [i32; 3], fluid: &str, cancel: &mut bool)"
     )]
     fn bucket_empty();
 }

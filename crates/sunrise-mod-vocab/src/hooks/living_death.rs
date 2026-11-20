@@ -16,7 +16,8 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "LivingDeathEvent",
         cancellable = true,
-        version = 2
+        version = 2,
+        native = "fn native_living_death(&mut self, entity: u32, kind: &str, source: &HurtSource<'_>, weapon: Option<&mod_api::ItemStack>, cancel: &mut bool)"
     )]
     fn living_death();
 }

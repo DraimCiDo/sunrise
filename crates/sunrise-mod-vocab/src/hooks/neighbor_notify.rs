@@ -14,7 +14,8 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "BlockEvent.NeighborNotifyEvent",
         cancellable = true,
-        target = "sunrise_client::game::native_hooks::neighbor_notify::GameLevel<'_>::native_neighbor_notify"
+        target = "sunrise_client::game::native_hooks::neighbor_notify::GameLevel<'_>::native_neighbor_notify",
+        native = "fn native_neighbor_notify(&self, dimension: LevelDimension, pos: BlockPos, state: BlockStateId, skipped_side: Option<Direction>, cancel: &mut bool)"
     )]
     fn neighbor_notify();
 }

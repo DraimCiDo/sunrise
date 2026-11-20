@@ -24,7 +24,8 @@ pub trait Hooks {
         contract = "collect",
         out = "drops",
         stack_count = "trim",
-        target = "sunrise_client::game::native_hooks::container_loot_filled::GameLevel<'_>::native_container_loot_filled"
+        target = "sunrise_client::game::native_hooks::container_loot_filled::GameLevel<'_>::native_container_loot_filled",
+        native = "fn native_container_loot_filled(&self, context: &ContainerLootFilled<'_>, drops: &mut Vec<ItemStack>)"
     )]
     fn container_loot_filled();
 }

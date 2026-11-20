@@ -13,7 +13,8 @@ pub trait Hooks {
         contract = "replace",
         out = "data",
         neoforge = "IPlayerExtension.openMenu",
-        cancellable = false
+        cancellable = false,
+        native = "fn native_menu_extra_data(&mut self, player: u128, menu: &str, block: &str, pos: [i32; 3], data: &mut Option<Vec<u8>>)"
     )]
     fn menu_extra_data();
 }

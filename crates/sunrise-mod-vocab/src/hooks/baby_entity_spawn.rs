@@ -32,7 +32,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "BabyEntitySpawnEvent",
-        cancellable = true
+        cancellable = true,
+        native = "fn native_baby_entity_spawn(&mut self, call: mod_api::__private::BabyEntitySpawnCall<'_>)"
     )]
     fn baby_entity_spawn(
         dimension: &str,

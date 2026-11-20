@@ -16,7 +16,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "StatAwardEvent",
-        cancellable = true
+        cancellable = true,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_stat_award",
+        native = "fn native_player_stat_award(&mut self, player: u128, name: &str, stat_type: &mut String, stat: &mut String, value: &mut i32, cancel: &mut bool)"
     )]
     fn player_stat_award();
 }

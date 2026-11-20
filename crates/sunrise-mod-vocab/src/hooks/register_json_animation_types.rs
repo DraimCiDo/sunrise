@@ -72,7 +72,8 @@ type and the mod that registered it."#]
         out = "types",
         context = "registration",
         answered_by = "mod",
-        neoforge = "RegisterJsonAnimationTypesEvent"
+        neoforge = "RegisterJsonAnimationTypesEvent",
+        native = "fn native_register_json_animation_types(context: &mod_api::RegistrationContext, types: &mut Vec<Answered<JsonAnimationType>>)"
     )]
     fn register_json_animation_types();
 }

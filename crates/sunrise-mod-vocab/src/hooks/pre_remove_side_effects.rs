@@ -34,7 +34,8 @@ pub trait Hooks {
         scope = "block_entity",
         key = "entity",
         target = "sunrise_client::game::native_hooks::pre_remove_side_effects::GameLevel<'_>::native_pre_remove_side_effects",
-        neoforge = "none (vanilla BlockEntity.preRemoveSideEffects; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla BlockEntity.preRemoveSideEffects; NeoForge adds no event or extension for it)",
+        native = "fn native_pre_remove_side_effects(&mut self, call: super::fire::PreRemoveSideEffectsCall<'_>)"
     )]
     fn pre_remove_side_effects(
         pos: BlockPos,

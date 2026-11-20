@@ -22,7 +22,8 @@ pub trait Hooks {
         key = "state",
         inert = "*hydrates = None;",
         target = "sunrise_client::game::native_hooks::can_be_hydrated::GameLevel<'_>::native_can_be_hydrated",
-        neoforge = "IBlockExtension.canBeHydrated"
+        neoforge = "IBlockExtension.canBeHydrated",
+        native = "fn native_can_be_hydrated(&self, dimension: LevelDimension, state: BlockStateId, pos: BlockPos, fluid: mod_api::FluidState, fluid_pos: BlockPos, hydrates: &mut Option<bool>)"
     )]
     fn can_be_hydrated();
 }

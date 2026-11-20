@@ -10,7 +10,8 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "GameRuleChangedEvent"
+        neoforge = "GameRuleChangedEvent",
+        native = "fn native_game_rule_changed(&mut self, rule: &str, value: GameRuleValue, actor: Option<&GameRuleActor<'_>>)"
     )]
     fn game_rule_changed();
 }

@@ -20,7 +20,9 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         cancellable = true,
-        neoforge = "none (vanilla ServerGamePacketListenerImpl.handleSetCreativeModeSlot; NeoForge adds no event or extension for it)"
+        neoforge = "none (vanilla ServerGamePacketListenerImpl.handleSetCreativeModeSlot; NeoForge adds no event or extension for it)",
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_creative_slot",
+        native = "fn native_creative_slot(&mut self, player: u128, name: &str, slot: i32, item: &str, count: i32, cancel: &mut bool)"
     )]
     fn creative_slot();
 }

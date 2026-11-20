@@ -8,7 +8,8 @@ pub trait Hooks {
         out = "discard",
         scope = "block",
         key = "state",
-        neoforge = "none (Block.updateEntityAfterFallOn; dropped-item contact)"
+        neoforge = "none (Block.updateEntityAfterFallOn; dropped-item contact)",
+        native = "fn native_item_after_vertical_collision(&mut self, call: crate::game::native_hooks::fire::ItemAfterVerticalCollisionCall<'_>)"
     )]
     fn item_after_vertical_collision(
         dimension: &str,

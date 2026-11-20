@@ -16,7 +16,9 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "PlayerContainerEvent.Close",
-        cancellable = false
+        cancellable = false,
+        target = "sunrise_client::game::native_hooks::base::Game<'_>::native_player_container_close",
+        native = "fn native_player_container_close(&mut self, player: u128, name: &str, dimension: &str, menu_type: &str, pos: Option<[i32; 3]>)"
     )]
     fn player_container_close();
 }

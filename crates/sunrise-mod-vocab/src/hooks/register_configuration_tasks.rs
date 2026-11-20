@@ -10,7 +10,8 @@ pub trait Hooks {
         side = "server",
         contract = "collect",
         out = "tasks",
-        neoforge = "RegisterConfigurationTasksEvent"
+        neoforge = "RegisterConfigurationTasksEvent",
+        native = "fn native_register_configuration_tasks(&mut self, connection: mod_api::ConfigurationConnection, player: u128, name: &str, tasks: &mut Vec<mod_api::ConfigurationTask>)"
     )]
     fn register_configuration_tasks();
 }

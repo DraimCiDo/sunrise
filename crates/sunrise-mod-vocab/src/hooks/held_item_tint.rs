@@ -21,7 +21,8 @@ pub trait Hooks {
         scope = "item",
         key = "stack",
         event_per_listener = true,
-        neoforge = "none (vanilla ItemInHandLayer.submitArmWithItem and PlayerItemInHandLayer.submitArmWithItem)"
+        neoforge = "none (vanilla ItemInHandLayer.submitArmWithItem and PlayerItemInHandLayer.submitArmWithItem)",
+        native = "fn native_held_item_tint(&self, entity_id: u32, hand: Hand, stack: &ItemStack, partial_tick: f32, tint: &mut Option<u32>)"
     )]
     fn held_item_tint();
 }
