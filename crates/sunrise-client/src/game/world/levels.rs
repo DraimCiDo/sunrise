@@ -987,7 +987,6 @@ impl Game<'_> {
         if let Some(host) = &mut self.lan {
             std::mem::swap(&mut host.states, &mut parked.lan_states);
             std::mem::swap(&mut host.border_sent, &mut parked.border_sent);
-            host.hub.set_dimension(target.id());
         }
         let left = std::mem::replace(&mut self.dim, target);
         self.levels.parked.insert(left, parked);
@@ -1021,6 +1020,9 @@ impl Game<'_> {
         let pending = std::mem::take(&mut self.pending);
         let spill = std::mem::take(&mut self.spill);
         self.put_level_in_place(target, parked);
+        if let Some(host) = &mut self.lan {
+            host.hub.set_dimension(target.id());
+        }
 
         struct ReturnLevel<'a, 'g, F: FnOnce(&mut Game<'g>)> {
             game: &'a mut Game<'g>,
@@ -1041,6 +1043,9 @@ impl Game<'_> {
                     .expect("a scoped write cannot unload its caller's level");
                 parked.world.day_time = previous_day;
                 game.put_level_in_place(previous, parked);
+                if let Some(host) = &mut game.lan {
+                    host.hub.set_dimension(previous.id());
+                }
                 (
                     game.player,
                     game.lan_acting,
@@ -1081,9 +1086,8 @@ impl Game<'_> {
             // Overworld's.
             let clock = self.level_clock_name(target);
             parked.world.day_time = self.switch_clock(&clock);
-            let left = self.dim;
+            parked.idle = 0;
             self.put_level_in_place(target, parked);
-            self.levels.parked.get_mut(&left).unwrap().idle = 0;
             self.clear_client_particles();
             if opened {
                 // The new streaming's radius and meshing options.
