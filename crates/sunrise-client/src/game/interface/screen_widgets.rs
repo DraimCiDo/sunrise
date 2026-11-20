@@ -457,8 +457,9 @@ mod tests {
     use mod_api::client::widgets::{Button, ScreenWidgetError, ScreenWidgetRef};
     use mod_api::{
         ClientHost, Flow, Hooks, ModEntry, ScreenCharTypedPreEvent, ScreenInitPostEvent,
-        ScreenInitPreEvent, ScreenMouseButtonReleasedPreEvent, Text, testing::with_mods,
+        ScreenInitPreEvent, ScreenMouseButtonReleasedPreEvent, Text,
     };
+    use mod_platform::testing::with_mods;
     use std::cell::RefCell;
     use std::sync::{Arc, Mutex};
     use sunrise_client::{gamepad, osk, widgets};
