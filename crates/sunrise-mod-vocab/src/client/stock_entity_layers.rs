@@ -66,7 +66,6 @@ pub enum HideLayerError {
     Unsupported(StockEntityLayer),
 }
 
-// no wire: draw-local renderer state, never serialized.
 // hidden: the renderer's fixed-size mask, used for both supported and hidden layers.
 #[doc(hidden)]
 #[derive(Clone, Copy, Default)]

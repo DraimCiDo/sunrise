@@ -1,7 +1,7 @@
 use crate::{DynamicTextureError, Identifier};
 
 /// The view that is submitting the player's built-in layer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PlayerLayerView {
     /// A player in the world, including the local third-person avatar.
@@ -11,7 +11,7 @@ pub enum PlayerLayerView {
 }
 
 /// A built-in player layer whose texture can be selected for a draw.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PlayerLayer {
     /// The cape, which may have no profile image.
@@ -20,7 +20,6 @@ pub enum PlayerLayer {
     Wings,
 }
 
-// no wire: the selection borrows the caller's identifier only while checking the drawing decision.
 /// A texture proposal for the current player, layer and view.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
@@ -35,7 +34,7 @@ pub enum PlayerLayerChoice<'a> {
 }
 
 /// Why a texture proposal did not replace the previous accepted choice.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PlayerLayerRefusal {
     /// Only wings can use an equipment texture.
@@ -46,7 +45,6 @@ pub enum PlayerLayerRefusal {
     IncompatibleLayout,
 }
 
-// no wire: draw-scoped access to the current atlas; it cannot outlive the hook.
 /// Engine context holding a stageable copy of the draw's texture decision.
 #[doc(hidden)]
 pub struct PlayerLayerSelection<'a> {
@@ -87,7 +85,6 @@ impl PlayerLayerSelection<'_> {
     }
 }
 
-// no wire: engine-only result holding normalized UVs in the current frame's atlas.
 #[doc(hidden)]
 #[derive(Clone, Copy)]
 pub enum ResolvedPlayerLayerTexture {
