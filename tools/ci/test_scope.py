@@ -28,7 +28,7 @@ from tools.ci.rust_changes import changed_paths  # noqa: E402
 SUNRISE_CLIENT = [
     # The build script and the native hook tests read the hook targets' sources.
     "crates/sunrise-client-render/src", "crates/sunrise-world/src", "crates/sunrise-items/src",
-    "crates/sunrise-guest-stack/src/guest_stack_constants.rs", "crates/sunrise-mod-wasm/tests/fixture/src",
+    "crates/sunrise-guest-stack/src/guest_stack_constants.rs",
     "docs/api/launch-reference.md", "docs/sunrise-ctl-commands.md", "docs/modding/examples/src/worldgen.rs",
     "docs/parity/block-entity-client-ticks.jsonl", "docs/parity/random-chance-seeded.jsonl",
     "packaging/executable_link.rs", "packaging/windows/exe.rs",
@@ -70,7 +70,6 @@ READERS = {
     "sunrise-guest-stack": ["crates/sunrise-client/src", "crates/sunrise-threads/src"],
     "sunrise-mod-api": MOD_API_GEN,
     "sunrise-mod-api-gen": MOD_API_GEN,
-    "sunrise-mod-marks": MOD_API_GEN,
     "sunrise-mod-api-gen-tests": MOD_API_GEN,
     "sunrise-mod-package": [
         "Cargo.lock", "docs/modding/src/how-to/native-mods/07-local-developer-builds.md",
@@ -78,11 +77,6 @@ READERS = {
     ],
     "sunrise-mod-points": MOD_API_GEN,
     "sunrise-mod-render": MOD_API_GEN,
-    "sunrise-mod-wasm": [*MOD_API_GEN, "crates/sunrise-guest-stack/src/guest_stack_constants.rs"],
-    "sunrise-mod-wasm-wire-loopback": [
-        *MOD_API_GEN, "crates/sunrise-guest-stack/src/guest_stack_constants.rs", "crates/sunrise-mod-wasm/src/prepared.rs",
-        "crates/sunrise-mod-wasm/tests/fixture/src", "crates/sunrise-mod-wasm/tests/support",
-    ],
     "sunrise-official": ["packaging/windows/exe.rs"],
     "sunrise-perf": ["crates/sunrise-perf-format/tests/fixtures", "tests/fixtures/pacing_slow_frames.hzperf"],
     "sunrise-port-pack": ["docs/modpacks/atm10-mods.csv"],

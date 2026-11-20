@@ -53,7 +53,7 @@ pub(super) const NO_ANSWER: &str =
 /// The server thread holds its `Game` by value and runs every tick on it.
 /// It reserves what every guest-capable thread does under the engine's stack policy.
 fn server_thread_stack_floor() -> usize {
-    sunrise_guest_stack::engine().reservation()
+    sunrise_guest_stack::reservation()
 }
 
 /// The server thread's stack size: [`server_thread_stack_floor`], or what `RUST_MIN_STACK` asks for

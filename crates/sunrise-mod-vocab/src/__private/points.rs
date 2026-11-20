@@ -1,4 +1,4 @@
-//! The engine API point registry, shared by native and wasm listeners.
+//! The engine API point registry for native listeners.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -54,7 +54,7 @@ impl Table {
     /// guard.
     #[cold]
     #[inline(never)]
-    pub fn fire_api(&self, place: usize, call: &mut dyn FnMut(ApiKind)) {
+    pub fn fire_api(&self, place: usize, call: &mut dyn FnMut(ApiFunction)) {
         let Some(sealed) = self.sealed.get() else {
             return;
         };
@@ -139,7 +139,7 @@ struct Owner {
     id: &'static str,
     /// Resolved at the seal, so firing reads the owner's canonical enable flag without a scan.
     mod_index: Option<usize>,
-    /// Set when the mod stopped (a trap in its wasm group, or the game giving up on it): its
+    /// Set when the game stops a mod: its
     /// listeners are skipped from then on.
     stopped: AtomicBool,
 }
@@ -150,56 +150,35 @@ impl Owner {
     }
 }
 
-/// The host available to a point's hook call; frame objects never cross as data.
-// no wire: point registry machinery runs in its owning process; listeners cross through their records, never this.
-// exhaustive: generated point code builds and matches it in full.
-pub enum PointHost<'a> {
-    /// A read-only point.
-    Read(&'a dyn crate::Host),
-    /// A server write point.
-    Server(&'a mut dyn crate::ServerHost),
-    /// A client write point.
-    Client(&'a mut dyn crate::ClientHost),
-    /// A point which runs on either side.
-    Side(crate::HostSide<'a>),
-    /// A free function without a host.
-    None,
-}
-
-/// A checked hook endpoint. The runtime calls the ordinary hook export under its limits.
-pub trait Forward: Send + Sync {
-    /// Dispatches one generated listener id with its mutable wire record.
-    fn forward(&self, id: u64, host: PointHost<'_>, record: &mut dyn crate::wire::Record);
-}
-
-/// A typed API function.
+// exhaustive: construction is private to the listener type.
+/// A function whose signature was checked by the generated listener constructor.
 #[derive(Clone, Copy)]
-// no wire: point registry machinery runs in its owning process; listeners cross through their records, never this.
-// exhaustive: generated point code builds and matches it in full.
-pub enum ApiKind {
-    /// A function checked by the generated typed constructor before erasure.
-    Typed(*const ()),
-    /// A runtime endpoint in the same ordered list as native functions.
-    Forwarded(&'static dyn Forward, u64),
+pub struct ApiFunction(*const ());
+
+impl ApiFunction {
+    /// Its erased function pointer; only the matching generated dispatcher can call it.
+    pub fn as_ptr(self) -> *const () {
+        self.0
+    }
 }
 
-// The pointer is a function; forwarding endpoints are Send + Sync resources.
+// The pointer is a function checked by the constructor, not a reference to data.
 #[allow(
     unsafe_code,
     reason = "Carried point-registry function-pointer erasure; ownership cleanup is tracked in #2587"
 )]
-unsafe impl Send for ApiKind {}
+unsafe impl Send for ApiFunction {}
 #[allow(
     unsafe_code,
     reason = "Carried point-registry function-pointer erasure; ownership cleanup is tracked in #2587"
 )]
-unsafe impl Sync for ApiKind {}
+unsafe impl Sync for ApiFunction {}
 
 /// A listener in its place's list.
 #[derive(Clone, Copy)]
 struct Slot {
     listener: u32,
-    kind: ApiKind,
+    kind: ApiFunction,
     priority: i32,
     injection: &'static str,
     replace: bool,
@@ -263,8 +242,8 @@ pub enum RegisterError {
         /// The place's index.
         index: usize,
     },
-    /// The guest table requires a typed API listener.
-    Unsupported,
+    /// The listener belongs to a different point table.
+    ForeignTable,
     /// A second `replace` listener at a place that already has one: two overwrites can't both win,
     /// as with a mixin overwrite conflict. Names the mod and injection of each.
     Replaced {
@@ -285,8 +264,8 @@ impl std::fmt::Display for RegisterError {
             Self::NoPlace { id, index } => {
                 write!(f, "{id}: place {index} is outside its point table")
             }
+            Self::ForeignTable => f.write_str("the listener belongs to a different point table"),
             Self::Sealed => f.write_str("the game's points were already set"),
-            Self::Unsupported => f.write_str("the guest table requires a typed API listener"),
             Self::Replaced { first, second } => write!(
                 f,
                 "{}:{} replaces a function that {}:{} already replaces; only one replace \
@@ -305,7 +284,7 @@ impl std::error::Error for RegisterError {}
 pub struct SlotListener {
     id: &'static str,
     place: Place,
-    kind: ApiKind,
+    kind: ApiFunction,
     priority: i32,
     injection: &'static str,
     /// A `replace` listener: the function is its, so a second one at the place is refused.
@@ -322,20 +301,10 @@ impl SlotListener {
         reason = "Carried typed point registration contract; ownership cleanup is tracked in #2587"
     )]
     pub const unsafe fn api(id: &'static str, place: Place, function: *const ()) -> Self {
-        Self::of(id, place, ApiKind::Typed(function))
+        Self::of(id, place, ApiFunction(function))
     }
 
-    /// A checked runtime endpoint at an API place, dispatched through the hook machinery.
-    pub const fn forwarded(
-        id: &'static str,
-        place: Place,
-        endpoint: &'static dyn Forward,
-        export: u64,
-    ) -> Self {
-        Self::of(id, place, ApiKind::Forwarded(endpoint, export))
-    }
-
-    const fn of(id: &'static str, place: Place, kind: ApiKind) -> Self {
+    const fn of(id: &'static str, place: Place, kind: ApiFunction) -> Self {
         Self {
             id,
             place,
@@ -361,7 +330,7 @@ impl SlotListener {
     }
 
     /// The function, when it is a typed API listener.
-    pub fn api_kind(&self) -> Option<ApiKind> {
+    pub fn api_kind(&self) -> Option<ApiFunction> {
         Some(self.kind)
     }
 
@@ -381,8 +350,8 @@ impl SlotListener {
     }
 }
 
-/// Registers a function or checked endpoint in its place's table, in the same order for native
-/// and wasm owners. The one boundary every listener passes: a table whose places have no site in
+/// Registers a function in its place's table. The one boundary every listener passes:
+/// a table whose places have no site in
 /// this build refuses here, naming the mod and the target, so no listener registers and never runs.
 pub fn register(slot: &SlotListener) -> Result<(), RegisterError> {
     // A place is built from any table and index: one outside its table is refused, not indexed.
@@ -413,7 +382,7 @@ pub fn register(slot: &SlotListener) -> Result<(), RegisterError> {
         slots: Vec::new(),
     });
     if !std::ptr::eq(table.table, slot.place.table) {
-        return Err(RegisterError::Unsupported);
+        return Err(RegisterError::ForeignTable);
     }
     let place = slot.place.index;
     if slot.replace
@@ -452,8 +421,7 @@ pub fn register(slot: &SlotListener) -> Result<(), RegisterError> {
 }
 
 /// Stops mod `id`'s engine listeners: none of them runs again, whether the slots are
-/// sealed yet or not. A trap that stops a wasm group and the game giving up on a native mod both
-/// end here.
+/// sealed yet or not.
 pub fn stop(id: &str) {
     let mut open = lock();
     if !open.sealed {

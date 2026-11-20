@@ -293,6 +293,7 @@ mod tests {
             note: None,
         };
         let uses = Uses {
+            schema: mod_surface::uses::USES_SCHEMA,
             items: vec![
                 used("hook:player_logged_in"),
                 used("hook:block_broken"),

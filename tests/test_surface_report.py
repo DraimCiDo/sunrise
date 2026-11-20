@@ -133,7 +133,6 @@ echo '{{}}' > "$3"
         self.assertIn("Surface: report\n", text)
         own = [call for call in calls.splitlines() if call.startswith("own ")]
         self.assertEqual(len(own), 1)
-        self.assertIn("--without-calls", own[0])
         self.assertIn("surface-diff", calls)
 
     def test_a_base_neither_tool_can_read_fails_naming_both(self):

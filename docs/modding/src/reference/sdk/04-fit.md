@@ -91,8 +91,7 @@ A registry or a release page can tell which builds a published package fits from
 `surface.json` alone, or with the build's build data too for a mod that declares game code:
 `cargo sunrise-mod fits <file.smod> --build <name>`. For a current list nothing from the build
 the mod was made for is needed, so pruning that build's compiled files never strands the mod. `fits` first checks
-that the list was made for the build the package pins (a native mod's `[native] sunrise`, a wasm mod's
-`[package.metadata.sunrise] sdk` in its packed `Cargo.toml`). If the pin is missing, is not a full commit SHA,
+that the list was made for the build the package pins (`[native] sunrise`). If the pin is missing, is not a full commit SHA,
 or does not match `made_for`, the list cannot show which other builds the package fits.
 
 The version promise covers the hooks in the list. A hook entry that holds no version cannot be shown to mean what

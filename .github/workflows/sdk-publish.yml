@@ -55,8 +55,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.rust.outputs.version }}
-          # The API source is checked for wasm32 too (tools/sdk_api_source.py build).
-          targets: wasm32-unknown-unknown
       # As the legs' caches: main's runs save it, every branch restores it.
       - uses: Swatinem/rust-cache@v2
         with:

@@ -2,9 +2,6 @@
 //! Crash report lines a mod adds (NeoForge's `CrashReportCallables`), computed when a report is
 //! written rather than when they are registered.
 use super::*;
-use crate::wire::{Reader, Wire, WireError, Writer};
-
-crate::wire::wire_handlers::handler!(dyn CrashSection, "CrashSection");
 
 /// A crash report line a mod computes when the report is written: NeoForge's
 /// `ISystemReportExtender`, `ICrashReportHeader`, or a `registerCrashCallable` supplier with its
@@ -12,10 +9,6 @@ crate::wire::wire_handlers::handler!(dyn CrashSection, "CrashSection");
 /// mid-tick: read the mod's own state, and don't wait on anything the game holds.
 pub trait CrashSection: Send + Sync + 'static {
     // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::crash_section::<Self>();
-    }
     /// The line's text, or `None` to leave it out of this report. The report keeps it on one
     /// line (control characters become spaces) and cuts it to 4096 bytes.
     fn value(&self) -> Option<String>;

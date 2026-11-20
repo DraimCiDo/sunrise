@@ -2,24 +2,22 @@
 //! items, data and assets, no code. Code mods are native (docs/modding/src/how-to/native-mods.md).
 //!
 //! - `new <path> [--name "Name"]`: a content mod from the template; with
-//!   `--template native|wasm [--sunrise <build>]`, a code mod pinned to the current Nightly's
+//!   `--template native [--sunrise <build>]`, a code mod pinned to the current Nightly's
 //!   SDK unless `--sunrise` names another build (`nightly-<date>` or a sha), with that SDK fetched
 //!   into `.sunrise/sdk/` (`sdk_fetch.rs`).
-//! - `update [--sunrise <build>]`: repin this mod; for a native mod, also diff/refresh declared internals.
+//! - `update [--sunrise <build>]`: repin a native mod and diff/refresh declared internals.
 //! - `inject update [--accept <id>]…`: refresh declarations without repinning.
 //! - `inject sync --repo <game checkout>`: validate API injection pins against a game catalog.
 //! - `inject add <at> --kind <kind> [--call <callee>] [--nth N] [--with <fn>]`: pin an inject.
-//! - `internals sync [--repo <path>]`: sync declarations for native or wasm mods.
+//! - `internals sync [--repo <path>]`: sync declarations for native mods.
 //! - `internals add <path>… [--kind <kind>]`: declare internals from the prebuilt catalog.
-//! - `build [--update-lock | --wasm [--catalog <points.json>] [--with <mod>]…]`: the `.smod` in `target/sunrise-mod/`, with the mod's `assets/`
-//!   and `data/`; a native mod is then compiled too (`dev.rs`); with `--wasm`, a Rust mod built to `mod.wasm` first (`wasm.rs`).
+//! - `build [--update-lock]`: the `.smod` in `target/sunrise-mod/`, with the mod's `assets/`
+//!   and `data/`; a native mod is compiled first (`dev.rs`).
 //! - `publish`: build, then write the registry entry, the staged file and the pull request text (`publish.rs`).
-//! - `wasm-std <out.wasm>`: the standard library member the game ships for wasm mods.
 //! - `run [--game <sunrise-client>] [--resources <folder>] [--jars <dir>] [-- <game args>]`: build, then play with
 //!   the mod.
-//! - `check [--uses] [--wasm] [--native]` in a mod folder: the package rules, its render pipeline
-//!   shaders composed and validated as the game does, `cargo check` for the project's own target
-//!   (`--wasm` or `--native` asks for the other), and what the mod uses of its pinned build
+//! - `check [--uses]` in a mod folder: the package rules and render pipeline shaders; for a native
+//!   mod, `cargo check` and what the mod uses of its pinned build
 //!   (`sdk_cmds.rs`).
 //! - `check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json]`: what the registry checks of a submission
 //!   (`.smod`, `.spack`, resource pack `.zip`, `.sshader`).
@@ -43,7 +41,6 @@ mod inject;
 mod inject_sync;
 mod internals;
 mod jar;
-mod layouts;
 mod native_build;
 mod options;
 mod publish;
@@ -51,7 +48,6 @@ mod registry;
 mod sdk_cmds;
 mod sdk_fetch;
 mod uses_table;
-mod wasm;
 
 use options::Options;
 use std::{
@@ -60,10 +56,6 @@ use std::{
 };
 
 const RUN_DIR: &str = "target/sunrise-mod/run";
-
-fn is_compiler_wrapper(name: &str) -> bool {
-    name.strip_suffix(".exe").unwrap_or(name).ends_with("rustc")
-}
 
 /// What `--version` prints: the commit this tool was built from, which tells a user whether it is as new as the
 /// rolling release (`tool.json`'s `commit` in the `mod-tool` release), and the `native-*` contract number it speaks.
@@ -87,30 +79,6 @@ fn main() -> ExitCode {
     let entry = mod_surface::child::child_entry();
     // Cargo runs `cargo-sunrise-mod sunrise-mod <args>`.
     let mut args: Vec<String> = std::env::args().skip(1).collect();
-    if std::env::var_os("SUNRISE_GROUP_WRAPPER").is_some()
-        // `rustc`, or `rustc.exe` on Windows.
-        && args
-            .first()
-            .is_some_and(|a| is_compiler_wrapper(a))
-    {
-        return match wasm::rustc(args) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("error: {e}");
-                ExitCode::FAILURE
-            }
-        };
-    }
-    // Cargo runs this tool as the linker of a `build --wasm`.
-    if let Ok(role) = std::env::var(wasm::LINK_ENV) {
-        return match wasm::link(&role, args) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("error: {e}");
-                ExitCode::FAILURE
-            }
-        };
-    }
     if args.first().is_some_and(|a| a == "sunrise-mod") {
         args.remove(0);
     }
@@ -130,12 +98,11 @@ fn main() -> ExitCode {
             Some(dir) => fetched(&dir),
             None => Ok(()),
         }),
-        Some("wasm-std") => wasm::wasm_std(&args[1..]),
         Some("build") => build_command(entry, &args[1..]).map(drop),
         Some("publish") => publish::run(entry, &args[1..]),
         Some("run") => run(&args[1..]).map_err(|e| e.to_string()),
         Some("check") => check_args(&args[1..]).and_then(|wanted| match wanted {
-            Check::Folder(flags) => sdk_cmds::check_mod(entry, flags),
+            Check::Folder { uses } => sdk_cmds::check_mod(entry, uses),
             Check::File(file) => check(file),
         }),
         Some("hooks") => sdk_cmds::hooks(&args[1..]),
@@ -171,69 +138,30 @@ fn main() -> ExitCode {
     }
 }
 
-/// What `build` was asked for.
-#[derive(Debug, PartialEq)]
-struct BuildArgs<'a> {
-    wasm: bool,
-    update_lock: bool,
-    catalog: Option<&'a str>,
-    with: Vec<&'a str>,
-}
-
-/// `build [--update-lock | --wasm]`, and with `--wasm` the CI-only `--catalog <points.json>` and `--with <library.wasm>…`.
-fn build_args(args: &[String]) -> Result<BuildArgs<'_>, String> {
-    let mut options = Options::new("build", args, &["--catalog", "--with"]);
-    let parsed = BuildArgs {
-        wasm: options.switch("--wasm"),
-        update_lock: options.switch("--update-lock"),
-        catalog: options.value("--catalog")?,
-        with: options.values("--with")?,
-    };
+fn build_args(args: &[String]) -> Result<bool, String> {
+    let mut options = Options::new("build", args, &[]);
+    let update_lock = options.switch("--update-lock");
     options.finish()?;
-    // Read by one kind of build only: given to the other, each would be dropped unsaid.
-    if !parsed.wasm && (parsed.catalog.is_some() || !parsed.with.is_empty()) {
-        let option = if parsed.catalog.is_some() {
-            "--catalog"
-        } else {
-            "--with"
-        };
-        return Err(format!("build {option} needs --wasm"));
-    }
-    if parsed.wasm && parsed.update_lock {
-        return Err(
-            "build --update-lock rewrites a native mod's Cargo.lock; build --wasm does not take it"
-                .into(),
-        );
-    }
-    Ok(parsed)
+    Ok(update_lock)
 }
 
-/// `build [--update-lock | --wasm]`: the package in `target/sunrise-mod/`, after a wasm mod's
-/// `mod.wasm` (with `--wasm`) or a native mod's compile. Also the first step of `publish`.
+/// `build [--update-lock]`: compile a native mod, then write the package in `target/sunrise-mod/`.
+/// Also the first step of `publish`.
 fn build_command(
     entry: mod_surface::child::ChildEntry,
     args: &[String],
 ) -> Result<PathBuf, String> {
-    let wanted = build_args(args)?;
+    let update_lock = build_args(args)?;
     let root = Path::new(".");
     let output = PackageOutput::in_project(root)?;
-    if wanted.wasm {
-        fetched(root)?;
-        let api = pinned_surface(root)?;
-        wasm::build(
-            root,
-            wanted.catalog.map(Path::new),
-            &wanted.with.iter().map(PathBuf::from).collect::<Vec<_>>(),
-            api.as_ref(),
-        )?;
-    } else if code_project(root) {
+    let package = Package::read(root)?;
+    if package.is_native() {
         fetched(root)?;
     }
-    let package = Package::read(root)?;
     // The package carries the mixins revision and Cargo.lock from the completed build.
     let built = package
         .is_native()
-        .then(|| dev::build(root, wanted.update_lock))
+        .then(|| dev::build(root, update_lock))
         .transpose()?;
     let path = build(
         entry,
@@ -243,11 +171,6 @@ fn build_command(
     )?;
     println!("Built {}", path.display());
     Ok(path)
-}
-
-/// Whether `dir` is a code mod's project: one with a `Cargo.toml`, which depends on the SDK.
-fn code_project(dir: &Path) -> bool {
-    dir.join("Cargo.toml").is_file()
 }
 
 /// The SDK the project at `dir` pins, fetched into its `.sunrise/sdk/` when missing or stale; a
@@ -267,15 +190,6 @@ fn fetched(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// The surface of the SDK the project pins, read once for everything that packs a library's
-/// wire identities; none for a project built against the game checkout, which exports its own.
-fn pinned_surface(dir: &Path) -> Result<Option<mod_surface::Surface>, String> {
-    if sdk_fetch::game_tree(dir)?.is_some() {
-        return Ok(None);
-    }
-    uses_table::surface_of(&sdk_fetch::ensure_sdk(dir)?).map(Some)
-}
-
 /// Fetches a build's verified SDK for a project: the SDK the build's `sdk.json` describes.
 type FetchSdk<'a> = &'a dyn Fn(&Path, &str) -> Result<sdk_fetch::PinnedSdk, String>;
 
@@ -285,7 +199,7 @@ fn new(args: &[String], fetch: FetchSdk) -> Result<Option<PathBuf>, String> {
     let usage = || help::of("new").expect("new has help");
     let unexpected = |arg: &str| {
         let reason = match arg {
-            "--native" | "--wasm" | "--content" => {
+            "--native" | "--content" => {
                 format!("unknown option {arg}; use --template {}", &arg[2..])
             }
             _ => format!("unexpected argument {arg}"),
@@ -332,11 +246,11 @@ fn new(args: &[String], fetch: FetchSdk) -> Result<Option<PathBuf>, String> {
     let fill = |t: &str| t.replace("{id}", &id).replace("{name}", &name);
     match template {
         None | Some("content") => {}
-        Some(template @ ("native" | "wasm")) => {
-            new_code(dir, &id, template == "native", sunrise, fetch, fill)?;
+        Some("native") => {
+            new_native(dir, &id, sunrise, fetch, fill)?;
             return Ok(Some(dir.to_owned()));
         }
-        Some(_) => return Err("--template is content, native or wasm".into()),
+        Some(_) => return Err("--template is content or native".into()),
     }
     // A block copying a vanilla one, with its model, name, loot, recipe and tag.
     let files = [
@@ -415,20 +329,8 @@ fn update_args(args: &[String]) -> Result<(Option<&str>, Vec<&str>), String> {
     Ok(parsed)
 }
 
-/// `update` in a content mod: it pins no game build, so there is nothing to repin.
-fn refuse_content_update(dir: &Path, manifest: &Manifest) -> Result<(), String> {
-    // A wasm project has no `[wasm]` table until its first `build --wasm`: its Cargo.toml says it is code.
-    if manifest.native.is_none() && manifest.wasm.is_none() && !code_project(dir) {
-        return Err(format!(
-            "{MANIFEST}: a content mod pins no game build, so there is nothing to update"
-        ));
-    }
-    Ok(())
-}
-
-/// Repins the mod. A native mod's declared internals and injects are checked against the new
-/// build first, reporting signature changes before writing; a wasm mod has none, so only its pin
-/// moves. `Cargo.toml` names the SDK by path, so the next command fetches the new one.
+/// Repins a native mod. Its declared internals and injects are checked against the new build
+/// before writing. `Cargo.toml` names the SDK by path, so the next command fetches the new one.
 fn update(
     dir: &Path,
     fetch: FetchSdk,
@@ -438,13 +340,12 @@ fn update(
     let path = dir.join(MANIFEST);
     let text = bounded::read(&path, bounded::MAX_MANIFEST)?;
     let manifest = Manifest::parse(&text)?;
-    refuse_content_update(dir, &manifest)?;
-    let sunrise = pin(sunrise)?;
     let Some(native) = manifest.native.as_ref() else {
-        sdk_fetch::repin(dir, &sunrise)?;
-        println!("Pinned to Sunrise {sunrise}");
-        return Ok(());
+        return Err(format!(
+            "{MANIFEST}: a content mod pins no game build, so there is nothing to update"
+        ));
     };
+    let sunrise = pin(sunrise)?;
     // The new build's SDK must exist and verify before anything is written; the mixins revision
     // is the SDK's own unless the manifest pins one.
     fetch(dir, &sunrise)?;
@@ -471,23 +372,25 @@ fn update(
         doc["native"]["sunrise"].as_value_mut().expect("native pin"),
         &sunrise,
     );
-    // Every check passes before anything is written: `repin` below parses what lands on disk.
+    // Every check passes before anything is written.
     let text = doc.to_string();
     Manifest::parse(&text)?;
     internals::atomic_write_manifest(&path, text)?;
     // The old pin's SDK goes; the next command fetches this one.
-    sdk_fetch::repin(dir, &sunrise)?;
+    if let Err(e) = std::fs::remove_dir_all(dir.join(sdk_fetch::DIR))
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(format!("{}: {e}", sdk_fetch::DIR));
+    }
     println!("Pinned to Sunrise {sunrise}");
     Ok(())
 }
 
-/// A flat code mod project, native or wasm, pinned to the build it is made for. Its `Cargo.toml`
-/// names the SDK by path (`.sunrise/sdk/api/crates/sunrise-mod-api`); a native mod pins its
-/// build in `[native] sunrise`, a wasm mod in `[package.metadata.sunrise] sdk`.
-fn new_code(
+/// A flat native mod project pins its game build in `[native] sunrise` and names the SDK in
+/// `Cargo.toml` by path (`.sunrise/sdk/api/crates/sunrise-mod-api`).
+fn new_native(
     dir: &Path,
     id: &str,
-    native: bool,
     sunrise: Option<&str>,
     fetch: FetchSdk,
     fill: impl Fn(&str) -> String,
@@ -510,25 +413,12 @@ fn new_code(
     fetch(dir, sunrise).inspect_err(|_| {
         let _ = std::fs::remove_dir_all(dir);
     })?;
-    let (manifest, metadata) = if native {
-        (
-            format!(
-                "{}\n[native]\ngame = \"26.3\"\nsunrise = \"{sunrise}\"\n",
-                include_str!("../template/native/sunrise-mod.toml"),
-            ),
-            String::new(),
-        )
-    } else {
-        (
-            include_str!("../template/wasm/sunrise-mod.toml").to_owned(),
-            format!(
-                "\n# The SDK build this mod is made for: `cargo sunrise-mod update` moves it.\n[package.metadata.sunrise]\nsdk = \"{sunrise}\"\n"
-            ),
-        )
-    };
-    let cargo = include_str!("../template/native/api.toml").replace("{metadata}", &metadata);
+    let manifest = format!(
+        "{}\n[native]\ngame = \"26.3\"\nsunrise = \"{sunrise}\"\n",
+        include_str!("../template/native/sunrise-mod.toml"),
+    );
     let files = [
-        ("Cargo.toml", cargo.as_str()),
+        ("Cargo.toml", include_str!("../template/native/api.toml")),
         ("src/lib.rs", include_str!("../template/native/lib.rs")),
         (MANIFEST, manifest.as_str()),
         (".gitignore", include_str!("../template/gitignore")),
@@ -542,16 +432,11 @@ fn new_code(
     for folder in ["assets", "data"] {
         std::fs::create_dir_all(dir.join(folder)).map_err(|e| e.to_string())?;
     }
-    let next = format!(
-        "cd {} && cargo sunrise-mod build{}",
-        dir.display(),
-        if native { "" } else { " --wasm" }
-    );
     println!(
-        "Created {} ({} mod id {id}). Your editor resolves sunrise-mod-api once the SDK is in .sunrise/sdk/: \
-         `cargo sunrise-mod check` fetches it in a fresh clone. Next: {next}",
+        "Created {} (native mod id {id}). Your editor resolves sunrise-mod-api once the SDK is in .sunrise/sdk/: \
+         `cargo sunrise-mod check` fetches it in a fresh clone. Next: cd {} && cargo sunrise-mod build",
         dir.display(),
-        if native { "native" } else { "wasm" },
+        dir.display(),
     );
     Ok(())
 }
@@ -567,13 +452,10 @@ fn build(
     mixins: Option<&str>,
 ) -> Result<PathBuf, String> {
     let root = Path::new(".");
-    let code = package.is_native() || package.manifest.wasm.is_some();
-    let mut api = None;
-    let uses = if code && sdk_fetch::game_tree(root)?.is_none() {
+    let uses = if package.is_native() && sdk_fetch::game_tree(root)?.is_none() {
         let sdk = sdk_fetch::ensure_sdk(root)?;
         let surface = uses_table::surface_of(&sdk)?;
         let scanned = uses_table::scan(entry, root, &surface)?;
-        api = Some(surface);
         match scanned {
             uses_table::Scanned::Uses(uses) => {
                 Some(uses_table::table(&uses, root, &sdk)?.to_json().into_bytes())
@@ -590,14 +472,7 @@ fn build(
     } else {
         None
     };
-    pack_into(
-        root,
-        output,
-        &package.manifest,
-        uses.as_deref(),
-        api.as_ref(),
-        mixins,
-    )
+    pack_into(root, output, &package.manifest, uses.as_deref(), mixins)
 }
 
 fn build_in(root: &Path, manifest: &Manifest) -> Result<PathBuf, String> {
@@ -605,7 +480,6 @@ fn build_in(root: &Path, manifest: &Manifest) -> Result<PathBuf, String> {
         root,
         &PackageOutput::in_project(root)?,
         manifest,
-        None,
         None,
         None,
     )
@@ -653,7 +527,6 @@ fn pack_into(
     output: &PackageOutput,
     manifest: &Manifest,
     uses: Option<&[u8]>,
-    api: Option<&mod_surface::Surface>,
     mixins: Option<&str>,
 ) -> Result<PathBuf, String> {
     let dir = &output.0;
@@ -666,9 +539,6 @@ fn pack_into(
         _ => {}
     }
     check::references(root, manifest)?;
-    if manifest.native.is_some() || manifest.wasm.is_some() {
-        layouts::build(root, api)?;
-    }
     let text = bounded::read(&root.join(MANIFEST), bounded::MAX_MANIFEST)?;
     let bytes = Package::pack_directory_with(root, uses, Some(completed_manifest(&text, mixins)?))?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
@@ -682,7 +552,9 @@ fn pack_into(
 #[derive(Debug, PartialEq)]
 enum Check<'a> {
     /// The mod in this folder.
-    Folder(sdk_cmds::CheckFlags),
+    Folder {
+        uses: bool,
+    },
     File(CheckFile<'a>),
 }
 
@@ -700,11 +572,7 @@ struct CheckFile<'a> {
 /// the other form is refused by name.
 fn check_args(args: &[String]) -> Result<Check<'_>, String> {
     let mut options = Options::new("check", args, &["--kind", "--key", "--signature"]);
-    let flags = sdk_cmds::CheckFlags {
-        uses: options.switch("--uses"),
-        wasm: options.switch("--wasm"),
-        native: options.switch("--native"),
-    };
+    let uses = options.switch("--uses");
     let (kind, key, signature, json) = (
         options.value("--kind")?,
         options.value("--key")?,
@@ -713,11 +581,6 @@ fn check_args(args: &[String]) -> Result<Check<'_>, String> {
     );
     let file = options.at_most_one()?;
     options.finish()?;
-    let of_folder = [
-        ("--uses", flags.uses),
-        ("--wasm", flags.wasm),
-        ("--native", flags.native),
-    ];
     let of_file = [
         ("--kind", kind.is_some()),
         ("--key", key.is_some()),
@@ -730,21 +593,19 @@ fn check_args(args: &[String]) -> Result<Check<'_>, String> {
             .find_map(|(name, given)| given.then_some(*name))
     };
     match file {
-        Some(file) => match given(&of_folder) {
-            Some(name) => Err(format!(
-                "check {name} checks the mod in this folder; `check {file}` does not take it"
-            )),
-            None => Ok(Check::File(CheckFile {
-                file,
-                kind,
-                key,
-                signature,
-                json,
-            })),
-        },
+        Some(file) if uses => Err(format!(
+            "check --uses checks the mod in this folder; `check {file}` does not take it"
+        )),
+        Some(file) => Ok(Check::File(CheckFile {
+            file,
+            kind,
+            key,
+            signature,
+            json,
+        })),
         None => match given(&of_file) {
             Some(name) => Err(format!("check {name} needs a file: check <file> {name}")),
-            None => Ok(Check::Folder(flags)),
+            None => Ok(Check::Folder { uses }),
         },
     }
 }
@@ -840,13 +701,9 @@ fn run(args: &[String]) -> Result<(), RunError> {
         extra,
     } = run_args(args).map_err(RunError::Build)?;
     let jars = jars.map(Path::new);
-    if Path::new("Cargo.toml").is_file() {
-        // Only a native mod starts here; a wasm mod is a package the game loads.
-        if !dev::is_native(Path::new(".")).map_err(RunError::Build)? {
-            return Err(RunError::Build(
-                "a wasm mod is started with its package: `cargo sunrise-mod build --wasm`, then `sunrise-client --dev-mod target/sunrise-mod/<id>.smod`".into(),
-            ));
-        }
+    let project = Path::new(".");
+    let package = Package::read(project).map_err(RunError::Build)?;
+    if package.is_native() {
         // `--game` and `--resources` are each read for one kind of mod: given for the other,
         // they would be dropped unsaid.
         if game.is_some() {
@@ -862,8 +719,6 @@ fn run(args: &[String]) -> Result<(), RunError> {
             "run --resources is for a native mod: for a content mod, give the game its own option after `--` (`run -- --resources <folder>`)".into(),
         ));
     }
-    let project = Path::new(".");
-    let package = Package::read(project).map_err(RunError::Build)?;
     let home =
         jar::stage_for_run(&package.manifest, project, jars, extra).map_err(RunError::Build)?;
     // A content mod carries no uses table.
@@ -918,7 +773,7 @@ mod tests {
     fn new_rejects_unknown_flags_without_creating_a_mod() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("greeter");
-        for arg in ["--native", "--wasm", "--content", "--typo", "-x", "--name"] {
+        for arg in ["--native", "--content", "--typo", "-x", "--name"] {
             let error = new(&[path.display().to_string(), arg.into()], &offline).unwrap_err();
             assert!(error.contains(arg), "{error}");
             assert!(!path.exists());
@@ -982,13 +837,11 @@ mod tests {
             std::fs::create_dir_all(project.join(sdk_fetch::DIR)).unwrap();
             Err("no signed SDK".into())
         };
-        for template in ["native", "wasm"] {
-            assert_eq!(
-                new(&code_args(&path, template), &fetch).unwrap_err(),
-                "no signed SDK"
-            );
-            assert!(!path.exists());
-        }
+        assert_eq!(
+            new(&code_args(&path, "native"), &fetch).unwrap_err(),
+            "no signed SDK"
+        );
+        assert!(!path.exists());
         // A folder that was there before is refused, not removed.
         std::fs::create_dir(&path).unwrap();
         std::fs::write(path.join("keep"), "mine").unwrap();
@@ -1089,7 +942,7 @@ mod tests {
         assert!(error.contains("the texture gems:block/gone"), "{error}");
         assert!(!smod.exists());
         std::fs::write(&model, original).unwrap();
-        let executable = path.join("assets/gems/mod.wasm");
+        let executable = path.join("assets/gems/mod.exe");
         std::fs::write(&executable, b"\0asm").unwrap();
         assert!(
             build_in(&path)
@@ -1146,7 +999,6 @@ mod tests {
             &PackageOutput::in_project(&path).unwrap(),
             &Package::read(&path).unwrap().manifest,
             Some(&uses_list("0123456789abcdef0123456789abcdef01234567")),
-            None,
             None,
         )
         .unwrap();
@@ -1209,7 +1061,6 @@ mod tests {
             &PackageOutput::in_project(&root).unwrap(),
             &Package::read(&root).unwrap().manifest,
             None,
-            None,
             Some(identity.revision()),
         )
         .unwrap();
@@ -1260,7 +1111,6 @@ mod tests {
             &PackageOutput::in_project(&path).unwrap(),
             &written,
             None,
-            None,
             Some(rev),
         )
         .unwrap();
@@ -1305,7 +1155,6 @@ mod tests {
                 &PackageOutput::in_project(&path).unwrap(),
                 &written,
                 Some(&uses_list(made_for)),
-                None,
                 Some(rev),
             )
             .unwrap();
@@ -1326,7 +1175,6 @@ mod tests {
             &path,
             &PackageOutput::in_project(&path).unwrap(),
             &exact,
-            None,
             None,
             Some(rev),
         )
@@ -1363,73 +1211,6 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    #[test]
-    fn the_wasm_template_pins_its_build_in_the_cargo_metadata() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("greeter");
-        let commit = "0123456789abcdef0123456789abcdef01234567";
-        let args = [
-            path.display().to_string(),
-            "--template".into(),
-            "wasm".into(),
-            "--sunrise".into(),
-            commit.into(),
-        ];
-        assert_eq!(new(&args, &offline).unwrap(), Some(path.clone()));
-        let manifest =
-            Manifest::parse(&std::fs::read_to_string(path.join(MANIFEST)).unwrap()).unwrap();
-        assert!(manifest.native.is_none() && manifest.wasm.is_none());
-        assert_eq!(sdk_fetch::pin(&path).unwrap(), commit);
-        let api = std::fs::read_to_string(path.join("Cargo.toml")).unwrap();
-        assert!(
-            api.contains(".sunrise/sdk/api/crates/sunrise-mod-api"),
-            "{api}"
-        );
-        // The SDK the editor reads is never part of the mod or its repository.
-        let ignored = std::fs::read_to_string(path.join(".gitignore")).unwrap();
-        assert!(ignored.lines().any(|line| line == "/.sunrise"), "{ignored}");
-    }
-
-    #[test]
-    fn update_moves_a_wasm_mods_cargo_pin_and_drops_its_sdk() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("greeter");
-        let old = "0123456789abcdef0123456789abcdef01234567";
-        let args = [
-            path.display().to_string(),
-            "--template".into(),
-            "wasm".into(),
-            "--sunrise".into(),
-            old.into(),
-        ];
-        new(&args, &offline).unwrap();
-        let cargo = path.join("Cargo.toml");
-        let text = std::fs::read_to_string(&cargo).unwrap();
-        let written = format!("sdk = \"{old}\"\n");
-        assert!(text.contains(&written), "{text}");
-        std::fs::write(
-            &cargo,
-            text.replace(&written, &format!("sdk   =  \"{old}\" # pinned\n")),
-        )
-        .unwrap();
-        let manifest = std::fs::read_to_string(path.join(MANIFEST)).unwrap();
-        std::fs::create_dir_all(path.join(sdk_fetch::DIR)).unwrap();
-        let newer = "89abcdef0123456789abcdef0123456789abcdef";
-        update(&path, &offline, Some(newer), &[]).unwrap();
-        assert_eq!(
-            std::fs::read_to_string(&cargo).unwrap(),
-            text.replace(
-                &written,
-                "sdk   =  \"89abcdef0123456789abcdef0123456789abcdef\" # pinned\n"
-            )
-        );
-        assert_eq!(
-            std::fs::read_to_string(path.join(MANIFEST)).unwrap(),
-            manifest
-        );
-        assert!(!path.join(sdk_fetch::DIR).exists());
-    }
-
     fn argv(line: &str) -> Vec<String> {
         line.split(' ')
             .filter(|w| !w.is_empty())
@@ -1439,16 +1220,8 @@ mod tests {
 
     #[test]
     fn build_run_update_and_check_read_their_options_and_refuse_others() {
-        let line = argv("--wasm --catalog points.json --with a.wasm --with b.wasm");
-        assert_eq!(
-            build_args(&line),
-            Ok(BuildArgs {
-                wasm: true,
-                update_lock: false,
-                catalog: Some("points.json"),
-                with: vec!["a.wasm", "b.wasm"],
-            })
-        );
+        assert_eq!(build_args(&[]), Ok(false));
+        assert_eq!(build_args(&argv("--update-lock")), Ok(true));
         let line = argv("--game g --resources r --jars j -- --relase");
         assert_eq!(
             run_args(&line),
@@ -1467,7 +1240,9 @@ mod tests {
                 "--relase",
             ),
             (
-                build_args(&argv("--wasm --typo")).map(drop).unwrap_err(),
+                build_args(&argv("--update-lock --typo"))
+                    .map(drop)
+                    .unwrap_err(),
                 "--typo",
             ),
             (run_args(&argv("--gme g")).map(drop).unwrap_err(), "--gme"),
@@ -1486,23 +1261,6 @@ mod tests {
             (
                 check_args(&argv("mod.smod --jsno")).map(drop).unwrap_err(),
                 "--jsno",
-            ),
-            // Read, but by the other kind of build.
-            (
-                build_args(&argv("--catalog points.json"))
-                    .map(drop)
-                    .unwrap_err(),
-                "--catalog",
-            ),
-            (
-                build_args(&argv("--with a.wasm")).map(drop).unwrap_err(),
-                "--with",
-            ),
-            (
-                build_args(&argv("--wasm --update-lock"))
-                    .map(drop)
-                    .unwrap_err(),
-                "--update-lock",
             ),
         ] {
             assert!(error.contains(option), "{error}");
@@ -1531,12 +1289,8 @@ mod tests {
             }))
         );
         assert_eq!(
-            check_args(&argv("--uses --native")),
-            Ok(Check::Folder(sdk_cmds::CheckFlags {
-                uses: true,
-                wasm: false,
-                native: true
-            }))
+            check_args(&argv("--uses")),
+            Ok(Check::Folder { uses: true })
         );
         for (line, named) in [
             ("--json", "--json"),
@@ -1546,27 +1300,6 @@ mod tests {
         ] {
             let error = check_args(&argv(line)).map(drop).unwrap_err();
             assert!(error.contains(named), "{line}: {error}");
-        }
-    }
-}
-
-#[cfg(test)]
-mod wrapper_suffix_tests {
-    #[test]
-    fn compiler_names_keep_suffix_contract() {
-        for (name, expected) in [
-            ("diagnostic-rustc", true),
-            ("xrustc", true),
-            ("rustc", true),
-            ("/path/to/rustc", true),
-            ("rustc.exe", true),
-            ("diagnostic-rustc.exe", true),
-            ("rustc.custom", false),
-            ("rustc-wrapper", false),
-            ("cargo-sunrise-mod", false),
-            ("/rustc/tool", false),
-        ] {
-            assert_eq!(super::is_compiler_wrapper(name), expected, "{name}");
         }
     }
 }

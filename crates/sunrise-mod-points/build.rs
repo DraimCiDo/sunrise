@@ -61,13 +61,6 @@ fn generate_fixture_readers() {
                 ("__fnr_read_body_0", 1, "fn(i64) -> i64"),
             ][..],
         ),
-        (
-            "wire_loopback_readers.rs",
-            &[
-                ("__fnr_read_slot_0", 0, "fn(f32, usize) -> f32"),
-                ("__fnr_read_body_0", 1, "fn(f32, usize) -> f32"),
-            ][..],
-        ),
     ] {
         let mut code = String::new();
         for (name, cell, ty) in readers {

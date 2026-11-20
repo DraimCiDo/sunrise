@@ -9,7 +9,7 @@
 //!
 //! - **Breaking**: it can stop any mod that uses the item from compiling or meaning the same.
 //!   A removed record; a changed contract (a hook's side or kind, a retyped field or argument, a
-//!   signature, a method no longer on wasm); a variant added to an exhaustive enum or a required
+//!   signature); a variant added to an exhaustive enum or a required
 //!   item added to a trait mods implement (the container's own hash covers those sets); an impl
 //!   a type no longer has; a supertrait a trait mods call no longer has, or gains when the new
 //!   one is not known to keep `dyn Trait` valid (`Clone`, `Sized`, a trait with generic methods).
@@ -21,11 +21,11 @@
 //!   constructible (only a mod that builds it with a literal); a public path that goes (only a
 //!   mod that names the item by it); a hook's `version` (only a mod whose manifest names it) or a
 //!   behaviour's (only a mod that relies on it); a
-//!   type's wire form or wire layout (`shape`; wasm mods only); a method of a trait mods only call
+//!   type's wire form or wire layout (`shape`; only when using that encoding); a method of a trait mods only call
 //!   that moved unchanged to a supertrait it still has (only a call written by trait path).
 //! - **Additive**: a new record (a behaviour, a field of a struct mods cannot build, a variant of a
-//!   `#[non_exhaustive]` enum, a defaulted method), and changes that only widen an item: now on
-//!   wasm, now crossing the wasm boundary, now constructible, an impl gained, a new public path,
+//!   `#[non_exhaustive]` enum, a defaulted method), and changes that only widen an item: now implementing
+//!   `Wire`, now constructible, an impl gained, a new public path,
 //!   a marker or object-safe API supertrait gained by a trait mods only call (`Send`, `Sync`,
 //!   `'static`, `Debug`, `Any`), an item no longer required, an enum no longer
 //!   `#[non_exhaustive]`.
@@ -53,7 +53,7 @@ pub enum Class {
     Advisory,
     Additive,
     /// Breaks only a mod that builds the value with a full literal, names a hook version, or
-    /// is a wasm mod; the fit test judges each mod.
+    /// uses a particular wire encoding.
     Conditional,
     Breaking,
 }
@@ -359,6 +359,9 @@ pub fn diff(old: &Surface, new: &Surface) -> Diff {
     let free = free_bounds(new);
     let ids: BTreeSet<&String> = before.keys().chain(after.keys()).collect();
     let mut changes: BTreeMap<String, Change> = BTreeMap::new();
+    let legacy = (old.schema == crate::legacy_hash::LEGACY_SURFACE_SCHEMA
+        && new.schema == crate::SCHEMA)
+        .then(|| crate::legacy_hash::LegacyHashes::new(new));
     for id in ids {
         let (kind, lines) = match (before.get(id), after.get(id)) {
             (Some(a), None) => {
@@ -382,13 +385,19 @@ pub fn diff(old: &Surface, new: &Surface) -> Diff {
                 (ChangeKind::Added, vec![line])
             }
             (Some(a), Some(b)) => {
-                let mut lines = if a.hash == b.hash {
+                let unchanged = a.hash == b.hash
+                    || (a.view == b.view
+                        && legacy
+                            .as_ref()
+                            .and_then(|legacy| legacy.matches(id, &a.hash))
+                            == Some(true));
+                let mut lines = if unchanged {
                     Vec::new()
                 } else {
                     describe(id, &a.view, &b.view)
                 };
                 lines.extend(extras(id, &a.extra, &b.extra, &free));
-                if a.hash != b.hash && lines.is_empty() {
+                if !unchanged && lines.is_empty() {
                     lines.push((
                         "its contract changed in a field this tool does not know".into(),
                         Class::Breaking,
@@ -615,7 +624,7 @@ fn extras(
     if x != y {
         lines.push((
             format!(
-                "wire layout: {} → {}: affects wasm mods only",
+                "wire layout: {} → {}: affects users of this encoding",
                 quoted("shape", &x),
                 quoted("shape", &y)
             ),
@@ -624,9 +633,9 @@ fn extras(
     }
     let wire = |map: &Map<String, Value>| get(map, "wire") == Value::Bool(true);
     match (wire(old), wire(new)) {
-        (false, true) => lines.push(("now crosses the wasm boundary".into(), Class::Additive)),
+        (false, true) => lines.push(("now implements `Wire`".into(), Class::Additive)),
         (true, false) => lines.push((
-            "no longer crosses the wasm boundary: affects wasm mods only".into(),
+            "no longer implements `Wire`: affects users of this encoding".into(),
             Class::Conditional,
         )),
         _ => {
@@ -634,7 +643,7 @@ fn extras(
             if x != y {
                 lines.push((
                     format!(
-                        "wire form: {} → {}: affects wasm mods only",
+                        "wire form: {} → {}: affects users of this encoding",
                         quoted("wire_form", &x),
                         quoted("wire_form", &y)
                     ),
@@ -819,8 +828,6 @@ fn describe(id: &str, old: &Value, new: &Value) -> Vec<(String, Class)> {
                     lines.push((format!("{word}s reordered"), Breaking));
                 }
             }
-            ("wasm", _, Value::Bool(true)) => lines.push(("now on wasm".into(), Additive)),
-            ("wasm", _, Value::Bool(false)) => lines.push(("no longer on wasm".into(), Breaking)),
             ("required", _, Value::Bool(false)) => {
                 lines.push(("now has a default".into(), Additive))
             }

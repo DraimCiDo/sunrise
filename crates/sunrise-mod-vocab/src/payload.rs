@@ -1,4 +1,4 @@
-//! Registered raw custom-payload vocabulary shared by native and wasm mods.
+//! Registered raw custom-payload vocabulary.
 #[path = "payload/registrar.rs"]
 mod registrar;
 pub use registrar::{
@@ -8,7 +8,6 @@ pub use registrar::{
 mod typed;
 pub use typed::{PayloadToken, ToClient, ToServer};
 
-use crate::wire::{Reader, Wire, WireError, Writer};
 use crate::{ClientHost, PlayerRef, ServerHost, Text};
 use std::sync::Arc;
 
@@ -295,9 +294,6 @@ pub enum PayloadHandleError {
     },
 }
 
-crate::wire::wire_handlers::handler!(dyn IPayloadHandler, "IPayloadHandler");
-crate::wire::wire_handlers::handler!(dyn PayloadWork, "PayloadWork");
-
 /// One receiving owner for a registered id and direction, never an all-mod broadcast.
 /// Return `Failed` when application decoding fails. For a typed or declared payload the session
 /// names the channel and fails instead of silently dropping the malformed message. For a raw
@@ -309,10 +305,6 @@ crate::wire::wire_handlers::handler!(dyn PayloadWork, "PayloadWork");
 /// ordering and deadline contract; this callback does not itself queue a retry.
 pub trait IPayloadHandler: Send + Sync + 'static {
     // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::i_payload_handler::<Self>();
-    }
     /// Handle exact application bytes using connection-derived context.
     fn handle(
         &self,
@@ -324,10 +316,6 @@ pub trait IPayloadHandler: Send + Sync + 'static {
 /// Work scheduled on the logical receiving main thread.
 pub trait PayloadWork: Send + Sync + 'static {
     // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::payload_work::<Self>();
-    }
     /// Execute with the same connection-derived context and transaction rules.
     fn run(&self, context: &mut dyn IPayloadContext) -> Result<(), String>;
 }

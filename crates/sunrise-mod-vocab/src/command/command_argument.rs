@@ -164,10 +164,6 @@ impl Default for CommandSender {
 /// client command, from the window's thread: implement it to be shared, without mutable state.
 pub trait CommandArgumentType: Send + Sync + 'static {
     // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::command_argument_type::<Self>();
-    }
     /// The part of the line the argument takes. The same on every client.
     fn kind(&self) -> CommandArgumentKind;
 
@@ -194,7 +190,7 @@ pub trait CommandArgumentType: Send + Sync + 'static {
     /// its answer unfiltered. It is `None` when no player asks: the console, and a client
     /// completing its own client commands before its own profile is known.
     ///
-    /// Native and wasm results share the vanilla packet limits: completion text may contain
+    /// The vanilla packet limits apply: completion text may contain
     /// at most 32767 UTF-16 code units; a literal tooltip may occupy at most 65535 bytes in
     /// Java modified UTF-8 (the NBT string limit). If any result exceeds either limit, the
     /// engine reports the refusal and discards the callback's results, rather than truncating

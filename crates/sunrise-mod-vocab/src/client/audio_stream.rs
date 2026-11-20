@@ -3,7 +3,6 @@
 //! `AudioStream`), on a pool of their own that never takes one of vanilla's streaming slots.
 use super::types::SoundSource;
 use crate::EntityRef;
-use crate::wire::{Reader, Wire, WireError, Writer};
 use std::sync::Arc;
 
 /// The most streams one mod holds open at once ([`AudioRefusal::ModStreamLimit`]).
@@ -198,14 +197,9 @@ impl std::fmt::Display for SpecFault {
 }
 
 /// The game's side of one open audio stream. A mod reaches it through [`AudioStreamRef`], not
-/// directly. A wasm mod holds the game's stream by id and each call crosses to the game. Every
-/// method works from any thread; `push` and the controls never wait on the mixer.
+/// directly. Every method works from any thread; `push` and the controls never wait on the mixer.
 pub trait AudioStreamSource: Send + Sync + 'static {
     // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::audio_stream_source::<Self>();
-    }
     /// Queues interleaved `samples`: whole frames only (a trailing odd sample of a stereo stream
     /// is not taken). Returns the frames accepted, which falls short of the frames offered when
     /// the ring is full, or when another thread is pushing to the same stream at that moment
@@ -227,19 +221,15 @@ pub trait AudioStreamSource: Send + Sync + 'static {
     /// dropped. Dropping the last handle does the same.
     fn stop(&self);
 }
-crate::wire::wire_handlers::handler!(dyn AudioStreamSource, "AudioStreamSource");
 
 /// A stream a mod opened with `open_audio_stream`: push PCM and the game plays it.
 ///
 /// Keep the handle while the stream should play. Dropping it stops the stream, as [`stop`]
-/// does. It is `Send`: a native mod may push from any thread, a `Network`-thread payload
-/// handler included, and the audio never waits for a tick. A wasm instance is single-threaded and
-/// runs from hooks, so its audio arrives at tick rate with up to 50 ms of jitter: give a wasm
-/// stream a larger `prebuffer_ms`.
+/// does. It is `Send`: a mod may push from any thread, a `Network`-thread payload handler
+/// included, and the audio never waits for a tick.
 ///
 /// [`stop`]: AudioStreamRef::stop
 // exhaustive: its field is private, so mods cannot build or destructure it
-#[derive(sunrise_mod_api_macros::Wire)]
 pub struct AudioStreamRef {
     source: Arc<dyn AudioStreamSource>,
 }
@@ -254,9 +244,8 @@ impl AudioStreamRef {
     /// Queues interleaved 16-bit samples (`channels` per frame) behind what is waiting and
     /// returns the frames accepted. The ring has a fixed size: what does not fit is refused,
     /// never delayed, so a stalled sender cannot build up latency, and the caller drops it or
-    /// pushes it again later. For a native mod the push writes straight into a ring made when the
-    /// stream opened: it never blocks, allocates or waits for a tick. (A wasm mod's call crosses
-    /// the boundary, which encodes the whole slice.) The ring has one
+    /// pushes it again later. A push writes straight into the ring made when the stream opened:
+    /// it never blocks, allocates or waits for a tick. The ring has one
     /// producer: if a second thread pushes to the same stream at the same moment, that push
     /// accepts nothing and returns 0. A native mod that shares the handle across threads
     /// pushes from one thread at a time (a lock of its own, or one pushing thread).

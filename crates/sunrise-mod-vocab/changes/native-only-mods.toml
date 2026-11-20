@@ -1,0 +1,27 @@
+ids = [
+  "handle:ChunkDiskData::get",
+  "handle:ChunkDiskData::remove",
+  "handle:ChunkDiskData::set",
+  "handle:PartStateDeclaration::check",
+  "handle:PartStateDeclaration::of",
+  "method:DimensionsRegistrar::add_biome_source",
+  "method:DimensionsRegistrar::add_chunk_generator",
+  "method:wire::Wire::holds_resource",
+  "point:sunrise_client::game::Game<'_>::level_can_survive",
+  "point:sunrise_client::game::block_entity_tick_items::Scope::new",
+  "trait:wire::Record",
+  "type:AttachmentDiskEntryWire",
+  "type:ChunkDiskData",
+  "type:ChunkDiskResultWire",
+  "type:ModBlockEntity",
+  "type:PackageRuntime.Wasm",
+  "type:PartStateRefusal.NoCodecOnWasm",
+  "type:PartStateRefusal.ResourceHandle",
+  "type:RuntimePathError.WasmMod",
+  "type:item::containers::ModBlockEntitySnapshot",
+  "type:wire::Fields",
+  "type:wire::ReadOnly",
+  "type:wire::Refused",
+]
+why = "Native and content-only packages are the supported mod routes. Remove guest runtime variants, transport snapshots, resource transfer and encoded record writeback. Part state and chunk disk access no longer require a transport codec. Dimension registration methods are now required without refusal defaults. The point catalog loses the removed worldgen adapter and records the new signature of the block-entity tick scope."
+migrate = "Native authors do not need to republish unchanged uses.json tables. Schema 1 and 2 lists continue to fit unchanged methods and functions; new scans write schema 3. Native callers of PartStateDeclaration::check drop the boolean argument; native DimensionsRegistrar implementations supply both methods. Use attachment codecs for persistence and Wire for typed payloads and recipes, not the removed transport forms."

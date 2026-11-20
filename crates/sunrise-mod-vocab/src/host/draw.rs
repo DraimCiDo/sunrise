@@ -591,8 +591,7 @@ pub trait WorldDrawContext {
     /// multiplies only faces that have a tint index, the same as vanilla's model
     /// renderer; [`ModelInstance::color`] multiplies every face. The view budget is 16,384 copies. Pass at most that many: a longer
     /// list is refused with [`InstanceError::CapacityExceeded`] before any copy is
-    /// examined. On wasm the guest pays for the list it passes, because the runtime
-    /// lifts the slice before that check. Within the bound, copies outside the frustum
+    /// examined. Within the bound, copies outside the frustum
     /// are omitted and do not count. On `Err`, nothing from this call is drawn.
     fn draw_model_instances(
         &mut self,

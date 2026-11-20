@@ -16,4 +16,3 @@ sunrise-mod-api-gen = { path = "../sunrise-mod-api-gen" }
 
 [features]
 listener-fixture = ["sunrise-mod-api-gen/listener-fixture"]
-wasm-guest = ["mod_vocab/wasm-guest"]

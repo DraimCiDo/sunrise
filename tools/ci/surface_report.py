@@ -156,26 +156,23 @@ def report(tool: str, base: Path, head: Path, work: Path, gate_on: bool, *,
     sunrise-stage, for a base the head's cannot read, and `own_head_tool` the head tree's, for a head tree that is
     not this checkout (a landed merge). `notes` is the (new, base) pair of change-note folders when they are not the
     trees' own; `landed` selects the notes of one merge."""
-    # The base's records may predate the call names: its export names none (`--without-calls`),
-    # which no comparison reads.
     catalogs = "--with-internals" if with_internals else "--with-points-and-loops"
 
-    def export(name: str, exporter: str, tree: Path, flags: list[str]) -> subprocess.CompletedProcess:
-        return subprocess.run([exporter, "surface", str(tree), str(work / f"{name}.json"), *flags, catalogs],
+    def export(name: str, exporter: str, tree: Path) -> subprocess.CompletedProcess:
+        return subprocess.run([exporter, "surface", str(tree), str(work / f"{name}.json"), catalogs],
                               capture_output=True, text=True)
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         # Drain both subprocesses' diagnostics while they run so a full pipe cannot stall an export.
-        exports = {name: pool.submit(export, name, tool, tree, flags)
-                   for name, tree, flags in (("base", base, ["--without-calls"]), ("head", head, []))}
+        exports = {name: pool.submit(export, name, tool, tree)
+                   for name, tree in (("base", base), ("head", head))}
     head_export = exports["head"].result()
     # This checkout's own tree failing is a broken generator, which no other step would catch.
     if head_export.returncode != 0 and own_head_tool is None:
         return 1, f"The surface export of this tree failed: {last_line(head_export.stderr)}.\n"
     note = ""
-    for name, tree, flags, done, own_tool in (("head", head, [], head_export, own_head_tool),
-                                              ("base", base, ["--without-calls"], exports["base"].result(),
-                                               own_base_tool)):
+    for name, tree, done, own_tool in (("head", head, head_export, own_head_tool),
+                                       ("base", base, exports["base"].result(), own_base_tool)):
         if done.returncode == 0:
             continue
         # An older tree this tool holds to a newer rule or format: that tree's own tool reads it.
@@ -183,7 +180,7 @@ def report(tool: str, base: Path, head: Path, work: Path, gate_on: bool, *,
         if own_tool is None:
             return 1, f"No surface report: {why}.\n"
         try:
-            own = export(name, own_tool(), tree, flags)
+            own = export(name, own_tool(), tree)
         except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
             return 1, f"No surface report: {why}, and the {name}'s own could not be used: {error}.\n"
         if own.returncode != 0:

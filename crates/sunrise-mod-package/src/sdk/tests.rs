@@ -412,11 +412,6 @@ fn removing_each_required_input_names_it_before_work() {
                     .map(|name| (name.clone(), checkout.join(name))),
             )
             .collect();
-        assert!(
-            files
-                .iter()
-                .any(|(name, _)| name == "sunrise-wasm-std.wasm")
-        );
         assert!(files.iter().any(|(name, _)| name == "sunrise-server.exe"));
         for (_, path) in &files {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -492,11 +487,6 @@ fn how_to_make_an_input_uses_the_game_programs_profile_and_folder() {
         let program = Path::new(folder).join("sunrise-client");
         assert_eq!(inputs.how("sunrise-prepare", &program).unwrap(), flag);
     }
-    let program = Path::new("target/release/sunrise-client");
-    assert_eq!(
-        inputs.how("sunrise-wasm-std.wasm", program).unwrap(),
-        "cargo run --locked -p cargo-sunrise-mod -- wasm-std target/release/sunrise-wasm-std.wasm"
-    );
 }
 
 /// The markers around the book's table of required inputs.

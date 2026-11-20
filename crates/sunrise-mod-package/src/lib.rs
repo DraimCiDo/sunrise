@@ -16,7 +16,6 @@ pub mod icon;
 pub mod index;
 pub mod install_lock;
 pub mod internals;
-pub mod layouts;
 #[cfg(all(
     feature = "runtime-process",
     any(target_os = "linux", target_os = "macos", windows)
@@ -27,7 +26,6 @@ pub mod locks;
 pub mod manifest;
 pub mod mixins_tool;
 pub mod mod_list;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod modpack;
 #[cfg(feature = "runtime-process")]
 pub mod output;

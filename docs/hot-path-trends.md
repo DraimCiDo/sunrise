@@ -49,8 +49,7 @@ A series also starts again, with no step flagged, when the CPU model, the Rust v
 changes: counts taken on either side of such a change are not compared. Whether instruction counts are the same on
 two CPU models is not verified; the runs that measured the noise were on one.
 
-Not measured yet: chunk meshing, the render frame, packet encoding and handling, a wasm listener and the wasm
-boundary, a point or replaced function call, registry and tag lookups. Allocated bytes are not recorded, only the
+Not measured yet: chunk meshing, the render frame, packet encoding and handling, a point or replaced function call, registry and tag lookups. Allocated bytes are not recorded, only the
 number of allocator calls.
 
 Most of a run is building the release executable. A follow-up is to measure an executable that main's own builds

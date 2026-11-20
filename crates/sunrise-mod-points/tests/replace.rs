@@ -1,5 +1,5 @@
 //! `replace` listeners (#2368) at real points, through `mod_points::replace!`, the expression the
-//! launcher and `cargo sunrise-mod build --wasm` both emit: the body never runs, the listener's
+//! launcher emits: the body never runs, the listener's
 //! value reaches the caller, and a second replace at the same place is refused.
 // Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
 #![allow(clippy::all, unused_comparisons, unreachable_patterns)]

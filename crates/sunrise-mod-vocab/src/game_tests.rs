@@ -48,10 +48,6 @@ impl GameTestContext {
 /// A function run once at the start of each attempt, with the owning server level.
 pub trait GameTestFunction: Send + Sync {
     // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::game_test_function::<Self>();
-    }
     /// Return an outcome; the runner owns retries, timeouts and completion.
     fn run(&self, host: &mut dyn ServerHost, context: &GameTestContext) -> GameTestResult;
 }

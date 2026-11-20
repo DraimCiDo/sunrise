@@ -2,8 +2,7 @@
 
 A block whose texture joins its neighbours' (a casing, glass, a scaffold, a tank) is declared as data: a JSON file
 that says which blocks and sprites it covers, which neighbours a face looks at, and which tile of a sprite sheet
-each outcome draws. It needs no code, so it behaves the same for native and wasm mods, and nothing of yours runs
-while the game meshes chunks.
+each outcome draws. This declaration runs no mod code when the game meshes chunks.
 
 The files are ordinary assets, read through the resource source: a resource pack overrides one by its path, as it
 overrides your models, and they are read again when resources reload.

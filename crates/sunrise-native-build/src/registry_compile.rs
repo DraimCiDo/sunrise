@@ -221,9 +221,6 @@ pub fn compile(
                 let mut source = fs::read_to_string(&root).map_err(|e| e.to_string())?;
                 prebuilt::check_entry_root(&source, id)?;
                 source.push_str("\n#[allow(unsafe_code)]\n#[path = \"__sunrise_entry.rs\"] mod __sunrise_entry;\n");
-                if project.uses_wasmtime() {
-                    source.push_str(prebuilt::WASMTIME_LINK);
-                }
                 fs::write(&root, source).map_err(|e| e.to_string())?;
                 mod_dirs.insert(id.clone(), dest.clone());
                 mod_roots.insert(id.clone(), root);
@@ -236,12 +233,6 @@ pub fn compile(
         ]);
         for (name, path) in &externs {
             prebuilt::refuse_closure_rlib(id, name, path)?;
-        }
-        if project.uses_wasmtime() {
-            externs.insert(
-                "sunrise_mod_wasm".into(),
-                prebuilt::library(&deps, "sunrise_mod_wasm")?,
-            );
         }
         for (name, package) in project.api_dependencies() {
             if package != "internals" {

@@ -48,10 +48,6 @@ pub struct TooltipAppendContext {
 /// only while its mod is enabled. Multiple registrations for the same component all run.
 pub trait TooltipAppender: Send + Sync + 'static {
     // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::tooltip_appender::<Self>();
-    }
     /// Add lines to `lines` for `stack`, each with a colour as `rgba` packs it (`u32::MAX` keeps
     /// the text's own). `context` is the tooltip's player, flags and client-level tick rate.
     fn append(

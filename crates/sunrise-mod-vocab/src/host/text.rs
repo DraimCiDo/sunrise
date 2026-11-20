@@ -16,7 +16,7 @@ pub trait TextHost {
     /// `server_starting`. Keybind components there return the literal ID.
     /// On a dedicated server, a component-valued translation replaces its
     /// arguments and fallback.
-    /// Available outside drawing, including setup on a game-backed host, on native and wasm.
+    /// Available outside drawing, including setup on a game-backed host.
     /// Pack discovery before game resources are available returns `TextFormError::Unavailable`.
     #[access(Metadata)]
     fn text_string(&self, text: &Text) -> Result<String, TextFormError>;

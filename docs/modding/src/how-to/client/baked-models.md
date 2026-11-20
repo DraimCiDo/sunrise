@@ -53,6 +53,4 @@ failed reload publishes nothing, and the keys of the last successful load stay v
 server bakes no models: its store is empty.
 
 All three calls are available through `ClientHost::render_assets()` in Setup, Reloading and World.
-Native and wasm mods get the same keys and copies, but not the same refusals: a wasm block key the
-game never issued is refused at the boundary, before any lookup, while a state the live index
-lacks gives `UnknownModel` on both.
+A state the live index lacks gives `UnknownModel` on both.

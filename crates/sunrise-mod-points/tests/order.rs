@@ -2,7 +2,7 @@
 #![allow(clippy::all, unused_comparisons, unreachable_patterns)]
 use mod_api::__private::points::register;
 use mod_points::{
-    __private::{ApiKind, Forward, PointHost, SlotListener, TABLE, seal},
+    __private::{SlotListener, TABLE, seal},
     PointId,
 };
 
@@ -20,46 +20,43 @@ fn point_priority_preserves_dependency_order_and_orders_injects_within_a_mod() {
             place: PointId::Tick,
             priorities: [0; 4],
             one_owner: false,
-            expected: ["z_native", "a_wasm", "m_native", "b_wasm"],
+            expected: ["z", "a", "m", "b"],
         },
         Row {
             place: PointId::TickReturn,
             priorities: [0, 10, 0, 0],
             one_owner: false,
-            expected: ["a_wasm", "z_native", "m_native", "b_wasm"],
+            expected: ["a", "z", "m", "b"],
         },
         Row {
             place: PointId::TickWorld,
             priorities: [0; 4],
             one_owner: true,
-            expected: ["wasm", "wasm", "native", "native"],
+            expected: ["a", "b", "m", "z"],
         },
     ];
-    fn native() {}
-    struct Endpoint;
-    impl Forward for Endpoint {
-        fn forward(&self, _: u64, _: PointHost<'_>, _: &mut dyn mod_api::wire::Record) {}
+    fn a() {
+        std::hint::black_box("a");
     }
-    static ENDPOINT: Endpoint = Endpoint;
+    fn b() {
+        std::hint::black_box("b");
+    }
+    fn m() {
+        std::hint::black_box("m");
+    }
+    fn z() {
+        std::hint::black_box("z");
+    }
     for row in &rows {
-        for (index, (owner, inject)) in [
-            ("z_native", "z"),
-            ("a_wasm", "a"),
-            ("m_native", "m"),
-            ("b_wasm", "b"),
-        ]
-        .into_iter()
-        .enumerate()
+        for (index, (owner, inject)) in [("z", "z"), ("a", "a"), ("m", "m"), ("b", "b")]
+            .into_iter()
+            .enumerate()
         {
             let owner = if row.one_owner { "same_mod" } else { owner };
             // SAFETY: these synthetic slots inspect kind and identity; they never invoke the pointers.
-            let listener = unsafe {
-                if index % 2 == 0 {
-                    SlotListener::api(owner, row.place.place(), native as *const ())
-                } else {
-                    SlotListener::forwarded(owner, row.place.place(), &ENDPOINT, 0)
-                }
-            };
+            let function = [z as fn(), a, m, b][index];
+            let listener =
+                unsafe { SlotListener::api(owner, row.place.place(), function as *const ()) };
             register(&listener.ordered(row.priorities[index], inject)).unwrap();
         }
     }
@@ -67,17 +64,13 @@ fn point_priority_preserves_dependency_order_and_orders_injects_within_a_mod() {
         let id = Box::leak(format!("owner_{owner}").into_boxed_str());
         // SAFETY: this fixture inspects identity without invoking the pointer.
         let listener =
-            unsafe { SlotListener::api(id, PointId::TickWorldReturn.place(), native as *const ()) };
+            unsafe { SlotListener::api(id, PointId::TickWorldReturn.place(), a as *const ()) };
         register(&listener.ordered(owner % 3, "large")).unwrap();
     }
     seal();
     let mut owners = Vec::new();
     TABLE.fire_api(PointId::TickWorldReturn as usize, &mut |_| {
-        owners.push(
-            mod_api::content::crash::current_native_mod()
-                .unwrap()
-                .to_owned(),
-        );
+        owners.push(mod_api::content::crash::current_mod().unwrap().to_owned());
     });
     let expected: Vec<_> = (0..3)
         .rev()
@@ -93,14 +86,20 @@ fn point_priority_preserves_dependency_order_and_orders_injects_within_a_mod() {
     );
     for row in rows {
         let mut heard = Vec::new();
-        TABLE.fire_api(row.place as usize, &mut |kind| {
+        TABLE.fire_api(row.place as usize, &mut |function| {
             heard.push(if row.one_owner {
-                match kind {
-                    ApiKind::Typed(_) => "native",
-                    ApiKind::Forwarded(..) => "wasm",
-                }
+                [
+                    (a as *const (), "a"),
+                    (b as *const (), "b"),
+                    (m as *const (), "m"),
+                    (z as *const (), "z"),
+                ]
+                .into_iter()
+                .find(|(pointer, _)| *pointer == function.as_ptr())
+                .unwrap()
+                .1
             } else {
-                mod_api::content::crash::current_native_mod().unwrap()
+                mod_api::content::crash::current_mod().unwrap()
             });
         });
         assert_eq!(heard, row.expected);

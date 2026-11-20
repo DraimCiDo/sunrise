@@ -2,8 +2,7 @@
 //! (NeoForge's `EntityRenderersEvent.RegisterRenderers`) is asked once at start, before resources
 //! load, and every resource load resolves the registrations into the slots the draw routes read, so
 //! a frame hands an entity to its type's renderer without a lookup by name or a scan over the mods.
-//! The renderer draws through the shared drawing boundary (`BlockEntityDrawContext`) for native and
-//! wasm mods alike.
+//! The renderer draws through the shared drawing boundary (`BlockEntityDrawContext`).
 //!
 //! The routes that read the table so far: the content mods' thrown types
 //! (`ProjectileKind::Thrown`, by [`ThrownType::slot`]), the living types drawn as mobs (by
@@ -358,10 +357,8 @@ impl Game<'_> {
     }
 
     /// Runs one mod renderer's or layer's `submit` on a draw posed at `pose` (`block` the block the
-    /// entity stands in, lit by `light`), adding to `out`: true when it drew. An `Err`, a panic and
-    /// a refused or trapped wasm call (an `Err` from the proxy) all drop what it drew this frame,
-    /// log once and set `failed`, after which it is asked no more until the next resource load
-    /// resolves it again.
+    /// entity stands in, lit by `light`), adding to `out`: true when it drew. On error or panic, discard this frame's drawing, log once and set
+    /// `failed`; the renderer is not called again until the next resource load.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::game) fn guarded_entity_draw(
         &self,

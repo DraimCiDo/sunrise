@@ -82,7 +82,7 @@ The unchanged SDK completed release/client compilation (18 existing staging
 visibility warnings). All four probe targets passed metadata checking and Clippy;
 runtime assertions passed and both Python refusal tests passed. Every
 allocator binding in the process, from the executable, both consumers, the shared
-dependency, the wasm runtime library and std itself, resolves to the game.
+dependency and std itself, resolves to the game.
 The consumer libraries also allocate vectors and return them for executable drop.
 
 An initial harness draft failed because it omitted the explicit game dependency
@@ -92,8 +92,7 @@ crate type or dependency architecture was changed.
 
 CI runs the probe on the Linux and Windows GNU client legs of
 `.github/workflows/prebuilt-game-build.yml`, against each leg's own SDK before
-packing. Linux also checks the starter against the API source alone on the host
-and on wasm32. The macOS leg builds one native mod through the shipped route, `cargo sunrise-mod native-build`
+packing. Linux also checks the starter against the API source alone on the host. The macOS leg builds one native mod through the shipped route, `cargo sunrise-mod native-build`
 (`tools/ci/native_build_route.py`), so a library linked with the game executable's link policy fails there: `ld` accepts a
 stack size only for a main executable. If the SDK for the commit is already published, the workflow skips
 the build and its checks.

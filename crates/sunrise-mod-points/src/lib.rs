@@ -16,9 +16,6 @@
 include!(concat!(env!("OUT_DIR"), "/points_generated.rs"));
 
 mod registry;
-#[cfg(target_arch = "wasm32")]
-pub use guest::register;
-#[cfg(not(target_arch = "wasm32"))]
 pub use registry::register;
 pub use registry::{RegisterError, stop};
 
@@ -34,9 +31,6 @@ pub use registry::{RegisterError, stop};
 /// returns. A point whose return has no API form (`none`) has no replace listener. `host` is `host`
 /// when the point's API listeners take one, `none` otherwise. The slot is marked
 /// [`__private::SlotListener::replacing`], so a second replace listener at the place is refused.
-///
-/// The launcher's generated `main` and `cargo sunrise-mod build --wasm` both emit it, so native
-/// and wasm mods share one contract.
 ///
 #[macro_export]
 macro_rules! replace {
@@ -78,12 +72,9 @@ macro_rules! replace {
     };
 }
 
-#[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
-pub mod guest;
-
 // hidden: the game's side of the points, not part of the API a mod is written against
 #[doc(hidden)]
 pub mod __private {
     pub use crate::registry::{POINTS, TABLE, seal};
-    pub use mod_api::__private::points::{ApiKind, Forward, PointHost, SlotListener};
+    pub use mod_api::__private::points::{ApiFunction, SlotListener};
 }

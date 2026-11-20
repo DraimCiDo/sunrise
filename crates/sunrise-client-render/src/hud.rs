@@ -1286,7 +1286,7 @@ impl HudAtlas {
     }
     /// The atlas above, with the pool of slots for client mods' dynamic textures
     /// (`dynamic_textures::DYNAMIC_TEXTURE_SLOTS` of each class, 10.5 MiB of texels) only when
-    /// `pool` says a client mod is loaded, native or wasm: a game without mods packs no slot
+    /// `pool` says a client mod is loaded: a game without mods packs no slot
     /// and its atlas does not grow. `game` is the game's own resources, without the packs: a
     /// pack's core shader (text, block outline, sky, stars, lightmap) is one that differs from
     /// the game's, so a `root` given as its own `game` loads none.

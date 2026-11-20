@@ -1,4 +1,4 @@
-//! One constructor emitter for native and wasm API injection listeners.
+//! One constructor emitter for native API injection listeners.
 use sunrise_mod_package::{Manifest, manifest::inject::Kind};
 
 /// The part of a staged `points.json` entry needed to resolve an API listener constructor.
@@ -45,7 +45,7 @@ pub fn plain_path(path: &str) -> String {
 
 /// Emit API head/return constructor expressions in manifest order, without surrounding syntax.
 /// `prefix` is the compiler-owned Rust module path preceding each manifest `with` function,
-/// for example `mod_0::` in the native launcher or `original_mod::` in a wasm wrapper.
+/// for example `mod_0::` in the native launcher.
 /// A `replace` goes through `mod_points::replace!`, which owns its contract for both targets.
 pub fn api(manifest: &Manifest, points: &[Point], prefix: &str) -> Result<Vec<String>, String> {
     Ok(resolve(manifest, points)?
@@ -154,7 +154,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn native_and_wasm_share_the_existing_constructor_expressions() {
+    fn native_listener_constructor_expressions() {
         let manifest = Manifest::parse(
             r#"
 id = "fixture"
@@ -238,9 +238,9 @@ hash = "pin"
         let mut untyped = points[0].clone();
         untyped.return_ty = None;
         assert!(api(&replace, &[untyped], "mod_3::").is_err());
-        let wasm = api(&manifest, &points, "original_mod::").unwrap();
+        let renamed_crate = api(&manifest, &points, "original_mod::").unwrap();
         assert_eq!(
-            wasm[0],
+            renamed_crate[0],
             "{ mod_points::__point_mark!(\"tick\"); mod_points::listeners::tick(\"fixture\", 12, \"before\", original_mod::head) }"
         );
         let mut head_only = points[0].clone();

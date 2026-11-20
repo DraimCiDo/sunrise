@@ -128,8 +128,6 @@ installed. Every cancellable hook's event has a `cancelled` field: a mod without
 cancelled reaches only mods that receive cancelled events. `receive_cancelled` on a hook without a cancel does not
 compile, and `#[listener]` is for a mod's hooks only: a part is called for its own thing, in no order.
 
-Native and wasm mods use the same listener ordering and cancellation rules. Wasm subscription records carry the hook name, signed priority, and receive-cancelled flag through the shared-memory Wire boundary at load time. The event's `cancelled` field crosses with its other writable fields.
-
 ## Events and shared state
 
 Each hook method takes its host, where it has one, and one event:
@@ -166,7 +164,7 @@ The generator validates edited stack-list outputs inside each listener's owning 
 output retains the immediately preceding accepted value, not the event's initial value. Scalar
 outputs and cancellation still commit; later listeners see the accepted stacks and run independently
 under the usual cancellation rules. Each refused output logs one warning naming the mod, hook,
-output and conversion error. This policy is identical for native and wasm listeners.
+output and conversion error.
 
 Hook methods take `&self` and require `Send + Sync`. The process-wide mod list is installed once, like mixin module statics. One mod instance serves both
 the window's game and the server-thread game. A hook can also fire again inside

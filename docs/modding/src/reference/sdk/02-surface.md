@@ -21,7 +21,7 @@ lists every public path a mod can name it by. Types inside signatures are normal
 ## What a hash covers
 
 A record's hash covers its contract, not its `doc`, its `paths`, a hook's `engine` (where it fires) or
-`counterparts` (its names in NeoForge, Fabric and Paper), nor the wasm crossing details of a type. Each member has
+`counterparts` (its names in NeoForge, Fabric and Paper). Each member has
 its own hash, so most additions change no existing hash: a new `Host` method, a new hook, a new hook argument or a
 new field on a type change nothing for a mod that doesn't use them. A container's hash covers its members only where
 a new member breaks users:
@@ -45,17 +45,16 @@ old one removed; in both with another hash, changed. A rename or a move to a dif
 and an addition, even within the same crate. Each change is in one of four classes:
 
 - **Breaking**: it can stop any mod that uses the item from compiling or meaning the same. A record removed; a
-  contract changed (a hook's side or kind, a retyped field or argument, a signature, a method no longer on wasm); a
+  contract changed (a hook's side or kind, a retyped field or argument, a signature); a
   variant added to an exhaustive enum; a required item added to a trait mods implement; an impl a type no longer
   has; a behaviour removed. An injection point or published loop removed or changed is breaking.
 - **Conditional**: it breaks only some mods, which the [fit test](04-fit.md) finds from each mod's source (except a
   behaviour's `version`, which no fit report shows: a mod relies on a behaviour without naming it). A field
   added to a struct mods can build, or an argument added to a hook (only a mod that writes it out in full); a struct
   no longer constructible; a public path that goes (only a mod that writes that path); a hook's `version` (only a mod
-  whose manifest names it) or a behaviour's `version` (only a mod that relies on it); a type's wire form or layout
-  (wasm mods only).
+  whose manifest names it) or a behaviour's `version` (only a mod that relies on it).
 - **Additive**: a new API record, behaviour, injection point or published loop, or a change that only widens an item:
-  now on wasm, an impl gained, a new public path, an item no longer required, an enum no longer `#[non_exhaustive]`.
+  an impl gained, a new public path, an item no longer required, an enum no longer `#[non_exhaustive]`.
 - **Advisory**: all listed internal changes are reported, not gated, because native internals are pinned to an exact
   build and the [fit test](04-fit.md) tells each mod whether it still fits.
 
@@ -107,8 +106,7 @@ compiles and runs `BASE`'s code, so use it only on a whole checkout you trust. T
 
 `CommandSuggestion` now carries an optional `replace_start` byte offset into the prefix. `None` replaces the whole
 prefix; `Some(offset)` preserves the text before that offset, which must be on a UTF-8 character boundary and not
-past the prefix. This changes the type's Wire layout: wasm mods using it must rebuild against this SDK. The
-optional tooltip is retained. See [Server commands](../../how-to/entities/server-commands.md) for replacement
+past the prefix. The optional tooltip is retained. See [Server commands](../../how-to/entities/server-commands.md) for replacement
 examples and the `id` argument's `tab_complete` completion route.
 
 `CommandArgumentType::suggest` also requires the optional sender before the prefix. Providers own their sender

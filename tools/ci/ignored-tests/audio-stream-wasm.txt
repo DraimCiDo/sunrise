@@ -1,2 +1,0 @@
-# A compiled wasm guest pushing tick-paced audio through the mixer: the audio streams book page's measured underruns.
-sunrise-client game::audio_stream_wasm_tests::a_compiled_wasm_mod_pushing_at_tick_pace_does_not_underrun_at_the_prebuffer_the_book_recommends lib daily wasm-fixture

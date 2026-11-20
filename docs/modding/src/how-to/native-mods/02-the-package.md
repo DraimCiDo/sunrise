@@ -15,8 +15,7 @@ my_mod/
 ```
 
 A native source package requires both `Cargo.toml` and `[native]`; inconsistent declarations
-are refused. A content-only package declares neither `[native]` nor `[wasm]`.
-[Wasm packages](../wasm-mods.md) declare `[wasm]` and contain `mod.wasm`. The mod's id and version come only from `sunrise-mod.toml`,
+are refused. A content-only package omits both. The mod's id and version come only from `sunrise-mod.toml`,
 not Cargo's package name or version. An id is a plain `[a-z0-9_]{1,64}` name, also used as its resource namespace.
 A native mod has no `rust-toolchain.toml`: the pinned Sunrise commit decides the toolchain that builds it.
 There is no input `native/` or `rust/` directory, `sunrise-native.json` or hand-written `horizon-mixin.toml`.

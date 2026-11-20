@@ -164,7 +164,7 @@ pub unsafe fn install_points(
 #[cfg(not(test))]
 pub mod __private {
     use super::*;
-    pub use mod_vocab::__private::points::{ApiKind, PointHost, cold};
+    pub use mod_vocab::__private::points::{ApiFunction, cold};
     /// A quiet point costs one acquire load.
     pub static POINTS: [std::sync::atomic::AtomicBool; POINT_COUNT] =
         [const { std::sync::atomic::AtomicBool::new(false) }; POINT_COUNT];
@@ -172,7 +172,7 @@ pub mod __private {
     ///
     /// Panics if [`install_points`] has not installed a table. Quiet macro sites
     /// check their activity flag and do not call this function before publication.
-    pub fn fire_api(place: PointId, call: &mut dyn FnMut(ApiKind)) {
+    pub fn fire_api(place: PointId, call: &mut dyn FnMut(ApiFunction)) {
         POINT_TABLE
             .get()
             .expect("point provider must be installed before publication")
