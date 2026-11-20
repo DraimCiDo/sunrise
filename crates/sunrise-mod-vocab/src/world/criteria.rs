@@ -26,16 +26,7 @@ pub trait CriterionContext {
 ///
 /// The game calls it synchronously for each open criterion, before testing the criterion's
 /// `player` predicate. It keeps neither the test nor its context after the trigger returns.
-/// The native and wasm interfaces are generated from this trait, not separate implementations.
-/// Wasm predicates run synchronously through a scoped loan of the triggering import's
-/// store, including in an already running group. They share the outer call's execution
-/// budget and memory limit; the context expires when the predicate returns.
 pub trait CriterionTest: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::criterion_test::<Self>();
-    }
     /// Whether the mod's part of this criterion passes. A callback that cannot run refuses
     /// with a typed error, rather than silently answering that the criterion did not match.
     fn test(&self, criterion: &dyn CriterionContext) -> Result<bool, CriterionTestError>;
@@ -46,7 +37,7 @@ pub trait CriterionTest: Send + Sync + 'static {
 #[non_exhaustive]
 #[derive(sunrise_mod_api_macros::Wire)]
 pub enum CriterionTestError {
-    /// The test could not run (including a stopped, busy or unscoped reentrant wasm group).
+    /// The test could not run.
     Unavailable,
 }
 

@@ -267,6 +267,7 @@ impl Game<'_> {
         partial: f32,
         camera: DVec3,
         light: u32,
+        in_level: bool,
         out: &mut Vec<Vertex>,
     ) -> bool {
         let Some(resolved) = super::native_entity_renderers::living_renderer(mob) else {
@@ -281,6 +282,7 @@ impl Game<'_> {
             &entity,
             &mob.kind.id,
             feet - camera,
+            in_level.then_some(feet),
             block,
             light,
             out,

@@ -4,7 +4,8 @@
 //! (`shader_modifiers`, wiki "Expression Uniforms on Any Shader"), resolved when the shader
 //! loaded (`polytone_post::ShaderModifiers::resolve`), each a block of one float holding its
 //! program's value this frame. The lightmap, sky, stars and block outline pipelines lay theirs out
-//! with this; any other pack core shader pipeline can.
+//! with this, and the GUI's, the world's and the see-through text pipelines too, through
+//! [`bindings`] and [`sampler_bindings`]; any other pack core shader pipeline can.
 
 use crate::core_shader::CoreProgram;
 use crate::polytone_post::ExpressionUniform;
@@ -14,6 +15,10 @@ pub const LINES: [&str; 1] = ["minecraft:core/rendertype_lines"];
 /// The sky disc's and the stars' shaders.
 pub const SKY: [&str; 1] = ["minecraft:core/sky"];
 pub const STARS: [&str; 1] = ["minecraft:core/stars"];
+/// The text's shader, one for the GUI's, the world's and the see-through text
+/// (`polytone/shader_modifiers/core/text.json`). Each of those three pipelines binds its blocks
+/// with [`bindings`] and its samplers with [`sampler_bindings`].
+pub(crate) const TEXT: [&str; 1] = ["minecraft:core/text"];
 
 /// An expression uniform's block: one float, as std140 rounds a block.
 const BLOCK: u64 = 16;
@@ -21,6 +26,80 @@ const BLOCK: u64 = 16;
 /// Each vanilla uniform block's offset in a pipeline's buffer (`core_shader::BLOCKS` order).
 pub(crate) const VANILLA_OFFSETS: [u64; 4] = [0, 256, 512, 768];
 pub(crate) const VANILLA_SIZES: [u64; 4] = [48, 64, 160, 48];
+
+/// A pipeline's uniform blocks in `buffer`: `blocks` (binding, offset, size and the stages
+/// reading it: vanilla's, [`vanilla_blocks`], and any of the pipeline's own), then `extra`'s
+/// expression uniforms. Their layout entries, each visible to the stages that read it, and their
+/// bind group entries.
+pub(crate) fn bindings<'a>(
+    blocks: &[(u32, u64, u64, wgpu::ShaderStages)],
+    extra: &'a ExpressionBlocks,
+    buffer: &'a wgpu::Buffer,
+) -> (
+    Vec<wgpu::BindGroupLayoutEntry>,
+    Vec<wgpu::BindGroupEntry<'a>>,
+) {
+    let layout = (blocks.iter())
+        .map(|&(binding, _, size, stages)| block_entry(binding, size, stages))
+        .chain(extra.layout())
+        .collect();
+    let group = (blocks.iter())
+        .map(|&(binding, offset, size, _)| wgpu::BindGroupEntry {
+            binding,
+            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer,
+                offset,
+                size: wgpu::BufferSize::new(size),
+            }),
+        })
+        .chain(extra.entries(buffer))
+        .collect();
+    (layout, group)
+}
+
+/// The texture and sampler pairs (a texture at `binding`, its sampler at `binding + 1`) of
+/// `textures` that a stage of `program` reads, bound only to the stages that read either: their
+/// layout entries and their bind group entries.
+pub(crate) fn sampler_bindings<'a>(
+    program: &CoreProgram,
+    textures: &[(u32, &'a wgpu::TextureView, &'a wgpu::Sampler)],
+) -> (
+    Vec<wgpu::BindGroupLayoutEntry>,
+    Vec<wgpu::BindGroupEntry<'a>>,
+) {
+    let (mut layout, mut group) = (Vec::new(), Vec::new());
+    for &(binding, view, sampler) in textures {
+        let stages = program.stages_reading(binding) | program.stages_reading(binding + 1);
+        if stages.is_empty() {
+            continue;
+        }
+        layout.push(wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: stages,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        });
+        layout.push(wgpu::BindGroupLayoutEntry {
+            binding: binding + 1,
+            visibility: stages,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        });
+        group.push(wgpu::BindGroupEntry {
+            binding,
+            resource: wgpu::BindingResource::TextureView(view),
+        });
+        group.push(wgpu::BindGroupEntry {
+            binding: binding + 1,
+            resource: wgpu::BindingResource::Sampler(sampler),
+        });
+    }
+    (layout, group)
+}
 
 /// Vanilla's blocks a stage of `program` reads: binding, offset, size and the stages reading it.
 pub(crate) fn vanilla_blocks(program: &CoreProgram) -> Vec<(u32, u64, u64, wgpu::ShaderStages)> {
@@ -190,6 +269,15 @@ impl ExpressionBlocks {
         self.offset(self.uniforms.len())
     }
 
+    /// Each value and `PolyGlobals` 0, as a frame where no world runs gives them (a menu, a
+    /// loading screen).
+    pub(crate) fn zero(&mut self) {
+        self.set_globals(None);
+        for (_, value) in &mut self.uniforms {
+            *value = 0.0;
+        }
+    }
+
     /// Their layout entries, each visible to the stages that read it.
     pub(crate) fn layout(&self) -> impl Iterator<Item = wgpu::BindGroupLayoutEntry> + '_ {
         let globals = (self.globals.iter())
@@ -270,35 +358,43 @@ impl ExpressionBlocks {
 /// The packs' core shader pipelines' Polytone blocks, for the game to give their values.
 impl super::Renderer {
     /// The installed pack pipelines with their Polytone blocks: the block outline's, the sky's and
-    /// the stars', and the lightmap's except under fullbright (which keeps the texture white).
-    /// Evaluation does not depend on which pipelines draw this frame.
-    fn polytone_blocks(&mut self) -> impl Iterator<Item = &mut ExpressionBlocks> {
+    /// the stars', the lightmap's except under fullbright (which keeps the texture white), and
+    /// the text's (the world's, the see-through and the GUI's) only where a world runs (`world`;
+    /// a frame where none runs writes zeros, [`Self::zero_text_blocks`]). Evaluation does not
+    /// depend on which pipelines draw this frame.
+    fn polytone_blocks(&mut self, world: bool) -> impl Iterator<Item = &mut ExpressionBlocks> {
         let fullbright = self.fullbright;
         let lightmap = (self.core_lightmap.as_mut())
             .filter(|_| !fullbright)
             .map(|core| &mut core.extra);
         let lines = self.core_lines.as_mut().map(|core| &mut core.extra);
         let sky = (self.core_sky.iter_mut()).flat_map(|core| core.expression_blocks());
-        lightmap.into_iter().chain(lines).chain(sky)
+        let text = (self.core_text.as_mut().filter(|_| world).into_iter())
+            .flat_map(|core| core.expression_blocks())
+            .chain(self.hud.text_expression_blocks().filter(|_| world));
+        (lightmap.into_iter().chain(lines).chain(sky)).chain(text)
     }
 
-    /// Whether the game needs an expression context for the installed pack pipelines this frame.
-    pub fn reads_pack_expressions(&mut self) -> bool {
-        self.polytone_blocks().any(|blocks| blocks.has_uniforms())
+    /// Whether the game needs an expression context for the installed pack pipelines this frame
+    /// (`world`: whether a world runs).
+    pub fn reads_pack_expressions(&mut self, world: bool) -> bool {
+        self.polytone_blocks(world)
+            .any(|blocks| blocks.has_uniforms())
     }
 
-    /// Evaluates the installed pack pipelines' expression uniforms from `frame`. The values
-    /// are uploaded separately as each pipeline prepares its draw.
-    pub fn evaluate_pack_expressions(&mut self, frame: &crate::environment::Frame) {
-        for blocks in self.polytone_blocks() {
+    /// Evaluates the installed pack pipelines' expression uniforms from `frame` (`world`: whether
+    /// a world runs). The values are uploaded separately as each pipeline prepares its draw.
+    pub fn evaluate_pack_expressions(&mut self, frame: &crate::environment::Frame, world: bool) {
+        for blocks in self.polytone_blocks(world) {
             blocks.evaluate(frame);
         }
     }
 
-    /// Whether an installed pack core shader reads `PolyGlobals`: only then does the game make them
-    /// for it ([`Self::set_poly_globals`]).
-    pub fn reads_poly_globals(&mut self) -> bool {
-        self.polytone_blocks().any(|blocks| blocks.reads_globals())
+    /// Whether an installed pack core shader reads `PolyGlobals` (`world`: whether a world runs):
+    /// only then does the game make them for it ([`Self::set_poly_globals`]).
+    pub fn reads_poly_globals(&mut self, world: bool) -> bool {
+        self.polytone_blocks(world)
+            .any(|blocks| blocks.reads_globals())
     }
 
     /// Whether the last frame's post effects were given `PolyGlobals`, which they ask for only
@@ -308,10 +404,20 @@ impl super::Renderer {
     }
 
     /// The frame's `PolyGlobals` (`polytone_post::PolyGlobals::bytes`) for the installed pack core
-    /// shaders that read them, which their next uploads write; none gives zeros.
-    pub fn set_poly_globals(&mut self, globals: Option<&PolyGlobalsBytes>) {
-        for blocks in self.polytone_blocks() {
+    /// shaders that read them (`world`: whether a world runs), which their next uploads write;
+    /// none gives zeros.
+    pub fn set_poly_globals(&mut self, globals: Option<&PolyGlobalsBytes>, world: bool) {
+        for blocks in self.polytone_blocks(world) {
             blocks.set_globals(globals);
+        }
+    }
+
+    /// The text's Polytone blocks are 0 where no world runs (a menu or a loading screen): a frame
+    /// of [`super::Frame::title`], whatever the game last gave them.
+    pub(super) fn zero_text_blocks(&mut self) {
+        let text = (self.core_text.iter_mut()).flat_map(|core| core.expression_blocks());
+        for blocks in text.chain(self.hud.text_expression_blocks()) {
+            blocks.zero();
         }
     }
 }

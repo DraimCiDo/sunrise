@@ -61,6 +61,9 @@ pub(super) struct OpenTransactions {
     /// The same count for a player's own state only (inventory, cursor, menu storage): what a
     /// decision that must stay open to other writes (a mod's move into another block) reads.
     player_writes: u64,
+    /// Tentative block writes do not advance the world's published revision. This epoch does
+    /// advance on those writes and never rolls back, even when the final state is unchanged.
+    block_writes: u64,
     /// The root commits telling their joins and leaves, outermost first: a listener's command in
     /// another level can commit a transaction there while this level's commit is told.
     committing: Vec<entities::Committing>,
@@ -93,6 +96,9 @@ impl OpenTransactions {
     /// The journaled-write epoch of players' own state.
     pub(in crate::game) fn player_writes(&self) -> u64 {
         self.player_writes
+    }
+    pub(super) fn block_writes(&self) -> u64 {
+        self.block_writes
     }
 }
 
@@ -194,6 +200,10 @@ pub(super) struct Level {
     mob_lengths: HashMap<u32, usize>,
     /// Each item entity's stack before this transaction first wrote it.
     item_entities: HashMap<u32, ItemStack>,
+    /// The merge fields of resident experience orbs before the first award touched them.
+    orbs: HashMap<crate::join_seq::JoinSeq, (i32, u32, i32)>,
+    /// Each detached station before the first click wrote it, by connection and owner.
+    stations: HashMap<(u32, decision::MenuId), super::lan_stations::GuestStation>,
     /// Each guest's menu storage before this transaction first wrote it, by connection.
     menus: HashMap<u32, KeptMenus>,
     /// The scoreboard before this transaction first wrote it (`journal_scoreboard`), whole.
@@ -360,6 +370,8 @@ pub(super) enum After {
     /// when the stack was accepted (a command run for a borrowed player swaps it in).
     GivePickup(u128, super::Dim),
     InventoryTrigger(u128),
+    GrindstoneEvent([i32; 3]),
+    StationContent(u32, decision::MenuId, i32),
     /// What did not fit of a `/give` to the player `uuid`, thrown in the level `dim` that was in
     /// place when it was accepted; at `eye`, the player's eyes then, if they are dead or gone
     /// by the commit.
@@ -624,6 +636,12 @@ impl Game<'_> {
                 }
                 for (id, kept) in level.item_entities {
                     outer.item_entities.entry(id).or_insert(kept);
+                }
+                for (join, kept) in level.orbs {
+                    outer.orbs.entry(join).or_insert(kept);
+                }
+                for (key, kept) in level.stations {
+                    outer.stations.entry(key).or_insert(kept);
                 }
                 for (id, len) in level.mob_lengths {
                     outer.mob_lengths.entry(id).or_insert(len);
@@ -1069,7 +1087,11 @@ impl Game<'_> {
                 replay_removal: false,
             });
         level.after.push(After::Block(key));
-        self.world.set_stored(pos[0], pos[1], pos[2], state)
+        if !self.world.set_stored(pos[0], pos[1], pos[2], state) {
+            return false;
+        }
+        self.transactions.block_writes = self.transactions.block_writes.wrapping_add(1);
+        true
     }
     /// Hide a replaced block entity from staged reads, without dropping its
     /// contents until the real write. Fluid pickup/pour instead rolls its own
@@ -1085,12 +1107,37 @@ impl Game<'_> {
         }
     }
     pub(super) fn journal_set_level_random(&mut self, random: sunrise_core::random::LegacyRandom) {
+        self.journal_level_random();
+        *self.world.random = random;
+    }
+    pub(super) fn journal_level_random(&mut self) {
         if let Some(level) = self.transactions.last_mut() {
             level
                 .level_random
                 .get_or_insert_with(|| (*self.world.random).clone());
         }
-        *self.world.random = random;
+    }
+    pub(super) fn journal_orb_merge(
+        &mut self,
+        join: crate::join_seq::JoinSeq,
+        fields: (i32, u32, i32),
+    ) {
+        if let Some(level) = self.transactions.last_mut() {
+            level.orbs.entry(join).or_insert(fields);
+        }
+    }
+    pub(super) fn journal_station_click(
+        &mut self,
+        conn: u32,
+        owner: decision::MenuId,
+        station: &super::lan_stations::GuestStation,
+    ) {
+        if let Some(level) = self.transactions.last_mut() {
+            level
+                .stations
+                .entry((conn, owner))
+                .or_insert_with(|| station.clone());
+        }
     }
     /// Keep the original cell without publishing the tentative write.
     pub(in crate::game) fn journal_biome(&mut self, pos: [i32; 3], old: u16) {
@@ -1169,6 +1216,20 @@ impl Game<'_> {
             }
             After::InventoryTrigger(uuid) => {
                 self.native_as_player(uuid, |g| g.check_inventory_trigger());
+            }
+            After::GrindstoneEvent(pos) => self.level_event_at(1042, pos, 0),
+            After::StationContent(conn, owner, window) => {
+                if self
+                    .lan
+                    .as_ref()
+                    .and_then(|host| host.menus.get(&conn))
+                    .is_some_and(|menus| {
+                        menus.station.id() == owner
+                            && menus.station.as_ref().is_some_and(|s| s.window == window)
+                    })
+                {
+                    self.lan_send_station(conn);
+                }
             }
             After::GiveRest {
                 uuid,
@@ -1476,7 +1537,24 @@ impl Game<'_> {
                 e.stack = kept;
             }
         }
+        for (join, kept) in level.orbs {
+            if let Some(i) = self.orbs.locate(join) {
+                let orb = &mut self.orbs[i];
+                (orb.value, orb.count, orb.age) = kept;
+            }
+        }
         if let Some(host) = self.lan.as_mut() {
+            for ((conn, owner), kept) in level.stations {
+                if let Some(menus) = host.menus.get_mut(&conn)
+                    && menus.station.id() == owner
+                    && menus
+                        .station
+                        .as_ref()
+                        .is_some_and(|s| s.window == kept.window)
+                {
+                    menus.station.restore(Some(kept));
+                }
+            }
             host.hub.guests.update_all(|g| {
                 if let Some(kept) = level.menus.get(&g.conn).filter(|_| g.placed) {
                     g.craft_grid.clone_from(&kept.craft_grid);

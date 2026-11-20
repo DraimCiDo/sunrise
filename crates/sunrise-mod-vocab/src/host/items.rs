@@ -85,6 +85,17 @@ pub trait ItemsHost {
         &mut self,
         permissions: CreativeTabPermissions,
     ) -> Result<std::sync::Arc<CreativeModeTabs>, CreativeTabReadError>;
+    /// Side: both. The catalog this side last finished building, as
+    /// `CreativeModeTab.getDisplayItems` reads it, for a reader that only has `&dyn Host`.
+    /// It never builds and never fires `build_creative_mode_tab_contents`. `Ok(None)` before
+    /// this side has built once (a read through [`creative_tabs`](Self::creative_tabs), or the
+    /// creative screen, builds it); [`CreativeTabReadError::Unavailable`] in setup or reload
+    /// and without a live world. The snapshot keeps the permissions of that build and stays
+    /// immutable: a later build publishes a new one.
+    #[access(Metadata)]
+    fn built_creative_tabs(
+        &self,
+    ) -> Result<Option<std::sync::Arc<CreativeModeTabs>>, CreativeTabReadError>;
 }
 /// The server host's methods of the `items` area, implemented by the game and reached through [`ServerHost`].
 #[sunrise_mod_api_macros::host_area]

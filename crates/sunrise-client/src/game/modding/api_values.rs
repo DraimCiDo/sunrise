@@ -1299,19 +1299,20 @@ impl super::Game<'_> {
         pos: [i32; 3],
         value: &mut crate::menu::GrindstonePlace,
         cancel: &mut bool,
-    ) {
+    ) -> Result<(), crate::game::transactions::decision::InvalidReason> {
         let Ok(mut api) = value.try_into_api() else {
-            return;
+            return Ok(());
         };
         let original = api.clone();
         self.native_grindstone_place(player, entity, pos, &mut api, cancel);
         if api == original {
-            return;
+            return Ok(());
         }
-        match api.try_into_engine(self.items()) {
-            Ok(result) => *value = result,
-            Err(_) => *cancel = true,
-        }
+        // An answer that is no stack is refused, never read as a cancel.
+        *value = api
+            .try_into_engine(self.items())
+            .map_err(|_| crate::game::transactions::decision::InvalidReason::Count)?;
+        Ok(())
     }
     pub(in crate::game) fn api_grindstone_take(
         &mut self,
@@ -1320,19 +1321,20 @@ impl super::Game<'_> {
         pos: [i32; 3],
         value: &mut crate::menu::GrindstoneTake,
         cancel: &mut bool,
-    ) {
+    ) -> Result<(), crate::game::transactions::decision::InvalidReason> {
         let Ok(mut api) = value.try_into_api() else {
-            return;
+            return Ok(());
         };
         let original = api.clone();
         self.native_grindstone_take(player, entity, pos, &mut api, cancel);
         if api == original {
-            return;
+            return Ok(());
         }
-        match api.try_into_engine(self.items()) {
-            Ok(result) => *value = result,
-            Err(_) => *cancel = true,
-        }
+        // An answer that is no stack is refused, never read as a cancel.
+        *value = api
+            .try_into_engine(self.items())
+            .map_err(|_| crate::game::transactions::decision::InvalidReason::Count)?;
+        Ok(())
     }
     pub(in crate::game) fn api_anvil_craft_pre(
         &mut self,
@@ -2870,19 +2872,21 @@ fn with_rule_schema<T>(f: impl FnOnce(&mod_api::__private::RuleSchema<'_>) -> T)
 pub(in crate::game) fn install_test_platform() {
     static INSTALLED: std::sync::Once = std::sync::Once::new();
     INSTALLED.call_once(|| {
-        let result = sunrise_engine_slots::install_platform(sunrise_engine_slots::Platform {
-            install_packages: mod_platform::__private::install_packages,
-            install_registration_data: mod_platform::__private::install_registration_data,
-            install_parts: mod_platform::__private::install_parts,
-            profiler_is_enabled: mod_platform::__private::profiler::is_enabled,
-            profiler_start: mod_platform::__private::profiler::start,
-            profiler_stop: mod_platform::__private::profiler::stop,
-            profiler_summary: mod_platform::__private::profiler::summary,
-            profiler_firefox_profile: mod_platform::__private::profiler::firefox_profile,
-        });
+        let result = mod_api::__private::platform::install_platform(
+            mod_api::__private::platform::Platform {
+                install_packages: mod_platform::__private::install_packages,
+                install_registration_data: mod_platform::__private::install_registration_data,
+                install_parts: mod_platform::__private::install_parts,
+                profiler_is_enabled: mod_platform::__private::profiler::is_enabled,
+                profiler_start: mod_platform::__private::profiler::start,
+                profiler_stop: mod_platform::__private::profiler::stop,
+                profiler_summary: mod_platform::__private::profiler::summary,
+                profiler_firefox_profile: mod_platform::__private::profiler::firefox_profile,
+            },
+        );
         assert!(
             result.is_ok()
-                || result == Err(sunrise_engine_slots::PlatformRefusal::AlreadyInstalled)
+                || result == Err(mod_api::__private::platform::PlatformRefusal::AlreadyInstalled)
         );
     });
 }
@@ -2890,7 +2894,7 @@ pub(in crate::game) fn install_parts(mods: &[mod_api::ModEntry]) -> Result<(), V
     #[cfg(test)]
     install_test_platform();
     with_rule_schema(|schema| {
-        (sunrise_engine_slots::platform()
+        (mod_api::__private::platform::platform()
             .map_err(|e| vec![e.to_string()])?
             .install_parts)(mods, schema, super::native_dimensions::valid_shape)
     })
@@ -2909,6 +2913,10 @@ pub(in crate::game) fn register_game_keys(ids: impl IntoIterator<Item = String>)
             .map(|def| sunrise_client_core::potions::namespaced(def.id)),
         |id| sunrise_client_core::potions::effect(id).map(|def| def.index),
     )
+    .unwrap();
+    mod_api::__private::validate_effect_part_owners(|id| {
+        sunrise_client_core::potions::effect(id)?.owner
+    })
     .unwrap();
     if let Some(types) = sunrise_client_core::block_entity_types::current() {
         // Registration just replaced the mod snapshot, but the process-wide engine

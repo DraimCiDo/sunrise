@@ -165,7 +165,7 @@ pub fn main(args: &[String]) -> Result<(), String> {
                 ))
             }
         }
-        // `check` (and its trial run) on each file `head` lists and `base`
+        // `check` on each file `head` lists and `base`
         // doesn't: a pull request's new files.
         Some("check") => {
             let (files, json) = (options.value("--files")?, options.switch("--json"));

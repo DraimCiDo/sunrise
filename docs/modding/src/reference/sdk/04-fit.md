@@ -39,10 +39,9 @@ The launcher asks, for each enabled native mod of an instance, in this order:
 
    The mod's `[native] mixins` pin, when it has one, must be the horizon-mixins revision this build's tool builds
    with.
-5. **Do its `[[inject]]` points hold?** Each row's point must be the same in this build's `points.json`.
-6. **Do the mods it needs fit?** A mod whose library mod is left out is left out too: "it needs Corelib, which
+5. **Do the mods it needs fit?** A mod whose library mod is left out is left out too: "it needs Corelib, which
    doesn't fit".
-7. **Does it compile?** The compile against the build is the final check. A mod that fits and fails to compile is
+6. **Does it compile?** The compile against the build is the final check. A mod that fits and fails to compile is
    left out of that build, and the other mods build.
 
 A mod that doesn't fit stays installed and is left out of the build, with the changed items named (at most five; the
@@ -73,7 +72,7 @@ reads source, and what it leaves to the compile, is in
 
 | Field | What it is |
 |---|---|
-| `schema` | The table's schema number (2). A reader also takes schema 1 ([Lists an older tool wrote](#lists-an-older-tool-wrote)). It refuses any other number, unknown fields, repeated ids and a table over 4 MiB. |
+| `schema` | The table's schema number (3). A reader also takes schemas 1 and 2 ([Lists an older tool wrote](#lists-an-older-tool-wrote)). It refuses any other number, unknown fields, repeated ids and a table over 4 MiB. |
 | `made_for` | The build id the hashes come from: the mod's pin. |
 | `entries[].id`, `entries[].hash` | A record the mod uses, and its hash at `made_for`. |
 | `entries[].impls` | A type's trait impls at `made_for`. |
@@ -91,8 +90,7 @@ A registry or a release page can tell which builds a published package fits from
 `surface.json` alone, or with the build's build data too for a mod that declares game code:
 `cargo sunrise-mod fits <file.smod> --build <name>`. For a current list nothing from the build
 the mod was made for is needed, so pruning that build's compiled files never strands the mod. `fits` first checks
-that the list was made for the build the package pins (a native mod's `[native] sunrise`, a wasm mod's
-`[package.metadata.sunrise] sdk` in its packed `Cargo.toml`). If the pin is missing, is not a full commit SHA,
+that the list was made for the build the package pins (`[native] sunrise`). If the pin is missing, is not a full commit SHA,
 or does not match `made_for`, the list cannot show which other builds the package fits.
 
 The version promise covers the hooks in the list. A hook entry that holds no version cannot be shown to mean what
@@ -101,7 +99,12 @@ naming the hooks, never "fits". `native-check` reports it as `no-list` with `why
 
 ### Lists an older tool wrote
 
-A schema 1 list differs in two ways, and packing the mod again with `cargo sunrise-mod build` removes both:
+Schemas 1 and 2 were written by the older scan, which could attribute a mod's own name to the API. The fit check
+accepts the older hashes for unchanged signatures. For those lists only, absent API records and lost impls that
+refer to a removed API type do not refuse fit. `fits` lists the deferred IDs in one `not checked` line;
+the native compile decides whether the mod actually needs them. Changed signatures and hook versions still refuse.
+
+A schema 1 list also differs in two ways:
 
 - **It holds no hook versions.** `cargo sunrise-mod fits` fetches the `surface.json` of the build the list was
   made for only when a comparison with another build would otherwise be "not known" because a required hook

@@ -32,12 +32,10 @@ impl Game<'_> {
             .instance_slot(fields.slot)
             .and_then(|_| self.model_faces(fields.slot))
             .ok_or(TerrainModelError::Model(ModelError::UnknownModel))?;
-        let light = self.native_draw_light(draw);
         let layers = &self.pack.render.sprite_layers;
         draw_terrain_model(
             draw,
             faces,
-            light,
             |name| {
                 layers
                     .get(name)
@@ -78,27 +76,28 @@ fn engine_options(options: TerrainModelOptions<'_>) -> NativeModelRenderOptions<
     }
 }
 
-/// Appends `faces` under `draw`'s pose at `light`, or appends nothing and returns `Refused` when
+/// Appends `faces` under `draw`'s pose, or appends nothing and returns `Refused` when
 /// the renderer refuses the model or `options`.
 fn draw_terrain_model(
     draw: &mut BlockEntityDraw,
     faces: &[BakedFace],
-    light: u32,
     sprite_layer: impl Fn(&str) -> Option<u32>,
     options: TerrainModelOptions<'_>,
 ) -> Result<(), TerrainModelError> {
     let pose = draw.pose();
+    let light = draw.element_ambient();
     let vertices = draw.vertices_mut();
-    draw_model(
+    let start = vertices.len();
+    let drawn = draw_model(
         faces,
         pose,
         light,
         engine_options(options),
         sprite_layer,
         |vertex| vertices.push(vertex),
-    )
-    .then_some(())
-    .ok_or(TerrainModelError::Refused)
+    );
+    draw.lit_since(start, BlockEntityDraw::cell_centre, draw.light() & 0xffff);
+    drawn.then_some(()).ok_or(TerrainModelError::Refused)
 }
 
 #[cfg(test)]
@@ -159,7 +158,7 @@ mod tests {
             diffuse_lights(false),
             Vec::new(),
         );
-        let result = draw_terrain_model(&mut draw, faces, 0xF0F0, sprite, options);
+        let result = draw_terrain_model(&mut draw, faces, sprite, options);
         (result, draw.into_vertices())
     }
 

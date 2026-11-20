@@ -3,8 +3,8 @@
 A mixin changes one game function. You name the function and the place in it (its start, its return value,
 one call inside it, or its whole body), and write your code there as a small Rust function, the **helper**.
 
-Use a mixin when you need private fields, a change in the middle of a function, or a new body. To run code at
-the start or end of a function with `mod_api` values, an [`[[inject]]` listener](../injections.md) is enough.
+Use a [hook](../hooks-and-the-host.md) or [Part method](../parts.md) when it exposes what you need.
+Use a mixin when you need to patch the game function itself.
 
 ## Example
 
@@ -39,9 +39,8 @@ fn head(game: &mut Game<'_>) -> ::core::ops::ControlFlow<()> {
 called on. With `cancellable = true` the helper returns `ControlFlow<()>`: `Break(())` makes the function
 return at once, and `Continue(())` lets it run. For a function that returns `R`, the helper returns `ControlFlow<R>`, and `Break(value)` returns `value`.
 
-Run `cargo sunrise-mod build` from the mod project. Neither `internals sync` nor `inject update` is a
-step of a mixin build. The build log shows `Function replacement: … without rebuilding the game` when
-it compiles the patch.
+Run `cargo sunrise-mod build` from the mod project. The build log shows
+`Function replacement: … without rebuilding the game` when it compiles the patch.
 
 ## Writing a helper
 
@@ -172,8 +171,7 @@ replacement is given coordinates beyond the columns of the chunk or tile being g
 ## With other mods
 
 Several mods' rows on one function all apply. An `OVERWRITE` must be the only mixin on its function,
-from any mod including its own, and that includes a `HEAD` or a `WRAP_OPERATION` inside it. The tool plans every mod selected for a native build together, so a conflict between mods is found when they are built together, not when one package is checked, and not when an already built library loads. An `[[inject]]` listener may share a function with mixins: head listeners run first, then the
-mixed-in function, then return listeners.
+from any mod including its own, and that includes a `HEAD` or a `WRAP_OPERATION` inside it. The tool plans every mod selected for a native build together, so a conflict between mods is found when they are built together, not when one package is checked, and not when an already built library loads.
 
 ## Errors
 

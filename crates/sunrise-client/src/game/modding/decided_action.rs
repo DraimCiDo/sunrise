@@ -9,8 +9,8 @@
 //! undone with every write the listener made rolled back.
 use super::*;
 use crate::game::transactions::decision::{
-    self, ActionTarget, GameHost, Identity, InvalidReason, MenuId, Outcome, Reply, Side,
-    StaleReason,
+    self, ActionTarget, GameHost, Identity, InvalidReason, MenuId, Outcome, OwnerStamp, Reply,
+    Side, StaleReason,
 };
 use mod_api::EntityRef;
 use std::{cell::RefCell, rc::Rc};
@@ -157,6 +157,14 @@ impl Game<'_> {
         let epoch = self.native_lifecycle.epoch()?;
         let entity = self.lan.as_ref()?.hub.guest(conn)?.entity_id;
         Some(EntityRef::new(epoch, u32::try_from(entity).ok()?))
+    }
+
+    /// The decision's menu id for the guest `conn`'s open workstation, and the owner's stamp: it
+    /// advances on every access to the station, so a stamp that still matches says no one opened,
+    /// closed or replaced it since it was read (also while a click has the menu lifted out).
+    pub(in crate::game) fn guest_station(&self, conn: u32) -> Option<(MenuId, OwnerStamp)> {
+        let owner = &self.lan.as_ref()?.menus.get(&conn)?.station;
+        Some((owner.id(), owner.stamp()))
     }
 
     /// The decision's menu id for the guest `conn`'s hub menus.

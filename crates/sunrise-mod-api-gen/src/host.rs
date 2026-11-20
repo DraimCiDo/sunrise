@@ -247,7 +247,7 @@ impl Area {
 }
 
 /// The traits of one area file by tier. Only `<Camel><Tier>` and the explicitly listed draw
-/// contexts and services are accepted: an unknown trait would reach neither a union nor the WIT.
+/// contexts and services are accepted: an unknown trait cannot be reached through the Host.
 /// Imports and file/item attributes are allowed, but modules, macros and other items are refused
 /// rather than hiding declarations from this scan.
 fn area_tiers(camel: &str, file: syn::File) -> Result<BTreeMap<Tier, Vec<Entry>>, String> {
@@ -363,20 +363,6 @@ fn load(root: &Path) -> Result<Vec<Area>, String> {
     }
     crate::rerun_if_changed(&dir.display());
     Ok(areas)
-}
-
-/// The areas whose backend the game answers from a borrowed view of its tables
-/// (`#[table_backend]`): each as its file stem and its backend trait's name. A level view lends
-/// those tables too, through the method named for the stem (`LevelHost::block_states`).
-pub(super) fn table_areas(root: &Path) -> Result<Vec<(String, String)>, String> {
-    Ok(load(root)?
-        .into_iter()
-        .filter(|area| area.tables.contains_key(&Tier::Backend))
-        .map(|area| {
-            let backend = area.trait_name(Tier::Backend);
-            (area.stem, backend)
-        })
-        .collect())
 }
 
 /// The area modules, the prelude that names every trait of them, and one macro for each union of

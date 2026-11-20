@@ -1,6 +1,6 @@
 #![cfg(test)]
 //! A client mod's dynamic textures (`ClientRenderClientHost::create_dynamic_texture`, #1343):
-//! the atlas's pool follows the loaded client mods, native or wasm, with no mixin (#4437), and
+//! the atlas's pool follows the loaded client mods, with no mixin (#4437), and
 //! an image created as the mod whose hook runs draws under its id through `native_sprite` on
 //! the real HUD pipeline, until it is freed.
 use super::resource_tables::dynamic_texture_pool;
@@ -23,7 +23,7 @@ struct ApiOnly;
 impl Hooks for ApiOnly {}
 
 #[test]
-fn the_pool_follows_the_loaded_client_mods_native_or_wasm() {
+fn the_pool_follows_the_loaded_client_mods() {
     assert!(
         !with_mods(Vec::new().into(), dynamic_texture_pool),
         "no mod"
@@ -33,8 +33,6 @@ fn the_pool_follows_the_loaded_client_mods_native_or_wasm() {
         with_mods(native.into(), dynamic_texture_pool),
         "a native mod with no mixin"
     );
-    let wasm = vec![ModEntry::wasm("wasm-mod", Box::new(ApiOnly))];
-    assert!(with_mods(wasm.into(), dynamic_texture_pool), "a wasm mod");
 }
 
 /// `f` run as mod `id`'s client tick.

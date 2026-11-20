@@ -425,7 +425,6 @@ pub fn wrapper_externs(deps: &Path) -> Result<BTreeMap<String, PathBuf>, String>
         "sunrise_client",
         "mod_api",
         "mod_vocab",
-        "mod_points",
         "sunrise_mod_package",
     ] {
         externs.insert(name.to_owned(), library(deps, name)?);
@@ -447,10 +446,6 @@ fn facade_refused(krate: &str) -> String {
 /// What the patch library's source ends with: edition 2024 loads an `--extern` only when the source names it, and
 /// the dylib links the game's crates only through `sunrise_mod_host`.
 pub const PATCH_HOST_LINK: &str = "\nextern crate sunrise_mod_host as _;\n";
-
-/// The game's one wasmtime is code only inside `libsunrise_mod_wasm` (`sunrise-wasmtime` is metadata in `deps/`), so a
-/// mod that names it links that library: edition 2024 loads an `--extern` only when the source names it.
-pub const WASMTIME_LINK: &str = "\nextern crate sunrise_mod_wasm as _;\n";
 
 pub fn facade_library(deps: &Path, krate: &str, sdk: &Identity) -> Result<PathBuf, String> {
     if !sdk.facade_crates.contains(krate) {
@@ -740,7 +735,6 @@ pub fn compile(
     let game_library = library(&deps, "sunrise_client")?;
     let mut facades = std::collections::HashMap::new();
     libraries.insert("mod_vocab", library(&deps, "mod_vocab")?);
-    libraries.insert("sunrise_mod_wasm", library(&deps, "sunrise_mod_wasm")?);
     let mut rlibs: std::collections::HashMap<&str, PathBuf> = std::collections::HashMap::new();
     let mut crate_names: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
     for (n, &index) in resolution.order.iter().enumerate() {
@@ -794,7 +788,6 @@ pub fn compile(
             &library_entry(
                 &api::template(&game.join(super::api_route::TEMPLATE))?,
                 &[&project.bundle.manifest],
-                &catalog,
                 sdk.commit(),
                 id,
                 &project.bundle.manifest.version.to_string(),
@@ -827,7 +820,6 @@ pub fn compile(
         let mut entry = library_entry(
             &template,
             &[],
-            &catalog,
             sdk.commit(),
             "sunrise_patch",
             "0",
@@ -870,7 +862,7 @@ pub fn compile(
 pub fn refuse_closure_rlib(id: &str, name: &str, path: &Path) -> Result<(), String> {
     if matches!(
         name,
-        "mod_api" | "mod_vocab" | "mod_points" | "sunrise_mod_runtime" | "sunrise_core"
+        "mod_api" | "mod_vocab" | "sunrise_mod_runtime" | "sunrise_core"
     ) && path.extension().is_some_and(|ext| ext == "rlib")
     {
         return Err(trf(
@@ -892,13 +884,12 @@ pub fn dylib_name(krate: &str) -> String {
 pub fn library_entry(
     template: &str,
     mods: &[&sunrise_mod_package::Manifest],
-    catalog: &internals::Catalog,
     build: &str,
     id: &str,
     version: &str,
     installs: &[String],
 ) -> String {
-    api::main_rs(template, mods, catalog)
+    api::main_rs(template, mods)
         .replace("mod_0::", "crate::")
         .replace(
             "/* NATIVE_BUILD */",
@@ -953,13 +944,6 @@ pub fn compile_mod<'a>(
     root.push_str(
         "\n#[allow(unsafe_code)]\n#[path = \"__sunrise_entry.rs\"] mod __sunrise_entry;\n",
     );
-    if project.uses_wasmtime() {
-        root.push_str(WASMTIME_LINK);
-        cmd.arg("--extern").arg(format!(
-            "sunrise_mod_wasm={}",
-            library("sunrise_mod_wasm").display()
-        ));
-    }
     fs::write(&source, root).map_err(|e| e.to_string())?;
     // Diagnostics as JSON, which `run_diagnosed` shows at the author's files: the compiler's
     // inputs and outputs stay those of the staged copy.
@@ -972,7 +956,7 @@ pub fn compile_mod<'a>(
     ])
     .arg("-C")
     .arg(format!("metadata={id}"));
-    for name in ["mod_api", "mod_vocab", "mod_points"] {
+    for name in ["mod_api", "mod_vocab"] {
         refuse_closure_rlib(id, name, library(name))?;
         cmd.arg("--extern")
             .arg(format!("{name}={}", library(name).display()));
@@ -1346,18 +1330,18 @@ mod tests {
     fn closure_rlib_refusal_names_the_mod_and_crate() {
         let message = super::refuse_closure_rlib(
             "example",
-            "mod_points",
-            std::path::Path::new("libmod_points.rlib"),
+            "mod_api",
+            std::path::Path::new("libmod_api.rlib"),
         )
         .unwrap_err();
         assert!(message.contains("example"), "{message}");
-        assert!(message.contains("mod_points"), "{message}");
+        assert!(message.contains("mod_api"), "{message}");
         assert!(message.contains("rlib"), "{message}");
         assert!(
             super::refuse_closure_rlib(
                 "example",
-                "mod_points",
-                std::path::Path::new("libmod_points.rmeta")
+                "mod_api",
+                std::path::Path::new("libmod_api.rmeta")
             )
             .is_ok()
         );
@@ -1383,7 +1367,7 @@ mod tests {
         };
         let api_only = write(
             "api_only",
-            "sunrise-mod-api={path='.sunrise/sdk/api/crates/sunrise-mod-api'}\nsunrise-mod-points={path='.sunrise/sdk/api/crates/sunrise-mod-points'}",
+            "sunrise-mod-api={path='.sunrise/sdk/api/crates/sunrise-mod-api'}",
         );
         let facade = write(
             "facade",
@@ -1567,19 +1551,14 @@ mod tests {
         let sdk: Identity = serde_json::from_value(serde_json::json!({
             "commit": "test", "rustc": "test", "target": "test", "side": "client", "link_args": [],
             "slices": {"runtime": [
-                "bin/sunrise-client.exe", "deps/sunrise_engine_slots.dll", "deps/sunrise_mod_host.dll",
-                "deps/libsunrise_mod_host.dll.a", "deps/libmod_api.so", "deps/mod_points.dylib",
+                "bin/sunrise-client.exe", "deps/sunrise_mod_host.dll",
+                "deps/libsunrise_mod_host.dll.a", "deps/libmod_api.so",
                 "sunrise-prebuilt.json",
             ], "api": []},
         }))
         .unwrap();
-        let recorded = [
-            "sunrise_engine_slots.dll",
-            "sunrise_mod_host.dll",
-            "libmod_api.so",
-            "mod_points.dylib",
-        ]
-        .map(|name| game.join("deps").join(name));
+        let recorded =
+            ["sunrise_mod_host.dll", "libmod_api.so"].map(|name| game.join("deps").join(name));
         for target in crate::rust::tests::HOSTS {
             let rust = crate::rust::tests::unpacked(scratch.path().join(target), target);
             let std = rust.target_libdir().unwrap().join("std-test.dll");
@@ -1666,14 +1645,14 @@ mod tests {
             ("bin/sunrise-client", "exe"),
             ("deps/libmod_api-1.rmeta", "api"),
             ("deps/libsunrise_client-1.rlib", "engine"),
-            ("points.json", "{}"),
+            ("internals.json", "{}"),
         ] {
             fs::create_dir_all(whole.join(name).parent().unwrap()).unwrap();
             fs::write(whole.join(name), text).unwrap();
         }
         let runtime = serde_json::json!([IDENTITY, "bin/sunrise-client"]);
         write(
-            serde_json::json!({"runtime": runtime, "api": ["deps/libmod_api-1.rmeta", "points.json"]}),
+            serde_json::json!({"runtime": runtime, "api": ["deps/libmod_api-1.rmeta", "internals.json"]}),
         );
         let package = lay_out(&whole, &dir.join("linked"), true).unwrap();
         assert_eq!(package, Package::at(&dir.join("linked")));
@@ -1684,7 +1663,7 @@ mod tests {
             read(package.engine.join("deps/libsunrise_client-1.rlib")),
             "engine"
         );
-        assert!(!package.engine.join("points.json").exists());
+        assert!(!package.engine.join("internals.json").exists());
         // Linking leaves the developer's folder as it was.
         assert_eq!(read(whole.join("bin/sunrise-client")), "exe");
         let union = package.whole(&dir.join("union")).unwrap();
@@ -1700,16 +1679,16 @@ mod tests {
         write(serde_json::json!({"runtime": runtime, "api": ["deps/gone.rmeta"]}));
         let error = lay_out(&whole, &dir.join("absent"), true).unwrap_err();
         assert!(error.contains("deps/gone.rmeta"), "{error}");
-        write(serde_json::json!({"runtime": runtime, "api": ["../points.json"]}));
+        write(serde_json::json!({"runtime": runtime, "api": ["../internals.json"]}));
         // Even when that file exists, outside the package.
-        fs::write(dir.join("points.json"), "{}").unwrap();
+        fs::write(dir.join("internals.json"), "{}").unwrap();
         let error = lay_out(&whole, &dir.join("escape"), true).unwrap_err();
         assert!(error.contains("not a plain path"), "{error}");
         write(serde_json::json!(null));
         assert!(lay_out(&whole, &dir.join("none"), true).is_err());
         // Moving (an unpacked download) leaves nothing behind.
         write(
-            serde_json::json!({"runtime": runtime, "api": ["deps/libmod_api-1.rmeta", "points.json"]}),
+            serde_json::json!({"runtime": runtime, "api": ["deps/libmod_api-1.rmeta", "internals.json"]}),
         );
         lay_out(&whole, &dir.join("moved"), false).unwrap();
         assert!(!whole.join("bin/sunrise-client").exists());

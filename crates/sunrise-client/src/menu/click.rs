@@ -299,6 +299,40 @@ impl Menu {
         if let Some(outcome) = env.stacked {
             (canceled, handled) = (outcome.canceled, outcome.handled);
             if canceled && handled {
+                // The replacement goes through the clicked slot's rules: a result slot's or
+                // filled potion slot's `onTake` would not run; `mayPickup` and `mayPlace` still
+                // answer, and the stack fits
+                // `Slot.getMaxStackSize`. A replacement they refuse changes nothing.
+                if let Some(clicked) = &outcome.clicked
+                    && clicked.as_ref() != self.slot(s)
+                {
+                    let held = self.slot(s).is_some();
+                    let result = matches!(
+                        self.state.slots[s].role,
+                        Role::Output
+                            | Role::CraftResult
+                            | Role::Inert
+                            | Role::LoomResult
+                            | Role::MerchantResult
+                            | Role::StoneResult
+                            | Role::GrindResult
+                            | Role::CombineResult
+                            | Role::CartoResult
+                            | Role::ModResult
+                    );
+                    if result
+                        || (held
+                            && (self.state.slots[s].role == Role::Potion
+                                || !self.may_pickup(env, s)))
+                        || clicked.as_ref().is_some_and(|stack| {
+                            !self.may_place(env, s, stack)
+                                || stack.count > self.slot_max(env, s, stack)
+                        })
+                    {
+                        outcome.refused.set(true);
+                        return;
+                    }
+                }
                 if let Some(carried) = outcome.carried.clone() {
                     self.state.carried = carried;
                 }
