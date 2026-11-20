@@ -135,11 +135,17 @@ fn a_compressed_size_rejection_does_not_skip_healthy_records_in_either_region() 
         }
         let bad = Record::Chunk(Arc::new(chunk), encoding.clone(), None);
         let healthy = Record::Tag(Arc::new(sample_tag(11)));
+        let neighbour = Record::Tag(Arc::new(sample_tag(33)));
         let later = Record::Tag(Arc::new(sample_tag(22)));
-        let records = [((0, 0), &healthy), ((1, 0), &bad), ((32, 0), &later)];
+        let records = [
+            ((0, 0), &healthy),
+            ((1, 0), &bad),
+            ((2, 0), &neighbour),
+            ((32, 0), &later),
+        ];
         // Inject the oversized compression result at the real RegionFile admission boundary.
         let mut prepared = Vec::new();
-        for record in [&healthy, &later] {
+        for record in [&healthy, &neighbour, &later] {
             prepared.push(compress_record(
                 record,
                 Compression::None,
@@ -171,6 +177,10 @@ fn a_compressed_size_rejection_does_not_skip_healthy_records_in_either_region() 
         assert_eq!(
             disk.raw_chunk(0, 0).unwrap().tag.get("xPos"),
             Some(&Tag::Int(11))
+        );
+        assert_eq!(
+            disk.raw_chunk(2, 0).unwrap().tag.get("xPos"),
+            Some(&Tag::Int(33))
         );
         assert_eq!(
             disk.raw_chunk(32, 0).unwrap().tag.get("xPos"),
