@@ -14,7 +14,6 @@ use serde_json::{Map, Number, Value, value::RawValue};
 
 const MAX_DEPTH: usize = 512;
 
-// no wire: a local conversion diagnostic, not a mod payload or host value.
 /// A value that cannot cross the shared JSON/NBT representation boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JsonNbtError {
@@ -41,7 +40,6 @@ impl std::fmt::Display for JsonNbtError {
 }
 impl std::error::Error for JsonNbtError {}
 
-// no wire: a local parser diagnostic, not a mod payload or host value.
 /// A refusal when decoding JSON text into typed NBT.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]

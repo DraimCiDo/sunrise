@@ -2,7 +2,6 @@
 use super::{Compound, JavaString, Tag, discard_tag};
 use smallvec::SmallVec;
 
-// no wire: a local parser diagnostic, not a mod payload or host value.
 /// An SNBT parse failure with a vanilla translation key and input-relative cursor.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SnbtError {
