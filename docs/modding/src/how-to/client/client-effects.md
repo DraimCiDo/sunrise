@@ -6,7 +6,7 @@ Use client services to edit tooltips, draw extra camera views and change local s
 
 Read `ClientHost::gui_options().advanced_item_tooltips` for the current
 `advancedItemTooltips` preference (F3+H). The snapshot reflects the current client
-setting on native and wasm; request a new snapshot after a toggle. This is separate
+setting; request a new snapshot after a toggle. This is separate
 from the advanced flag supplied to an individual tooltip request.
 
 ## Showing an item's tooltip in your screen
@@ -33,13 +33,13 @@ receives every item's finished tooltip, including the parts' earlier lines,
 component lines and advanced information. No attached part is needed for a
 global listener, so this is also how a mod edits vanilla or other mods' tooltips.
 The global event supplies the stack, display settings, player IDs, and the
-request's `advanced` and `creative` flags on native and wasm alike.
+request's `advanced` and `creative` flags.
 
 ## Drawing a second world camera
 
 Native internals mods can request extra world cameras through `world_views` and
 consume their textures in `world_view_drawn`. These are raw renderer callbacks, not
-portable API callbacks: wasm mods cannot use them. Construct a `WorldView` with a
+stable API callbacks. Construct a `WorldView` with a
 stable ID, camera, yaw, pitch, field of view and pixel size, and push it to the
 `WorldViews` the hook hands you. The hook is asked once a frame. Up to eight
 views with distinct IDs are taken, with sides limited to 4096 pixels and the

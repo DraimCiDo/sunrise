@@ -96,8 +96,7 @@ fn register(r: &mut dyn Registrar) {
   decoded value and the connection's `IPayloadContext`. A typed id has one declaration: the same
   id in another protocol refuses load.
 - **Tokens.** Registration returns a `ToServer<T>` (client to server) or `ToClient<T>` (server to
-  client), both for a bidirectional one. Keep it and send with it; it has a Wire form, so a wasm
-  mod keeps it the same way. A token grants nothing on its own: each send checks it.
+  client), both for a bidirectional one. Keep it and send with it. A token grants nothing on its own: each send checks it.
 - **Sending and replying.** `ToServer::send(host, &value)` sends from the client
   (`ClientHost::send_payload_to_server`), `ToClient::send(host, player, &value)` from the server
   (`PlayerRef::send_payload`), and `reply(cx, &value)` on either answers on the connection a
@@ -197,8 +196,7 @@ anything a handler counts on (inventories, state changes): keep those `Reliable`
   for `Droppable` channels (others refuse with `NotDroppable`), so a relay forwards a frame without
   waiting for the main tick. `players` is your own snapshot: a `PlayerRef` is a plain value, so keep a
   list in the handler's state behind a lock and replace it from a tick or join hook on the main
-  thread. A player who left, or whose connection is not in play, is skipped. It works the same for
-  a wasm handler. A network-thread send is published at once, not with the handler's staged replies.
+  thread. A player who left, or whose connection is not in play, is skipped. A network-thread send is published at once, not with the handler's staged replies.
 - **Vanilla's packet-rate limit** (`rate-limit`, off by default) counts every packet, `Droppable`
   payloads included. Voice at 20 ms frames is 50 payloads a second: a mod may pack two frames into
   one payload.

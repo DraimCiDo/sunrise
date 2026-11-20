@@ -37,13 +37,3 @@ the active immutable item-registry owner before lending its mutable host, and ca
 engine conversions for final commit. Untouched listeners neither clone another checkpoint nor
 revalidate unchanged stacks. Keep this policy in the generator when adding mixed-output hooks;
 the general generated hook notes describe the author-visible rule once.
-
-The `wasm-mods` job also builds `tests/mixed-output-fixture` and runs
-`sunrise-mod-wasm`'s `listener_outputs` target with `mixed-output-fixture` enabled.
-This opt-in catalog contract is absent from normal API/wire generation: the existing
-cancellable drop hooks carry `ItemDrop`, not a direct `Vec<ItemStack>`. The test runs
-the same literal stack/scalar/cancel edits natively and through a compiled guest's
-generated event serialization and the real `WasmMod` proxy, including warning ownership,
-cancelled-listener filtering and later-listener independence. Its conversion callback
-has a fixed fixture limit; Game registry conversion has separate coverage. A standalone
-Wasm VM running both dispatcher and listeners is not evidence of this boundary.

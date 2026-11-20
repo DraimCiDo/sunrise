@@ -119,6 +119,5 @@ shared transaction and runtime limits, with no cauldron-specific budget.
 Client prediction selects the same entry, but skips custom handlers entirely:
 it does not call `decide` or predict writes and consumes the local action while
 waiting for the server result. Vanilla handlers continue to predict normally.
-The server owns inventories, statistics, drops and game events. Native and wasm handlers
-use the same generated registration and callback route;
+The server owns inventories, statistics, drops and game events.
 `CauldronFire` defaults to `Refused` when a generated callback cannot run.

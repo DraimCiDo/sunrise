@@ -52,8 +52,7 @@ payment and `offer.out_of_stock()` to check availability.
 `Ok(None)` means the handle is no longer current, doesn't belong to the local player, or isn't a
 merchant menu. An open merchant menu can return `Ok(Some(vec![]))` before the offers arrive.
 `Err(LevelReadError::Unavailable)` means the snapshot couldn't be read. The call doesn't select
-an offer, buy anything, or send packets; the server still decides every trade. Native and wasm
-mods use the same read.
+an offer, buy anything, or send packets; the server still decides every trade.
 
 ## Frame coordinates
 
@@ -82,7 +81,7 @@ The stack's tooltip image and style, and the rule hiding slot tooltips while
 carrying an item (except items such as bundles), are unchanged. This is the
 screen-side replacement point, not a second item-tooltip hook. NeoForge's
 tooltip events do not carry a slot index; the index here is a Sunrise convenience
-over the screen override. Native and wasm use the same hook and menu indices.
+over the screen override.
 
 ## Moving or hiding a mod screen's slots
 
@@ -156,7 +155,7 @@ are supplied; draw them yourself from `screen_draw` instead.
 
 The default inventory label is at y 72 for a standard 166-high screen and y 39
 for a 133-high hopper layout. Chest layouts use `height - 94`; a shulker box's
-167-high image places it at y 73. Native and wasm use the same declaration.
+167-high image places it at y 73.
 When building a complete `Screen` literal, include `title_label: None` and
 `inventory_label: None`, or use `..Default::default()`.
 

@@ -1,6 +1,6 @@
 # Dropped items during block-entity ticks
 
-During a mod's `BlockEntityPart::block_entity_tick`, existing dropped-item stack writes and removals are proposals. Use `ItemEntityRef::set_stack` to replace a complete nonempty stack and `EntityRef::discard` or `EntityRef::remove` to remove it. Item-place writes join the same scope. Native and wasm mods use the same calls; there is no separate batch method or transaction seal to finish the tick.
+During a mod's `BlockEntityPart::block_entity_tick`, existing dropped-item stack writes and removals are proposals. Use `ItemEntityRef::set_stack` to replace a complete nonempty stack and `EntityRef::discard` or `EntityRef::remove` to remove it. Item-place writes join the same scope. There is no separate batch method or transaction seal to finish the tick.
 
 Later Parts see earlier proposed stacks in registration order. A proposed removal hides the item from handle resolution, item narrowing, entity selectors and item-place reads. Explicit nested host transactions can abort their own proposals; committing one waits for final tick acceptance.
 

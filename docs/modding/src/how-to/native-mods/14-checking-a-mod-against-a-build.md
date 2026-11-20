@@ -2,7 +2,7 @@
 
 In a mod folder, `cargo sunrise-mod` does this for you from the SDK it fetched into `.sunrise/sdk/`:
 
-- `cargo sunrise-mod check` runs `cargo check` for the project's own target (this computer for a native mod, wasm32 for a wasm mod; `--wasm` or `--native` asks for the other), checks the package rules,
+- `cargo sunrise-mod check` runs `cargo check` for this computer, checks the package rules,
   and prints what the mod uses: `Greeter uses 14 items of the API (6 hooks, 5 methods, 3 types). Made for
   nightly-2026-11-13 (afe471c).` With `--uses` it lists each item with the line that brought it in.
 - `cargo sunrise-mod build` packs the list into the package as `uses.json`, with each item's fingerprint at the
@@ -79,8 +79,7 @@ Some sources cannot be judged at all:
   comparisons between plain names (`[a < b, c < d, …]`) is also refused, though it would compile;
 - a `use` statement nested deeper than 64 groups;
 - a symbolic link;
-- a `#[path]` or `include!` that leaves the mod's folder or is computed, or an `include!` renamed by a `use`;
-- any source when the scan runs where it cannot give the parser a stack of its own (on wasm).
+- a `#[path]` or `include!` that leaves the mod's folder or is computed, or an `include!` renamed by a `use`.
 
 The parser runs first in a separate process, the same program started again with the mod's source on its
 input, never on its command line. If that process runs out of stack, or takes longer than 15 seconds, the

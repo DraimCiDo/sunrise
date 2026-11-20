@@ -210,4 +210,3 @@ runs `cargo`, so Rust has to be installed in the same environment.
 
 - [Your first native mod](first-mod.md)
 - [Your first content mod](first-content-mod.md)
-- [Your first WebAssembly mod](first-wasm-mod.md)

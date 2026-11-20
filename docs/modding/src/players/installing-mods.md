@@ -11,11 +11,9 @@ file by hand into the game folder (the folder that holds `options.txt`):
 | Mod | Goes in | What happens next |
 | --- | --- | --- |
 | Content mod (`.smod`, or a folder holding `sunrise-mod.toml`) | `sunrise-mods/` | Read when the game starts |
-| WebAssembly mod (`.smod` with `mod.wasm`) | `sunrise-mods/` | Loaded into the game's sandbox when the game starts |
 | Native mod (`.smod` with Rust source) | `sunrise-native-mods/` | The launcher builds it for that instance ([Native mods](../how-to/native-mods.md)) |
 
 **Browse Mods** in the game lists content mods only, checked against the same registry as the launcher. Native and
-WebAssembly mods install from the launcher or by hand.
 
 Fabric and NeoForge jars do not run in Sunrise: they target Minecraft's Java runtime, which Sunrise does not have.
 The data and assets inside a jar can be carried over; see

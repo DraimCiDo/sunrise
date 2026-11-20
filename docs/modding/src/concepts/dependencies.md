@@ -32,16 +32,15 @@ or `"none"` changes listener/content dispatch, not compiler staging or actual im
 
 The instance's `sunrise-mods/dependency-overrides.toml` can drop a logical constraint/dispatch edge
 or make it a warning. These overrides also cover ordinary dependency rows. This policy is a Sunrise
-addition: it cannot fabricate a code library or bypass native Cargo or wasm ABI/hash/toolchain checks.
+addition: it cannot fabricate a code library or bypass Cargo or native build validation.
 A code dependency still links dependency-first or is refused by name. Selected content and loaded
-native/wasm code share one rule resolver; warnings and every applied override appear on both affected
+native code share one rule resolver; warnings and every applied override appear on both affected
 installed Mods rows, alongside any failed/off status.
 
 The launcher adds a path dependency using the mod ID as the Cargo alias and the target's actual Cargo
 package name. Optional dependencies also get a Cargo feature named exactly as their mod ID, enabled
 only when that mod is installed. Guard calls with `if_installed!`, which builds the block only with
-that feature and runs it only when the mod is installed, so the same source works when built to
-`mod.wasm`, where the library is linked at load and an absent one's functions trap:
+that feature and runs it only when the mod is installed:
 
 ```rust,ignore
 mod_api::if_installed!(host, extra_mod, {
