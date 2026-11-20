@@ -2,9 +2,10 @@
 //! listener `sunrise-hot-paths-game` installs, and an attachment read and written.
 use super::{super::Game, Recorder};
 use sunrise_client::Result;
+use sunrise_mod_runtime::attachments::AttachmentType;
 
 /// The attachment the attachment workloads read and write: plain data, not saved or synced.
-static COUNTER: mod_api::AttachmentType<u32> = mod_api::AttachmentType {
+static COUNTER: AttachmentType<u32> = AttachmentType {
     namespace: "hot_paths",
     name: "counter",
     default: || 0,

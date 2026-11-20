@@ -2,7 +2,8 @@
 use crate::game::native_entity_refs::tests::{prepare_entity_ticking_neighborhood, with_game};
 use sunrise_client::mobs::Mob;
 use sunrise_core::{geometry::Vec3, position::ChunkPos};
-static VALUE: mod_api::AttachmentType<u32> = mod_api::AttachmentType {
+use sunrise_mod_runtime::attachments::AttachmentType;
+static VALUE: AttachmentType<u32> = AttachmentType {
     namespace: "bench",
     name: "tick_state",
     default: || 0,

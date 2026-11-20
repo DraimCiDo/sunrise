@@ -50,10 +50,11 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use crate::game::native_entity_refs::tests::with_game;
-    use mod_api::{AttachmentType, Holder};
     use sunrise_client::mobs::{Mob, conversion::Params};
     use sunrise_core::{geometry::Vec3, nbt::Tag};
-    use sunrise_mod_runtime::attachments::{AttachmentCodec, AttachmentError};
+    use sunrise_mod_runtime::attachments::{
+        AttachmentCodec, AttachmentError, AttachmentType, Holder,
+    };
 
     static MARK: AttachmentType<i32> = AttachmentType {
         namespace: "conversion_test",
