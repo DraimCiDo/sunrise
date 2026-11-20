@@ -19,16 +19,19 @@ phase. It grants no live chunk lookup, scheduling, packets or world writes.
 Registry and settings reads use the captured resource generation.
 
 A captured record caches its callback result. Disk encoding and pending reads
-reuse it; they cannot invoke the callback twice. A refusal keeps the original
-capture and prevents the writer from replacing the prior region record. A chunk
+reuse it; they cannot invoke the callback twice. The writer handles records
+independently: a refusal leaves the previous region slot intact and keeps the
+captured snapshot readable, while unrelated records are still written. A chunk
 whose `chunk_data_load` listener failed is saved without any save listener.
 Attachment values over 65536 encoded bytes, nesting over 64 or total data over
 1048576 bytes refuse the job, including opaque unknown entries.
 
 Every captured record runs the callback exactly once, for full saves (explicit,
 forced, late, unload and closing) and proto saves alike. Saves are refused, with
-no callback, while an action savepoint is open, and chunk unloading waits for it to close. If the disk write fails, the
-old record stays on disk, the snapshot stays readable for recovery and the
-wait or flush reports the failure; nothing is marked saved early. A
-chunk whose save was refused or failed is marked modified again, so the game
-tries it again at the next save.
+no callback, while an action savepoint is open, and chunk unloading waits for
+it to close. An explicit flush reports any unresolved refusals. If shutdown
+finishes with a partial save because a record was refused, it logs the refusal
+and continues rather than treating it as fatal. Storage I/O errors still
+propagate. A failed full chunk that is still resident is marked modified for
+another save attempt. This automatic retry does not cover unloaded chunks or
+proto chunks.
