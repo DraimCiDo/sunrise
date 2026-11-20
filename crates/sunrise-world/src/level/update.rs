@@ -215,7 +215,7 @@ impl Update {
 
 impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     pub fn fluid_at(&self, pos: BlockPos) -> FluidState {
-        self.b.fluid(self.state(pos))
+        self.signals().fluid_at(pos)
     }
     pub fn random(&mut self) -> &mut LegacyRandom {
         self.level.random()
@@ -803,6 +803,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
 }
 
 impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
+    pub fn fluid_at(&self, pos: BlockPos) -> FluidState {
+        self.b.fluid(self.state(pos))
+    }
     pub fn state(&self, pos: BlockPos) -> BlockStateId {
         self.level.block_state(pos)
     }

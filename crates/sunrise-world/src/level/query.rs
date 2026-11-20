@@ -192,27 +192,12 @@ impl<L: super::signal_access::SignalAccess + ?Sized> crate::dynamic_support::Dyn
 }
 
 impl<L: LevelAccess + ?Sized> Sim<'_, L> {
-    /// Shape queries over `getCollisionShape(level, pos)`, including the
-    /// position-dependent shapes (bamboo, speleothems, shulker boxes).
     pub(crate) fn shape_info_at(
         &self,
         state: BlockStateId,
         pos: BlockPos,
     ) -> super::data::ShapeInfo {
-        if let Some(shape) = self.signals().positioned_collision(pos, state) {
-            return super::data::analyse_shape(&shape).unwrap_or_default();
-        }
-        if self.b.facts(state).shape >= 0 {
-            return self.b.shape_info(state);
-        }
-        match self.b.dynamic.get(&state) {
-            Some(support) => support
-                .collision_shape(&mut NoBlockEntities, [pos.x, pos.y, pos.z])
-                .ok()
-                .and_then(|shape| super::data::analyse_shape(&shape).ok())
-                .unwrap_or_default(),
-            None => super::data::ShapeInfo::default(),
-        }
+        self.signals().shape_info_at(state, pos)
     }
     /// `Block.canSupportRigidBlock(level, below)`.
     pub fn can_support_rigid_block(&self, pos: BlockPos) -> bool {
@@ -223,8 +208,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     pub(super) fn can_support_rigid_block_on(&self, pos: BlockPos, state: BlockStateId) -> bool {
         self.signals().can_support_rigid_block_on(pos, state)
     }
-    /// `Block.canSupportCenter(level, pos, direction)`.
-    pub fn can_support_center(&self, pos: BlockPos, direction: Direction) -> bool {
+    #[cfg(test)]
+    pub(super) fn can_support_center(&self, pos: BlockPos, direction: Direction) -> bool {
         self.signals().can_support_center(pos, direction)
     }
     pub fn is_empty_block(&self, pos: BlockPos) -> bool {
@@ -265,10 +250,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.signals().max_local_raw_brightness(pos)
     }
     pub(crate) fn below_state(&self, pos: BlockPos) -> BlockStateId {
-        self.state(below(pos))
+        self.signals().below_state(pos)
     }
     pub(crate) fn rel_state(&self, pos: BlockPos, direction: Direction) -> BlockStateId {
-        self.state(rel(pos, direction))
+        self.signals().rel_state(pos, direction)
     }
     pub(crate) fn is_inside_build_height(&self, y: i32) -> bool {
         y >= self.level.min_y() && y < self.level.max_y()
@@ -374,6 +359,28 @@ impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
             .get(&state)?
             .is_face_sturdy(&mut world, [pos.x, pos.y, pos.z], direction, support)
             .ok()
+    }
+    /// Shape queries over `getCollisionShape(level, pos)`, including the
+    /// position-dependent shapes (bamboo, speleothems, shulker boxes).
+    pub(crate) fn shape_info_at(
+        &self,
+        state: BlockStateId,
+        pos: BlockPos,
+    ) -> super::data::ShapeInfo {
+        if let Some(shape) = self.positioned_collision(pos, state) {
+            return super::data::analyse_shape(&shape).unwrap_or_default();
+        }
+        if self.b.facts(state).shape >= 0 {
+            return self.b.shape_info(state);
+        }
+        match self.b.dynamic.get(&state) {
+            Some(support) => support
+                .collision_shape(&mut NoBlockEntities, [pos.x, pos.y, pos.z])
+                .ok()
+                .and_then(|shape| super::data::analyse_shape(&shape).ok())
+                .unwrap_or_default(),
+            None => super::data::ShapeInfo::default(),
+        }
     }
     /// Position-specific collision overrides the ordinary cached shape and its metadata.
     /// A publication wins over the declared default, even if that default has an offset.
@@ -491,6 +498,12 @@ impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
     }
     pub fn is_redstone_conductor(&self, state: BlockStateId, _pos: BlockPos) -> bool {
         self.b.is_redstone_conductor(state)
+    }
+    pub(crate) fn below_state(&self, pos: BlockPos) -> BlockStateId {
+        self.state(below(pos))
+    }
+    pub(crate) fn rel_state(&self, pos: BlockPos, direction: Direction) -> BlockStateId {
+        self.state(rel(pos, direction))
     }
     pub(crate) fn above_state(&self, pos: BlockPos) -> BlockStateId {
         self.state(above(pos))

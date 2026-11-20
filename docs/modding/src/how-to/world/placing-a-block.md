@@ -47,7 +47,8 @@ An explicit `BlockPart::can_survive` answer wins. Otherwise the block's rule run
 `can_sustain_plant` on the soil before `may_place_on` on the plant where the rule asks them.
 `Ok(false)` is a rule refusal; `Err(Stale)` means the level handle is dead, and
 `Err(Unavailable)` means the host could not evaluate the state or destination. On a client the
-answer is only a prediction on its loaded local replica.
+answer is only a prediction on its active loaded replica; separately viewed levels return
+`Err(Unavailable)` because they have no local rule context.
 
 The read sees earlier transaction writes that are already visible to normal reads. It loads no
 chunks, changes no blocks and opens or settles no transaction. It does not run `must_survive`

@@ -96,14 +96,14 @@ impl Game<'_> {
             rule_ticks: Some(ticks),
         };
         // All storage lent to this adapter is shared, including the caller's staged writes.
-        let mut read = SurvivalLevel {
+        let read = SurvivalLevel {
             read,
             scratch_random: LegacyRandom::new(0),
         };
         Ok(self
             .res
             .behaviours()
-            .can_survive_read(&mut read, ticks, pos, state))
+            .can_survive_read(&read, ticks, pos, state))
     }
 }
 

@@ -931,23 +931,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         !refused
     }
 
-    // ---- PistonHeadBlock ----
     pub(crate) fn piston_head_fitting_base(&self, head: BlockStateId, base: BlockStateId) -> bool {
-        let b = self.b;
-        let expected = if b.table.text(head, b.props.kind) == "sticky" {
-            b.named.sticky_piston
-        } else {
-            b.named.piston
-        };
-        b.is_block(base, expected)
-            && b.table.bool(base, b.props.extended)
-            && b.facing(base) == b.facing(head)
-    }
-    pub(crate) fn piston_head_can_survive(&self, head: BlockStateId, pos: BlockPos) -> bool {
-        let b = self.b;
-        let base = self.rel_state(pos, b.facing(head).opposite());
-        self.piston_head_fitting_base(head, base)
-            || (b.is_block(base, b.named.moving_piston) && b.facing(base) == b.facing(head))
+        self.signals().piston_head_fitting_base(head, base)
     }
 }
 
@@ -1091,6 +1076,25 @@ impl Behaviours {
 }
 
 impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
+    // ---- PistonHeadBlock ----
+    pub(crate) fn piston_head_fitting_base(&self, head: BlockStateId, base: BlockStateId) -> bool {
+        let b = self.b;
+        let expected = if b.table.text(head, b.props.kind) == "sticky" {
+            b.named.sticky_piston
+        } else {
+            b.named.piston
+        };
+        b.is_block(base, expected)
+            && b.table.bool(base, b.props.extended)
+            && b.facing(base) == b.facing(head)
+    }
+    pub(crate) fn piston_head_can_survive(&self, head: BlockStateId, pos: BlockPos) -> bool {
+        let b = self.b;
+        let base = self.rel_state(pos, b.facing(head).opposite());
+        self.piston_head_fitting_base(head, base)
+            || (b.is_block(base, b.named.moving_piston) && b.facing(base) == b.facing(head))
+    }
+
     pub(crate) fn moving_piston(&self, pos: BlockPos) -> Option<MovingPiston> {
         let slot = self.ticks.moving_piston_slot(pos)?;
         Some(self.ticks.moving_pistons[slot].1)

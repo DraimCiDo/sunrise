@@ -38,7 +38,7 @@ impl sunrise_client::motion::SideLevel for GameSide<'_> {
                 self.facts,
                 self.biomes,
                 self.behaviours,
-                self.dim,
+                self.dim.level(),
                 pos,
             )
     }

@@ -42,6 +42,17 @@ impl<'g, 'a> ReadLevel<'g, 'a> {
         self.dimension.unwrap_or_else(|| self.game.dim.level())
     }
 
+    fn containers(&self, at: mod_api::BlockSide) -> Option<super::machines::Containers<'_>> {
+        (self.game.native_authoritative() && at.level == self.level).then(|| {
+            super::machines::Containers::stored(
+                self.world,
+                self.game.res.behaviours(),
+                self.game.items(),
+                self.game.pack.assets.registry,
+            )
+        })
+    }
+
     fn read_signals<R>(&self, read: impl FnOnce(&Signals<'_, Self>) -> R) -> Option<R> {
         // Signal Parts get the signal view, not the originating rule's signal-read capability.
         let signal_view = Self {
@@ -272,16 +283,13 @@ impl LevelHost for ReadLevel<'_, '_> {
         super::native_block_entity_refs::world_block_entity(self.world, self.level, pos)
     }
     fn container_size(&self, at: mod_api::BlockSide) -> Option<usize> {
-        if at.level != self.level || !self.world.is_loaded_at(at.pos[0], at.pos[1], at.pos[2]) {
-            return None;
-        }
-        self.game.container_size(at)
+        self.containers(at)?.capability_size(at)
     }
     fn container_stack(&self, at: mod_api::BlockSide, slot: usize) -> Option<mod_api::ItemStack> {
-        if at.level != self.level || !self.world.is_loaded_at(at.pos[0], at.pos[1], at.pos[2]) {
-            return None;
-        }
-        self.game.container_stack(at, slot)?.try_into_api().ok()
+        self.containers(at)?
+            .capability_stack(at, slot)?
+            .try_into_api()
+            .ok()
     }
     fn block_entity_part_snapshot(
         &self,
@@ -423,10 +431,16 @@ impl LevelHost for ReadLevel<'_, '_> {
     fn is_loaded(&self, [x, y, z]: [i32; 3]) -> bool {
         self.world.is_loaded_at(x, y, z)
     }
-    fn is_raining_at(&self, pos: [i32; 3]) -> bool {
-        self.game
-            .level_is_raining_at(self.level, pos)
-            .unwrap_or(false)
+    fn is_raining_at(&self, [x, y, z]: [i32; 3]) -> bool {
+        self.world.is_loaded_at(x, y, z)
+            && super::native_level_world::rain_at(
+                self.world,
+                self.game.res.facts(),
+                world_biomes!(self.game),
+                self.game.res.behaviours(),
+                self.dimension(),
+                BlockPos::new(x, y, z),
+            )
     }
     fn enabled_features(&self) -> mod_api::FeatureFlags {
         mod_api::FeatureFlags::new(self.game.enabled_feature_ids().clone())

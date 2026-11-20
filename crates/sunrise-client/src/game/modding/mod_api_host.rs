@@ -587,19 +587,13 @@ impl mod_api::LevelHost for super::GameLevel<'_> {
         super::native_block_entity_refs::world_block_entity(self.world, self.api_level?, pos)
     }
     fn container_size(&self, at: mod_api::BlockSide) -> Option<usize> {
-        if !self.native_authoritative
-            || self.api_level != Some(at.level)
-            || !self.world.is_loaded_at(at.pos[0], at.pos[1], at.pos[2])
-        {
+        if !self.native_authoritative || self.api_level != Some(at.level) {
             return None;
         }
         self.containers().capability_size(at)
     }
     fn container_stack(&self, at: mod_api::BlockSide, slot: usize) -> Option<mod_api::ItemStack> {
-        if !self.native_authoritative
-            || self.api_level != Some(at.level)
-            || !self.world.is_loaded_at(at.pos[0], at.pos[1], at.pos[2])
-        {
+        if !self.native_authoritative || self.api_level != Some(at.level) {
             return None;
         }
         self.containers()

@@ -2,7 +2,7 @@
 //! Rules mirror the natively-validated `block_survival` port; dispatch follows
 //! the Java class chain so `super.canSurvive` reaches the next override.
 use super::{
-    LevelAccess, Signals, Sim,
+    LevelAccess, Signals, Sim, Ticks,
     classes::Class,
     query::is_horizontal,
     update::{HORIZONTAL, above, below, rel},
@@ -24,35 +24,96 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         answer
     }
 
-    fn retains_block(&self, state: BlockStateId, pos: BlockPos) -> bool {
+    /// Head and body blocks of a growing-plant family.
+    pub(crate) fn growing_plant_pair(
+        &self,
+        block: super::states::BlockId,
+    ) -> (super::states::BlockId, super::states::BlockId) {
+        let head = self.b.growing_plant_head(block);
+        let body = self
+            .b
+            .table
+            .block_by_name(&format!("{}_plant", &*self.b.table.info(head).name))
+            .unwrap_or(block);
+        (head, body)
+    }
+    /// `CampfireBlock.isSmokeSource`: a hay bale, unless the level answers.
+    pub(crate) fn is_smoke_source(&self, state: BlockStateId) -> bool {
+        let mut smoke = None;
+        self.level.before_smoke_source(state, &mut smoke);
+        smoke.unwrap_or_else(|| {
+            self.b
+                .table
+                .block_by_name("minecraft:hay_block")
+                .is_some_and(|hay| self.b.is_block(state, hay))
+        })
+    }
+    /// `BlockState.canSurvive(level, pos)` with the current simulation's Part context.
+    pub fn can_survive(&self, state: BlockStateId, pos: BlockPos) -> bool {
+        self.signals().can_survive(
+            state,
+            pos,
+            SurvivalContext {
+                part_ticks: self.ticks,
+                landing_block: self.landing_block,
+            },
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct SurvivalContext<'a> {
+    pub part_ticks: &'a Ticks,
+    pub landing_block: Option<(BlockPos, BlockStateId)>,
+}
+
+impl<L: LevelAccess + ?Sized> Signals<'_, L> {
+    fn retains_block(
+        &self,
+        state: BlockStateId,
+        pos: BlockPos,
+        context: SurvivalContext<'_>,
+    ) -> bool {
         let block = self.b.block(state);
-        self.landing_block
+        context
+            .landing_block
             .is_some_and(|(target, carried)| target == pos && self.b.block(carried) == block)
-            || self.block_of(self.state(pos)) == block
+            || self.b.block(self.state(pos)) == block
     }
 
     /// `BlockState.canSurvive(level, pos)`.
-    pub fn can_survive(&self, state: BlockStateId, pos: BlockPos) -> bool {
+    pub(super) fn can_survive(
+        &self,
+        state: BlockStateId,
+        pos: BlockPos,
+        context: SurvivalContext<'_>,
+    ) -> bool {
         let mut survives = None;
         if self
             .level
-            .before_can_survive(&*self.ticks, None, pos, state, &mut survives)
+            .before_can_survive(context.part_ticks, None, pos, state, &mut survives)
         {
-            return self.retains_block(state, pos);
+            return self.retains_block(state, pos, context);
         }
         survives.unwrap_or_else(|| {
             if self.b.data(state).declared_vegetation {
                 let ground = below(pos);
-                self.may_place_on(state, self.state(ground), ground)
+                self.may_place_on(state, self.state(ground), ground, context)
             } else {
-                self.can_survive_at(0, state, pos)
+                self.can_survive_at(0, state, pos, context)
             }
         })
     }
-    fn can_survive_at(&self, depth: usize, state: BlockStateId, pos: BlockPos) -> bool {
+    fn can_survive_at(
+        &self,
+        depth: usize,
+        state: BlockStateId,
+        pos: BlockPos,
+        context: SurvivalContext<'_>,
+    ) -> bool {
         let chain = &self.b.data(state).chain;
         for (index, class) in chain.iter().enumerate().skip(depth) {
-            if let Some(result) = self.can_survive_class(*class, index, state, pos) {
+            if let Some(result) = self.can_survive_class(*class, index, state, pos, context) {
                 return result;
             }
         }
@@ -64,6 +125,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         depth: usize,
         state: BlockStateId,
         pos: BlockPos,
+        context: SurvivalContext<'_>,
     ) -> Option<bool> {
         let b = self.b;
         let p = &b.props;
@@ -170,7 +232,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }
             Class::Cocoa => b.in_set(self.rel_state(pos, b.facing(state)), &t.supports_cocoa),
             Class::Crop => {
-                self.raw_brightness(pos, 0) >= 8 && self.can_survive_at(depth + 1, state, pos)
+                self.raw_brightness(pos, 0) >= 8
+                    && self.can_survive_at(depth + 1, state, pos, context)
             }
             Class::Diode => self.can_support_rigid_block(below(pos)),
             Class::Door => {
@@ -183,17 +246,17 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }
             Class::DoublePlant => {
                 if b.table.text(state, p.half) != "upper" {
-                    return Some(self.can_survive_at(depth + 1, state, pos));
+                    return Some(self.can_survive_at(depth + 1, state, pos, context));
                 }
                 let below_state = self.below_state(pos);
                 b.is_block(below_state, block) && b.table.text(below_state, p.half) == "lower"
             }
             Class::SmallDripleaf => {
                 if b.table.text(state, p.half) == "upper" {
-                    return Some(self.can_survive_at(depth + 1, state, pos));
+                    return Some(self.can_survive_at(depth + 1, state, pos, context));
                 }
                 let below = below(pos);
-                self.may_place_on(state, self.state(below), below)
+                self.may_place_on(state, self.state(below), below, context)
             }
             Class::TallSeagrass => {
                 if b.table.text(state, p.half) == "upper" {
@@ -204,7 +267,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     );
                 }
                 let fluid = self.fluid_at(pos);
-                self.can_survive_at(depth + 1, state, pos)
+                self.can_survive_at(depth + 1, state, pos, context)
                     && b.is_water_fluid(fluid.kind())
                     && fluid.is_full()
             }
@@ -214,7 +277,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 if lower && self.raw_brightness(pos, 0) < 8 {
                     false
                 } else {
-                    self.can_survive_at(depth + 1, state, pos)
+                    self.can_survive_at(depth + 1, state, pos, context)
                 }
             }
             Class::FaceAttachedHorizontalDirectional => {
@@ -240,9 +303,12 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 if !self.growing_plant_can_attach_to(state, attached) {
                     return Some(false);
                 }
-                let (head, body) = self.growing_plant_pair(block);
-                b.is_block(attached, head)
-                    || b.is_block(attached, body)
+                let head = b.growing_plant_head(block);
+                let attached_block = b.block(attached);
+                // We already have the neighbour ID. Recognize the body without building a name.
+                attached_block == head
+                    || b.table.info(attached_block).name.strip_suffix("_plant")
+                        == Some(&*b.table.info(head).name)
                     || b.is_face_sturdy(attached, growth)
             }
             Class::HangingMoss => {
@@ -270,7 +336,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         &t.supports_hanging_mangrove_propagule,
                     )
                 } else {
-                    self.can_survive_at(depth + 1, state, pos)
+                    self.can_survive_at(depth + 1, state, pos, context)
                 }
             }
             Class::MossyCarpet => {
@@ -300,7 +366,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     true
                 } else {
                     self.raw_brightness(pos, 0) < 13
-                        && self.may_place_on(state, below_state, below_pos)
+                        && self.may_place_on(state, below_state, below_pos, context)
                 }
             }
             Class::Path => {
@@ -321,7 +387,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             Class::Scaffolding => self.scaffolding_distance(pos) < 7,
             Class::SeaPickle => {
                 let below = below(pos);
-                self.may_place_on(state, self.state(below), below)
+                self.may_place_on(state, self.state(below), below, context)
             }
             Class::SnowLayer => {
                 let below_state = self.below_state(pos);
@@ -374,7 +440,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }
             Class::Vegetation => {
                 let below = below(pos);
-                self.may_place_on(state, self.state(below), below)
+                self.may_place_on(state, self.state(below), below, context)
             }
             Class::Vine => {
                 let updated = self.vine_updated_state(state, pos);
@@ -388,33 +454,38 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
 
     /// `VegetationBlock.mayPlaceOn` (virtual) for `state`'s block.
-    pub fn may_place_on(
+    fn may_place_on(
         &self,
         state: BlockStateId,
         ground: BlockStateId,
         ground_pos: BlockPos,
+        context: SurvivalContext<'_>,
     ) -> bool {
         // NeoForge's `BushBlock.canSurvive`: the soil's answer first, the plant's second.
         let mut sustains = None;
         if self.level.before_can_sustain_plant(
-            &*self.ticks,
+            context.part_ticks,
             None,
             state,
             ground,
             ground_pos,
             &mut sustains,
         ) {
-            return self.retains_block(state, above(ground_pos));
+            return self.retains_block(state, above(ground_pos), context);
         }
         if let Some(sustains) = sustains {
             return sustains;
         }
         let mut may = None;
-        if self
-            .level
-            .before_may_place_on(&*self.ticks, None, state, ground, ground_pos, &mut may)
-        {
-            return self.retains_block(state, above(ground_pos));
+        if self.level.before_may_place_on(
+            context.part_ticks,
+            None,
+            state,
+            ground,
+            ground_pos,
+            &mut may,
+        ) {
+            return self.retains_block(state, above(ground_pos), context);
         }
         if let Some(may) = may {
             return may;
@@ -505,21 +576,6 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     pub(crate) fn multiface_has_face(&self, state: BlockStateId, direction: Direction) -> bool {
         self.b.table.bool(state, self.direction_prop(direction))
     }
-    /// Head and body blocks of a growing-plant family.
-    pub(crate) fn growing_plant_pair(
-        &self,
-        block: super::states::BlockId,
-    ) -> (super::states::BlockId, super::states::BlockId) {
-        let name = &*self.b.table.info(block).name;
-        let head = name.strip_suffix("_plant").unwrap_or(name);
-        let head = self.b.table.block_by_name(head).unwrap_or(block);
-        let body = self
-            .b
-            .table
-            .block_by_name(&format!("{}_plant", &*self.b.table.info(head).name))
-            .unwrap_or(block);
-        (head, body)
-    }
     /// `GrowingPlantBlock.canAttachTo` (kelp refuses `cannot_support_kelp`).
     fn growing_plant_can_attach_to(&self, state: BlockStateId, attached: BlockStateId) -> bool {
         let b = self.b;
@@ -572,17 +628,6 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 (data.ignite_odds, data.burn_odds)
             }
         }
-    }
-    /// `CampfireBlock.isSmokeSource`: a hay bale, unless the level answers.
-    pub(crate) fn is_smoke_source(&self, state: BlockStateId) -> bool {
-        let mut smoke = None;
-        self.level.before_smoke_source(state, &mut smoke);
-        smoke.unwrap_or_else(|| {
-            self.b
-                .table
-                .block_by_name("minecraft:hay_block")
-                .is_some_and(|hay| self.b.is_block(state, hay))
-        })
     }
     /// `ScaffoldingBlock.getDistance`.
     pub(crate) fn scaffolding_distance(&self, pos: BlockPos) -> i32 {
@@ -679,6 +724,15 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
 }
 
+impl super::Behaviours {
+    fn growing_plant_head(&self, block: super::states::BlockId) -> super::states::BlockId {
+        let name = &*self.table.info(block).name;
+        self.table
+            .block_by_name(name.strip_suffix("_plant").unwrap_or(name))
+            .unwrap_or(block)
+    }
+}
+
 impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
     pub(crate) fn direction_prop(&self, direction: Direction) -> super::states::PropKey {
         let p = &self.b.props;
@@ -695,6 +749,48 @@ impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
 
 /// `Sim` reads these through its [`Signals`], so there is one implementation of each.
 impl<L: LevelAccess + ?Sized> Sim<'_, L> {
+    pub(crate) fn bell_connected_direction(&self, state: BlockStateId) -> Direction {
+        self.signals().bell_connected_direction(state)
+    }
+    pub(crate) fn face_attached_connected(&self, state: BlockStateId) -> Direction {
+        self.signals().face_attached_connected(state)
+    }
+    pub(crate) fn multiface_has_face(&self, state: BlockStateId, direction: Direction) -> bool {
+        self.signals().multiface_has_face(state, direction)
+    }
+    pub(crate) fn is_valid_fire_location(&self, pos: BlockPos) -> bool {
+        self.signals().is_valid_fire_location(pos)
+    }
+    pub(crate) fn neighbour_can_burn(&self, pos: BlockPos, direction: Direction) -> bool {
+        self.signals().neighbour_can_burn(pos, direction)
+    }
+    pub(crate) fn can_burn(&self, state: BlockStateId, pos: BlockPos, face: Direction) -> bool {
+        self.signals().can_burn(state, pos, face)
+    }
+    pub(crate) fn ignite_odds(&self, state: BlockStateId, pos: BlockPos, face: Direction) -> i32 {
+        self.signals().ignite_odds(state, pos, face)
+    }
+    pub(crate) fn burn_odds(&self, state: BlockStateId, pos: BlockPos, face: Direction) -> i32 {
+        self.signals().burn_odds(state, pos, face)
+    }
+    pub(crate) fn scaffolding_distance(&self, pos: BlockPos) -> i32 {
+        self.signals().scaffolding_distance(pos)
+    }
+    pub(crate) fn is_valid_speleothem_placement(
+        &self,
+        block: super::states::BlockId,
+        pos: BlockPos,
+        tip: Direction,
+    ) -> bool {
+        self.signals()
+            .is_valid_speleothem_placement(block, pos, tip)
+    }
+    pub(crate) fn vine_updated_state(&self, state: BlockStateId, pos: BlockPos) -> BlockStateId {
+        self.signals().vine_updated_state(state, pos)
+    }
+    pub(crate) fn vine_count_faces(&self, state: BlockStateId) -> usize {
+        self.signals().vine_count_faces(state)
+    }
     pub(crate) fn direction_prop(&self, direction: Direction) -> super::states::PropKey {
         self.signals().direction_prop(direction)
     }

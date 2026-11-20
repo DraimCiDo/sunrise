@@ -37,21 +37,21 @@ fn weather_flags((rain, thunder): (f32, f32)) -> (bool, bool) {
     (rain > 0.2, thunder > 0.9)
 }
 
-/// `Level.isRainingAt` over `world`, the column of the level in dimension `dim`.
+/// `Level.isRainingAt` over `world`, with the addressed level's dimension and weather.
 pub(super) fn rain_at(
     world: &World,
     facts: &sunrise_client::blocks::BlockFacts,
     biomes: &sunrise_client::biome::Biomes,
     behaviours: &sunrise_world::level::Behaviours,
-    dim: Dim,
+    dimension: LevelDimension,
     pos: BlockPos,
 ) -> bool {
     let view = RainView {
         world,
         facts,
         biomes,
-        dimension: dim.level(),
-        raining: weather_flags(weather_for_world(world, dim == Dim::End)).0,
+        dimension,
+        raining: weather_flags(weather_for_world(world, dimension == LevelDimension::End)).0,
         random: LegacyRandom::new(0),
     };
     behaviours.is_raining_at(&view, pos)
@@ -383,7 +383,7 @@ impl Game<'_> {
             self.res.facts(),
             world_biomes!(self),
             self.res.behaviours(),
-            Dim::from_id(level.dimension_id()),
+            Dim::from_id(level.dimension_id()).level(),
             BlockPos::new(pos[0], pos[1], pos[2]),
         ))
     }

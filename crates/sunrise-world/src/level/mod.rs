@@ -2174,19 +2174,22 @@ impl Behaviours {
             unknown_output: std::cell::Cell::new(false),
         }
     }
-    /// Evaluate candidate survival against a read adapter, using the level's live signal inputs
-    /// (including moving-piston support) without borrowing or changing its tick queues.
+    /// Evaluate candidate survival using live read inputs, without creating or changing tick queues.
     pub fn can_survive_read<L: LevelAccess + ?Sized>(
         &self,
-        level: &mut L,
+        level: &L,
         ticks: &Ticks,
         pos: BlockPos,
         state: BlockStateId,
     ) -> bool {
-        let mut scratch = Ticks::default();
-        let mut sim = self.sim(level, &mut scratch);
-        sim.signal_reads = Some(ticks);
-        sim.can_survive(state, pos)
+        self.uncached_signals(level, ticks).can_survive(
+            state,
+            pos,
+            survive::SurvivalContext {
+                part_ticks: ticks,
+                landing_block: None,
+            },
+        )
     }
 
     /// Ask `Block.getStateForPlacement` with a resolved context, without placing the result.

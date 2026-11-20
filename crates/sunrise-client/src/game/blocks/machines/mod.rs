@@ -982,15 +982,30 @@ pub(super) fn shelf_signal(
     )
 }
 
+impl<'a> Containers<'a> {
+    /// A stored-slot capability read needs only the addressed level's block data.
+    pub(in crate::game) fn stored(
+        world: &'a World,
+        behaviours: &'a Behaviours,
+        items: &'a Items,
+        registry: &'static sunrise_world::registry::BlockRegistry,
+    ) -> Self {
+        Self {
+            world,
+            behaviours,
+            items,
+            registry,
+            brewing: None,
+            mobs: &[],
+        }
+    }
+}
+
 impl super::GameLevel<'_> {
     pub(in crate::game) fn containers(&self) -> Containers<'_> {
         Containers {
-            world: self.world,
-            behaviours: self.behaviours,
-            items: self.items,
-            registry: self.registry,
-            brewing: None,
             mobs: self.entities().mobs,
+            ..Containers::stored(self.world, self.behaviours, self.items, self.registry)
         }
     }
 }
