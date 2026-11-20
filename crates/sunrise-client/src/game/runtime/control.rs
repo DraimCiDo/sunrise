@@ -359,12 +359,14 @@ impl Game<'_> {
             line.split_whitespace().next(),
             Some("key" | "mouse" | "type")
         );
+        let config_was_open = self.config_screen.is_some();
         let result = self.with_user_input(input, |game| {
             game.control_command_inner(line, reply, event_loop)
         });
+        self.settle_config_screen();
         self.settle_title_mode();
         // After handling, as the window's: the mods' mappings and `input_key` hear the key.
-        if let Some((key, action)) = socket_key(line) {
+        if !config_was_open && let Some((key, action)) = socket_key(line) {
             self.with_user_input(true, |game| game.socket_key_input(key, action));
         }
         if let Some(key) = released {
@@ -731,7 +733,9 @@ impl Game<'_> {
                     }
                     return ok();
                 }
-                self.require_world()?;
+                if self.config_screen.is_none() {
+                    self.require_world()?;
+                }
                 // KeyboardHandler.keyPress: the open screen's narration hears it.
                 super::narrator::narrate_key(&mut self.narration, key, arg(2)? != "up");
                 // The sign editor takes raw presses (Enter, arrows, Backspace, Escape).
@@ -782,6 +786,22 @@ impl Game<'_> {
                     }
                 }
                 let action = arg(2)?;
+                if self.config_screen.is_some() {
+                    if action != "up" && !self.screen_key_pressed(physical, action == "repeat") {
+                        self.config_screen_key(physical, true, action == "repeat");
+                    }
+                    if action == "tap" {
+                        self.physical_keys.remove(&physical);
+                        self.debug_key(physical, sunrise_client::debug_keys::KeyAction::Release);
+                    }
+                    if self.config_screen.is_some()
+                        && matches!(action, "tap" | "up")
+                        && !self.screen_key_released(physical)
+                    {
+                        self.config_screen_key(physical, false, false);
+                    }
+                    return ok();
+                }
                 // ScreenEvent.KeyPressed.Pre: the open screen hears of the
                 // press before it acts on it. A cancelled press goes no further.
                 if action != "up" && self.screen_key_pressed(physical, action == "repeat") {
@@ -1152,6 +1172,10 @@ impl Game<'_> {
                     .unwrap_or("");
                 // A server's dialog, in configuration too.
                 if self.dialog_type(text) {
+                    return ok();
+                }
+                if self.config_screen.is_some() {
+                    self.screen_chars_typed(Some(text));
                     return ok();
                 }
                 self.require_world()?;

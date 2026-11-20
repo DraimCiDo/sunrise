@@ -4543,7 +4543,9 @@ impl Game<'_> {
     }
     /// Closes mod `mod_id`'s own screen, if it is open.
     pub(in crate::game) fn mod_screen_close(&mut self, mod_id: &str) {
-        if self.mod_screen().is_some_and(|id| id == mod_id) {
+        if self.mod_screen() == Some(mod_id)
+            && (self.config_screen.is_none() || !Self::another_mods(mod_id))
+        {
             self.close_mod_screen();
         }
     }
@@ -4650,7 +4652,11 @@ impl Game<'_> {
         if Self::another_mods(mod_id) {
             return;
         }
-        self.store_setting(mod_id, key, value);
+        if self.config_screen.is_some() && self.mod_screen() == Some(mod_id) {
+            mod_settings::store_edit(&self.native_data_dir(mod_id), mod_id, key, value);
+        } else {
+            self.store_setting(mod_id, key, value);
+        }
     }
     pub(super) fn store_setting(&self, mod_id: &str, key: &str, value: &str) -> bool {
         mod_settings::store(&self.native_data_dir(mod_id), mod_id, key, value)
@@ -4880,6 +4886,9 @@ impl LevelView<'_> {
     }
 }
 
+#[cfg(test)]
+#[path = "base_tests/config_screen_tests.rs"]
+mod config_screen_tests;
 #[cfg(test)]
 #[path = "base_tests/screen_open_tests.rs"]
 mod screen_open_tests;

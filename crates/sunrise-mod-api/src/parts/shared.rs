@@ -59,6 +59,7 @@ pub struct PartRegistrar {
     pub(crate) mod_index: usize,
     /// Whether the registering mod was loaded as a wasm module.
     pub(crate) mod_wasm: bool,
+    pub(crate) config_screen_client: bool,
     /// Parts registered so far, by every mod: the next part's `order`.
     pub(crate) registered: usize,
     pub(crate) parts: Parts,
@@ -119,6 +120,7 @@ impl PartRegistrar {
             mod_id,
             mod_index: 0,
             mod_wasm: false,
+            config_screen_client: true,
             registered: 0,
             parts: Self::capability_parts(),
             entity_selector_bytes: 0,
@@ -250,6 +252,7 @@ pub(crate) fn register_all(
         registrar.mod_index = index;
         registrar.mod_wasm = mod_vocab::__private::parts_installation::mod_entry_wasm(&mods[index]);
         let context = crate::RegistrationContext::new();
+        registrar.config_screen_client = mod_vocab::__private::client_registration(&context);
         let rollback = registrar.registration_checkpoint();
         hooks.register(&mut registrar, &context);
         for warning in mod_vocab::__private::take_registration_warnings(&context) {

@@ -1780,6 +1780,7 @@ struct Game<'a> {
     native_net: native_net::NativeNet,
     /// The mod whose own screen is open (`Screen::Mod`).
     native_mod_screen: Option<String>,
+    config_screen: Option<mod_api::ConfigScreenSession>,
     /// Meshed sections waiting for an upload budget (Sunrise settings).
     pending_uploads: Vec<((i32, i32, i32), sunrise_client::mesher::SectionMesh)>,
     upload_pace: upload_pace::UploadPace,
@@ -9623,6 +9624,7 @@ impl Game<'_> {
         // it (`ScreenEvent.MouseButtonPressed.Post` and its siblings): set where
         // the Pre lets the input through, fired after the arms ran.
         let mut mouse_post: Option<native_hooks::ScreenMousePost> = None;
+        let was_config_screen = self.config_screen.is_some();
         let result: Result<()> = (|| {
             if let WindowEvent::MouseInput { state, button, .. } = &event
                 && !self.pad_synthetic_input()
@@ -9636,7 +9638,9 @@ impl Game<'_> {
             {
                 // Screen cancellation must not leave a held keyboard mapping down.
                 self.keys.remove(&key);
-                self.mapped_key_event(key, false, false)?;
+                if self.config_screen.is_none() {
+                    self.mapped_key_event(key, false, false)?;
+                }
                 return Ok(());
             }
             if let WindowEvent::KeyboardInput { event, .. } = &event
@@ -9784,6 +9788,9 @@ impl Game<'_> {
                             }
                             native_hooks::ScreenMousePre::NotFired => {}
                         }
+                        if self.config_screen.is_some() {
+                            return Ok(());
+                        }
                         if self.dialog_open() {
                             self.dialog_drag();
                         }
@@ -9873,6 +9880,9 @@ impl Game<'_> {
                             scaled(raw_x),
                             scaled(raw_y),
                         ]));
+                    }
+                    if self.config_screen.is_some() {
+                        return Ok(());
                     }
                     // A prompt is vanilla's `Minecraft.screen`, the only one MouseHandler.onScroll
                     // tells: the top one hears the wheel, as the click arms below pick it, and
@@ -10020,7 +10030,8 @@ impl Game<'_> {
                         self.connect_screen_click()?;
                     }
                 }
-                WindowEvent::MouseInput { .. } if self.screen == Screen::Win => {}
+                WindowEvent::MouseInput { .. }
+                    if self.screen == Screen::Win || self.config_screen.is_some() => {}
                 WindowEvent::MouseInput { state, button, .. } if self.screen == Screen::Options => {
                     if self.options_waiting_for_key() && state == ElementState::Pressed {
                         self.options_bind_mouse(button)?;
@@ -10395,6 +10406,15 @@ impl Game<'_> {
                         && !matches!(event.physical_key, PhysicalKey::Code(KeyCode::Escape)) =>
                 {
                     self.world_options_key(&event)
+                }
+                WindowEvent::KeyboardInput { event, .. } if self.config_screen.is_some() => {
+                    if let PhysicalKey::Code(key) = event.physical_key {
+                        self.config_screen_key(
+                            key,
+                            event.state == ElementState::Pressed,
+                            event.repeat,
+                        );
+                    }
                 }
                 WindowEvent::KeyboardInput { event, .. } if self.screen == Screen::Win => {
                     self.win_key(&event)?
@@ -10821,6 +10841,7 @@ impl Game<'_> {
         })();
         if let Some(post) = mouse_post
             && result.is_ok()
+            && was_config_screen == self.config_screen.is_some()
         {
             self.screen_mouse_post(post);
         }
@@ -11379,6 +11400,7 @@ impl<'a> Game<'a> {
             mod_phase,
             native_net: Default::default(),
             native_mod_screen: None,
+            config_screen: None,
             sky_darken_memo: Default::default(),
             water_plane_memo: Default::default(),
             water_plane_scan: Default::default(),

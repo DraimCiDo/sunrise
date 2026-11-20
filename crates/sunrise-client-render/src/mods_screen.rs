@@ -53,7 +53,7 @@ pub enum Action {
     OpenFolder,
     /// The Back button.
     Back,
-    /// Config: the settings page of the native mod at this index of `ModList::installed`.
+    /// Config: the selected mod at this index of `ModList::installed`.
     Config(usize),
     /// Homepage, Issues or the license: this link, through a confirmation.
     Link(String),
@@ -276,6 +276,12 @@ pub struct ModsScreen {
 }
 
 impl ModsScreen {
+    /// The installed row selected in this list (as opposed to a built-in row).
+    pub fn selected_mod(&self) -> Option<(usize, &str)> {
+        let entry = &self.entries[self.selected?];
+        Some((entry.index?, &entry.id))
+    }
+
     /// `ModListScreen.init`: Minecraft, the registered rows, then the installed mods.
     pub fn new(width: i32, height: i32, in_world: bool, mods: &ModList) -> Self {
         let rows = sunrise_hooks::mod_rows::engine::all();
@@ -337,7 +343,7 @@ impl ModsScreen {
                 config: installed
                     .native
                     .as_ref()
-                    .is_some_and(|page| !page.settings.is_empty()),
+                    .is_some_and(|page| page.config_screen || !page.settings.is_empty()),
                 status,
                 note,
             });
