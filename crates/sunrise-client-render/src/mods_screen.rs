@@ -266,6 +266,7 @@ pub struct ModsScreenId(u64);
 
 /// The Mods screen and its state.
 #[derive(Debug)]
+#[cfg_attr(test, derive(Clone))] // Geometry tests draw from snapshots of one list.
 pub struct ModsScreen {
     id: ModsScreenId,
     pub width: i32,
