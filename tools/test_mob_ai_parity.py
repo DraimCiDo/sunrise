@@ -441,9 +441,16 @@ def scenarios():
     # Mobs dropped into deep water (#542): FloatGoal users float at the surface (their navigation
     # can float, so Mob.jumpInLiquid adds 0.04 a tick), zombies sink.
     for species, seed in [('pig', 171), ('cow', 172), ('wolf', 173), ('cat', 174), ('horse', 175),
-                          ('witch', 176), ('vindicator', 177), ('zombie', 178)]:
+                          ('witch', 176), ('vindicator', 177), ('zombie', 178), ('frog', 179)]:
         add(f'{species}_deep_water', 160, ['fill -4 -64 -4 4 -61 4 minecraft:water',
                                            f'mob minecraft:{species} 0.5 -62 0.5 0 {seed} persistent'])
+    # Frogs in water (#3719): FrogAi.initSwimActivity has no Swim goal; the frog swims at 0.75
+    # (RandomStroll.swim) and TryFindLand(8, 1.5) heads for land within 8 blocks. The wide pool has no
+    # land that near, so the frog only swims; the narrow one has the shore in range.
+    add('frog_open_water', 200, ['fill -12 -64 -12 12 -61 12 minecraft:water',
+                                 'mob minecraft:frog 0.5 -62 0.5 0 180 persistent'])
+    add('frog_pool_shore', 200, ['fill -4 -64 -4 4 -61 4 minecraft:water', 'player 12.5 -60 0.5',
+                                 'mob minecraft:frog 0.5 -62 0.5 0 181 persistent'])
     # A ghast floating near a player (RandomFloatAroundGoal, GhastMoveControl, GhastLookGoal) and shooting it.
     # Blazes: hovering (Blaze.aiStep's slow fall; the burn and smoke are the client's and draw nothing here),
     # rising toward a player above them (customServerAiStep's 0.3F), and BlazeAttackGoal's volleys.

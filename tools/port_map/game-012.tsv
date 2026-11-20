@@ -50,7 +50,7 @@ Frog.FrogPathNavigation.canCutCorner	port	crates/sunrise-client/src/mobs/nav.rs:
 Frog.FrogPathNavigation.createPathFinder	port	crates/sunrise-client/src/mobs/frog.rs::register	amphibious navigation with the frog's prefersShallowSwimming (water below sea level - 10 costs more)
 FrogAi.initCoreActivity	inline	crates/sunrise-client/src/mobs/frog.rs::register	AnimalPanic(2.0) is the Panic goal; look and move sinks are the controls
 FrogAi.initIdleActivity	inline	crates/sunrise-client/src/mobs/frog.rs::register	gap: minor: Croak, stroll and look at player (6 blocks), the 1.25 food tempt (unless pregnant) and the mate search; no TryFindLand
-FrogAi.initSwimActivity	inline	crates/sunrise-client/src/mobs/frog.rs::register	gap: minor: no separate swim activity: Float and the land stroll stand in, no random swim at 0.75 or find-land
+FrogAi.initSwimActivity	inline	crates/sunrise-client/src/mobs/frog.rs::Swim::step	the Swim goal (priority 4) stands in for the activity: IsInWaterSensor memory, TryFindLand(8, 1.5), RandomStroll.swim at 0.75, then stroll(1.0, true); no Float. gap: minor: SetWalkTargetFromLookTarget, and the sink's reached-target and cooldown handling
 FrogAi.initLaySpawnActivity	port	crates/sunrise-client/src/mobs/frog.rs::register	the LaySpawn goal, added in place of the activity
 FrogAi.initJumpActivity	port	crates/sunrise-client/src/mobs/frog.rs::register	the LongJump goal, added in place of the activity
 FrogAi.initTongueActivity	inline	crates/sunrise-client/src/mobs/frog.rs::register	ShootTongue goal at priority 2 with the attack-target checks inside it

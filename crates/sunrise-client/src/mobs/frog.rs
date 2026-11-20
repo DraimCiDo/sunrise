@@ -9,7 +9,7 @@
 use super::{
     DamageLevel, Mob, MobEvent, MobWorld, Species, Who,
     goals::{
-        Breed, Cx, Float, Goal, LOOK, LookAtPlayer, MOVE, Panic, RandomLookAround, Stroll, Tempt,
+        Breed, Cx, Goal, LOOK, LookAtPlayer, MOVE, Panic, RandomLookAround, Stroll, Tempt,
         goal_clone,
     },
     sync,
@@ -79,6 +79,10 @@ pub struct State {
     croak: i32,
     /// The land beside water `LaySpawn` walks to (its `WALK_TARGET`).
     lay_target: Option<[i32; 3]>,
+    /// Ticks to the `IsInWaterSensor`'s next scan, and its `IS_IN_WATER`
+    /// memory: the swim activity follows it, up to 20 ticks behind the water.
+    water_scan: i32,
+    in_water: bool,
     /// Ticks to the attackables sensor's next scan, and `NEAREST_ATTACKABLE`.
     scan: i32,
     nearest: Option<u32>,
@@ -120,23 +124,40 @@ pub fn register(m: &mut Mob) {
         prefers_shallow: true,
     };
     let g = &mut m.ai.goals;
-    g.add(0, Float);
     // `FrogAi.initCoreActivity`: `AnimalPanic(2.0)` — the panic speed
     // multiplier is 2.0, not the 1.25 its temptation uses.
     g.add(1, Panic::new(2.0));
     // `FrogAi.initIdleActivity`: `AnimalMakeLove` first, then `FollowTemptation(1.25)`.
     g.add(2, Breed::new(1.0));
     g.add(3, Unless(is_pregnant, Tempt::new(1.25, food, false)));
+    // `FrogAi.initSwimActivity`: `TryFindLand(8, 1.5)` and the swim `RandomStroll`.
+    // Vanilla's core activity has no `Swim`, so the frog has no `Float`.
+    g.add(4, Swim::default());
     g.add(2, ShootTongue);
     g.add(2, LaySpawn::default());
     g.add(3, LongJump::default());
     g.add(4, Croak);
     g.add(
         5,
-        Unless(laying_trip, Stroll::avoiding_water(1.0).interval(1)),
+        Unless(laying_or_swimming, Stroll::avoiding_water(1.0).interval(1)),
     );
     g.add(6, LookAtPlayer::new(6.0));
     g.add(7, RandomLookAround::default());
+    delay_sensors(m);
+}
+
+/// `Brain.Provider.makeBrain`: `Sensor.randomlyDelayStart` (`nextInt(20)`) for
+/// each sensor of `Frog.SENSOR_TYPES` from the frog's own random: nearest
+/// living entities, hurt by, attackables, temptations and in water. A draw is
+/// the time to that sensor's first scan.
+pub fn delay_sensors(m: &mut Mob) {
+    let draw = |m: &mut Mob| m.random.next_int_bound(SCAN_RATE).unwrap_or(0);
+    for _ in 0..2 {
+        draw(m);
+    }
+    m.extra.frog.scan = draw(m);
+    draw(m);
+    m.extra.frog.water_scan = draw(m);
 }
 
 /// `Entity.setPose` and `Frog.onSyncedDataUpdated(DATA_POSE)`.
@@ -205,7 +226,14 @@ fn can_eat(species: Species, size: i32) -> bool {
 /// `FrogAttackablesSensor` (every 20 ticks) and the memory timers.
 pub fn server_ai_step(m: &mut Mob, w: &MobWorld) {
     count_down_cooldown(m);
+    // `IsInWaterSensor` (every 20 ticks, the first on the first tick).
+    let wet = m.fluids.in_water;
     let f = &mut m.extra.frog;
+    f.water_scan -= 1;
+    if f.water_scan <= 0 {
+        f.water_scan = SCAN_RATE;
+        f.in_water = wet;
+    }
     f.unreachable.retain_mut(|(_, ttl)| {
         *ttl -= 1;
         *ttl > 0
@@ -265,12 +293,154 @@ impl Goal for Croak {
     }
 }
 
+/// `FrogAi.initSwimActivity`'s requirements and `updateActivity`'s order: in
+/// water by the sensor's memory, and not in the tongue, lay spawn or long jump
+/// activities that come before it.
+fn swim_activity(m: &Mob) -> bool {
+    m.extra.frog.in_water && m.extra.frog.target.is_none() && !is_pregnant(m)
+}
+
+/// `TryFindLand.create(8, 1.5)` and the gate of the swim activity: a walk
+/// target toward the nearest land, else `RandomStroll.swim(0.75)`, the land
+/// `stroll(1.0, true)` when that finds nothing. `MoveToTargetSink` takes the
+/// walk target the tick after a behaviour sets it.
+#[derive(Clone, Debug, Default)]
+struct Swim {
+    /// `TryFindLand`'s `nextOkStartTime`: tried every tick it pushes the next
+    /// search 60 ticks on, so it only searches again after a gap.
+    next_ok: i64,
+    /// The `WALK_TARGET` the sink has not taken yet: block, speed.
+    walk: Option<([i32; 3], f64)>,
+    /// The tick the behaviour set it is over: the sink starts on the next.
+    set_this_tick: bool,
+}
+impl Swim {
+    /// `TryFindLand.canStandOn`.
+    fn can_stand_on(w: &MobWorld, p: [i32; 3]) -> bool {
+        w.collision_bounds(p).is_none() && w.top_face_full([p[0], p[1] - 1, p[2]])
+    }
+    fn find_land(&mut self, m: &mut Mob, cx: &mut Cx) {
+        let at = [
+            m.position.x.floor() as i32,
+            m.position.y.floor() as i32,
+            m.position.z.floor() as i32,
+        ];
+        if cx.w.fluid(at[0], at[1], at[2]) != Fluid::Water {
+            return;
+        }
+        let now = cx.w.game_time;
+        if now < self.next_ok {
+            self.next_ok = now + 60;
+            return;
+        }
+        self.next_ok = now + 60;
+        let found = manhattan_box(at, 8).into_iter().find(|p| {
+            (p[0] != at[0] || p[2] != at[2])
+                && cx.w.fluid(p[0], p[1], p[2]) == Fluid::None
+                && Self::can_stand_on(cx.w, *p)
+        });
+        if let Some(p) = found {
+            // The look target is a `BlockPosTracker` on the block.
+            m.look_at([
+                f64::from(p[0]) + 0.5,
+                f64::from(p[1]) + 0.5,
+                f64::from(p[2]) + 0.5,
+            ]);
+            self.walk = Some((p, 1.5));
+        }
+    }
+    /// `MoveToTargetSink.start`: `createPath(target, 0)` for the walk target.
+    fn take_walk(&mut self, m: &mut Mob, cx: &mut Cx) {
+        let Some((p, speed)) = self.walk.take() else {
+            return;
+        };
+        let path = m.create_path_to(cx.w, p, 0);
+        m.nav_move_to_path(cx.w, path, speed);
+    }
+    /// The brain's turn with no walk target: the gate's behaviours in order.
+    fn gate(&mut self, m: &mut Mob, cx: &mut Cx) {
+        // `RandomStroll.swim`: only in water; a position or nothing.
+        if m.fluids.in_water {
+            if let Some(p) = super::animal_brain::swim_stroll_pos(m, cx.w) {
+                self.walk = Some((
+                    [
+                        p.x.floor() as i32,
+                        p.y.floor() as i32,
+                        p.z.floor() as i32,
+                    ],
+                    0.75,
+                ));
+                return;
+            }
+        }
+        // `RandomStroll.stroll(1.0, true)`.
+        if let Some(p) = m.land_random_pos(cx.w, 10, 7) {
+            self.walk = Some((
+                [
+                    p[0].floor() as i32,
+                    p[1].floor() as i32,
+                    p[2].floor() as i32,
+                ],
+                1.0,
+            ));
+        }
+    }
+    fn step(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
+        if !swim_activity(m) {
+            self.walk = None;
+            return false;
+        }
+        // A walk target is present while another goal's trip runs.
+        if !m.ai.nav.is_done() {
+            return false;
+        }
+        self.find_land(m, cx);
+        if self.walk.is_none() {
+            self.gate(m, cx);
+        }
+        self.set_this_tick = self.walk.is_some();
+        self.walk.is_some()
+    }
+}
+impl Goal for Swim {
+    goal_clone!();
+    fn flags(&self) -> u8 {
+        MOVE
+    }
+    fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
+        self.step(m, cx)
+    }
+    fn can_continue(&mut self, m: &mut Mob, _cx: &mut Cx) -> bool {
+        swim_activity(m) && (!m.ai.nav.is_done() || self.walk.is_some())
+    }
+    fn every_tick(&self) -> bool {
+        true
+    }
+    fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
+        // Core's `MoveToTargetSink` starts the tick after the walk target is set.
+        if std::mem::take(&mut self.set_this_tick) {
+            return;
+        }
+        self.take_walk(m, cx);
+    }
+    fn stop(&mut self, m: &mut Mob, _cx: &mut Cx) {
+        self.walk = None;
+        self.set_this_tick = false;
+        m.nav_stop();
+    }
+}
+
 /// `IS_PREGNANT`, set by `Frog.spawnChildFromBreeding` and erased once the
 /// frog has laid its frogspawn.
 const PREGNANT: &str = "is_pregnant";
 /// `LaySpawn`'s walk target is set.
 fn laying_trip(m: &Mob) -> bool {
     m.extra.frog.lay_target.is_some()
+}
+/// The idle activity runs only while `IS_IN_WATER` is absent, and the lay
+/// spawn activity's trip has its own walk target.
+fn laying_or_swimming(m: &Mob) -> bool {
+    laying_trip(m) || m.extra.frog.in_water
 }
 pub fn is_pregnant(m: &Mob) -> bool {
     m.extra.memories.iter().any(|x| x.0 == PREGNANT)
@@ -1056,6 +1226,49 @@ mod tests {
         k.id = "minecraft:frog".into();
         k.species = Species::Frog;
         Mob::new(1, kind, Vec3::new(0.5, 0.0, 0.5), 0.0)
+    }
+
+    #[test]
+    fn swim_activity_replaces_float() {
+        let mut m = frog();
+        register(&mut m);
+        // `FrogAi.initCoreActivity` has no `Swim`; the swim activity's goal is there.
+        assert!(!m.ai.goals.has("Float"));
+        assert!(m.ai.goals.has("Swim"));
+        assert!(!m.ai.nav.can_float, "no FloatGoal, so the navigation cannot float");
+    }
+
+    #[test]
+    fn swim_activity_follows_the_sensor_memory_and_the_earlier_activities() {
+        let mut m = frog();
+        // `IS_IN_WATER` absent: the idle activity.
+        assert!(!swim_activity(&m));
+        m.extra.frog.in_water = true;
+        assert!(swim_activity(&m));
+        // `updateActivity` tries TONGUE and LAY_SPAWN first.
+        m.extra.frog.target = Some(2);
+        assert!(!swim_activity(&m));
+        m.extra.frog.target = None;
+        set_pregnant(&mut m, true);
+        assert!(!swim_activity(&m));
+        set_pregnant(&mut m, false);
+        assert!(swim_activity(&m));
+        // Idle goals wait while the memory is set.
+        assert!(laying_or_swimming(&m));
+        m.extra.frog.in_water = false;
+        assert!(!laying_or_swimming(&m));
+    }
+
+    #[test]
+    fn sensor_delays_draw_five_times_and_keep_two_of_them() {
+        let mut m = frog();
+        m.random.set_seed(179);
+        let mut twin = LegacyRandom::new(179);
+        delay_sensors(&mut m);
+        let draws: Vec<i32> = (0..5).map(|_| twin.next_int_bound(20).unwrap()).collect();
+        assert_eq!(m.extra.frog.scan, draws[2], "FrogAttackablesSensor");
+        assert_eq!(m.extra.frog.water_scan, draws[4], "IsInWaterSensor");
+        assert_eq!(m.random.state(), twin.state());
     }
 
     #[test]

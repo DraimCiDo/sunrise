@@ -1106,6 +1106,10 @@ pub fn main() -> sunrise_client::Result<()> {
                     sunrise_client::mobs::aquatic::FollowFlockLeader::next_start_tick(&mut m);
                 m.ai.goals.set_start_delay("FollowFlockLeaderGoal", delay);
             }
+            if m.species() == Species::Frog {
+                // The oracle delays the brain's sensors again with the seeded random.
+                sunrise_client::mobs::frog::delay_sensors(&mut m);
+            }
             if m.species() == Species::Bee {
                 // The oracle draws the constructor's cooldowns again once seeded.
                 sunrise_client::mobs::bee::draw_cooldowns(&mut m);
