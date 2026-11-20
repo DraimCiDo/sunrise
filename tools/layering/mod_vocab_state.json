@@ -207,7 +207,7 @@
   "world/startup_progress.rs::SCREEN": {
     "type": "OnceLock<Arc<dynStartupScreen>>",
     "category": "dispatch table",
-    "reason": "One engine-installed startup-screen service; registration contexts carry this same resource to native and wasm mods, and retained progress handles use it after registration."
+    "reason": "One engine-installed startup-screen service; registration contexts carry this same resource to mods, and retained progress handles use it after registration."
   },
   "runtime.rs::LISTENER_SERIAL": {
     "type": "std::cell::Cell<u64>",

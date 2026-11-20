@@ -61,13 +61,13 @@ class CompilerCacheTests(unittest.TestCase):
                     result = subprocess.run(
                         [WRAPPER, "/toolchain/clippy-driver", "/toolchain/rustc",
                          "--crate-name", "mod_points", *incremental,
-                         "-C", "debuginfo=1", "--cfg", 'feature="wasm-host"'],
+                         "-C", "debuginfo=1", "--cfg", 'feature="test-support"'],
                         env=env, text=True, capture_output=True, timeout=5,
                     )
                     self.assertEqual(result.returncode, 7, result.stderr)
                     argv, incremental_env = json.loads(result.stdout)
                     self.assertEqual(argv, ["/toolchain/rustc", "--crate-name", "mod_points",
-                                            "-C", "debuginfo=1", "--cfg", 'feature="wasm-host"',
+                                            "-C", "debuginfo=1", "--cfg", 'feature="test-support"',
                                             "-D", "warnings"])
                     self.assertIsNone(incremental_env)
 
