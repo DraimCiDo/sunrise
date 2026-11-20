@@ -30,9 +30,11 @@ command above to inspect the selection rather than relying on historical counts.
 Item component values live in `W/component_value.rs`; the protocol's
 `item/persistent.rs` and generic `item/hash/ops.rs` share their source/stream schema.
 Templates retain their own patches and dense container holes. Persistent encoding
-is fallible: a valid stream-only holder or native count need not fit the saved codec.
-Check this seam with `cargo test -p horizon-world --lib component_value::` and
-`cargo test -p horizon-protocol --lib item::`.
+is fallible: a valid stream-only holder or native count, or a value outside the saved codec's ranges,
+is refused there and stays intact. A component named twice in a patch keeps its last entry; source trees
+nested deeper than 512 levels and stacks holding 64 components inside components are refused.
+Check this seam with `cargo test -p sunrise-world --lib component_value::` and
+`cargo test -p sunrise-protocol --lib item::`.
 
 | # | Area (commits) | Files | Checks |
 |---|---|---|---|

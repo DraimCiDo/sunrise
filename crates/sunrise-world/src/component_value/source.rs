@@ -81,7 +81,7 @@ fn boolean(t: &Tag) -> Result<Value> {
     Ok(Value::Bool(number(t)? != 0.0))
 }
 fn text(t: &Tag) -> Result<Value> {
-    Ok(Value::from_nbt(super::compact_text_tag(t), TEXT_BOOLS))
+    Value::from_nbt(super::compact_text_tag(t), TEXT_BOOLS)
 }
 fn list(t: &Tag, f: impl Fn(&Tag) -> Result<Value>) -> Result<Value> {
     let values = match t {
@@ -334,8 +334,16 @@ fn resolvable(t: &Tag, f: impl Fn(&Tag) -> Result<Value>) -> Result<Value> {
     }
 }
 
+/// The one bound on every source tree, checked before any recursive conversion of it.
+fn check_depth(t: &Tag) -> Result<()> {
+    if !sunrise_core::nbt::within_depth(t, super::MAX_TREE_DEPTH) {
+        return Err(format!("NBT nesting exceeds {}", super::MAX_TREE_DEPTH));
+    }
+    Ok(())
+}
 /// `ItemStackTemplate.CODEC`: source admission, not the signed native stream codec.
 pub fn template_from_tag(t: &Tag) -> Result<Template> {
+    check_depth(t)?;
     template_tag(t, false)
 }
 fn template_tag(t: &Tag, native_templates: bool) -> Result<Template> {
@@ -444,14 +452,19 @@ fn predicate(t: &Tag, native_templates: bool) -> Result<Value> {
 /// Decode the actual component codec's schema and remove its Java defaults.
 /// Registry identifiers remain names; the caller validates them against its snapshot.
 pub fn from_component_tag(id: &str, t: &Tag) -> Result<Value> {
+    check_depth(t)?;
     component_tag(id, t, false)
 }
 /// Datafix output represents native stacks, whose template counts are not bounded by CODEC.
 pub fn from_upgraded_component_tag(id: &str, t: &Tag) -> Result<Value> {
+    check_depth(t)?;
     component_tag(id, t, true)
 }
 fn component_tag(id: &str, t: &Tag, native_templates: bool) -> Result<Value> {
     let id = identifier(id)?;
+    if !native_templates && !super::is_persistent(&id) {
+        return Err(format!("{id} has no persistent codec"));
+    }
     let name = id.strip_prefix("minecraft:").unwrap_or(&id);
     validate_source(name, t)?;
     Ok(match name {
@@ -461,7 +474,7 @@ fn component_tag(id: &str, t: &Tag, native_templates: bool) -> Result<Value> {
             if !matches!(t, Tag::Compound(_)) {
                 return Err("custom data is not a compound".into());
             }
-            Value::from_nbt(t, &[])
+            Value::from_nbt(t, &[])?
         }
         "intangible_projectile" => unit(t)?,
         "map_decorations" => map(t, |v| {
@@ -496,7 +509,7 @@ fn component_tag(id: &str, t: &Tag, native_templates: bool) -> Result<Value> {
             } else {
                 value.to_tag()?
             };
-            Value::from_nbt(&tag, &[])
+            Value::from_nbt(&tag, &[])?
         }
         "container_loot" => record(t, |r| {
             r.required("loot_table", ident)?;
@@ -783,7 +796,7 @@ fn component_tag(id: &str, t: &Tag, native_templates: bool) -> Result<Value> {
                 return Err("typed data not a compound".into());
             };
             entries.insert("id".into(), id);
-            Value::from_nbt(&v, &[])
+            Value::from_nbt(&v, &[])?
         }
         "lodestone_tracker" => record(t, |r| {
             r.optional("target", |v| {
@@ -871,7 +884,7 @@ fn component_tag(id: &str, t: &Tag, native_templates: bool) -> Result<Value> {
         "sign_text_front" | "sign_text_back" => sign_text(t)?,
         "profile" => profile(t)?,
         "blocks_attacks" => blocks_attacks(t)?,
-        _ if !id.starts_with("minecraft:") => Value::from_nbt(t, &[]),
+        _ if !id.starts_with("minecraft:") => Value::from_nbt(t, &[])?,
         _ => return Err(format!("unknown component codec {id}")),
     })
 }
@@ -1074,7 +1087,7 @@ fn predicate_value(t: &Tag, native_templates: bool) -> Result<Value> {
                 .collect::<Result<_>>()?,
         )),
         Tag::List(_) => list(t, |v| predicate_value(v, native_templates)),
-        _ => Ok(Value::from_nbt(t, &[])),
+        _ => Value::from_nbt(t, &[]),
     }
 }
 fn item_predicate(t: &Tag, native_templates: bool) -> Result<Value> {
@@ -1098,6 +1111,10 @@ fn item_predicate(t: &Tag, native_templates: bool) -> Result<Value> {
         })
     })
 }
+/// The persistent codec's range and size limits on one component's saved form.
+pub fn validate_persistent(name: &str, t: &Tag) -> Result<()> {
+    validate_source(name.strip_prefix("minecraft:").unwrap_or(name), t)
+}
 fn validate_source(name: &str, t: &Tag) -> Result<()> {
     fn integer(t: &Tag, min: i32, max: i32) -> Result<()> {
         let Value::Int(n) = int(t)? else {
@@ -1113,7 +1130,9 @@ fn validate_source(name: &str, t: &Tag) -> Result<()> {
             unreachable!()
         };
         let n = f32::from_bits(n);
-        if !(n >= min && n <= max) || exclusive && n == min {
+        // `Float.compareTo` order, as `ExtraCodecs.floatRange` uses: -0.0 is below 0.0 and NaN above every number.
+        let below = n.total_cmp(&min);
+        if below.is_lt() || exclusive && below.is_eq() || n.total_cmp(&max).is_gt() {
             return Err("float outside component codec range".into());
         }
         Ok(())
@@ -1550,5 +1569,58 @@ mod tests {
                 matches!(&native,Value::List(values) if matches!(&values[0],Value::Template(item) if item.count==count))
             );
         }
+    }
+    #[test]
+    fn persistent_input_refuses_transient_components_by_name_but_native_stacks_keep_them() {
+        for name in ["creative_slot_lock", "map_post_processing", "additional_trade_cost"] {
+            let value = if name == "creative_slot_lock" {
+                Tag::Compound(Default::default())
+            } else {
+                Tag::Int(3)
+            };
+            let error = from_component_tag(&format!("minecraft:{name}"), &value).unwrap_err();
+            assert!(error.contains(name), "{error}");
+            assert!(from_upgraded_component_tag(&format!("minecraft:{name}"), &value).is_ok());
+        }
+        let removal = parse(r#"{id:"minecraft:stone",components:{"!minecraft:map_post_processing":{}}}"#);
+        assert!(template_from_tag(&removal).unwrap_err().contains("map_post_processing"));
+    }
+    #[test]
+    fn float_ranges_follow_java_ordering_and_refuse_negative_zero_at_a_zero_minimum() {
+        let float = |bits: u32| Tag::Float(bits);
+        assert!(from_component_tag("minecraft:potion_duration_scale", &float(0)).is_ok());
+        assert!(from_component_tag("minecraft:potion_duration_scale", &float(0x8000_0000)).is_err());
+        assert!(from_component_tag("minecraft:potion_duration_scale", &float(f32::NAN.to_bits())).is_err());
+        assert!(from_component_tag("minecraft:potion_duration_scale", &float(f32::INFINITY.to_bits())).is_err());
+        let cooldown = |bits: u32| Tag::compound([("seconds", float(bits))]);
+        assert!(from_component_tag("minecraft:use_cooldown", &cooldown(1.0f32.to_bits())).is_ok());
+        assert!(from_component_tag("minecraft:use_cooldown", &cooldown(0)).is_err());
+        assert!(from_component_tag("minecraft:use_cooldown", &cooldown(0x8000_0000)).is_err());
+    }
+    #[test]
+    fn trees_nested_past_the_nbt_depth_are_refused_before_conversion() {
+        let nested = |levels: usize| {
+            let mut tag = Tag::Compound(Default::default());
+            for _ in 1..levels {
+                tag = Tag::compound([("a", tag)]);
+            }
+            tag
+        };
+        let convert = |levels: usize| {
+            std::thread::Builder::new()
+                .stack_size(2 << 20)
+                .spawn(move || from_component_tag("minecraft:custom_data", &nested(levels)).is_ok())
+                .unwrap()
+                .join()
+                .unwrap()
+        };
+        assert!(convert(super::super::MAX_TREE_DEPTH));
+        assert!(!convert(super::super::MAX_TREE_DEPTH + 1));
+        let mut value = Value::Int(0);
+        for _ in 0..=super::super::MAX_TREE_DEPTH {
+            value = Value::List(vec![value]);
+        }
+        assert!(value.to_tag().is_err());
+        assert!(Value::from_nbt(&nested(super::super::MAX_TREE_DEPTH + 1), &[]).is_err());
     }
 }

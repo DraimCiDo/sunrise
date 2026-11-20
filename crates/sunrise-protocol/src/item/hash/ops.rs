@@ -19,7 +19,8 @@ pub(crate) trait Ops: Sized {
     fn create_int_list(v: &[i32]) -> Self::Value;
     fn create_map(v: Vec<(Self::Value, Self::Value)>) -> Self::Value;
     fn create_list(v: impl IntoIterator<Item = Self::Value>) -> Self::Value;
-    fn from_nbt(v: &Tag, bools: &[&str]) -> Self::Value;
+    /// `None` when the tree is nested deeper than a conversion may recurse.
+    fn from_nbt(v: &Tag, bools: &[&str]) -> Option<Self::Value>;
     fn template(stack: &Stack, names: &dyn Names) -> Option<Self::Value>;
     fn special_component(
         _: i32,
@@ -78,8 +79,8 @@ impl Ops for HashOps {
     fn create_list(v: impl IntoIterator<Item = HashCode>) -> HashCode {
         HashOps::create_list(v)
     }
-    fn from_nbt(v: &Tag, bools: &[&str]) -> HashCode {
-        HashOps::from_nbt(v, bools)
+    fn from_nbt(v: &Tag, bools: &[&str]) -> Option<HashCode> {
+        Some(HashOps::from_nbt(v, bools))
     }
     fn template(stack: &Stack, names: &dyn Names) -> Option<HashCode> {
         super::template_record_with::<Self>(stack, names)
@@ -152,8 +153,8 @@ impl Ops for Values {
     fn create_list(v: impl IntoIterator<Item = Value>) -> Value {
         Value::List(v.into_iter().collect())
     }
-    fn from_nbt(v: &Tag, bools: &[&str]) -> Value {
-        Value::from_nbt(v, bools)
+    fn from_nbt(v: &Tag, bools: &[&str]) -> Option<Value> {
+        Value::from_nbt(v, bools).ok()
     }
     fn template(stack: &Stack, names: &dyn Names) -> Option<Value> {
         crate::item::persistent::template_value(stack, names)

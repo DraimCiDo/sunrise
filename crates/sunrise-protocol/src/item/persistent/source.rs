@@ -6,7 +6,7 @@ use crate::{
     buf::{Reader, Writer},
 };
 use sunrise_core::nbt::Tag;
-use sunrise_world::component_value::{Template, Value};
+use sunrise_world::component_value::{Template, Value, effective_patch};
 
 fn err(s: impl Into<String>) -> Error {
     Error::new(s.into())
@@ -98,6 +98,12 @@ fn id(ids: &dyn Ids, registry: &str, v: &Value) -> Result<i32> {
         .filter(|id| *id >= 0)
         .ok_or_else(|| err(format!("unknown {registry} entry {name}")))
 }
+/// A registry id as the stream's holder reference: one above the id, with 0 for an inline value.
+fn holder_id(ids: &dyn Ids, registry: &str, v: &Value) -> Result<i32> {
+    id(ids, registry, v)?
+        .checked_add(1)
+        .ok_or_else(|| err(format!("{registry} id overflows the holder reference")))
+}
 fn named(v: &Value, names: &[&str]) -> Result<i32> {
     let name = string(v)?;
     names
@@ -134,7 +140,7 @@ fn nbt(w: &mut Writer, v: &Value) -> Result<()> {
 }
 fn sound(w: &mut Writer, v: &Value, ids: &dyn Ids) -> Result<()> {
     if matches!(v, Value::String(_)) {
-        w.varint(id(ids, "minecraft:sound_event", v)? + 1);
+        w.varint(holder_id(ids, "minecraft:sound_event", v)?);
     } else {
         w.varint(0);
         w.string(&string(need(v, "sound_id")?)?);
@@ -179,7 +185,7 @@ fn holder(
     direct: impl FnOnce(&mut Writer, &Value) -> Result<()>,
 ) -> Result<()> {
     if matches!(v, Value::String(_)) {
-        w.varint(id(ids, registry, v)? + 1);
+        w.varint(holder_id(ids, registry, v)?);
     } else {
         w.varint(0);
         direct(w, v)?;
@@ -235,24 +241,13 @@ fn patch_kind(name: &str, ids: &dyn Ids) -> Result<i32> {
 }
 
 /// Native templates preserve their signed count and their own patch, including transients.
+/// A component named twice keeps its last entry, as in the JSON form.
 pub fn template_from_parts(
     item: &str,
     count: i32,
     patch: &[(String, Option<Value>)],
     ids: &dyn Ids,
 ) -> Result<Stack> {
-    template_stack(item, count, patch, ids, 0)
-}
-fn template_stack(
-    item: &str,
-    count: i32,
-    patch: &[(String, Option<Value>)],
-    ids: &dyn Ids,
-    depth: u32,
-) -> Result<Stack> {
-    if depth >= 64 {
-        return Err(err("component template nesting exceeds 64"));
-    }
     if count == 0 || item == "minecraft:air" {
         return Err(err("empty native template"));
     }
@@ -261,12 +256,10 @@ fn template_stack(
         .filter(|id| *id > 0)
         .ok_or_else(|| err(format!("unknown or empty item {item}")))?;
     let mut stack = Stack::new(item, count);
-    for (name, value) in patch {
+    for (name, value) in effective_patch(patch) {
         let kind = patch_kind(name, ids)?;
         if let Some(value) = value {
-            stack
-                .added
-                .push((kind, component_at(kind, value, ids, depth + 1)?));
+            stack.added.push((kind, component_at(kind, value, ids, 0)?));
         } else {
             stack.removed.push(kind);
         }
@@ -279,10 +272,9 @@ fn template(w: &mut Writer, v: &Value, ids: &dyn Ids, depth: u32) -> Result<()> 
     };
     template_body(w, t, ids, depth)
 }
+/// `depth` counts the components enclosing this template, as the stream reader counts them:
+/// a component inside the template is encoded at the same depth and is the one that adds a level.
 fn template_body(w: &mut Writer, t: &Template, ids: &dyn Ids, depth: u32) -> Result<()> {
-    if depth >= 64 {
-        return Err(err("component template nesting exceeds 64"));
-    }
     if t.count == 0 || t.item == "minecraft:air" {
         return Err(err("empty native template"));
     }
@@ -292,16 +284,16 @@ fn template_body(w: &mut Writer, t: &Template, ids: &dyn Ids, depth: u32) -> Res
         .ok_or_else(|| err(format!("unknown or empty item {}", t.item)))?;
     w.varint(item);
     w.varint(t.count);
-    w.varint(t.patch.iter().filter(|(_, v)| v.is_some()).count() as i32);
-    w.varint(t.patch.iter().filter(|(_, v)| v.is_none()).count() as i32);
-    for (name, value) in &t.patch {
+    w.varint(effective_patch(&t.patch).filter(|(_, v)| v.is_some()).count() as i32);
+    w.varint(effective_patch(&t.patch).filter(|(_, v)| v.is_none()).count() as i32);
+    for (name, value) in effective_patch(&t.patch) {
         if let Some(value) = value {
             let kind = patch_kind(name, ids)?;
             w.varint(kind);
-            encode(kind, value, w, ids, depth + 1)?;
+            encode(kind, value, w, ids, depth)?;
         }
     }
-    for (name, value) in &t.patch {
+    for (name, value) in effective_patch(&t.patch) {
         if value.is_none() {
             w.varint(patch_kind(name, ids)?);
         }
@@ -311,9 +303,6 @@ fn template_body(w: &mut Writer, t: &Template, ids: &dyn Ids, depth: u32) -> Res
 /// Persistent input is normalized below protocol before registry admission.
 pub fn component_from_tag(kind: i32, value: &Tag, ids: &dyn Ids) -> Result<Component> {
     let name = component_name(kind).ok_or_else(|| err("unknown component type"))?;
-    if !sunrise_world::component_value::is_persistent(name) {
-        return Err(err("component has no persistent codec"));
-    }
     let value =
         sunrise_world::component_value::source::from_component_tag(name, value).map_err(err)?;
     component_from_value(kind, &value, ids)
@@ -843,7 +832,7 @@ fn encode(kind: i32, v: &Value, w: &mut Writer, ids: &dyn Ids, depth: u32) -> Re
                 w.f32(float(need(v, "length_in_seconds")?)?);
                 w.varint(int(need(v, "comparator_output")?)?);
             } else {
-                w.varint(id(ids, "minecraft:jukebox_song", v)? + 1);
+                w.varint(holder_id(ids, "minecraft:jukebox_song", v)?);
             }
         }
         67 => holders(w, v, "minecraft:banner_pattern", ids)?,
@@ -1003,7 +992,7 @@ fn encode(kind: i32, v: &Value, w: &mut Writer, ids: &dyn Ids, depth: u32) -> Re
                     optional(w, field(v, k), nbt)?;
                 }
             } else {
-                w.varint(id(ids, "minecraft:painting_variant", v)? + 1);
+                w.varint(holder_id(ids, "minecraft:painting_variant", v)?);
             }
         }
         118 | 119 => {

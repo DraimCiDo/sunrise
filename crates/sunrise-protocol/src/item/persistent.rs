@@ -19,7 +19,13 @@ impl<F: Fn(&str, &str) -> Option<i32>> Ids for F {
     }
 }
 /// Adapter for a name-only lookup callback.
+#[non_exhaustive]
 pub struct NameLookup<'a>(pub &'a dyn Fn(&str, i32) -> Option<String>);
+impl<'a> NameLookup<'a> {
+    pub fn new(lookup: &'a dyn Fn(&str, i32) -> Option<String>) -> Self {
+        Self(lookup)
+    }
+}
 impl Names for NameLookup<'_> {
     fn name(&self, registry: &str, id: i32) -> Option<String> {
         (self.0)(registry, id)
@@ -201,11 +207,7 @@ pub fn template_value(stack: &Stack, names: &dyn Names) -> Result<ValueTemplate>
         set_patch(&mut patch, name, None);
     }
     patch.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(ValueTemplate {
-        item,
-        count: stack.count,
-        patch,
-    })
+    Ok(ValueTemplate::new(item, stack.count, patch))
 }
 fn set_patch(patch: &mut Patch, name: &str, value: Option<Value>) {
     if let Some((_, old)) = patch.iter_mut().find(|(key, _)| key == name) {
@@ -228,10 +230,15 @@ pub fn component_to_tag(kind: i32, value: &Component, names: &dyn Names) -> Resu
     if matches!(kind, 20 | 42 | 50) {
         return Ok(None);
     }
-    component_value(kind, value, names)?
+    let name = component_name(kind)
+        .ok_or_else(|| Error::new(format!("unknown pinned component type {kind}")))?;
+    let tag = component_value(kind, value, names)?
         .to_tag()
-        .map(Some)
-        .map_err(Error::new)
+        .map_err(Error::new)?;
+    // The stream carries values the saved codec refuses (negative damage, out-of-range multipliers):
+    // refuse them here and leave the retained value as it was.
+    sunrise_world::component_value::source::validate_persistent(name, &tag).map_err(Error::new)?;
+    Ok(Some(tag))
 }
 
 pub(crate) fn special_value(
@@ -372,10 +379,10 @@ mod tests {
     }
     #[test]
     fn transient_components_are_wire_values_not_persistent_entries() {
-        let template = ValueTemplate {
-            item: "minecraft:stone".into(),
-            count: 1,
-            patch: vec![
+        let template = ValueTemplate::new(
+            "minecraft:stone".into(),
+            1,
+            vec![
                 (
                     "minecraft:creative_slot_lock".into(),
                     Some(Value::Map(Vec::new())),
@@ -386,7 +393,7 @@ mod tests {
                 ),
                 ("minecraft:map_post_processing".into(), Some(Value::Int(1))),
             ],
-        };
+        );
         assert!(template.to_tag().unwrap().get("components").is_none());
         let wire = template_from_parts(
             &template.item,
@@ -499,5 +506,97 @@ mod tests {
                 assert!(component_value(kind, &Component::Raw(wire.data), &Registry).is_err());
             }
         }
+    }
+    fn bundle_of(template: ValueTemplate) -> Value {
+        Value::List(vec![Value::Template(Box::new(template))])
+    }
+    fn stone(patch: Patch) -> ValueTemplate {
+        ValueTemplate::new("minecraft:stone".into(), 1, patch)
+    }
+    #[test]
+    fn a_component_named_twice_keeps_its_last_entry_in_every_projection() {
+        let damage = || "minecraft:damage".to_owned();
+        let set_last = vec![(damage(), None), (damage(), Some(Value::Int(9)))];
+        let removed_last = vec![(damage(), Some(Value::Int(9))), (damage(), None)];
+        for (patch, kept, key, absent) in [
+            (set_last, Some(Value::Int(9)), "minecraft:damage", "!minecraft:damage"),
+            (removed_last, None, "!minecraft:damage", "minecraft:damage"),
+        ] {
+            let stack = template_from_parts("minecraft:stone", 1, &patch, &registry_id).unwrap();
+            assert_eq!(
+                template_value(&stack, &Registry).unwrap().patch,
+                vec![(damage(), kept)]
+            );
+            // The same patch nested in a bundle takes the nested-writer path.
+            let nested = component_from_value(51, &bundle_of(stone(patch.clone())), &registry_id);
+            let Component::Stacks(inner) = nested.unwrap() else {
+                panic!("bundle contents are stacks");
+            };
+            assert_eq!(inner[0].added.len() + inner[0].removed.len(), 1);
+            let tag = stone(patch).to_tag().unwrap();
+            let components = tag.get("components").unwrap();
+            assert!(components.get(key).is_some() && components.get(absent).is_none());
+        }
+    }
+    #[test]
+    fn component_chains_up_to_the_readers_depth_convert_on_a_network_stack() {
+        let chain = |bundles: usize| {
+            let mut template = stone(vec![]);
+            for _ in 0..bundles {
+                template = stone(vec![(
+                    "minecraft:bundle_contents".into(),
+                    Some(bundle_of(template)),
+                )]);
+            }
+            template
+        };
+        let convert = |bundles: usize| {
+            std::thread::Builder::new()
+                .stack_size(2 << 20)
+                .spawn(move || {
+                    let top = chain(bundles);
+                    template_from_parts(&top.item, top.count, &top.patch, &registry_id).is_ok()
+                })
+                .unwrap()
+                .join()
+                .unwrap()
+        };
+        assert!(convert(64));
+        assert!(!convert(65));
+    }
+    #[test]
+    fn persistent_projection_refuses_what_the_saved_codec_refuses() {
+        assert!(component_to_tag(3, &Component::Int(-1), &Registry).is_err());
+        assert!(component_to_tag(3, &Component::Int(4), &Registry).unwrap().is_some());
+        let use_effects = |speed: f32| {
+            let mut wire = Writer::new();
+            wire.bool(true);
+            wire.bool(true);
+            wire.f32(speed);
+            Component::Raw(wire.data)
+        };
+        for speed in [2.0, -0.5, -0.0] {
+            assert!(component_to_tag(5, &use_effects(speed), &Registry).is_err());
+        }
+        assert!(component_to_tag(5, &use_effects(0.5), &Registry).unwrap().is_some());
+        // The retained value is untouched by the refusal.
+        let value = Component::Int(-1);
+        let _ = component_to_tag(3, &value, &Registry);
+        assert_eq!(value, Component::Int(-1));
+        let template = stone(vec![("minecraft:damage".into(), Some(Value::Int(-1)))]);
+        assert!(template.to_tag().is_err());
+    }
+    #[test]
+    fn persistent_input_names_the_transient_component_it_refuses() {
+        let error = component_from_tag(20, &Tag::Compound(Default::default()), &registry_id)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("creative_slot_lock"), "{error}");
+    }
+    #[test]
+    fn a_registry_id_at_the_top_of_the_range_is_refused_not_wrapped() {
+        let top = |_: &str, _: &str| Some(i32::MAX);
+        let error = component_from_value(64, &Value::string("minecraft:quartz"), &top);
+        assert!(error.is_err());
     }
 }

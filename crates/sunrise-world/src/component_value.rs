@@ -3,24 +3,49 @@ use sunrise_core::nbt::{JavaString, Tag};
 pub mod source;
 pub use source::from_component_tag;
 
+/// The deepest list/compound nesting a tag tree may have in a conversion:
+/// `NbtAccounter.MAX_STACK_DEPTH`, the most binary NBT reads.
+pub const MAX_TREE_DEPTH: usize = 512;
+
 /// `ComponentSerialization.CODEC` collapses an unstyled literal with no siblings.
-/// Borrow the compact form so source, legacy, and stream traversal share it.
-pub fn compact_text_tag(value: &Tag) -> &Tag {
-    match value {
-        Tag::List(values) if values.len() == 1 => compact_text_tag(&values[0]),
-        Tag::Compound(fields) if fields.len() == 1 => match fields.iter().next() {
-            Some((key, text @ Tag::String(_))) if key.0 == [116, 101, 120, 116] => text,
-            _ => value,
-        },
-        _ => value,
+/// Borrow the compact form so source and stream traversal share it.
+pub fn compact_text_tag(mut value: &Tag) -> &Tag {
+    loop {
+        match value {
+            Tag::List(values) if values.len() == 1 => value = &values[0],
+            Tag::Compound(fields) if fields.len() == 1 => match fields.iter().next() {
+                Some((key, text @ Tag::String(_))) if key.0 == [116, 101, 120, 116] => {
+                    return text;
+                }
+                _ => return value,
+            },
+            _ => return value,
+        }
     }
 }
 
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct Template {
     pub item: String,
     pub count: i32,
     pub patch: Patch,
+}
+impl Template {
+    pub fn new(item: String, count: i32, patch: Patch) -> Self {
+        Self { item, count, patch }
+    }
+}
+/// The entries that decide a patch: when a component is named twice the last entry wins,
+/// as in the JSON form. Allocation-free; patches hold at most one entry per component type.
+pub fn effective_patch(
+    patch: &[(String, Option<Value>)],
+) -> impl Iterator<Item = &(String, Option<Value>)> {
+    patch
+        .iter()
+        .enumerate()
+        .filter(|(index, (name, _))| !patch[index + 1..].iter().any(|(later, _)| later == name))
+        .map(|(_, entry)| entry)
 }
 impl PartialEq for Template {
     fn eq(&self, other: &Self) -> bool {
@@ -47,6 +72,7 @@ impl PartialEq for Template {
 pub type Patch = Vec<(String, Option<Value>)>;
 
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum Value {
     Empty,
     Byte(i8),
@@ -102,7 +128,14 @@ impl Value {
     pub fn string(value: &str) -> Self {
         Self::String(value.encode_utf16().collect())
     }
-    pub fn from_nbt(tag: &Tag, bool_keys: &[&str]) -> Self {
+    /// Refuses a tree nested deeper than [`MAX_TREE_DEPTH`] before converting any of it.
+    pub fn from_nbt(tag: &Tag, bool_keys: &[&str]) -> Result<Self, String> {
+        if !sunrise_core::nbt::within_depth(tag, MAX_TREE_DEPTH) {
+            return Err(format!("NBT nesting exceeds {MAX_TREE_DEPTH}"));
+        }
+        Ok(Self::convert_nbt(tag, bool_keys))
+    }
+    fn convert_nbt(tag: &Tag, bool_keys: &[&str]) -> Self {
         match tag {
             Tag::End => Self::Empty,
             Tag::Byte(v) => Self::Byte(*v),
@@ -115,7 +148,7 @@ impl Value {
             Tag::ByteArray(v) => Self::ByteArray(v.clone()),
             Tag::IntArray(v) => Self::IntArray(v.clone()),
             Tag::LongArray(v) => Self::LongArray(v.clone()),
-            Tag::List(v) => Self::List(v.iter().map(|v| Self::from_nbt(v, bool_keys)).collect()),
+            Tag::List(v) => Self::List(v.iter().map(|v| Self::convert_nbt(v, bool_keys)).collect()),
             Tag::Compound(v) => Self::Map(
                 v.iter()
                     .map(|(k, v)| {
@@ -127,7 +160,7 @@ impl Value {
                             {
                                 Self::Bool(*v != 0)
                             }
-                            _ => Self::from_nbt(v, bool_keys),
+                            _ => Self::convert_nbt(v, bool_keys),
                         };
                         (Self::String(k.0.clone()), value)
                     })
@@ -137,13 +170,16 @@ impl Value {
     }
     /// A read-only encoding error leaves the value available to the caller.
     pub fn to_tag(&self) -> Result<Tag, String> {
-        self.tag(false)
+        self.tag(false, 0)
     }
     /// Presentation may inspect inline stream holders without claiming they persist.
     pub fn presentation_tag(&self) -> Result<Tag, String> {
-        self.tag(true)
+        self.tag(true, 0)
     }
-    fn tag(&self, presentation: bool) -> Result<Tag, String> {
+    fn tag(&self, presentation: bool, depth: usize) -> Result<Tag, String> {
+        if depth > MAX_TREE_DEPTH {
+            return Err(format!("value nesting exceeds {MAX_TREE_DEPTH}"));
+        }
         Ok(match self {
             Self::Empty => Tag::End,
             Self::Byte(v) => Tag::Byte(*v),
@@ -159,7 +195,7 @@ impl Value {
             Self::LongArray(v) => Tag::LongArray(v.clone()),
             Self::List(v) | Self::Set(v) => Tag::List(
                 v.iter()
-                    .map(|v| v.tag(presentation))
+                    .map(|v| v.tag(presentation, depth + 1))
                     .collect::<Result<_, _>>()?,
             ),
             Self::Map(v) => Tag::Compound(
@@ -168,11 +204,11 @@ impl Value {
                         let Self::String(k) = k else {
                             return Err("component map key is not a string".into());
                         };
-                        Ok((JavaString(k.clone()), v.tag(presentation)?))
+                        Ok((JavaString(k.clone()), v.tag(presentation, depth + 1)?))
                     })
                     .collect::<Result<_, String>>()?,
             ),
-            Self::Template(v) => v.tag(presentation)?,
+            Self::Template(v) => v.tag(presentation, depth + 1)?,
             Self::Container(slots) => Tag::List(
                 slots
                     .iter()
@@ -181,22 +217,22 @@ impl Value {
                         item.as_ref().map(|item| {
                             Ok(Tag::compound([
                                 ("slot", Tag::Int(slot as i32)),
-                                ("item", item.tag(presentation)?),
+                                ("item", item.tag(presentation, depth + 1)?),
                             ]))
                         })
                     })
                     .collect::<Result<_, String>>()?,
             ),
-            Self::StreamOnly(v) if presentation => v.tag(true)?,
+            Self::StreamOnly(v) if presentation => v.tag(true, depth + 1)?,
             Self::StreamOnly(_) => return Err("inline holder has no persistent encoding".into()),
         })
     }
 }
 impl Template {
     pub fn to_tag(&self) -> Result<Tag, String> {
-        self.tag(false)
+        self.tag(false, 0)
     }
-    fn tag(&self, presentation: bool) -> Result<Tag, String> {
+    fn tag(&self, presentation: bool, depth: usize) -> Result<Tag, String> {
         if !presentation && !(1..=99).contains(&self.count) {
             return Err("persistent item template count must be in 1..99".into());
         }
@@ -205,12 +241,18 @@ impl Template {
             fields.push(("count".into(), Tag::Int(self.count)));
         }
         let mut patch = Vec::with_capacity(self.patch.len());
-        for (name, value) in &self.patch {
+        for (name, value) in effective_patch(&self.patch) {
             if !presentation && !is_persistent(name) {
                 continue;
             }
             patch.push(match value {
-                Some(value) => (name.as_str().into(), value.tag(presentation)?),
+                Some(value) => {
+                    let tag = value.tag(presentation, depth + 1)?;
+                    if !presentation {
+                        source::validate_persistent(name, &tag)?;
+                    }
+                    (name.as_str().into(), tag)
+                }
                 None => (
                     format!("!{name}").as_str().into(),
                     Tag::Compound(Default::default()),
