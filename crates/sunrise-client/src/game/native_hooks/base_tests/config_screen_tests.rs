@@ -272,7 +272,9 @@ fn typed_config_screen_keeps_its_mods_parent_and_owns_input() {
             );
             let mut batch = HudBatch::scratch([480, 240]);
             game.draw_screen_with_post_hook(&mut batch);
-            assert_eq!(batch.vertices.len(), 4);
+            assert_eq!(batch.vertices.len(), 6);
+            assert_eq!(batch.vertices[0].pos, [10.0, 20.0]);
+            assert_eq!(batch.vertices[2].pos, [22.0, 28.0]);
             assert!(
                 batch
                     .vertices
@@ -353,7 +355,14 @@ fn typed_config_screen_keeps_its_mods_parent_and_owns_input() {
             state.lock().unwrap().parent.as_ref().unwrap().go_back();
             game.settle_config_screen();
             assert_parent(game);
-            assert_eq!(state.lock().unwrap().calls, [false, false, false, true]);
+            activate(game);
+            assert_eq!(game.mod_screen(), Some("fixture"));
+            mod_api::prelude::ScreensClientHost::mod_screen_close(game, "fixture");
+            assert_parent(game);
+            assert_eq!(
+                state.lock().unwrap().calls,
+                [false, false, false, true, true]
+            );
 
             game.settings.mods.installed = vec![row("generated")];
             game.list_native_mods();
