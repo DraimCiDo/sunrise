@@ -1862,16 +1862,17 @@ impl Game<'_> {
         }
         // WingsLayer: ArmorStandRenderer adds it after the armour layers. A stand
         // never crouches or glides, so its wings rest folded.
+        let chest = a.equipment[4].as_ref();
         self.wings_geometry(
-            a.equipment[4].as_ref().map(|s| &*s.item),
-            a.equipment[4].as_ref(),
+            self.worn_chest_layers(chest.map(|s| &*s.item), chest, self.items()),
+            chest,
             None,
             a.small,
             base,
             sunrise_client::mobs::ElytraAnimation::RESTING,
             false,
             packed,
-            self.wings_overlay(a.equipment[4].as_ref()),
+            self.wings_overlay(chest),
             out,
         );
     }

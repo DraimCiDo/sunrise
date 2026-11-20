@@ -231,9 +231,10 @@ impl Game<'_> {
             // and SpinAttackEffectLayer. Only the cape hides with the body;
             // the others have no `isInvisible` check.
             let chest = mob.extra.slot_id(sunrise_items::equipment::CHEST);
+            let draw = self.player_layer_draw(mob, chest, false, mod_api::PlayerLayerView::World);
             // `CapeLayer` and `Deadmau5EarsLayer`: `!state.isInvisible`, whoever sees the body.
             if !invisible {
-                self.player_cape_geometry(mob, chest, camera, alpha as f32, packed, out);
+                self.player_cape_geometry(mob, &draw, camera, alpha as f32, packed, out);
             }
             if !invisible
                 && let Some((_, name)) = self
@@ -243,7 +244,7 @@ impl Game<'_> {
             {
                 self.player_ears_geometry(mob, &name, camera, alpha as f32, packed, out);
             }
-            self.player_elytra_geometry(mob, chest, camera, alpha as f32, packed, out);
+            self.player_elytra_geometry(mob, &draw, camera, alpha as f32, packed, out);
             self.shoulder_parrots_geometry(mob, camera, alpha as f32, packed, out);
             self.spin_attack_geometry(mob, camera, alpha as f32, packed, out);
             self.stuck_in_body_geometry(mob, mob.id as i32, camera, alpha as f32, packed, out);
