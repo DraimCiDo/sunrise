@@ -1,5 +1,8 @@
 use super::*;
-use crate::game::native_entity_refs::tests::{run_fresh_cases, with_client_game};
+use crate::game::{
+    EventLoopCtl,
+    native_entity_refs::tests::{run_fresh_cases, with_client_game},
+};
 use mod_api::{
     ClientHost, ConfigScreenContext, ConfigScreenFactory, ConfigScreenParent, ConfigScreenRefusal,
     ConfigScreenRegistrationError, ConfigScreenSession, Flow, Hooks, InputKeyEvent, ModEntry,
@@ -8,9 +11,11 @@ use mod_api::{
     ScreenMouseButtonReleasedPreEvent, ScreenMouseDraggedPreEvent, ScreenMouseScrolledPreEvent,
     ScreenOpeningEvent, ScreenRenderPostEvent, SettingSpec,
 };
-use std::sync::{Arc, Mutex};
-use sunrise_client::mod_list::Installed;
-use sunrise_client::options_ui::Page;
+use std::{
+    sync::{Arc, Mutex},
+    time::Instant,
+};
+use sunrise_client::{mod_list::Installed, options_ui::Page, title::Action};
 use winit::{
     application::ApplicationHandler,
     event::{
@@ -18,8 +23,10 @@ use winit::{
         WindowEvent,
     },
     event_loop::{ActiveEventLoop, EventLoop},
+    keyboard::PhysicalKey,
     platform::{pump_events::EventLoopExtPumpEvents, x11::EventLoopBuilderExtX11},
     raw_window_handle::{HasWindowHandle, RawWindowHandle},
+    window::WindowId,
 };
 use x11rb::{
     connection::Connection,
