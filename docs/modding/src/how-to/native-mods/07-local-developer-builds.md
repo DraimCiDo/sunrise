@@ -5,9 +5,8 @@ launcher installation command, not a native mod build route. It runs the checkou
 code with your rights and requires `--trust-unsigned`.
 
 Commit tracked changes, build the game and companion programs, and prepare compatible exporters from
-your own Minecraft installation before installing. The
-game program, the `--program` file, is the `sunrise-client` binary of the `sunrise-game` package
-(`cargo build -p sunrise-client` builds only the library):
+your own Minecraft installation before installing. Pass the `sunrise-client` binary from
+`sunrise-game` to `--program` (`cargo build -p sunrise-client` builds only the library):
 
 ```sh
 cargo build -p sunrise-game -p sunrise-client-lib --bins -p sunrise-prepare -p sunrise-server

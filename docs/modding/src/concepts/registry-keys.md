@@ -190,7 +190,7 @@ levels are typed errors. A type without an engine matcher returns
 `RecipeLookupError::NotMatchable`, not an empty match. For mod-owned types, retain
 `recipes_of_type` once per load/reload and match that cached data **inside the mod**,
 with zero crossings per tick. Dynamic custom outputs and contextual predicates
-remain mod-owned; the host does not call guest code to match recipes.
+remain mod-owned; the host does not call mod code to match recipes.
 
 At publication, call `ingredient.item_keys(host)` once per ingredient to retain
 `Arc<[ItemKey]>` for local matching. This load-time read returns exactly the plain

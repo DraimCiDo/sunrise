@@ -8,7 +8,7 @@ Rules for a coding agent making a Sunrise mod. They are short on purpose; each l
    per-item or per-entity moment is a Part method ([Parts](../modding/src/concepts/parts.md)).
 3. **Otherwise follow the [injection ladder](../modding/src/concepts/injections.md#declaration):** an API `[[inject]]` declaration
    naming a crate-root function and its `mod_points` record; use a native `[[native.mixin]]` and declared internals only when the API cannot express it. Every injection comes
-   with a [hook request](../modding/src/concepts/injections.md#ask-for-the-hook). Injects never compile game code; unavailable API points are refused by name on both targets. Use a [mixin](../modding/src/concepts/native-route/2-mixins.md) for native function replacement against the prebuilt SDK.
+   with a [hook request](../modding/src/concepts/injections.md#ask-for-the-hook). Injects never compile game code; unavailable API points are refused by name. Use a [mixin](../modding/src/concepts/native-route/2-mixins.md) for native function replacement against the prebuilt SDK.
 4. **Names:** NeoForge 26.3 names for hooks that have a counterpart; no `on_` prefix; the event is `&mut`;
    handles come from the event; writes take `host`.
 5. **Layout:** `sunrise-mod.toml`, `assets/`, `data/`, `Cargo.toml` and `src/` at the top. The id and version come
