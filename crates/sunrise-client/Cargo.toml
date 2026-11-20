@@ -165,7 +165,6 @@ workspace = true
 sunrise-hooks = { path = "../sunrise-hooks", features = ["test-support"] }
 sunrise-client-core = { path = "../sunrise-client-core", features = ["test-language-publication"] }
 sunrise-client-lib = { path = "../sunrise-client-lib", default-features = false, features = ["test-menu-validity", "test-payload-probe", "test-publication-scope", "test-residency-observer", "test-dry-side"] }
-sunrise-mod-wasm = { path = "../sunrise-mod-wasm", features = ["runtime-fixture", "listener-fixture", "test-copy-probe"] }
 wat = "1.261"
 tempfile = "3"
 sunrise-mod-runtime = { path = "../sunrise-mod-runtime", features = ["test-work-count"] }

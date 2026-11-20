@@ -140,7 +140,6 @@ workspace = true
 [dev-dependencies]
 sunrise-client-lib = { path = ".", default-features = false, features = ["test-dry-side"] }
 sunrise-threads = { path = "../sunrise-threads", features = ["test-allocation-probe", "test-game-dir"] }
-sunrise-mod-wasm = { path = "../sunrise-mod-wasm", features = ["listener-fixture", "test-copy-probe"] }
 tempfile = "3"
 mod_platform = { package = "sunrise-mod-api", path = "../sunrise-mod-api", features = ["testing"] }
 mod_api = { package = "sunrise-mod-vocab", path = "../sunrise-mod-vocab", features = ["testing"] }

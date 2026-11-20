@@ -16,7 +16,6 @@ name = "mod_vocab"
 sunrise-mod-runtime = { path = "../sunrise-mod-runtime" }
 sunrise-core = { path = "../sunrise-core" }
 sunrise-mod-api-macros = { path = "../sunrise-mod-api-macros" }
-sunrise-mod-marks = { path = "../sunrise-mod-marks" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["raw_value"] }
 log = "0.4"
