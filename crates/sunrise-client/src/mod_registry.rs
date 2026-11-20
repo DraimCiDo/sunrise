@@ -187,7 +187,7 @@ pub fn install(
     }
     if target.exists() && old_file.as_deref() == Some(relative.as_str()) {
         let package = sunrise_mod_package::Package::read(&target)?;
-        if package.manifest.native.is_some() || package.manifest.wasm.is_some() {
+        if package.manifest.native.is_some() {
             return Err("code mods are installed and updated in the launcher".into());
         }
     }
@@ -220,7 +220,7 @@ pub fn install(
     let checked = || -> Result<_, String> {
         let trust = index::check_file(index, p, v, &download)?;
         let package = sunrise_mod_package::Package::read(&download)?;
-        if package.manifest.native.is_some() || package.manifest.wasm.is_some() {
+        if package.manifest.native.is_some() {
             return Err("code mods are installed and updated in the launcher".into());
         }
         Ok(trust)

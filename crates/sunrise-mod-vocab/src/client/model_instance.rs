@@ -151,7 +151,6 @@ pub enum InstanceError {
 /// Persistent copies of one resolved model, retired on reload, world close, mod disable or destroy.
 /// Only the creating mod may access or submit the group; others receive [`GroupError::Stale`].
 /// Retired handles never become valid again, even when their storage slot is reused.
-/// Native and wasm mods use the same storage, ownership and drawing rules.
 /// Static groups cache CPU conversion; all visible GPU-routed copies still upload every frame.
 /// Frequent group pose changes rebuild the live cache and can cost more than transient copies.
 // no wire: decoding from_parts rejects generation zero (an unpublished instance group handle).

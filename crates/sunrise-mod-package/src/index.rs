@@ -895,8 +895,6 @@ pub struct Facts {
     /// The mod's dependencies, sorted by id.
     pub dependencies: Vec<Dependency>,
     pub requires: Vec<Requirement>,
-    /// A mod that declares `[wasm]`: its `mod.wasm` runs in the game's sandbox.
-    pub wasm: bool,
 }
 
 /// Whether a package's own `found` version and a registry's `listed` label are one version. A mod's
@@ -985,11 +983,9 @@ pub fn inspect(kind: &Kind, path: &Path) -> Result<Facts, String> {
             if package.is_native() {
                 return Err("it has native code: it is a native-mod".into());
             }
-            package.read_runtime(path)?;
             let m = package.manifest;
             crate::Content::read(path, &m)?;
             Ok(Facts {
-                wasm: m.wasm.is_some(),
                 dependencies: manifest_dependencies(&m),
                 capabilities: m.capabilities,
                 id: Some(m.id),

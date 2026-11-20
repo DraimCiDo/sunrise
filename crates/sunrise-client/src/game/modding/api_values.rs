@@ -2870,19 +2870,21 @@ fn with_rule_schema<T>(f: impl FnOnce(&mod_api::__private::RuleSchema<'_>) -> T)
 pub(in crate::game) fn install_test_platform() {
     static INSTALLED: std::sync::Once = std::sync::Once::new();
     INSTALLED.call_once(|| {
-        let result = sunrise_engine_slots::install_platform(sunrise_engine_slots::Platform {
-            install_packages: mod_platform::__private::install_packages,
-            install_registration_data: mod_platform::__private::install_registration_data,
-            install_parts: mod_platform::__private::install_parts,
-            profiler_is_enabled: mod_platform::__private::profiler::is_enabled,
-            profiler_start: mod_platform::__private::profiler::start,
-            profiler_stop: mod_platform::__private::profiler::stop,
-            profiler_summary: mod_platform::__private::profiler::summary,
-            profiler_firefox_profile: mod_platform::__private::profiler::firefox_profile,
-        });
+        let result = mod_api::__private::platform::install_platform(
+            mod_api::__private::platform::Platform {
+                install_packages: mod_platform::__private::install_packages,
+                install_registration_data: mod_platform::__private::install_registration_data,
+                install_parts: mod_platform::__private::install_parts,
+                profiler_is_enabled: mod_platform::__private::profiler::is_enabled,
+                profiler_start: mod_platform::__private::profiler::start,
+                profiler_stop: mod_platform::__private::profiler::stop,
+                profiler_summary: mod_platform::__private::profiler::summary,
+                profiler_firefox_profile: mod_platform::__private::profiler::firefox_profile,
+            },
+        );
         assert!(
             result.is_ok()
-                || result == Err(sunrise_engine_slots::PlatformRefusal::AlreadyInstalled)
+                || result == Err(mod_api::__private::platform::PlatformRefusal::AlreadyInstalled)
         );
     });
 }
@@ -2890,7 +2892,7 @@ pub(in crate::game) fn install_parts(mods: &[mod_api::ModEntry]) -> Result<(), V
     #[cfg(test)]
     install_test_platform();
     with_rule_schema(|schema| {
-        (sunrise_engine_slots::platform()
+        (mod_api::__private::platform::platform()
             .map_err(|e| vec![e.to_string()])?
             .install_parts)(mods, schema, super::native_dimensions::valid_shape)
     })

@@ -2,8 +2,7 @@
 
 Register a map codec once in the static, server-only `LOOT_FUNCTION_TYPE` or
 `LOOT_CONDITION_TYPE` registry. These are the NeoForge 26.3 registries; their
-entries are codecs, not separate legacy type wrappers. Native and wasm mods use
-the same declarations:
+entries are codecs, not separate legacy type wrappers:
 
 ```rust,ignore
 fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
@@ -59,8 +58,7 @@ not yet replace complete selector, coordinate and canonical text-size validation
 
 `LootEntryData` is API-owned and derives `Wire`. Its one private JSON-value field
 uses the shared JSON tree encoding: length-prefixed UTF-8 JSON, with the shared
-Wire depth and size checks. Native codecs accept the same data as wasm codecs;
-an unrepresentable entry refuses load rather than silently skipping the guest.
+Wire depth and size checks. An unrepresentable entry refuses load.
 
 ## Applying and testing
 

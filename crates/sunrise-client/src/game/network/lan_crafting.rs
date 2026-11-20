@@ -2352,7 +2352,7 @@ mod empty_ingredient_placement_tests {
                         .tables;
                     game.build_registries();
                     {
-                        // The generated Host entrypoint serves native and wasm callers;
+                        // The generated Host entrypoint serves mod callers;
                         // roundtrip its real answer, not a hand-constructed ingredient.
                         use mod_api::wire::{Reader, Wire, Writer};
                         let host: &dyn mod_api::Host = game;

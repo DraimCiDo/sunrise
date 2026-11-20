@@ -310,18 +310,109 @@ pub struct BlockEntityDraw {
     /// The block drawn, for `native_draw_item`'s owner.
     block: [i32; 3],
     pose: Mat4,
-    parent_poses: Vec<Mat4>,
+    /// World entity draws track the local translation separately from their camera-relative
+    /// render pose. The affine pose's basis is the same in both spaces.
+    local_light_translation: Option<DVec3>,
+    parent_poses: Vec<(Mat4, Option<DVec3>)>,
     lights: (Vec3, Vec3),
     vertices: Vec<Vertex>,
     kept: bool,
     /// Where each turning part starts in `vertices` (`spin`), and where the
     /// parts standing still start again (`still`, none).
     spins: Vec<(usize, Option<Spin>)>,
+    /// `level_light` is on: elements drawn now are lit by the level.
+    level_lit: bool,
+    /// Each element drawn under `level_light` (vertex range and local centre),
+    /// beside `spins`.
+    lit: Vec<LitElement>,
     /// World block entities record a prepared copy instead of CPU vertices.
     /// Shader packs, GUI scenes and mobs leave this clear, so the model stays
     /// in the vertex stream those paths and their spans already cover.
     prepared: bool,
     records: Vec<PreparedRecord>,
+}
+
+/// One element (`block`, `model`, `terrain_model`, `cube` or `quad`) drawn under
+/// `level_light`: its vertices and posed centre in draw coordinates, before any `spin`.
+struct LitElement {
+    start: usize,
+    end: usize,
+    centre: DVec3,
+    /// Fixed ambient fallback. The vertex light stores only the intrinsic floor until
+    /// placement, so turning cannot ratchet it.
+    ambient: u32,
+}
+
+impl LitElement {
+    fn apply_light(vertices: &mut [Vertex], ambient: u32) {
+        let sky = ambient & 0xff;
+        let block = (ambient >> 8) & 0xff;
+        for v in vertices {
+            v.light = (ambient & 0xffff_0000)
+                | sky.max(v.light & 0xff)
+                | (block.max((v.light >> 8) & 0xff) << 8);
+        }
+    }
+}
+
+/// Where the draw's coordinate origin is in the level and how to look up its packed light.
+pub(super) struct LevelLight<'a> {
+    pub(super) origin: DVec3,
+    pub(super) light_at: &'a dyn Fn([i32; 3]) -> u8,
+}
+
+impl LevelLight<'_> {
+    fn sample(&self, centre: DVec3) -> Option<u32> {
+        let absolute = (self.origin + centre).floor();
+        if !absolute.cmpge(DVec3::splat(f64::from(i32::MIN))).all()
+            || !absolute.cmple(DVec3::splat(f64::from(i32::MAX))).all()
+        {
+            return None;
+        }
+        Some(vertex_light((self.light_at)(
+            absolute.as_ivec3().to_array(),
+        )))
+    }
+}
+
+/// Walks the ordered light records alongside the spin segments. Kept stationary
+/// vertices store their first sample; kept turning vertices store their intrinsic floors.
+struct PlacementLight<'a> {
+    elements: &'a [LitElement],
+    level: &'a LevelLight<'a>,
+    pass: LightPass<'a>,
+}
+
+enum LightPass<'a> {
+    Fresh(Option<&'a mut [Vertex]>),
+    Retained,
+}
+
+impl PlacementLight<'_> {
+    fn apply(&mut self, vertices: &mut [Vertex], start: usize, turn: Option<Mat4>) {
+        let count = self
+            .elements
+            .partition_point(|e| e.start < start + vertices.len());
+        let (elements, rest) = self.elements.split_at(count);
+        self.elements = rest;
+        if turn.is_none() && matches!(self.pass, LightPass::Retained) {
+            return;
+        }
+        let light_turn = turn.map(|m| m.as_dmat4());
+        for e in elements {
+            let centre = light_turn.map_or(e.centre, |m| m.transform_point3(e.centre));
+            let ambient = self.level.sample(centre).unwrap_or(e.ambient);
+            let span = &mut vertices[e.start - start..e.end - start];
+            LitElement::apply_light(span, ambient);
+            if turn.is_none()
+                && let LightPass::Fresh(Some(kept)) = &mut self.pass
+            {
+                for (kept, drawn) in kept[e.start..e.end].iter_mut().zip(span) {
+                    kept.light = drawn.light;
+                }
+            }
+        }
+    }
 }
 
 struct PreparedRecord {
@@ -395,43 +486,47 @@ impl Spin {
     }
 }
 
-/// `vertices`, drawn relative to the block, moved to the camera by `origin`
-/// and each part of `spins` (starts relative to `vertices`) turned as it is
-/// at animation time `time`, onto `out`.
-pub(super) fn place_turning(
-    vertices: &[Vertex],
+/// Places one draw in place: turns each spin segment and its light samples with the same
+/// matrix, then makes the vertices camera-relative.
+fn place_geometry(
+    vertices: &mut [Vertex],
     spins: &[(usize, Option<Spin>)],
     time: f64,
     origin: Vec3,
-    out: &mut Vec<Vertex>,
+    mut lighting: Option<PlacementLight<'_>>,
 ) {
-    let mut turn: Option<Mat4> = None;
-    let mut next = spins.iter().peekable();
-    for (i, v) in vertices.iter().enumerate() {
-        while let Some((start, spin)) = next.next_if(|(start, _)| *start <= i) {
-            let _ = start;
-            turn = spin.map(|s| s.turn(time));
-        }
-        let mut v = *v;
-        if let Some(m) = turn {
-            v.pos = m.transform_point3(Vec3::from_array(v.pos)).to_array();
-            if v.normal[3] != 0 {
-                let n = Vec3::new(
-                    f32::from(v.normal[0]),
-                    f32::from(v.normal[1]),
-                    f32::from(v.normal[2]),
-                );
-                let n = m.transform_vector3(n);
-                v.normal = [
-                    n.x.round().clamp(-127.0, 127.0) as i8,
-                    n.y.round().clamp(-127.0, 127.0) as i8,
-                    n.z.round().clamp(-127.0, 127.0) as i8,
-                    v.normal[3],
-                ];
+    let mut start = 0;
+    let mut spin: Option<Spin> = None;
+    for (end, next_spin) in spins.iter().copied().chain([(vertices.len(), None)]) {
+        let span = &mut vertices[start..end];
+        if !span.is_empty() {
+            let turn = spin.map(|s| s.turn(time));
+            if let Some(light) = &mut lighting {
+                light.apply(span, start, turn);
+            }
+            for v in span {
+                if let Some(m) = turn {
+                    v.pos = m.transform_point3(Vec3::from_array(v.pos)).to_array();
+                    if v.normal[3] != 0 {
+                        let n = Vec3::new(
+                            f32::from(v.normal[0]),
+                            f32::from(v.normal[1]),
+                            f32::from(v.normal[2]),
+                        );
+                        let n = m.transform_vector3(n);
+                        v.normal = [
+                            n.x.round().clamp(-127.0, 127.0) as i8,
+                            n.y.round().clamp(-127.0, 127.0) as i8,
+                            n.z.round().clamp(-127.0, 127.0) as i8,
+                            v.normal[3],
+                        ];
+                    }
+                }
+                v.pos = (Vec3::from_array(v.pos) + origin).to_array();
             }
         }
-        v.pos = (Vec3::from_array(v.pos) + origin).to_array();
-        out.push(v);
+        start = end;
+        spin = next_spin;
     }
 }
 
@@ -456,11 +551,14 @@ impl BlockEntityDraw {
             light,
             block,
             pose,
+            local_light_translation: None,
             parent_poses: Vec::new(),
             lights,
             vertices,
             kept: false,
             spins: Vec::new(),
+            level_lit: false,
+            lit: Vec::new(),
             prepared: false,
             records: Vec::new(),
         }
@@ -472,18 +570,13 @@ impl BlockEntityDraw {
         self.animation = time;
         self
     }
-    /// The frame's time on the animation clock (`native_draw_animation_time`).
-    pub(super) fn animation(&self) -> f64 {
-        self.animation
-    }
-
     fn spinning(&self) -> bool {
         self.spins.last().is_some_and(|(_, spin)| spin.is_some())
     }
 
     /// Record a prepared copy at the current vertex, unless this draw is CPU-only or spinning.
     fn defer_model(&mut self, slot: u32, generation: u64, tint: u32) -> bool {
-        if !self.prepared || self.spinning() {
+        if !self.prepared || self.spinning() || self.level_lit {
             return false;
         }
         self.records.push(PreparedRecord {
@@ -517,6 +610,12 @@ impl BlockEntityDraw {
                     *at += count;
                 }
             }
+            for e in &mut self.lit {
+                if e.start >= record.at {
+                    e.start += count;
+                    e.end += count;
+                }
+            }
             self.vertices.splice(record.at..record.at, extra);
         }
     }
@@ -548,25 +647,60 @@ impl BlockEntityDraw {
                 }),
         );
     }
-    /// The vertices drawn, with those it was made with first.
-    pub(super) fn into_vertices(mut self) -> Vec<Vertex> {
-        super::draw_boundary::truncate(&mut self.vertices, super::draw_boundary::MAX_DRAW_VERTICES);
+    /// The vertices drawn in a level-less frame, with those it was made with first.
+    pub(super) fn into_vertices(self) -> Vec<Vertex> {
+        self.into_vertices_with_light(None)
+    }
+
+    /// Finish a posed frame drawn at rest, sampling the level when supplied.
+    pub(super) fn into_vertices_with_light(
+        mut self,
+        level: Option<&LevelLight<'_>>,
+    ) -> Vec<Vertex> {
+        self.finish_light(level);
         self.vertices
     }
-    /// The vertices drawn and where its turning parts start in them (`spin`).
-    pub(super) fn into_turning(mut self) -> (Vec<Vertex>, Vec<(usize, Option<Spin>)>) {
-        super::draw_boundary::truncate(&mut self.vertices, super::draw_boundary::MAX_DRAW_VERTICES);
+
+    /// Place the vertices of a level-less scene, including any turning parts.
+    pub(super) fn into_placed(mut self, origin: Vec3) -> Vec<Vertex> {
+        self.finish_light(None);
         self.spins.retain(|(at, _)| *at <= self.vertices.len());
-        (self.vertices, self.spins)
+        place_geometry(
+            &mut self.vertices,
+            &self.spins,
+            self.animation,
+            origin,
+            None,
+        );
+        self.vertices
     }
+
+    fn finish_light(&mut self, level: Option<&LevelLight<'_>>) {
+        super::draw_boundary::truncate(&mut self.vertices, super::draw_boundary::MAX_DRAW_VERTICES);
+        for e in &self.lit {
+            let end = e.end.min(self.vertices.len());
+            if e.start >= end {
+                break;
+            }
+            let ambient = level.and_then(|l| l.sample(e.centre)).unwrap_or(e.ambient);
+            LitElement::apply_light(&mut self.vertices[e.start..end], ambient);
+        }
+    }
+    /// Track the pose from the entity's world origin, not its starting render translation.
+    pub(super) fn track_entity_local_light_pose(&mut self) {
+        self.local_light_translation = Some(DVec3::ZERO);
+    }
+
     /// `PoseStack.pushPose`: `pop` comes back to the pose as it is now.
     fn push(&mut self) {
-        self.parent_poses.push(self.pose);
+        self.parent_poses
+            .push((self.pose, self.local_light_translation));
     }
     /// `PoseStack.popPose`; the block's own pose is never popped.
     fn pop(&mut self) {
-        if let Some(parent) = self.parent_poses.pop() {
-            self.pose = parent;
+        if let Some((pose, light_translation)) = self.parent_poses.pop() {
+            self.pose = pose;
+            self.local_light_translation = light_translation;
         }
     }
     /// Moves what is drawn next by `by`, in blocks.
@@ -614,8 +748,9 @@ impl BlockEntityDraw {
     /// game turns it each frame. With `keep` it goes on turning with no call
     /// of `native_block_entity_submit` until what it was drawn with changes.
     /// With a new speed, pass `old_angle - animation * new_speed` as the
-    /// phase, or it jumps. Quads drawn while it is active are lit where they
-    /// turn to (`quad`). Until `still` or the next `spin`. A block entity's
+    /// phase, or it jumps. The shading of a quad drawn while it is active follows
+    /// the turn (its normal turns); its light is fixed, and follows the turn
+    /// only under `level_light`. Until `still` or the next `spin`. A block entity's
     /// frame only: a mob's (`native_render_living_pre`) draws it at rest. API
     /// @API:spinning_geometry@.
     pub fn spin(&mut self, axis: [f32; 3], pivot: [f32; 3], degrees_per_tick: f32, phase: f32) {
@@ -636,7 +771,46 @@ impl BlockEntityDraw {
     pub fn still(&mut self) {
         self.spins.push((self.vertices.len(), None));
     }
+    fn set_light(&mut self, light: u32) {
+        self.light = light;
+        self.level_lit = false;
+    }
+
+    /// What is drawn next is lit by the level (`native_draw_level_light`).
+    fn level_light(&mut self) {
+        self.level_lit = true;
+    }
+    /// Records one element and its fixed fallback only if there are vertices to relight.
+    pub(super) fn lit_since(&mut self, start: usize, centre: impl FnOnce() -> DVec3, ambient: u32) {
+        if self.level_lit && self.vertices.len() > start {
+            let pose = self.pose.as_dmat4();
+            let translation = self
+                .local_light_translation
+                .unwrap_or(pose.w_axis.truncate());
+            self.lit.push(LitElement {
+                start,
+                end: self.vertices.len(),
+                centre: pose.transform_vector3(centre()) + translation,
+                ambient,
+            });
+        }
+    }
+
+    /// Under `level_light`, the emitter writes only the face's intrinsic light floors.
+    pub(super) fn element_ambient(&self) -> u32 {
+        if self.level_lit { 0 } else { self.light }
+    }
+    /// The centre of the unit cell a model is drawn in, before posing.
+    pub(super) fn cell_centre() -> DVec3 {
+        DVec3::splat(0.5)
+    }
     fn apply(&mut self, m: Mat4) {
+        if let Some(translation) = &mut self.local_light_translation {
+            *translation += self
+                .pose
+                .as_dmat4()
+                .transform_vector3(m.w_axis.truncate().as_dvec3());
+        }
         self.pose *= m;
     }
     pub(super) fn pose(&self) -> Mat4 {
@@ -649,9 +823,31 @@ impl BlockEntityDraw {
     pub(super) fn light(&self) -> u32 {
         self.light
     }
+    fn quad(&mut self, corners: [[f32; 3]; 4], uv: [[f32; 2]; 4], sprite: Rect, tint: u32) {
+        let start = self.vertices.len();
+        self.emit_quad(corners, uv, sprite, tint, self.element_ambient());
+        self.lit_since(
+            start,
+            || {
+                corners
+                    .into_iter()
+                    .map(|c| DVec3::from_array(c.map(f64::from)) / 4.0)
+                    .sum()
+            },
+            self.light,
+        );
+    }
+
     /// A quad of `corners` (blocks, under the pose) with unit UVs, shaded as
     /// vanilla's block entity models are (`Lighting`'s two lights).
-    fn quad(&mut self, corners: [[f32; 3]; 4], uv: [[f32; 2]; 4], sprite: Rect, tint: u32) {
+    fn emit_quad(
+        &mut self,
+        corners: [[f32; 3]; 4],
+        uv: [[f32; 2]; 4],
+        sprite: Rect,
+        tint: u32,
+        light: u32,
+    ) {
         let pose = self.pose();
         let at = corners.map(|c| pose.transform_point3(Vec3::from_array(c)));
         if !super::draw_boundary::quad_allowed(
@@ -668,9 +864,10 @@ impl BlockEntityDraw {
         } else {
             normal
         };
-        // A turning part is lit where it turns to (`place_turning` turns the
-        // normal, the shader lights it, as `draw_block`'s faces are lit);
-        // a part standing still keeps its light in its colour.
+        // A turning part is shaded where it turns to (`place_geometry` turns the
+        // normal, the shader shades it, as `draw_block`'s faces are); a part
+        // standing still keeps its shading in its colour. Its light is fixed
+        // unless `level_light` is on.
         let (color, normal) = if self.spinning() {
             let n = (normal * 127.0).round();
             (shaded(tint, 1.0), [n.x as i8, n.y as i8, n.z as i8, 127])
@@ -686,11 +883,25 @@ impl BlockEntityDraw {
                 ],
                 layer: 0,
                 color,
-                light: self.light,
+                light,
                 normal,
                 glint_uv: [0.0, 0.0],
             });
         }
+    }
+
+    fn model(&mut self, faces: &[super::minecarts::PreparedModelFace], tint: u32) {
+        let ambient = self.element_ambient();
+        let start = self.vertices.len();
+        super::minecarts::emit_model_faces(
+            faces.iter().copied().map(|face| (face, ambient)),
+            self.pose(),
+            true,
+            |index| (index >= 0).then_some(tint & 0xFF_FFFF),
+            &mut self.vertices,
+        );
+        super::minecarts::scale_tint_alpha(&mut self.vertices[start..], faces, tint);
+        self.lit_since(start, Self::cell_centre, self.light & 0xffff);
     }
 }
 
@@ -727,6 +938,9 @@ struct KeptEntry {
     vertices: Vec<Vertex>,
     /// Its turning parts (`BlockEntityDraw::spin`), from the start of `vertices`.
     spins: Vec<(usize, Option<Spin>)>,
+    /// Its elements lit by the level (`BlockEntityDraw::level_light`), from the
+    /// start of `vertices`.
+    lit: Vec<LitElement>,
 }
 
 /// Geometry mods kept (`BlockEntityDraw::keep`), by position. As
@@ -772,26 +986,127 @@ impl KeptGeometry {
         bounds: [f32; 6],
         vertices: &[Vertex],
         spins: Vec<(usize, Option<Spin>)>,
+        lit: Vec<LitElement>,
         now: i64,
+    ) -> &mut KeptEntry {
+        use std::collections::hash_map::Entry;
+        let mut entry = KeptEntry {
+            key,
+            revision,
+            bounds,
+            used: now,
+            vertices: Vec::new(),
+            spins,
+            lit,
+        };
+        let entry = match self.entries.entry(pos) {
+            Entry::Vacant(slot) => slot.insert(entry),
+            Entry::Occupied(mut slot) => {
+                std::mem::swap(&mut entry.vertices, &mut slot.get_mut().vertices);
+                *slot.get_mut() = entry;
+                slot.into_mut()
+            }
+        };
+        entry.vertices.clear();
+        entry.vertices.extend_from_slice(vertices);
+        entry
+    }
+
+    /// Place the kept draw if its inputs still match; only a miss asks for bounds and submits.
+    fn render(
+        &mut self,
+        pos: [i32; 3],
+        key: KeptKey,
+        revision: ModRevision,
+        draw: &mut BlockEntityDraw,
+        origin: Vec3,
+        level: &LevelLight<'_>,
+        bounds: impl FnOnce() -> [f32; 6],
+        visible: impl FnOnce([f32; 6], usize) -> bool,
+        submit: impl FnOnce(&mut BlockEntityDraw),
     ) {
-        let mut kept = self
-            .entries
-            .remove(&pos)
-            .map_or_else(Vec::new, |e| e.vertices);
-        kept.clear();
-        kept.extend_from_slice(vertices);
-        self.entries.insert(
-            pos,
-            KeptEntry {
+        let start = draw.vertices.len();
+        if let Some(entry) = self.get(pos, key, revision, draw.game_time) {
+            if visible(entry.bounds, start) {
+                if entry.spins.is_empty() {
+                    draw.vertices.extend(entry.vertices.iter().map(|v| Vertex {
+                        pos: (Vec3::from_array(v.pos) + origin).to_array(),
+                        ..*v
+                    }));
+                } else {
+                    draw.vertices.extend_from_slice(&entry.vertices);
+                    place_geometry(
+                        &mut draw.vertices[start..],
+                        &entry.spins,
+                        draw.animation,
+                        origin,
+                        (!entry.lit.is_empty()).then_some(PlacementLight {
+                            elements: &entry.lit,
+                            level,
+                            pass: LightPass::Retained,
+                        }),
+                    );
+                }
+            }
+            return;
+        }
+        let bounds = bounds();
+        if !visible(bounds, start) {
+            return;
+        }
+        draw.block = pos;
+        draw.pose = Mat4::IDENTITY;
+        draw.parent_poses.clear();
+        draw.light = key.light;
+        draw.kept = false;
+        draw.spins.clear();
+        draw.level_lit = false;
+        draw.lit.clear();
+        draw.records.clear();
+        submit(draw);
+        // Offsets in the shared scratch draw become local to this block's vertices.
+        for (at, _) in &mut draw.spins {
+            *at -= start;
+        }
+        for e in &mut draw.lit {
+            e.start -= start;
+            e.end -= start;
+        }
+        let vertices = &mut draw.vertices[start..];
+        let (spins, lit, cached) = if draw.kept {
+            // Keep the intrinsic floors, not the sampled light written into the frame.
+            let entry = self.keep(
+                pos,
                 key,
                 revision,
                 bounds,
-                used: now,
-                vertices: kept,
-                spins,
-            },
+                vertices,
+                std::mem::take(&mut draw.spins),
+                std::mem::take(&mut draw.lit),
+                draw.game_time,
+            );
+            (
+                &entry.spins,
+                &entry.lit,
+                Some(entry.vertices.as_mut_slice()),
+            )
+        } else {
+            self.forget(pos);
+            (&draw.spins, &draw.lit, None)
+        };
+        place_geometry(
+            vertices,
+            spins,
+            draw.animation,
+            origin,
+            (!lit.is_empty()).then_some(PlacementLight {
+                elements: lit,
+                level,
+                pass: LightPass::Fresh(cached),
+            }),
         );
     }
+
     fn forget(&mut self, pos: [i32; 3]) {
         self.entries.remove(&pos);
     }
@@ -862,11 +1177,14 @@ impl Game<'_> {
             light: 0,
             block: [0; 3],
             pose: Mat4::IDENTITY,
+            local_light_translation: None,
             parent_poses: Vec::new(),
             lights: diffuse_lights(self.nether_lighting()),
             vertices: std::mem::take(out),
             kept: false,
             spins: Vec::new(),
+            level_lit: false,
+            lit: Vec::new(),
             prepared: prepared_route(
                 self.pack_ids.is_some(),
                 !self.native_shaders.picked.is_empty(),
@@ -881,6 +1199,7 @@ impl Game<'_> {
         let mut kept = self.kept_block_entities.borrow_mut();
         kept.sweep(now);
         let distances = self.view_distances();
+        let light_at = |b: [i32; 3]| self.world.light(b[0], b[1], b[2]);
         for &(pos, state) in blocks {
             let corner = DVec3::new(f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2]));
             // Vec3.closerThan: strictly closer.
@@ -901,74 +1220,41 @@ impl Game<'_> {
                 light,
                 glyphs: self.gui.atlas.font.epoch(),
             };
-            if let Some(entry) = kept.get(pos, key, entity.revision(), now) {
-                if in_frustum(self.view_frustum.as_ref(), origin, entry.bounds) {
-                    let start = draw.vertices.len();
-                    self.mark_block_entity(start, state);
-                    if entry.spins.is_empty() {
-                        draw.vertices.extend(entry.vertices.iter().map(|v| Vertex {
-                            pos: (Vec3::from_array(v.pos) + origin).to_array(),
-                            ..*v
-                        }));
-                    } else {
-                        place_turning(
-                            &entry.vertices,
-                            &entry.spins,
-                            draw.animation,
-                            origin,
-                            &mut draw.vertices,
-                        );
-                    }
-                }
-                continue;
-            }
             let id = BlockStateId(state);
-            let block = &*self.res.facts().get(id).name;
-            let mut bounds = DEFAULT_BOUNDS;
-            self.api_block_entity_render_bounding_box(pos, block, id, entity, &mut bounds);
-            if !in_frustum(self.view_frustum.as_ref(), origin, bounds) {
-                continue;
-            }
-            let start = draw.vertices.len();
-            self.mark_block_entity(start, state);
-            // Drawn relative to the block, then moved to the camera, so what
-            // is kept can be moved again.
-            draw.block = pos;
-            draw.pose = Mat4::IDENTITY;
-            draw.parent_poses.clear();
-            draw.light = light;
-            draw.kept = false;
-            draw.spins.clear();
-            draw.records.clear();
-            self.api_block_entity_submit(pos, block, id, entity, &mut draw);
-            self.finish_prepared_draw(&mut draw, corner, camera);
-            // The turning parts, from the start of this block's vertices.
-            let spins: Vec<(usize, Option<Spin>)> = draw
-                .spins
-                .drain(..)
-                .map(|(at, spin)| (at.saturating_sub(start), spin))
-                .collect();
-            if draw.kept {
-                kept.keep(
-                    pos,
-                    key,
-                    entity.revision(),
-                    bounds,
-                    &draw.vertices[start..],
-                    spins.clone(),
-                    now,
-                );
-            } else {
-                kept.forget(pos);
-            }
-            if spins.is_empty() {
-                for v in &mut draw.vertices[start..] {
-                    v.pos = (Vec3::from_array(v.pos) + origin).to_array();
-                }
-            } else {
-                let drawn = draw.vertices.split_off(start);
-                place_turning(&drawn, &spins, draw.animation, origin, &mut draw.vertices);
-            }
+            let block = || &*self.res.facts().get(id).name;
+            kept.render(
+                pos,
+                key,
+                entity.revision(),
+                &mut draw,
+                origin,
+                &LevelLight {
+                    origin: corner,
+                    light_at: &light_at,
+                },
+                || {
+                    let mut bounds = DEFAULT_BOUNDS;
+                    self.api_block_entity_render_bounding_box(
+                        pos,
+                        block(),
+                        id,
+                        entity,
+                        &mut bounds,
+                    );
+                    bounds
+                },
+                |bounds, start| {
+                    if !in_frustum(self.view_frustum.as_ref(), origin, bounds) {
+                        return false;
+                    }
+                    self.mark_block_entity(start, state);
+                    true
+                },
+                |draw| {
+                    self.api_block_entity_submit(pos, block(), id, entity, draw);
+                    self.finish_prepared_draw(draw, corner, camera);
+                },
+            );
         }
         *out = draw.vertices;
     }
@@ -1091,7 +1377,12 @@ impl Game<'_> {
     }
     /// Lights what is drawn next with `light` (as `native_draw_light` reads it).
     pub(super) fn native_draw_set_light(&self, draw: &mut BlockEntityDraw, light: u32) {
-        draw.light = light;
+        draw.set_light(light);
+    }
+    /// Lights what is drawn next by the level at each element's centre
+    /// (`BlockEntityDrawContext::level_light`).
+    pub(super) fn native_draw_level_light(&self, draw: &mut BlockEntityDraw) {
+        draw.level_light();
     }
     /// Draws a quad with `corners` in blocks under `draw`'s pose, in a model
     /// face's order (top left, bottom left, bottom right, top right as seen
@@ -1223,6 +1514,8 @@ impl Game<'_> {
         tint: u32,
     ) -> bool {
         let mut all = true;
+        let start = draw.vertices.len();
+        let ambient = draw.element_ambient();
         for (direction, face) in Direction::ALL.into_iter().zip(faces) {
             let Some(face) = face else { continue };
             let Some(rect) = self.gui.atlas.sprites.get(face.sprite).copied() else {
@@ -1235,9 +1528,17 @@ impl Game<'_> {
                 force_translucent: false,
             };
             if let Ok(quad) = bake_flat_face(from, to, uv, direction, material, -1) {
-                draw.quad(quad.positions, quad.uv, rect, tint);
+                draw.emit_quad(quad.positions, quad.uv, rect, tint, ambient);
             }
         }
+        draw.lit_since(
+            start,
+            || {
+                (DVec3::from_array(from.map(f64::from)) + DVec3::from_array(to.map(f64::from)))
+                    / 32.0
+            },
+            draw.light,
+        );
         all
     }
 
@@ -1271,14 +1572,16 @@ impl Game<'_> {
             return false;
         };
         let pose = draw.pose();
+        let start = draw.vertices.len();
         self.block_model_vertices(
             id,
             Self::BLOCK_MODEL_SEED,
             pose,
-            draw.light,
+            draw.element_ambient(),
             true,
             &mut draw.vertices,
         );
+        draw.lit_since(start, BlockEntityDraw::cell_centre, draw.light & 0xffff);
         true
     }
 
@@ -1371,16 +1674,7 @@ impl Game<'_> {
         if draw.defer_model(fields.slot, fields.generation, tint) {
             return Ok(());
         }
-        let light = draw.light;
-        let start = draw.vertices.len();
-        super::minecarts::emit_model_faces(
-            faces.iter().copied().map(|face| (face, light)),
-            draw.pose(),
-            true,
-            |index| (index >= 0).then_some(tint & 0xFF_FFFF),
-            &mut draw.vertices,
-        );
-        super::minecarts::scale_tint_alpha(&mut draw.vertices[start..], faces, tint);
+        draw.model(faces, tint);
         Ok(())
     }
 
@@ -1497,7 +1791,7 @@ fn draw_model_part(draw: &mut BlockEntityDraw, part: &ModelPart, sprite: Rect, t
         for polygon in &part.polygons {
             let corners = polygon.vertices.map(|v| v.pos.map(|c| c / 16.0));
             let uv = polygon.vertices.map(|v| [v.u, v.v]);
-            draw.quad(corners, uv, sprite, tint);
+            draw.emit_quad(corners, uv, sprite, tint, draw.light);
         }
     }
     for (_, child) in part.children() {
@@ -1537,11 +1831,14 @@ mod tests {
             light: 0xF0F0,
             block: [0; 3],
             pose: Mat4::from_translation(Vec3::new(10.0, 0.0, 0.0)),
+            local_light_translation: None,
             parent_poses: Vec::new(),
             lights: diffuse_lights(false),
             vertices: Vec::new(),
             kept: false,
             spins: Vec::new(),
+            level_lit: false,
+            lit: Vec::new(),
             prepared: false,
             records: Vec::new(),
         }
@@ -1559,10 +1856,10 @@ mod tests {
     }
 
     /// A quad standing still has its light baked into its colour, as before; one drawn under
-    /// `spin` keeps its plain tint and its outward normal (`w = 127`, the shader lights it), and
+    /// `spin` keeps its plain tint and its outward normal (`w = 127`, the shader shades it), and
     /// once turned its normal points where the face does: up turned a quarter about +x faces +z.
     #[test]
-    fn a_turning_quad_is_lit_where_it_turns_to() {
+    fn a_turning_quad_is_shaded_where_it_turns_to() {
         let mut draw = draw();
         let top = [
             [0.0, 1.0, 0.0],
@@ -1582,8 +1879,7 @@ mod tests {
                 .iter()
                 .all(|v| v.normal == [0, 127, 0, 127] && v.color == shaded(tint, 1.0))
         );
-        let mut out = Vec::new();
-        place_turning(&draw.vertices, &draw.spins, 1.0, Vec3::ZERO, &mut out);
+        let out = draw.animated(1.0).into_placed(Vec3::ZERO);
         assert!(out[..4].iter().all(|v| v.normal == [0; 4]));
         assert!(out[4..].iter().all(|v| v.normal == [0, 0, 127, 127]));
     }
@@ -3072,8 +3368,8 @@ mod tests {
         let origin = Vec3::new(10.0, 0.0, 0.0);
         let close = |a: [f32; 3], b: [f32; 3]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-4);
         // A tick and a half: 135 degrees.
-        let mut out = Vec::new();
-        place_turning(&draw.vertices, &draw.spins, 1.5, origin, &mut out);
+        let mut out = draw.vertices.clone();
+        place_geometry(&mut out, &draw.spins, 1.5, origin, None);
         assert!(close(out[0].pos, [11.0, 0.5, 0.5]), "{:?}", out[0].pos);
         let h = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
         assert!(
@@ -3083,21 +3379,193 @@ mod tests {
         );
         assert!(close(out[2].pos, [10.0, 0.0, 0.0]), "{:?}", out[2].pos);
         // One tick: a quarter turn, +x to -z, the normal along.
-        out.clear();
-        place_turning(&draw.vertices, &draw.spins, 1.0, origin, &mut out);
+        out.copy_from_slice(&draw.vertices);
+        place_geometry(&mut out, &draw.spins, 1.0, origin, None);
         assert!(close(out[1].pos, [10.5, 0.5, 0.0]), "{:?}", out[1].pos);
         assert_eq!(out[1].normal, [0, 0, -127, 127]);
         // Four ticks: all the way round, and a long session's late clock is no
         // less exact.
-        out.clear();
-        place_turning(
-            &draw.vertices,
-            &draw.spins,
-            4_000_000_000.0,
-            origin,
-            &mut out,
-        );
+        out.copy_from_slice(&draw.vertices);
+        place_geometry(&mut out, &draw.spins, 4_000_000_000.0, origin, None);
         assert!(close(out[1].pos, [11.0, 0.5, 0.5]), "{:?}", out[1].pos);
+    }
+
+    const LIGHT_QUAD: [[f32; 3]; 4] = [
+        [0.0, 1.0, 0.5],
+        [0.0, 0.0, 0.5],
+        [1.0, 0.0, 0.5],
+        [1.0, 1.0, 0.5],
+    ];
+
+    #[test]
+    fn kept_spun_model_follows_level_light_without_losing_emission_or_resubmitting() {
+        use std::cell::{Cell, RefCell};
+
+        let mut quad = bake_flat_face(
+            [0.0; 3],
+            [16.0; 3],
+            [0.0, 0.0, 16.0, 16.0],
+            Direction::South,
+            Material {
+                sprite: "test:casing".into(),
+                force_translucent: false,
+            },
+            -1,
+        )
+        .unwrap();
+        let plain = super::super::minecarts::PreparedModelFace::new(&quad, sprite());
+        quad.light_emission = 12;
+        let emissive = super::super::minecarts::PreparedModelFace::new(&quad, sprite());
+        let pos = [10, 64, 20];
+        let samples = RefCell::new(Vec::new());
+        let level = LevelLight {
+            origin: DVec3::from_array(pos.map(f64::from)),
+            light_at: &|cell| {
+                samples.borrow_mut().push(cell);
+                match cell {
+                    [11, 64, 20] => 0x7F,
+                    [10, 64, 19] => 0,
+                    [10, 64, 20] => 0x29,
+                    _ => panic!("unexpected sample at {cell:?}"),
+                }
+            },
+        };
+        let mut kept = KeptGeometry::default();
+        let mut draw = draw();
+        let revision = machine();
+        let submits = Cell::new(0);
+        let bounds_calls = Cell::new(0);
+        for (tick, expected) in [
+            (0, [0x9020, 0xF070, 0xF070, 0xF0F0]),
+            (1, [0x9020, 0xC000, 0x0000, 0xF0F0]),
+        ] {
+            draw.animation = f64::from(tick);
+            draw.vertices.clear();
+            kept.render(
+                pos,
+                KEY,
+                revision,
+                &mut draw,
+                Vec3::new(4.0, -2.0, 3.0),
+                &level,
+                || {
+                    bounds_calls.set(bounds_calls.get() + 1);
+                    DEFAULT_BOUNDS
+                },
+                |_, _| true,
+                |draw| {
+                    submits.set(submits.get() + 1);
+                    // A stationary lit neighbour keeps its first sample. The model's two
+                    // faces share a lookup, but only one face has an intrinsic block floor.
+                    draw.level_light();
+                    draw.quad(LIGHT_QUAD, [[0.0; 2]; 4], sprite(), 0xFFFFFF);
+                    draw.spin([0.0, 1.0, 0.0], [0.5; 3], 90.0, 0.0);
+                    draw.push();
+                    draw.translate([1.0, 0.0, 0.0]);
+                    draw.model(&[emissive, plain], u32::MAX);
+                    draw.pop();
+                    draw.still();
+                    draw.set_light(KEY.light);
+                    draw.quad(LIGHT_QUAD, [[0.0; 2]; 4], sprite(), 0xFFFFFF);
+                    draw.keep();
+                },
+            );
+            assert_eq!(
+                draw.vertices.iter().map(|v| v.light).collect::<Vec<_>>(),
+                expected
+                    .into_iter()
+                    .flat_map(|light| [light; 4])
+                    .collect::<Vec<_>>(),
+            );
+        }
+        assert_eq!(
+            *samples.borrow(),
+            [[10, 64, 20], [11, 64, 20], [10, 64, 19]]
+        );
+        assert_eq!(bounds_calls.get(), 1);
+        assert_eq!(submits.get(), 1);
+    }
+
+    #[test]
+    fn entity_level_light_samples_the_same_cell_at_two_camera_distances() {
+        const DELTA: f32 = 1.0 / 1_048_576.0; // 2^-20, exact in both f32 and f64.
+        let origin = DVec3::new(10.5 - f64::from(DELTA), 64.25, 20.0);
+        let level = LevelLight {
+            origin,
+            light_at: &|cell| {
+                assert_eq!(cell, [11, 64, 20]);
+                0x37
+            },
+        };
+        for relative_x in [1.0, 64.0] {
+            let camera = origin - DVec3::new(relative_x, 0.0, 0.0);
+            let mut draw = BlockEntityDraw::posed(
+                0.0,
+                0,
+                0x50A0,
+                [10, 64, 20],
+                Mat4::from_translation((origin - camera).as_vec3()),
+                diffuse_lights(false),
+                Vec::new(),
+            );
+            draw.track_entity_local_light_pose();
+            draw.translate([DELTA, 0.0, 0.0]);
+            draw.push();
+            draw.translate([1.0, 0.0, 0.0]);
+            draw.pop();
+            draw.level_light();
+            // The local centre is 0.5 + DELTA, so it lies on the X=11 boundary.
+            // With the camera 64 blocks away, the f32 render pose loses DELTA.
+            draw.quad(
+                [
+                    [0.5, 1.0, 0.0],
+                    [0.5, 0.0, 0.0],
+                    [0.5, 0.0, 1.0],
+                    [0.5, 1.0, 1.0],
+                ],
+                [[0.0; 2]; 4],
+                sprite(),
+                0xFFFFFF,
+            );
+            let out = draw.into_vertices_with_light(Some(&level));
+            assert_eq!(out.len(), 4);
+            assert!(out.iter().all(|v| v.light == 0x7030));
+        }
+    }
+
+    #[test]
+    fn a_huge_translation_samples_only_when_the_absolute_cell_fits() {
+        for (anchor_x, cell, expected) in [(10, None, 0x3070), (-1, Some(i32::MAX), 0x2040)] {
+            let pos = [anchor_x, 64, 20];
+            let mut draw = draw();
+            KeptGeometry::default().render(
+                pos,
+                KeptKey {
+                    light: 0x3070,
+                    ..KEY
+                },
+                machine(),
+                &mut draw,
+                Vec3::ZERO,
+                &LevelLight {
+                    origin: DVec3::from_array(pos.map(f64::from)),
+                    light_at: &|[x, y, z]| {
+                        assert_eq!(Some(x), cell);
+                        assert_eq!([y, z], [64, 20]);
+                        0x42
+                    },
+                },
+                || DEFAULT_BOUNDS,
+                |_, _| true,
+                |draw| {
+                    draw.level_light();
+                    draw.translate([2_147_483_648.0, 0.0, 0.0]);
+                    draw.quad(LIGHT_QUAD, [[0.0; 2]; 4], sprite(), 0xFFFFFF);
+                },
+            );
+            assert_eq!(draw.vertices.len(), 4);
+            assert!(draw.vertices.iter().all(|v| v.light == expected));
+        }
     }
 
     #[test]
@@ -3118,6 +3586,7 @@ mod tests {
             drawn,
             DEFAULT_BOUNDS,
             &[vertex(0.5)],
+            Vec::new(),
             Vec::new(),
             0,
         );
@@ -3161,6 +3630,7 @@ mod tests {
             DEFAULT_BOUNDS,
             &[vertex(0.25)],
             Vec::new(),
+            Vec::new(),
             2,
         );
         assert!(kept.get(pos, KEY, drawn, 2).is_none());
@@ -3178,8 +3648,26 @@ mod tests {
         let mut kept = KeptGeometry::default();
         let (seen, gone) = ([0, 0, 0], [5, 0, 0]);
         let m = machine();
-        kept.keep(seen, KEY, m, DEFAULT_BOUNDS, &[vertex(0.0)], Vec::new(), 0);
-        kept.keep(gone, KEY, m, DEFAULT_BOUNDS, &[vertex(0.0)], Vec::new(), 0);
+        kept.keep(
+            seen,
+            KEY,
+            m,
+            DEFAULT_BOUNDS,
+            &[vertex(0.0)],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        kept.keep(
+            gone,
+            KEY,
+            m,
+            DEFAULT_BOUNDS,
+            &[vertex(0.0)],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
         kept.get(gone, KEY, m, 50);
         // A sweep at 100 keeps both: each was drawn in the last 100 ticks.
         kept.sweep(100);

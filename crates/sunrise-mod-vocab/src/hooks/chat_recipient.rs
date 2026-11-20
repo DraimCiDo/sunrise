@@ -12,8 +12,7 @@ pub trait Hooks {
     /// server's log keeps: hiding is per receiver. This is not a second `server_chat`: that
     /// hook is heard once for a line, only for typed chat, and cancels it for everyone; this one
     /// is per receiver, and covers `/say` and `/me`. With no listener nothing is asked and
-    /// nothing is allocated. A fault or an epoch timeout in a wasm listener answers nothing, so
-    /// the line is sent, like every cancellable hook. No player's state is swapped in.
+    /// nothing is allocated. No player's state is swapped in.
     /// Server-side.
     #[hook(
         side = "server",

@@ -45,7 +45,7 @@
 //! Names assembled inside a macro from outside the mod (`paste!`, `concat_idents!`) never appear
 //! in the source and are out of the scan's reach; the compile catches them. A file that does not
 //! parse, or nests deeper than [`syntax::MAX_NESTING`], cannot be judged ([`ScanError`]), and
-//! neither can any file where the parser cannot have a stack of its own (on wasm). Even a mod
+//! neither can any file where the parser cannot reserve its own stack. Even a mod
 //! judged to fit is compiled on the player's machine against the target build, and that compile
 //! stays the final check. The scan also records the public paths the mod writes each item by:
 //! imported, written out, under an API glob (`prelude::Biome` after `use mod_api::*`), or
@@ -179,6 +179,11 @@ pub struct Uses {
 impl Uses {
     pub fn entries(&self) -> impl Iterator<Item = &Entry> {
         self.items.iter().map(|used| &used.entry)
+    }
+
+    /// Checks the scanned records against the API of another build.
+    pub fn fits(&self, target: &Surface) -> Fit {
+        fit_report(None, self.entries(), target).verdict
     }
 
     /// The table a package carries for a mod made for `made_for` (a build id).
@@ -426,7 +431,7 @@ pub enum ScanError {
     /// The file nests brackets, generics or expressions deeper than the scan parses
     /// ([`syntax::MAX_NESTING`]), at this line.
     TooDeep { file: String, line: usize },
-    /// The parser's own stack could not be had (always so on wasm), so the file was not parsed.
+    /// The parser's own stack could not be reserved, so the file was not parsed.
     NoStack { file: String },
     /// The child process that parses first ([`crate::child`]) died, by a signal, an overflow or
     /// a limit on its memory or processor time, while parsing this file (none: before it
@@ -2391,11 +2396,27 @@ pub enum Fit {
     Unversioned(Vec<String>),
 }
 
+/// A fit verdict and the note about entries the compile must judge, if any.
+pub struct FitReport {
+    pub verdict: Fit,
+    /// A single human-readable line, absent when nothing was deferred to the compile.
+    pub deferred: Option<String>,
+}
+
 /// Whether every entry exists in `target` with an equal hash and under every path the mod writes,
 /// every type keeps its impls, every struct the mod builds can still be built (and keeps its
 /// field set when built in full), and every hook keeps the version the entry names. A hook entry
 /// that names none is [`Fit::Unversioned`] when nothing else changed.
-pub fn fits<'a>(entries: impl IntoIterator<Item = &'a Entry>, target: &Surface) -> Fit {
+#[cfg(test)]
+pub(crate) fn fits<'a>(entries: impl IntoIterator<Item = &'a Entry>, target: &Surface) -> Fit {
+    fit_report(None, entries, target).verdict
+}
+
+fn fit_report<'a>(
+    table: Option<&UsesTable>,
+    entries: impl IntoIterator<Item = &'a Entry>,
+    target: &Surface,
+) -> FitReport {
     let hashes: BTreeMap<&str, &str> = target.entries().collect();
     let types: BTreeMap<&str, &Type> = target.types.iter().map(|t| (t.id.as_str(), t)).collect();
     let versions: BTreeMap<&str, u64> = target
@@ -2417,6 +2438,7 @@ pub fn fits<'a>(entries: impl IntoIterator<Item = &'a Entry>, target: &Surface) 
         public_paths.insert(&m.id, &m.paths);
     }
     let entries: Vec<&Entry> = entries.into_iter().collect();
+    let mut legacy = crate::legacy_hash::LegacyFit::new(table, target, &entries);
     // What each trait a member is reached from leads to in the target, along references built
     // once: a table's `reached_from` strings are many and its own, the surface's size is not.
     let refs = target.refs(true);
@@ -2432,10 +2454,12 @@ pub fn fits<'a>(entries: impl IntoIterator<Item = &'a Entry>, target: &Surface) 
             })
         };
         let Some(hash) = hashes.get(id) else {
-            misfit(Change::Removed);
+            if legacy.check_missing_record(id) {
+                misfit(Change::Removed);
+            }
             continue;
         };
-        if *hash != entry.hash {
+        if !legacy.matches(id, hash, &entry.hash) {
             misfit(Change::Changed);
         }
         for path in &entry.paths {
@@ -2448,7 +2472,7 @@ pub fn fits<'a>(entries: impl IntoIterator<Item = &'a Entry>, target: &Surface) 
         }
         if let Some(record) = types.get(id) {
             for name in &entry.impls {
-                if !record.impls.contains(name) {
+                if !record.impls.contains(name) && legacy.check_missing_impl(id, name) {
                     misfit(Change::LostImpl(name.clone()));
                 }
             }
@@ -2502,17 +2526,21 @@ pub fn fits<'a>(entries: impl IntoIterator<Item = &'a Entry>, target: &Surface) 
     misfits.sort();
     misfits.dedup();
     unversioned.sort();
-    if !misfits.is_empty() {
+    let verdict = if !misfits.is_empty() {
         Fit::DoesNotFit(misfits)
     } else if !unversioned.is_empty() {
         Fit::Unversioned(unversioned)
     } else {
         Fit::Fits
+    };
+    FitReport {
+        verdict,
+        deferred: legacy.deferred_note(),
     }
 }
 
 /// The schema [`UsesTable`] writes.
-pub const USES_SCHEMA: u32 = 2;
+pub const USES_SCHEMA: u32 = 3;
 
 /// The schema before it, which [`UsesTable::read`] still reads: published packages carry it. Its
 /// lists recorded a build wherever the scan was in doubt, with nothing to tell a doubt from a
@@ -2561,7 +2589,7 @@ impl std::fmt::Display for UsesError {
             Self::Json(error) => write!(f, "the uses table is not valid: {error}"),
             Self::Schema(schema) => write!(
                 f,
-                "the uses table has schema {schema}; this tool reads schemas {DOUBTING_SCHEMA} and {USES_SCHEMA}"
+                "the uses table has schema {schema}; this tool reads schemas {DOUBTING_SCHEMA}–{USES_SCHEMA}"
             ),
             Self::DuplicateId(id) => write!(f, "the uses table lists {id} twice"),
         }
@@ -2571,6 +2599,16 @@ impl std::fmt::Display for UsesError {
 impl std::error::Error for UsesError {}
 
 impl UsesTable {
+    /// Checks the entries covered by the typed API. The caller judges any native engine-code
+    /// entries separately against the target build's executable catalog.
+    pub fn fits<'a>(
+        &'a self,
+        api: impl IntoIterator<Item = &'a Entry>,
+        target: &Surface,
+    ) -> FitReport {
+        fit_report(Some(self), api, target)
+    }
+
     /// Reads a table: refuses an oversized document, an unknown schema, malformed JSON and
     /// repeated ids, and unknown fields: the table is this crate's own format, and a field a newer
     /// writer adds is a check this reader would silently skip. Entries come back sorted by id.
@@ -2584,7 +2622,7 @@ impl UsesTable {
         }
         let header: Header =
             serde_json::from_slice(bytes).map_err(|e| UsesError::Json(e.to_string()))?;
-        if ![USES_SCHEMA, DOUBTING_SCHEMA].contains(&header.schema) {
+        if !(DOUBTING_SCHEMA..=USES_SCHEMA).contains(&header.schema) {
             return Err(UsesError::Schema(header.schema));
         }
         let mut table: Self =
@@ -2606,19 +2644,10 @@ impl UsesTable {
         Ok(table)
     }
 
-    /// Gives each hook entry that holds no version the one `made_for` has, which must be the
-    /// surface of the build the list was made for: a list of the schema before this one says none.
-    pub fn pin_hook_versions(&mut self, made_for: &Surface) {
-        let versions: BTreeMap<&str, u64> = made_for
-            .hooks
-            .iter()
-            .map(|h| (h.id.as_str(), h.contract.version))
-            .collect();
-        for entry in &mut self.entries {
-            entry.version = entry
-                .version
-                .or_else(|| versions.get(entry.id.as_str()).copied());
-        }
+    /// Pins missing hook versions in a legacy list from its made-for SDK's `surface.json`.
+    /// This projects only hook ids and versions, never the old surface contracts.
+    pub fn pin_hook_versions(&mut self, made_for: &[u8]) -> Result<(), crate::ReadError> {
+        crate::legacy_hash::pin_hook_versions(self, made_for)
     }
 
     /// The table as written: pretty JSON, entries sorted by id, ending in a newline.

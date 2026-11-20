@@ -64,8 +64,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.rust.outputs.version }}
-          # wasm-std uses -Zbuild-std even when this pinned toolchain is already installed.
-          components: rust-src, rustfmt
       - uses: actions/setup-python@v6
         if: runner.environment == 'github-hosted'
         with:
@@ -85,15 +83,6 @@ jobs:
       - name: Restore unchanged source timestamps
         if: runner.environment == 'self-hosted'
         run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes-v2.json"
-      - name: Build the shared wasm standard library
-        shell: bash
-        run: |
-          cargo run --locked -p cargo-sunrise-mod -- sunrise-mod wasm-std sunrise-wasm-std.wasm
-      - uses: actions/upload-artifact@v7
-        with:
-          name: wasm-std
-          path: sunrise-wasm-std.wasm
-          if-no-files-found: error
       - name: Private exporter inputs
         run: |
           if [[ -n "${DYNA_CI_BUILD:-}" ]]; then
@@ -152,6 +141,7 @@ jobs:
             os: ubuntu-22.04
             blacksmith: blacksmith-16vcpu-ubuntu-2204
             musl: true
+            target: x86_64-unknown-linux-musl
             dir: sunrise-linux-musl-x86_64
             asset: sunrise-linux-musl-x86_64.tar.gz
           - name: windows
@@ -201,11 +191,13 @@ jobs:
     # The fork's cold client + headless builds need both feature variants; keep upstream's limits unchanged.
     # GitHub's macOS runner builds Sunrise's game cold: 60 minutes ran out mid-build (nightly dry run
     # 43813225420), and a timed-out job counts as cancelled, which continue-on-error does not cover, so the
-    # whole build stopped before signing. The musl leg, built in Alpine on a hosted runner, took 53 minutes in
+    # whole build stopped before signing. The musl leg, when built in Alpine on a hosted runner, took 53 minutes in
     # nightly dry run 43838074073 and ran out at 60 in nightly 43869408636, cancelling it the same way.
     timeout-minutes: ${{ github.repository == 'sunrise-org/sunrise' && ((matrix.mac || matrix.musl) && 100 || 60) || (matrix.mac && 60 || 40) }}
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
+      # Same Alpine base for the cross-link sysroot and the separate runtime-only check.
+      MUSL_IMAGE: alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f
       # The release's version, built in (sunrise_core::release): --version, user agents and crash reports
       # say it. No version-bump commits.
       SUNRISE_VERSION: ${{ inputs.version }}
@@ -231,7 +223,11 @@ jobs:
           persist-credentials: false
           sparse-checkout-cone-mode: false
           sparse-checkout: |
+            tools/check_cpu_baseline.py
             tools/check_glibc.py
+            tools/check_imports.py
+            tools/ci/build-musl.sh
+            tools/ci/check-musl-startup.sh
             tools/ci/game_smoke.sh
             tools/ci/rust-version
             tools/ci/with_xvfb.py
@@ -254,8 +250,11 @@ jobs:
           shared-key: ${{ inputs.trusted && 'release' || 'nightly' }}-${{ matrix.name }}
           save-if: ${{ inputs.trusted }}
       - name: ALSA and udev headers
-        if: runner.os == 'Linux' && !matrix.musl
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+        # libudev-sys also probes the host (not the target) for hwdb in the musl build.
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+          dpkg-query -W libasound2-dev libudev-dev
       - name: Build the official game, sunrise-ctl, sunrise-perf, sunrise-prepare, sunrise-server and sunrise-port-pack
         if: ${{ !matrix.musl }}
         run: cargo build --release --locked --timings ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p sunrise-official --bin sunrise-official -p sunrise-client-lib --bin sunrise-ctl -p sunrise-perf --bin sunrise-perf -p sunrise-prepare --bin sunrise-prepare -p sunrise-server --bin sunrise-server -p sunrise-port-pack --bin sunrise-port-pack
@@ -375,20 +374,28 @@ jobs:
         with:
           name: original-exporters
           path: exporters
-      # The wasm member is target-independent, including on musl and Windows.
-      - uses: actions/download-artifact@v8
-        with:
-          name: wasm-std
-          path: ${{ matrix.musl && 'target/x86_64-unknown-linux-musl/release' || env.BIN }}
-      - name: Build, check and package for musl in Alpine
+      - name: Cross-build for musl with glibc-hosted Rust
         if: matrix.musl
-        # Run Docker on the Ubuntu host: JavaScript actions themselves require glibc.
         run: |
-          docker run --rm -v "$PWD:/work" -w /work \
-            -e SUNRISE_VERSION -e SUNRISE_NIGHTLY \
-            rust:alpine3.22 sh tools/ci/build-musl.sh
+          sysroot="$RUNNER_TEMP/alpine-sysroot"
+          mkdir -p "$sysroot"
+          # The image is pinned by digest; its packages come from the live 3.22 repository, so each one the build
+          # links against (headers and the runtime libraries they come with) uses a version-token prefix. apk's
+          # `~X.Y.Z` admits extra components and suffixes, but not a different final numeric token like `X.Y.Z1`.
+          # This is not an exact pin: Alpine replaces its `-rN` revisions for rebuilds and security fixes, so `=`
+          # with a revision would break. The whole set is logged.
+          docker run --rm "$MUSL_IMAGE" sh -ec '
+            apk add --no-cache build-base "gcc~14.2.0" "binutils~2.44" "musl-dev~1.2.5" "linux-headers~6.14.2" \
+              "alsa-lib-dev~1.2.14" "eudev-dev~3.2.14" "musl~1.2.5" "libgcc~14.2.0" "alsa-lib~1.2.14" \
+              "eudev-libs~3.2.14" >&2
+            apk info -v | sort >&2
+            tar -C / -cf - lib usr
+          ' | tar --no-same-owner -xf - -C "$sysroot"
+          # Let Alpine's GCC and binutils run without putting musl libraries on glibc's search path.
+          sudo install -Dm755 "$sysroot/lib/ld-musl-x86_64.so.1" /lib/ld-musl-x86_64.so.1
+          printf '%s\n' "$sysroot/lib:$sysroot/usr/lib" | sudo tee /etc/ld-musl-x86_64.path > /dev/null
+          bash .workflow-tools/tools/ci/build-musl.sh "$sysroot"
       - name: Package
-        if: ${{ !matrix.musl }}
         run: |
           set -euo pipefail
           cargo run --locked -p xtask -- package "$BIN/sunrise-client${{ matrix.exe }}" "dist/${{ matrix.dir }}"
@@ -412,6 +419,26 @@ jobs:
                fi ;;
           esac
           ls -l "${{ matrix.asset }}"
+      - name: Check the packaged musl programs
+        if: matrix.musl
+        run: |
+          # The archive that is uploaded, as a player unpacks it: its files, paths and modes, not the staging folder.
+          unpacked=$(mktemp -d)
+          tar -xzf "dist/${{ matrix.asset }}" -C "$unpacked"
+          folder="$unpacked/${{ matrix.dir }}"
+          programs=("$folder"/sunrise-{client,ctl,perf,prepare,server,port-pack})
+          for program in "${programs[@]}"; do
+            [[ -f "$program" && -x "$program" ]] || { echo "::error::$program is missing or not executable"; exit 1; }
+          done
+          python3 .workflow-tools/tools/check_imports.py --musl "${programs[@]}"
+          rustup component add llvm-tools
+          python3 .workflow-tools/tools/check_cpu_baseline.py "${programs[@]}"
+          # This container sees the package only, not the compiler sysroot or host libraries.
+          docker run --rm -i -e SUNRISE_VERSION -v "$folder:/package:ro" "$MUSL_IMAGE" sh -ec '
+            apk add --no-cache "alsa-lib~1.2.14" "eudev-libs~3.2.14" "libgcc~14.2.0" "musl~1.2.5"
+            apk info -v | sort
+            exec sh -s /package
+          ' < .workflow-tools/tools/ci/check-musl-startup.sh
       - name: Notarized
         # A zip of programs can't be stapled: Gatekeeper asks Apple the first time each one runs.
         if: runner.os == 'macOS' && vars.MACOS_SIGN_IDENTITY != '' && inputs.developer_id
