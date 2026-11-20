@@ -1,5 +1,24 @@
 //! Installed native code loading.
 use mod_api::__private::game::Fields;
+use std::path::Path;
+use sunrise_mod_package::{
+    Manifest,
+    dependencies::{Overrides, Resolution, resolve_manifests},
+    manifest::Side,
+    mod_list,
+};
+
+fn resolve_startup(
+    manifests: &[&Manifest],
+    side: Side,
+    game_dir: &Path,
+) -> Result<Resolution, String> {
+    // The native dynamic loader and compiled package inventory already enforce
+    // native physical requirements. Only logical requirements reach this resolver.
+    let overrides = Overrides::read(&game_dir.join(mod_list::DIR))?;
+    resolve_manifests(manifests, side, &overrides).map_err(|error| error.to_string())
+}
+
 /// Load installed native code, register its dependency-ordered entries,
 /// and start the engine. Keep the validated startup lease alive for the whole run.
 pub fn main_with(
@@ -67,24 +86,9 @@ pub fn main_with(
                 "loaded code has checked manifests"
             );
             let side = launch.installation_side();
-            let declared: Vec<_> = code_manifests
-                .iter()
-                .map(|m| sunrise_mod_package::dependencies::from_manifest(&m.dependencies, side))
-                .collect();
-            let inputs: Vec<_> = code_manifests
-                .iter()
-                .zip(&declared)
-                .map(|(m, dependencies)| sunrise_mod_package::dependencies::Mod {
-                    id: &m.id,
-                    version: &m.version,
-                    has_api: true,
-                    code: true,
-                    dependencies,
-                })
-                .collect();
             let code_ids: std::collections::HashSet<_> =
                 mods.iter().map(|entry| entry.fields().id).collect();
-            let settings = sunrise_mod_package::mod_list::ModList::load(&launch.context.game_dir);
+            let settings = mod_list::ModList::load(&launch.context.game_dir);
             let content: Vec<_> = sunrise_mod_package::selection::content_packages(
                 &launch.context.game_dir,
                 &settings.enabled,
@@ -96,26 +100,13 @@ pub fn main_with(
                 .copied()
                 .chain(content.iter().map(|source| &source.package.manifest))
                 .collect();
-            let order = sunrise_mod_package::dependencies::Overrides::read(
-                &launch
-                    .context
-                    .game_dir
-                    .join(sunrise_mod_package::mod_list::DIR),
-            )
-            .and_then(|overrides| {
-                let resolution = sunrise_mod_package::dependencies::resolve_manifests(
-                    &manifests, side, &overrides,
-                )
-                .map_err(|error| error.to_string())?;
-                sunrise_mod_package::dependencies::resolve_links(&inputs)
-                    .map_err(|error| format!("code link requirements refused: {error}"))?;
-                Ok(resolution)
-            })
-            .unwrap_or_else(|error| {
-                eprintln!("Sunrise: mod load refused: {error}");
-                sunrise_client::logging::flush();
-                std::process::exit(1);
-            });
+            let order = resolve_startup(&manifests, side, &launch.context.game_dir).unwrap_or_else(
+                |error| {
+                    eprintln!("Sunrise: mod load refused: {error}");
+                    sunrise_client::logging::flush();
+                    std::process::exit(1);
+                },
+            );
             for warning in &order.warnings {
                 log::warn!("Sunrise: {warning}");
             }
@@ -141,8 +132,75 @@ pub fn main_with(
                 .filter(|&i| code_ids.contains(manifests[i].id.as_str()))
                 .map(|i| entries.remove(manifests[i].id.as_str()).unwrap())
                 .collect();
+            mod_api::__private::install_dependencies(order.effective);
             mod_api::__private::install(mods.into());
         },
         startup,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mod_api::__private::native::BuiltMod;
+    use std::{fs, path::PathBuf};
+    use sunrise_mod_package::{dependencies::OVERRIDES, runtime::Runtime};
+
+    #[test]
+    fn native_startup_requires_manifest_only_data_unless_dropped() {
+        const BUILT: &[BuiltMod] = &[
+            BuiltMod {
+                id: "addon",
+                version: "1.0.0",
+                side: Side::Both,
+            },
+            BuiltMod {
+                id: "data",
+                version: "1.0.0",
+                side: Side::Both,
+            },
+        ];
+        struct Scratch(PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let root = Scratch(std::env::temp_dir().join(format!(
+            "sunrise-native-startup-deps-{}",
+            std::process::id()
+        )));
+        let package = root.0.join(mod_list::NATIVE_DIR).join("addon");
+        fs::create_dir_all(package.join("src")).unwrap();
+        fs::write(
+            package.join("Cargo.toml"),
+            "[package]\nname='addon'\nversion='1.0.0'\n",
+        )
+        .unwrap();
+        fs::write(package.join("src/lib.rs"), "").unwrap();
+        fs::write(package.join("sunrise-mod.toml"), format!(
+            "id='addon'\nname='Addon'\nversion='1.0.0'\napi='0.2'\nside='both'\ncapabilities=['registries']\n[dependencies]\ndata='^1'\n[native]\ngame='26.3'\nsunrise='{}'\nmixins='{}'\n",
+            "a".repeat(40), "b".repeat(40),
+        )).unwrap();
+        let executable = root.0.join("sunrise-client");
+        let native = Runtime::load(&executable, &BUILT[..1]).unwrap();
+        let manifests = [&native.packages()[0].manifest];
+        assert_eq!(
+            resolve_startup(&manifests, Side::Client, &root.0).unwrap_err(),
+            "addon requires missing mod data"
+        );
+
+        let mods_dir = root.0.join(mod_list::DIR);
+        fs::create_dir(&mods_dir).unwrap();
+        fs::write(mods_dir.join(OVERRIDES), "[addon]\ndata='drop'\n").unwrap();
+        let resolved = resolve_startup(&manifests, Side::Client, &root.0).unwrap();
+        assert_eq!(resolved.order, [0]);
+        assert!(!resolved.effective.permits("addon", "data"));
+
+        // If the executable actually includes the dependency's code, its package
+        // is required before logical policy can be applied, even with the drop.
+        let error = Runtime::load(&executable, BUILT).unwrap_err();
+        assert_eq!(error.refused.len(), 1);
+        assert!(error.to_string().contains("data 1.0.0:"), "{error}");
+    }
 }

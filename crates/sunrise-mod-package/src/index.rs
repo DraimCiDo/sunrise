@@ -19,6 +19,8 @@ use std::{io::Read, path::Path};
 /// The index format this build reads and writes. A reader refuses a newer
 /// one rather than misread it.
 pub const SCHEMA: u32 = 1;
+/// Byte budget for the in-game browser's HTTPS index download.
+pub const MAX_INDEX: u64 = 16 << 20;
 /// The biggest file the registry takes (a `.smod` with content, a `.spack`).
 pub const MAX_FILE: u64 = 64 << 20;
 /// The biggest native binary build ID, in bytes.
@@ -1178,6 +1180,7 @@ fn names(caps: &[Capability]) -> String {
     format!("[{}]", names.join(", "))
 }
 
+pub mod browser_state;
 mod collections;
 pub use collections::{Collection, MAX_COLLECTION_MEMBERS, Member};
 mod dependencies;

@@ -163,12 +163,13 @@ fn flat_input(texture: &(u32, u32, Vec<bool>)) -> crate::clouds::Input<'_> {
     crate::clouds::Input {
         texture,
         uv: [0.0; 2],
-        camera: glam::DVec3::new(0.0, crate::clouds::CLOUD_HEIGHT + 2.0, -3.96),
+        camera: glam::DVec3::new(0.0, f64::from(crate::clouds::CLOUD_HEIGHT) + 2.0, -3.96),
         time: 0,
         partial_tick: 0.0,
         range: 1,
         fast: true,
         color: [0.8, 1.0, 1.0, 1.0],
+        height: crate::clouds::CLOUD_HEIGHT,
     }
 }
 
@@ -336,12 +337,17 @@ fn vanillas_clouds_shaders_draw_a_cell_above_the_camera() {
         texture: &texture,
         uv: [0.0; 2],
         // The middle of cell 0, 0 (z is offset by 3.96), 10 below the layer.
-        camera: glam::DVec3::new(6.0, crate::clouds::CLOUD_HEIGHT - 10.0, 6.0 - 3.96),
+        camera: glam::DVec3::new(
+            6.0,
+            f64::from(crate::clouds::CLOUD_HEIGHT) - 10.0,
+            6.0 - 3.96,
+        ),
         time: 0,
         partial_tick: 0.0,
         range: 1,
         fast: false,
         color: [0.8, 0.8, 0.8, 1.0],
+        height: crate::clouds::CLOUD_HEIGHT,
     };
     let view = crate::gfx::View::screen(0.0, -90.0, 70.0, 1.0, 1024.0);
     let far = 1.0e9;

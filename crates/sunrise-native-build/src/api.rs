@@ -697,17 +697,32 @@ mod tests {
             ),
         )
         .unwrap();
-        let resolution = super::super::dependencies::Resolution {
-            order: vec![0],
-            warnings: Vec::new(),
-        };
+        let manifest = dir.join(sunrise_mod_package::manifest::MANIFEST);
+        let source = fs::read_to_string(&manifest).unwrap();
+        fs::write(
+            &manifest,
+            format!("{source}\n[dependencies]\ncontent='^1'\n"),
+        )
+        .unwrap();
         let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
         let project = Project::read(&bundle).unwrap();
         let catalog = internals::Catalog {
             discovery: true,
             ..Default::default()
         };
-        assert!(stage(stage_dir, &[project], &[vec![]], &resolution, &catalog).unwrap());
+        let side = sunrise_mod_package::manifest::Side::Both;
+        let declared =
+            super::super::dependencies::build_dependencies(&bundle.manifest, side, |_| false);
+        let resolution =
+            super::super::dependencies::resolve_links(&[super::super::dependencies::Mod {
+                id: &bundle.manifest.id,
+                version: &bundle.manifest.version,
+                has_api: true,
+                code: true,
+                dependencies: &declared,
+            }])
+            .unwrap();
+        assert!(stage(stage_dir, &[project], &[declared], &resolution, &catalog).unwrap());
         let root = read(&stage_dir.join("Cargo.toml")).unwrap();
         assert_eq!(
             root["workspace"]["members"].as_array().unwrap(),
@@ -717,6 +732,7 @@ mod tests {
             ]
         );
         let lib = read(&stage_dir.join("native-api/example/Cargo.toml")).unwrap();
+        assert!(lib["dependencies"].get("content").is_none());
         assert_eq!(
             lib["dependencies"]["internals"]["path"].as_str(),
             Some("../../native-internals/example")
