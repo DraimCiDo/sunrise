@@ -4,7 +4,6 @@ pub use sunrise_core::{game_mode::GameMode, geometry::Direction, position::Block
 /// [`Host::math_profile`](crate::Host::math_profile) describes the engine's selection.
 pub mod java_math;
 /// Host-free SNBT and JSON conversion for typed NBT.
-#[cfg(not(target_arch = "wasm32"))]
 pub mod nbt;
 /// Platform-independent, host-call-free StrictMath functions, including sin/cos/tan/exp/pow.
 pub mod strict_math;
