@@ -40,6 +40,7 @@ pub(super) struct LivingFrame<'a> {
     pub(super) viewer: Option<&'a sunrise_client::scoreboard::Team>,
     pub(super) skinning: bool,
     pub(super) listened: bool,
+    pub(super) wants_stock_layers: bool,
 }
 
 impl Game<'_> {
@@ -58,6 +59,7 @@ impl Game<'_> {
             viewer,
             skinning,
             listened,
+            wants_stock_layers,
         } = *frame;
         let atlas = &self.gui.atlas;
         let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
@@ -142,7 +144,7 @@ impl Game<'_> {
         let (replacement, supported_layers) = if is_player {
             (None, StockLayerMask::PLAYER)
         } else {
-            super::super::native_entity_renderers::living_renderer(mob, listened)
+            super::super::native_entity_renderers::living_renderer(mob, wants_stock_layers)
         };
         let pre = self.mod_render_pre(
             mob,
