@@ -100,10 +100,9 @@ impl EquipmentLayer {
 
 /// The single provider attached to one item for worn equipment rendering.
 /// Only visible equipped pieces which pass the equippable slot/asset gate are queried.
-/// Native and wasm use these same methods and reload-issued references; geometry never
-/// crosses Wire during a frame. Register trees and textures through the reload registrar.
-/// A panicking native callback or refused/trapped wasm callback discards every layer of
-/// the piece, draws it with vanilla behaviour, and disables the provider until reload.
+/// Register trees and textures through the reload registrar and use the references it returns.
+/// If the callback panics, the game discards every layer of the piece, draws it with vanilla
+/// behaviour, and disables the provider until reload.
 pub trait ClientItemExtensions: Send + Sync + 'static {
     // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     #[doc(hidden)]

@@ -52,7 +52,7 @@ impl ChunkDiskData {
     }
 
     /// Read the job's typed value, inserting its default if absent. `T` must
-    /// support the shared Wire contract on native and wasm alike.
+    /// implement the Wire codec.
     pub fn get<T: Clone + Send + Sync + wire::Wire + 'static>(
         &mut self,
         key: &AttachmentType<T>,

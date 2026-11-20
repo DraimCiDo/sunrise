@@ -1,7 +1,7 @@
 //! Load-owned attachment identities. Owner declarations authorize cross-package use.
 use super::*;
 
-/// Attachment declarations shared by native and wasm registration.
+/// Attachment declarations.
 pub trait AttachmentTypesRegistrar {
     /// Declare an explicitly namespaced attachment owned by this package.
     /// `has_sync_codec` means the type synchronizes to clients, not merely that
@@ -13,7 +13,7 @@ pub trait AttachmentTypesRegistrar {
 }
 
 /// Read-only access to the load-owned attachment registry, including without a world host.
-// hidden: generated guest metadata validation; authors use typed keys and snapshots.
+// hidden: attachment metadata lookup; authors use typed keys and snapshots.
 #[doc(hidden)]
 pub trait AttachmentDeclarations {
     fn validate_attachment_type(

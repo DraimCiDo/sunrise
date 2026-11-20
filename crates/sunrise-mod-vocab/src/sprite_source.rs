@@ -7,7 +7,7 @@ use std::sync::Arc;
 /// vanilla's `SpriteSource.run` receives): every selected pack of this load in order, the game's
 /// own, the mods' and the player's. Names are full resource paths
 /// (`assets/<namespace>/textures/<path>.png`). It is given to `Hooks::sprite_source` and valid
-/// for that call only: a read after it returns finds nothing. The same on native and wasm.
+/// for that call only: a read after it returns finds nothing.
 pub trait ResourceReader: Send + Sync + 'static {
     // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     #[doc(hidden)]

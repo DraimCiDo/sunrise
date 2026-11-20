@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 /// The game's side of one package's runtime files. A mod reaches it through
 /// [`RegistrationContext::runtime_files`](crate::RegistrationContext::runtime_files), not
-/// directly. A wasm mod holds the game's source by id and each call crosses to the game.
+/// directly.
 pub trait RuntimeFileSource: Send + Sync + 'static {
     // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     #[doc(hidden)]
@@ -98,9 +98,6 @@ impl RuntimeFiles {
     /// copy. A package that is a `.smod` archive has no path ([`RuntimePathError::NotAFolder`]).
     /// The file was checked when the package opened; a later edit of the folder is the mod's to
     /// guard against.
-    ///
-    /// Not on wasm: a wasm mod has no host path to map, and is refused with
-    /// [`RuntimePathError::WasmMod`]. Read the bytes with [`file`](Self::file) instead.
     pub fn file_path(&self, name: &str) -> Result<std::path::PathBuf, RuntimePathError> {
         if cfg!(target_arch = "wasm32") {
             return Err(RuntimePathError::WasmMod);
@@ -125,8 +122,7 @@ impl crate::RegistrationContext {
             .ok_or(RuntimeFilesError::NoRuntimeFiles)
     }
 
-    /// The source for the mod running now: the one a wasm guest was handed with its context, or
-    /// the game's table entry for the native mod being dispatched.
+    /// The source for the mod being dispatched.
     pub(crate) fn bound_runtime_files(&self) -> Option<Arc<dyn RuntimeFileSource>> {
         self.runtime_files.clone().or_else(|| {
             let owner = crate::content::crash::current_native_mod()?;

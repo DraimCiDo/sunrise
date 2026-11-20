@@ -41,7 +41,7 @@ pub trait BlockEntityPartState: BlockEntityPart + Sized {
     /// The value each block entity of the Part's type keeps.
     type Data: Clone + Send + Sync + crate::wire::Wire + 'static;
     /// Its attachment key, default and codec. The owner declares the key at registration;
-    /// without a codec the value is kept for the session only (and a wasm mod needs one).
+    /// without a codec the value is kept for the session only.
     const DATA: &'static AttachmentType<Self::Data>;
 
     /// The block entity's value, or the default when it has none. Inserts nothing.
@@ -163,8 +163,7 @@ pub enum PartStateRefusal {
     /// boundary only in their saved form.
     NoCodecOnWasm,
     /// `Data`'s Wire form holds a resource handle (an erased handler such as
-    /// `Arc<dyn BlockPart>`), which crosses only into one link group's resource scope:
-    /// not as data both targets read, nor into a save.
+    /// `Arc<dyn BlockPart>`), not data that can be saved.
     ResourceHandle,
     /// The same key is already declared with a type of another Rust type name, named here.
     Incompatible {
@@ -287,9 +286,8 @@ impl PartStateDeclaration {
         }
     }
 
-    /// What the declaration is refused for on its own, for a mod the game loaded as a wasm
-    /// module where `wasm` (the game's knowledge, not the module's): syncing, copying on death,
-    /// a resource handle in its Wire form, or no codec in a wasm mod.
+    /// Checks the declaration for unsupported syncing, copying on death or a Wire form
+    /// that holds a resource handle.
     pub fn check(&self, wasm: bool) -> Result<(), PartStateRefusal> {
         if self.sync {
             return Err(PartStateRefusal::Sync);

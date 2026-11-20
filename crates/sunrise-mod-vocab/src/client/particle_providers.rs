@@ -9,8 +9,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 /// One particle of a provider's type, as its tick reads and writes it: the fields of vanilla's
-/// `Particle` a `tick` moves. Plain numbers, so a tick allocates nothing, and one value for
-/// native and wasm mods alike.
+/// `Particle` a `tick` moves. Plain numbers, so a tick allocates nothing.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it for each tick and a mod only edits its fields
 #[derive(sunrise_mod_api_macros::Wire)]

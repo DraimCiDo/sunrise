@@ -175,7 +175,7 @@ pub use job::ChunkDiskJob;
 #[path = "chunk_disk/tests.rs"]
 mod tests;
 
-/// Fence native unwinds and synchronous guest failures before publication.
+/// Run the listener and report failure before publishing its output.
 pub(crate) fn invoke(mod_id: &str, call: impl FnOnce()) -> Result<(), ChunkDiskFailure> {
     let failures = sunrise_mod_runtime::dispatch_failures::dispatch_failure_counter();
     let before = failures.get();

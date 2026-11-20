@@ -1,4 +1,4 @@
-//! Registered raw custom-payload vocabulary shared by native and wasm mods.
+//! Registered raw custom-payload vocabulary.
 #[path = "payload/registrar.rs"]
 mod registrar;
 pub use registrar::{

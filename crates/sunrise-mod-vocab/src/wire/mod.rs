@@ -1,5 +1,4 @@
-//! The wire form of the API's plain data, for the wasm boundary: values written into and read
-//! from one buffer. Native and wasm mods share the same encoding.
+//! The wire form of the API's plain data: values written into and read from one buffer.
 //!
 //! Everything is little-endian and self-delimiting: a length is a `u32` before its items, an
 //! `Option` is a tag byte, an enum is a `u32` case then its fields, a record is its fields in
@@ -8,7 +7,7 @@
 //! as UTF-8, and nesting against [`MAX_DEPTH`]. A bad input is a [`WireError`], never a panic and
 //! never an allocation larger than the input can back.
 //!
-//! Derive [`Wire`](crate::Wire) on types that cross a target boundary. The derive encodes
+//! Derive [`Wire`](crate::Wire) for values exchanged as bytes. The derive encodes
 //! fields in declaration order; checked constructors can use `#[wire(via = T)]`.
 //! Hand-written implementations declare how they cross with `layout_fields!` or `layout_via!`.
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};

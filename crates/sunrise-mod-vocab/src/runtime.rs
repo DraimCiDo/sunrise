@@ -390,8 +390,7 @@ pub(crate) fn outside_world() -> bool {
 }
 
 /// Runs a listener's call. With `contained` (outside `World`) a Host call the phase gate refuses
-/// comes back as `Err`, and the caller answers as a refused wasm call does; otherwise it is the
-/// plain call.
+/// comes back as `Err`. In `World` the listener is called directly.
 #[inline]
 pub(crate) fn refusable<T>(
     contained: bool,

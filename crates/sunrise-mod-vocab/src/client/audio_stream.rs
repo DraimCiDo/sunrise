@@ -198,8 +198,7 @@ impl std::fmt::Display for SpecFault {
 }
 
 /// The game's side of one open audio stream. A mod reaches it through [`AudioStreamRef`], not
-/// directly. A wasm mod holds the game's stream by id and each call crosses to the game. Every
-/// method works from any thread; `push` and the controls never wait on the mixer.
+/// directly. Every method works from any thread; `push` and the controls never wait on the mixer.
 pub trait AudioStreamSource: Send + Sync + 'static {
     // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     #[doc(hidden)]
@@ -232,10 +231,8 @@ crate::wire::wire_handlers::handler!(dyn AudioStreamSource, "AudioStreamSource")
 /// A stream a mod opened with `open_audio_stream`: push PCM and the game plays it.
 ///
 /// Keep the handle while the stream should play. Dropping it stops the stream, as [`stop`]
-/// does. It is `Send`: a native mod may push from any thread, a `Network`-thread payload
-/// handler included, and the audio never waits for a tick. A wasm instance is single-threaded and
-/// runs from hooks, so its audio arrives at tick rate with up to 50 ms of jitter: give a wasm
-/// stream a larger `prebuffer_ms`.
+/// does. It is `Send`: a mod may push from any thread, a `Network`-thread payload handler
+/// included, and the audio never waits for a tick.
 ///
 /// [`stop`]: AudioStreamRef::stop
 // exhaustive: its field is private, so mods cannot build or destructure it
@@ -254,9 +251,8 @@ impl AudioStreamRef {
     /// Queues interleaved 16-bit samples (`channels` per frame) behind what is waiting and
     /// returns the frames accepted. The ring has a fixed size: what does not fit is refused,
     /// never delayed, so a stalled sender cannot build up latency, and the caller drops it or
-    /// pushes it again later. For a native mod the push writes straight into a ring made when the
-    /// stream opened: it never blocks, allocates or waits for a tick. (A wasm mod's call crosses
-    /// the boundary, which encodes the whole slice.) The ring has one
+    /// pushes it again later. A push writes straight into the ring made when the stream opened:
+    /// it never blocks, allocates or waits for a tick. The ring has one
     /// producer: if a second thread pushes to the same stream at the same moment, that push
     /// accepts nothing and returns 0. A native mod that shares the handle across threads
     /// pushes from one thread at a time (a lock of its own, or one pushing thread).

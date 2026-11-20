@@ -53,10 +53,9 @@ pub trait EntityRenderLayer: Send + Sync + 'static {
     /// the entity's light. Asked once a frame for each entity of the target in view, but not for
     /// one whose `render_living_pre` or `render_player_pre` a mod canceled: as with NeoForge's
     /// canceled `RenderLivingEvent.Pre`, none of its layers draw then. A frame is
-    /// drawn afresh: `draw.keep()` does nothing here. `Ok(())` keeps what it drew. An `Err`, a
-    /// panic, and a wasm call that is refused or traps all mean the same: what it drew this frame
-    /// is dropped, the error is logged once, and the layer is asked no more until the next
-    /// resource load adds it again.
+    /// drawn afresh: `draw.keep()` does nothing here. `Ok(())` keeps what it drew. On an `Err`
+    /// or panic, what it drew this frame is dropped, the error is logged once, and the layer
+    /// is asked no more until the next resource load adds it again.
     fn submit(
         &self,
         entity: &EntityRenderState,

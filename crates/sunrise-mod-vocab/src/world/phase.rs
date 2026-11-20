@@ -257,9 +257,7 @@ pub(crate) fn unprovided(method: &'static str, operation: &'static str, access: 
 /// crash report). The dispatcher that called the mod catches it with `contain_refusal`, drops
 /// that listener's answer and goes on. The scope latches: while it holds a refusal every later
 /// gated call in it refuses too, whatever its access class, and the refusal is reported even
-/// if the mod caught the unwind and returned normally. The wasm host dispatcher checks
-/// `access_allowed` before entering these methods and returns a named phase refusal
-/// instead; the guest must never consult its own independent phase state.
+/// if the mod caught the unwind and returned normally.
 ///
 /// Two cases are not contained. When the thread is already unwinding (a mod `Drop` running
 /// during a panic, say) the gate logs the named line and panics, and a panic during an unwind
@@ -681,8 +679,8 @@ impl RegistrationContext {
             .expect("registration runtime environment is installed")
     }
 
-    /// The instance directory captured before registration, identically on native
-    /// and wasm. This is data only, not permission to access a filesystem.
+    /// The instance directory captured before registration. This is data only, not permission
+    /// to access a filesystem.
     /// The value preserves the host OS's raw path encoding, including non-UTF-8 names.
     pub fn instance_dir(&self) -> Result<&crate::InstanceDirectory, RegistrationReadError> {
         self.instance_dir

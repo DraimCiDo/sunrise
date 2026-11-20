@@ -7,7 +7,6 @@ use crate::*;
 /// whether what it kept of it (`BlockEntityDraw::keep`) is still right
 /// without comparing the whole entity, and no write can skip that. Its type
 /// identity is fixed at construction and is not part of the mutable fields.
-/// Returned guest snapshots apply only changed mutable fields through the same revision path.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 // no wire: transfers a flattened ModBlockEntitySnapshot, including revision counters and queued client fields, rather than internal fields storage.
 pub struct ModBlockEntity {

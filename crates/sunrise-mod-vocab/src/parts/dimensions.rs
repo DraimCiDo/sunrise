@@ -64,9 +64,6 @@ pub trait DimensionsRegistrar {
     fn add_dimension(&mut self, name: &str, settings: crate::DimensionSettings);
     /// Register chunk generator `name` with `generator`; mods reach it through
     /// `register_chunk_generator`.
-    ///
-    /// Not on wasm: ChunkGenerator and ChunkAccess are not bound by the generated worker
-    /// interface. A wasm mod's dimension can name an already installed generator.
     fn add_chunk_generator(&mut self, name: &str, generator: Arc<dyn crate::ChunkGenerator>) {
         let _ = generator;
         panic!(
@@ -76,9 +73,6 @@ pub trait DimensionsRegistrar {
     }
     /// Register biome source `name` with `source`; mods reach it through
     /// `register_biome_source`.
-    ///
-    /// Not on wasm: BiomeSource is not bound by the generated worker interface. A wasm mod's
-    /// dimension can name a biome source a native mod registered.
     fn add_biome_source(&mut self, name: &str, source: Arc<dyn crate::BiomeSource>) {
         let _ = source;
         panic!(

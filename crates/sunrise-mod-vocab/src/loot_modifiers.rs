@@ -132,7 +132,7 @@ crate::wire::wire_handlers::handler!(
 
 /// A prepared instance (`IGlobalLootModifier`), enabled by a data file, not a hook
 /// listener. Priority and condition are captured once when decoding completes;
-/// a metadata failure, including a refused wasm call, refuses that preparation.
+/// a metadata failure refuses that preparation.
 pub trait GlobalLootModifier: Send + Sync + 'static {
     // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     #[doc(hidden)]
@@ -164,7 +164,7 @@ pub trait GlobalLootModifier: Send + Sync + 'static {
 
 crate::wire::wire_handlers::handler!(dyn GlobalLootModifier, "GlobalLootModifier");
 
-/// A roll-scoped resource, identical for native and wasm instances. It lends the
+/// A roll-scoped resource. It lends the
 /// selected roll random, not a level random or an independently seeded stream.
 /// A mod cannot retain this context beyond the callback.
 pub trait LootModifierContext {
@@ -189,10 +189,6 @@ mod tests;
 /// The immutable modifier instances of one successful server reload, sorted by
 /// descending priority. Equal-priority ordering has no specified meaning.
 /// Read it through `ServerHost::reload_resources` using `Self::key()`.
-///
-/// Not on wasm: the manager is a retained, process-local reload listener and does not
-/// cross Wire. The serializer, the prepared modifier and the roll context do cross,
-/// through resource dispatch.
 #[derive(Default)]
 #[non_exhaustive]
 pub struct GlobalLootModifierManager {

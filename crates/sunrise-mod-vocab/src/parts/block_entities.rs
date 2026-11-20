@@ -182,7 +182,7 @@ impl dyn Registrar + '_ {
     /// [`Self::block_entity_part`] for a Part with typed state (`BlockEntityPartState`):
     /// each block entity of type `kind` keeps one `P::Data`, under `P::DATA`. Refused, and
     /// reported as the mod's registration refusal, when `P::DATA` syncs, copies on death,
-    /// lacks the codec a wasm mod needs, is outside the mod's namespaces (a Part on another
+    /// is outside the mod's namespaces (a Part on another
     /// package's type declares its state key as its own package does), or names a key
     /// this mod already declared with another type.
     pub fn block_entity_part_with_state<P: crate::BlockEntityPartState>(

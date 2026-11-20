@@ -40,7 +40,7 @@ pub enum AttributeRegistrationError {
 }
 
 /// An effect requested once through [`Registrar::effect_key`](EffectsRegistrar::effect_key). The registry is fixed until restart.
-// no wire: decoding validates the u32 slot with EffectKey::from_slot on the host; wasm carries the host-issued opaque token without consulting guest tables.
+// no wire: decoding validates the u32 slot with EffectKey::from_slot on the host.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so only registration creates a key
 pub struct EffectKey(pub(crate) u32);
@@ -49,7 +49,7 @@ pub struct EffectKey(pub(crate) u32);
 /// registration order. Returned by `EntityRef::kind`; Copy/Eq comparisons do not
 /// allocate. Request `key.id(host)` for its namespaced name (an owned diagnostic
 /// string). A key stays valid until the game exits.
-// The derived scalar codec validates host slots; wasm carries the host-issued token.
+// The derived scalar codec validates host slots.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, sunrise_mod_api_macros::Wire)]
 #[wire(via = u32)]
 // exhaustive: incoming scalar slots are checked against the host's registry

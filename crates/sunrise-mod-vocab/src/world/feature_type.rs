@@ -17,9 +17,7 @@
 //! loads, so a config that doesn't fit is refused then, naming the feature, never during
 //! generation.
 //!
-//! Not on wasm: feature types run on the worldgen workers, which wasm mods can't serve yet, so
-//! registering one from a wasm mod is refused at startup, naming the mod and the type, before any
-//! world job runs. Native mods only.
+//! Feature types run on the worldgen workers.
 use crate::wire::{Reader, Wire, WireError, Writer};
 use crate::world::datapack_registry::{DatapackEntry, DatapackField};
 use crate::world::structure_type::HeightmapType;

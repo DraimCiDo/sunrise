@@ -157,8 +157,7 @@ impl dyn Registrar + '_ {
     /// [`EntityPart::register_goals`] runs at every `Mob` construction of that
     /// type, spawning or loading, and its goals join the mob's selectors
     /// beside vanilla's. Its `general_entity_tick` runs for one general row
-    /// of the type (#792). Wasm parts can implement `general_entity_tick`
-    /// and `can_rider_interact`.
+    /// of the type (#792).
     pub fn entity_part<P: EntityPart>(&mut self, entity: &str, part: P) {
         self.attach_entity_part(entity, type_name::<P>(), Arc::new(part));
     }
@@ -223,17 +222,13 @@ pub trait EntitiesRegistrar {
     /// Attach `part`, of kind `kind`, to the entity type `entity`
     /// (`minecraft:zombie`, `mymod:golem`): its `register_goals` runs at every
     /// `Mob` construction of that type, and its `general_entity_tick` for one
-    /// general row's authoritative tick (#792). A wasm mod's part crosses
-    /// here as a handler the host calls back; the part's goal, behavior,
-    /// spawn-size and shear methods stay off wasm, as their docs say.
+    /// general row's authoritative tick (#792).
     fn attach_entity_part(&mut self, entity: &str, kind: &'static str, part: Arc<dyn EntityPart>);
 
     /// Record the state declaration of entity Part `part` on entity type `entity`, or refuse
     /// it (as the mod's registration refusal too): see `PartStateDeclaration::check`, a key
     /// outside this mod's namespaces, or one it declared with another Rust type name. Mods reach
     /// it through `entity_part_with_state`.
-    ///
-    /// Not on wasm: entity parts and their state declarations are registered only by native mods.
     #[cfg(not(target_arch = "wasm32"))]
     fn declare_entity_part_state(
         &mut self,

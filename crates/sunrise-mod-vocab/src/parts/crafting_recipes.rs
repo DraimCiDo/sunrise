@@ -56,7 +56,6 @@ pub struct CraftingRecipeCodec<T> {
     decode: fn(&CraftingRecipeValue) -> Result<T, String>,
 }
 impl<T: Wire> CraftingRecipeCodec<T> {
-    /// Use the same Wire encoding on native and wasm targets.
     pub fn wire() -> Self {
         Self {
             encode: |value| {
@@ -131,7 +130,7 @@ pub trait CraftingRecipeKind: Send + Sync + 'static {
 }
 
 /// Portable dispatch to the sole owner of a registered kind.
-// hidden: type erasure for generated native/wasm registration transport.
+// hidden: type erasure for dispatch to the registered handler.
 #[doc(hidden)]
 pub trait CraftingRecipeHandler: Send + Sync {
     // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.

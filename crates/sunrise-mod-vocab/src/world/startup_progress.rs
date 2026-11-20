@@ -37,8 +37,7 @@ impl From<(crate::Identifier, String)> for StartupProgressError {
 
 /// The game's side of the startup loading screen. A mod reaches it through
 /// [`RegistrationContext::progress`](crate::RegistrationContext::progress) and
-/// [`RegistrationContext::message`](crate::RegistrationContext::message), not directly. A wasm
-/// mod holds the game's screen by id and each call crosses to the game.
+/// [`RegistrationContext::message`](crate::RegistrationContext::message), not directly.
 pub trait StartupScreen: Send + Sync + 'static {
     // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     #[doc(hidden)]

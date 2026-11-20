@@ -1,4 +1,4 @@
-//! The engine API point registry, shared by native and wasm listeners.
+//! The engine API point registry.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -139,8 +139,7 @@ struct Owner {
     id: &'static str,
     /// Resolved at the seal, so firing reads the owner's canonical enable flag without a scan.
     mod_index: Option<usize>,
-    /// Set when the mod stopped (a trap in its wasm group, or the game giving up on it): its
-    /// listeners are skipped from then on.
+    /// Set when the mod stops. Its listeners are skipped from then on.
     stopped: AtomicBool,
 }
 
@@ -381,9 +380,8 @@ impl SlotListener {
     }
 }
 
-/// Registers a function or checked endpoint in its place's table, in the same order for native
-/// and wasm owners. The one boundary every listener passes: a table whose places have no site in
-/// this build refuses here, naming the mod and the target, so no listener registers and never runs.
+/// Registers a function or checked endpoint in its place's table. A table whose places have no site
+/// in this build refuses registration, naming the mod and the target.
 pub fn register(slot: &SlotListener) -> Result<(), RegisterError> {
     // A place is built from any table and index: one outside its table is refused, not indexed.
     let table = slot.place.table;
@@ -452,8 +450,7 @@ pub fn register(slot: &SlotListener) -> Result<(), RegisterError> {
 }
 
 /// Stops mod `id`'s engine listeners: none of them runs again, whether the slots are
-/// sealed yet or not. A trap that stops a wasm group and the game giving up on a native mod both
-/// end here.
+/// sealed yet or not.
 pub fn stop(id: &str) {
     let mut open = lock();
     if !open.sealed {
