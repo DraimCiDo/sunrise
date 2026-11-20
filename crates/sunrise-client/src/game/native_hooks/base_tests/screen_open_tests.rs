@@ -439,12 +439,12 @@ fn mods_actions_route_pointer_and_keyboard_to_the_owner_and_close_to_the_selecti
             .find(|w| w.label == config_label && w.enabled)
             .unwrap();
         tab_to(game, [config.x, config.y, config.w, config.h]);
-        let focus = Some(action("action_owner", "details").rect);
-        tab_to(game, focus.unwrap());
+        let focus = action("action_owner", "details").rect;
+        tab_to(game, focus);
         *answer.lock().unwrap() = Some(ScreenOpening::Cancel);
         assert!(game.key_focus_key(&NoLoop, KeyCode::Enter));
         assert_parent(game);
-        assert_eq!(game.pad_focus_rect(), focus);
+        assert_eq!(game.pad_focus_rect(), Some(focus));
         assert_eq!(take(&log), ["opening options->mod"]);
         expect_press("action_owner", "details");
         *answer.lock().unwrap() = None;

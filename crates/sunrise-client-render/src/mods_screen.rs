@@ -578,7 +578,7 @@ impl ModsScreen {
     fn row_at(&self, y: f64, list_top: i32) -> Option<usize> {
         let below = y - f64::from(list_top + 2) + self.list.amount.trunc();
         (below >= 0.0)
-            .then(|| (below / f64::from(ROW_H)) as usize)
+            .then_some((below / f64::from(ROW_H)) as usize)
             .filter(|&position| position < self.shown.len())
     }
 
