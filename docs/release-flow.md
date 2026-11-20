@@ -263,13 +263,22 @@ publishes) is `linux-smoke`'s, on Dyna's runner with the prepared files, from th
 
 The musl archive is an optional manual download for musl-based Linux desktops; see
 [installation and updates](native-client.md#musl-linux-manual-installation). The launcher still selects the
-standard glibc archive. [`game-build.yml`](../.github/workflows/game-build.yml) supplies the GCC toolchain and
-sysroot from a digest-pinned Alpine 3.22 image. The musl client and tools keep audio and controllers enabled
-and link musl dynamically (`-C target-feature=-crt-static`) to load graphics and window libraries at runtime.
-The native Ubuntu packer bundles the artifacts, then startup checks run in the same Alpine base with only the
-runtime libraries added. A failed musl build does not block other platforms: signing and publication omit the
-missing archive with a warning. The dedicated server archive remains glibc; the bundled musl `sunrise-server`
-refuses automatic updates to glibc archives.
+standard glibc archive. Nightlies and snapshots publish without waiting for the musl build. The release notes
+say that the archive follows separately. After publication, `musl-attach` signs and verifies `SHA256SUMS-musl`
+with `SHA256SUMS-musl.sig` for the channel and `SHA256SUMS-musl.v2.sig` for its exact build. It adds those files
+and then the archive without replacing the launcher's `SHA256SUMS` or its signatures. It writes to the release
+`publish` made, addressed by its id, and only while its tag still names the build's commit. GitHub uploads each file
+on its own, so a failed upload can leave the first files attached: a rerun keeps a file already there with the same
+bytes and stops at one with other bytes, or one GitHub holds unfinished, replacing nothing; only an empty
+placeholder of an upload that never began is removed. Build, signing or upload
+failures file a `bug` issue without editing the published release or replacing assets. Dry runs build, sign with a
+throwaway key and verify without publishing assets or filing issues.
+
+[`game-build.yml`](../.github/workflows/game-build.yml) supplies the GCC toolchain and sysroot from a digest-pinned
+Alpine 3.22 image. The musl client and tools keep audio and controllers enabled and link musl dynamically
+(`-C target-feature=-crt-static`) to load graphics and window libraries at runtime. The Ubuntu packer bundles the
+artifacts, then startup checks run in the same Alpine base with only the runtime libraries added. The dedicated
+server archive remains glibc; the bundled musl `sunrise-server` refuses automatic updates to glibc archives.
 
 Musl gameplay parity is not yet validated. On x86-64, `sunrise-core::jmath` uses the platform libm for several
 functions, so musl may round differently from glibc or HotSpot. Values near a simulation threshold could
@@ -569,8 +578,9 @@ a warning. A grant names its commit in full; a blank one is no grant. The commit
 first, as for every Nightly. The gate
 still holds, and an exception never changes the rule (owner, 2026-11-17). A complete published
 `sdk-<sha>` is verified and carried when available; without it, notes say native mods cannot be built for this
-build and no `sdk.json` is signed or published. Linux and Windows x64 are required. macOS, Windows ARM64 and
-musl Linux are optional: failed archives are omitted from signed checksums and publication with a warning.
+build and no `sdk.json` is signed or published. Linux and Windows x64 are required. macOS and Windows ARM64
+are optional: failed archives are omitted from signed checksums and publication with a warning. The manual
+[musl Linux download](#builds) is built in parallel and attached separately.
 
 The upstream Nightly selection machinery below describes Sunrise's picked-PR channel, not Sunrise's selection.
 
@@ -671,8 +681,9 @@ comment on any issue or pull request (`.github/workflows/nightly-command.yml`, `
 
 - **Jobs.** `pick` assembles the commit and writes the notes: what reached main since the previous Nightly (New and
   Fixed, as a release's notes), then each picked pull request with its title, author and who picked it, the known
-  issues and the thanks. `build` is
-  `game-build.yml`, the same builds and smoke test as a release, with the version `nightly-<date>` and
+  issues and the thanks. `exporters` prepares the shared Java exporter classes once via `game-build.yml`.
+  After that, `build` runs the launcher platform builds and Linux smoke test, and `musl-build` runs in
+  parallel. They use the version `nightly-<date>` and
   `SUNRISE_NIGHTLY="<date> <short sha>"` built in, macOS signed ad hoc. `sign` signs SHA256SUMS for the channel
   (the message says `horizon release nightly`, so a nightly's signature never passes for a release's). `publish`
   checks the signature, the smoke test and that no `release-blocker` is open (as a release; a dry run only warns, so
@@ -683,9 +694,9 @@ comment on any issue or pull request (`.github/workflows/nightly-command.yml`, `
   schedule and `issue_comment` run the default branch; `uses: ./…` takes the caller's commit), never a pull
   request's `.github/`, and a pull request that changes `.github/` or `tools/ci/` is refused. `build` compiles the
   merge with a read-only token that isn't kept in the checkout and no secrets, and signs nothing with Developer ID
-  (`developer_id: false`). `sign` is the only job with the key, and checks out only main's `tools/ci/sign_release.sh`, which
-  hashes the archives with the runner's `sha256sum` and signs with its OpenSSL: it never runs what `build` made.
-  `publish` runs main's `sunrise-release-sign`, never the archives. Nothing a nightly's build leaves reaches a
+  (`developer_id: false`). `sign` and `musl-attach` pass the key only to main's `tools/ci/sign_release.sh`, which
+  hashes the archives with the runner's `sha256sum` and signs with its OpenSSL: it never runs what the build made.
+  `publish` and `musl-attach` verify with main's `sunrise-release-sign`, never the archives. Nothing a nightly's build leaves reaches a
   release either: `game-build.yml`'s `trusted` input is true only for `release.yml`. An untrusted build's legs
   run on fresh Blacksmith (or GitHub) machines, and its Rust cache has its own key and is never saved. A trusted build doesn't use the machine's
   shared sccache, which pull requests' jobs write (`SUNRISE_NO_SCCACHE`, `tools/ci/runner-env.sh`).

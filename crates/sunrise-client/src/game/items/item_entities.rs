@@ -474,6 +474,9 @@ impl Game<'_> {
     /// `ExperienceOrb.awardWithDirection`: `award` whose fresh orbs start
     /// `roughly` that way (`new ExperienceOrb(level, pos, roughly, value)`).
     pub(super) fn spawn_orbs_toward(&mut self, at: [f64; 3], roughly: [f64; 3], mut value: u32) {
+        if value > 0 {
+            self.journal_level_random();
+        }
         while value > 0 {
             let v = ExperienceOrb::split(value);
             value -= v;
@@ -505,13 +508,13 @@ impl Game<'_> {
                 let vanilla = o.can_merge(merge_id as u32, value as i32);
                 let (join, id) = (o.join, o.id);
                 let before = OrbFields::read(o);
+                self.journal_orb_merge(join, before);
                 let accepted =
                     self.orb_merges(id, before.value, before.count, 0, value as i32, 1, vanilla);
                 let Some(i) = self.orbs.locate(join) else {
                     continue;
                 };
                 if accepted && let Some(after) = before.awarded(OrbFields::read(&self.orbs[i])) {
-                    self.journal_orb_merge(join, before);
                     after.write(&mut self.orbs[i]);
                     return true;
                 }

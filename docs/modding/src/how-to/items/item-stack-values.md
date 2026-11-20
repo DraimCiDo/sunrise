@@ -86,8 +86,13 @@ The `item_stacked_on_other` hook runs on the authoritative side only (a client p
 the clicked slot's stack, frozen, and takes a typed answer (`StackedOnOtherResult`: `handled`, and
 `StackResult::Keep` or `Set` for the cursor and the slot) that the game validates once and applies
 once. A stack can be set only by a cancelled click that is also `handled`; any other answer that
-sets one is refused. A write through the `Host` to what the click read makes the click stale: it is
-refused and every write the listener made is undone. The block-entity
+sets one is refused. A replacement must pass the clicked slot's pickup, placement and capacity
+rules for the actual stacks. It cannot change a result slot or take an item from a brewing potion
+slot, because the replacement does not run the slot's take effects. A refused replacement keeps
+the slot and cursor as they were and undoes the listener's writes. A write through the `Host` to
+what the click read likewise makes the click stale and refuses it.
+
+The block-entity
 tick, menu-button and menu-quick-move bridges validate their captured snapshot outputs together
 before applying them. These are output guarantees, not whole-world transactions: independent
 `ServerHost` storage writes, commands, messages and other effects are not rolled back on a

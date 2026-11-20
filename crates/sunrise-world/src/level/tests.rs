@@ -4265,7 +4265,7 @@ fn the_level_chooses_the_state_a_block_is_placed_in() {
         asked: RefCell<Vec<Asked>>,
         unloaded: Option<BlockPos>,
         max_y: i32,
-        rewrite: Option<(BlockPos, BlockStateId)>,
+        rewrite_on_update: Option<(BlockPos, BlockStateId)>,
     }
     impl crate::level::BlockEntityNeighbors for Placer {}
     impl LevelAccess for Placer {
@@ -4273,11 +4273,17 @@ fn the_level_chooses_the_state_a_block_is_placed_in() {
             self.inner.block_state(pos)
         }
         fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId> {
-            let state = self
-                .rewrite
-                .filter(|(at, _)| pos == *at)
-                .map_or(state, |(_, state)| state);
             self.inner.set_raw(pos, state)
+        }
+        fn send_block_updated(&mut self, pos: BlockPos) {
+            // Model a side effect after the chunk accepts the write, but
+            // before Level.setBlock returns to BlockItem.
+            if let Some((at, state)) = self.rewrite_on_update
+                && at == pos
+            {
+                self.rewrite_on_update = None;
+                self.inner.set_raw(pos, state);
+            }
         }
         fn is_loaded(&self, pos: BlockPos) -> bool {
             self.unloaded != Some(pos)
@@ -4363,7 +4369,7 @@ fn the_level_chooses_the_state_a_block_is_placed_in() {
         asked: RefCell::new(Vec::new()),
         unloaded: None,
         max_y: 320,
-        rewrite: None,
+        rewrite_on_update: None,
     };
     let mut ticks = Ticks::new(0);
     ticks.add_empty_chunk(ChunkPos::new(0, 0)).unwrap();
@@ -4583,7 +4589,7 @@ fn the_level_chooses_the_state_a_block_is_placed_in() {
     // but the door's tag and companion are not applied to that other block.
     level.set_raw(top, b.air());
     level.answer = Some(Some(door));
-    level.rewrite = Some((pos, stone));
+    level.rewrite_on_update = Some((pos, stone));
     let placed = b
         .place_block_with_state(&mut level, &mut ticks, &ctx, |state| {
             assert_eq!(
@@ -4605,10 +4611,9 @@ fn the_level_chooses_the_state_a_block_is_placed_in() {
     let east_foot = f.registry.id(&foot).unwrap();
     foot.properties.insert("part".into(), "head".into());
     let east_head = f.registry.id(&foot).unwrap();
-    level.rewrite = None;
     level.set_raw(pos, b.air());
     level.answer = Some(Some(bed));
-    level.rewrite = Some((pos, east_foot));
+    level.rewrite_on_update = Some((pos, east_foot));
     let placed = b
         .place_block_with_context(&mut level, &mut ticks, &ctx)
         .unwrap();

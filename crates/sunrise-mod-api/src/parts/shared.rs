@@ -297,7 +297,8 @@ pub(crate) fn install_registrar(
     registrar.validate_attachment_admission()?;
     let game_rule_slots = slots.expect("every schema refusal was collected");
     let installed = Installed {
-        effect_part_packages: crate::load_state::current_packages(),
+        dependencies: crate::load_state::effective_dependencies(),
+        effect_ticks: Default::default(),
         biome_modifiers: registrar.biome_modifiers,
         biome_regions: {
             let mut regions = registrar.biome_regions;

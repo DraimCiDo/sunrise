@@ -1,6 +1,8 @@
 //! Installing from a local test registry: a real content `.smod`, an index
 //! naming it, and the game folder the launcher shares.
 use super::*;
+use std::path::PathBuf;
+use sunrise_mod_package::index::browser_state::MANIFEST;
 
 fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(

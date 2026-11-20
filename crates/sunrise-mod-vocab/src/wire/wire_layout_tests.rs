@@ -124,8 +124,8 @@ fn resource_decoders_normalize_non_unit_wire_quantities() {
 }
 
 #[test]
-fn empty_feature_flag_storage_encodes_the_effective_vanilla_default() {
-    let flags = FeatureFlags::new(std::sync::Arc::from([]));
+fn feature_flag_wire_preserves_the_effective_set() {
+    let flags = FeatureFlags::new(["minecraft:vanilla".to_owned()].into());
     assert!(flags.contains("minecraft:vanilla"));
     assert!(flags.contains("vanilla"));
     assert_eq!(flags.iter().collect::<Vec<_>>(), ["minecraft:vanilla"]);
@@ -136,12 +136,13 @@ fn empty_feature_flag_storage_encodes_the_effective_vanilla_default() {
     assert_eq!(out.bytes(), expected);
     let decoded: FeatureFlags = Reader::decode(expected).unwrap();
     assert_eq!(decoded.iter().collect::<Vec<_>>(), ["minecraft:vanilla"]);
-    // A zero-entry input still takes the constructor's empty-default path,
-    // and re-encoding it emits the same effective list as before the migration.
-    let empty: FeatureFlags = Reader::decode(&[0, 0, 0, 0]).unwrap();
+    let no_flags = [0, 0, 0, 0];
+    let empty: FeatureFlags = Reader::decode(&no_flags).unwrap();
+    assert!(!empty.contains("minecraft:vanilla"));
+    assert_eq!(empty.iter().next(), None);
     out.clear();
     out.put(&empty);
-    assert_eq!(out.bytes(), expected);
+    assert_eq!(out.bytes(), &no_flags);
 }
 
 #[test]
