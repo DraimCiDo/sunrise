@@ -11,8 +11,12 @@ pub trait Hooks {
     /// Skin Customization), as a mod drawing its own outer skin layer does: a hidden part takes its
     /// children with it (the hat goes with the head), while its armour, held items and other
     /// layers, the cape among them, keep every part.
+    /// `hidden_layers.hide(layer)` instead hides an individual stock layer or armor pass for
+    /// this world draw. The living pre hook inherits these hides; it cannot undo them.
+    /// Not on wasm: `hidden_layers` lends the current stock renderer's native editor.
     #[hook(
         side = "client",
+        version = 2,
         contract = "cancel",
         out = "canceled",
         neoforge = "RenderPlayerEvent.Pre",

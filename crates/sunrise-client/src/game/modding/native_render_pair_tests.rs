@@ -283,3 +283,138 @@ fn a_spectator_draws_no_layers_but_gets_its_post_hooks() {
         assert_eq!(events(&heard), ["living_pre 94", "living_post 94"]);
     });
 }
+
+#[test]
+#[ignore = "daily"]
+fn stock_hides_are_draw_local_and_refused_callbacks_cannot_erase_them() {
+    use mod_api::__private::{ModPhase, PhaseOwner};
+    use mod_api::{
+        ArmorLayerPass, ArmorLayerSlot, ClientHost, Flow, HideLayerError, StockEntityLayer as Layer,
+    };
+    use sunrise_client::hud::{GuiScale, HudBatch};
+    use sunrise_client::mobs::render::ARMOR_GLINT;
+
+    const CHEST_BASE: Layer = Layer::Armor(ArmorLayerSlot::Chest, ArmorLayerPass::Base);
+    const CHEST_GLINT: Layer = Layer::Armor(ArmorLayerSlot::Chest, ArmorLayerPass::Glint);
+    struct Hide;
+    #[mod_api::__subscriptions]
+    impl Hooks for Hide {
+        fn render_player_pre(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut RenderPlayerPreEvent<'_>,
+        ) -> Flow {
+            if event.who.local {
+                event.hidden_layers.hide(Layer::Cape).unwrap();
+                event.hidden_layers.hide(Layer::Cape).unwrap();
+            }
+            Flow::Continue
+        }
+        fn render_living_pre(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut RenderLivingPreEvent<'_>,
+        ) -> Flow {
+            match event.entity.id {
+                4321 => event.hidden_layers.hide(CHEST_GLINT).unwrap(),
+                92 => assert_eq!(
+                    event.hidden_layers.hide(Layer::Cape),
+                    Err(HideLayerError::Unsupported(Layer::Cape))
+                ),
+                _ => {}
+            }
+            Flow::Continue
+        }
+    }
+    struct Refused;
+    #[mod_api::__subscriptions]
+    impl Hooks for Refused {
+        fn render_living_pre(
+            &self,
+            host: &dyn ClientHost,
+            event: &mut RenderLivingPreEvent<'_>,
+        ) -> Flow {
+            if event.entity.id == 4321 {
+                event.hidden_layers.hide(CHEST_BASE).unwrap();
+                let _ = host.level("minecraft:overworld");
+                panic!("the phase gate must refuse the callback before it returns");
+            }
+            Flow::Continue
+        }
+    }
+    super::native_entity_refs::tests::with_client_game(|game| {
+        let mut chest = sunrise_client::items::ItemStack::new("minecraft:diamond_chestplate", 1);
+        chest.enchant("minecraft:protection", 1);
+        game.armor[1] = Some(chest.clone());
+        own_player_frame(game, false);
+        // Mark the capes with independent atlas regions, disjoint from the skin and armor.
+        let local = game.gui.atlas.sprites["block/gold_block"];
+        let remote = game.gui.atlas.sprites["block/diamond_block"];
+        game.gui
+            .atlas
+            .sprites
+            .insert("test:local_cape".into(), local);
+        game.gui
+            .atlas
+            .sprites
+            .insert("test:remote_cape".into(), remote);
+        game.player_model.as_mut().unwrap().cape = Some("test:local_cape".into());
+        let mut other = mob(game, "minecraft:player", 91, 2.0);
+        other.cape = Some("test:remote_cape".into());
+        game.mobs = vec![other, mob(game, "minecraft:cow", 92, 4.0)];
+        let uses_cape = |uv: [f32; 2], rect: sunrise_client::hud::Rect| {
+            uv[0] > rect.u0 && uv[0] < rect.u1 && uv[1] > rect.v0 && uv[1] < rect.v1
+        };
+        let frame = |game: &mut Game<'_>| {
+            let mobs = mob_frame(game);
+            let mut player = Vec::new();
+            game.player_model_geometry(CAMERA, 1.0, &mut player);
+            let mut hud = HudBatch::new(
+                [320, 240],
+                GuiScale {
+                    requested: 1,
+                    unicode: false,
+                },
+            );
+            game.draw_player_preview(&mut hud, 26.0, 8.0, 75.0, 78.0, 30.0, 0.0625);
+            (player, mobs, hud.vertices)
+        };
+        let (mut expected, other, preview) = frame(game);
+        assert!(expected.iter().any(|v| uses_cape(v.uv, local)));
+        assert!(expected.iter().any(|v| v.layer == ARMOR_GLINT));
+        assert!(other.iter().any(|v| uses_cape(v.uv, remote)));
+        assert!(preview.iter().any(|v| uses_cape(v.uv, local)));
+        expected.retain(|v| !uses_cape(v.uv, local));
+        for v in &mut expected {
+            if v.layer == ARMOR_GLINT {
+                v.layer = 0;
+                v.glint_uv = [0.0; 2];
+            }
+        }
+
+        let _setup = PhaseOwner::scope(ModPhase::Setup);
+        mod_platform::testing::with_mods(
+            vec![
+                mod_api::ModEntry::new("hide", Box::new(Hide)),
+                mod_api::ModEntry::new("refused", Box::new(Refused)),
+            ]
+            .into(),
+            || {
+                let (actual, actual_other, actual_preview) = frame(game);
+                assert_eq!(
+                    bytemuck::cast_slice::<_, u8>(&actual),
+                    bytemuck::cast_slice::<_, u8>(&expected)
+                );
+                assert_eq!(
+                    bytemuck::cast_slice::<_, u8>(&actual_other),
+                    bytemuck::cast_slice::<_, u8>(&other)
+                );
+                assert_eq!(
+                    bytemuck::cast_slice::<_, u8>(&actual_preview),
+                    bytemuck::cast_slice::<_, u8>(&preview)
+                );
+                assert_eq!(game.armor[1].as_ref(), Some(&chest));
+            },
+        );
+    });
+}

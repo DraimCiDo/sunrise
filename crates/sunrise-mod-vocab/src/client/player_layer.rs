@@ -51,7 +51,8 @@ pub enum PlayerLayerRefusal {
 #[doc(hidden)]
 pub struct PlayerLayerSelection<'a> {
     layer: PlayerLayer,
-    resolve: &'a dyn Fn(&Identifier) -> Result<[f32; 4], PlayerLayerRefusal>,
+    resolve: &'a dyn Fn(&str, &Identifier) -> Result<[f32; 4], PlayerLayerRefusal>,
+    subscriber: &'static str,
     answer: ResolvedPlayerLayerTexture,
 }
 
@@ -64,7 +65,7 @@ impl crate::ResolvePlayerLayerEvent<'_, '_> {
         selection.answer = match choice {
             PlayerLayerChoice::Keep => ResolvedPlayerLayerTexture::Keep,
             PlayerLayerChoice::UseTexture(id) => {
-                ResolvedPlayerLayerTexture::Texture((selection.resolve)(id)?)
+                ResolvedPlayerLayerTexture::Texture((selection.resolve)(selection.subscriber, id)?)
             }
             PlayerLayerChoice::UseEquipmentTexture if selection.layer == PlayerLayer::Wings => {
                 ResolvedPlayerLayerTexture::Equipment
@@ -76,10 +77,11 @@ impl crate::ResolvePlayerLayerEvent<'_, '_> {
 }
 
 impl PlayerLayerSelection<'_> {
-    pub(crate) fn __stage(&self) -> Self {
+    pub(crate) fn __stage(&self, subscriber: &'static str) -> Self {
         Self {
             layer: self.layer,
             resolve: self.resolve,
+            subscriber,
             answer: self.answer,
         }
     }
@@ -100,11 +102,12 @@ pub enum ResolvedPlayerLayerTexture {
 #[doc(hidden)]
 pub fn player_layer_selection(
     layer: PlayerLayer,
-    resolve: &dyn Fn(&Identifier) -> Result<[f32; 4], PlayerLayerRefusal>,
+    resolve: &dyn Fn(&str, &Identifier) -> Result<[f32; 4], PlayerLayerRefusal>,
 ) -> PlayerLayerSelection<'_> {
     PlayerLayerSelection {
         layer,
         resolve,
+        subscriber: "",
         answer: ResolvedPlayerLayerTexture::Keep,
     }
 }

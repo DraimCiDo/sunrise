@@ -3,6 +3,7 @@ use crate::game::native_entity_refs::tests::with_client_game;
 use mod_api::{
     ClientHost, DynamicTextureError, EntityUuid, Flow, Hooks, Identifier, ModEntry,
     PlayerLayerChoice, PlayerLayerRefusal, RenderPlayerPreEvent, ResolvePlayerLayerEvent,
+    StockEntityLayer,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use sunrise_client::{
@@ -257,21 +258,27 @@ fn world_inventory_and_creative_use_separate_draws() {
     in_scene_process("world_inventory_and_creative_use_separate_draws", || {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let calls = seen.clone();
-        let key = Identifier::parse("picker:world").unwrap();
+        let world_key = Identifier::parse("picker:world").unwrap();
+        let preview_key = Identifier::parse("picker:preview").unwrap();
         let mod_ = listener("picker", move |event| {
             calls
                 .lock()
                 .unwrap()
                 .push((event.player, event.local, event.layer, event.view));
-            if event.view == PlayerLayerView::World {
-                let _ = event.choose(PlayerLayerChoice::UseTexture(&key));
-            }
+            let key = if event.view == PlayerLayerView::World {
+                &world_key
+            } else {
+                &preview_key
+            };
+            let _ = event.choose(PlayerLayerChoice::UseTexture(key));
         });
         with_scene(vec![mod_], |game| {
             profile_cape(game);
             let texture = upload(game, "picker:world", 64, 32);
-            let profile = game.gui.atlas.sprites[PROFILE];
-            assert!(uses(&world(game), texture));
+            let preview = upload(game, "picker:preview", 64, 32);
+            let vertices = world(game);
+            assert!(uses(&vertices, texture));
+            assert!(!uses(&vertices, preview));
             let mut survival = HudBatch::scratch([320, 240]);
             game.screen = Screen::Inventory;
             game.draw_inventory_player(&mut survival, 0.0, 0.0);
@@ -286,7 +293,7 @@ fn world_inventory_and_creative_use_separate_draws() {
             game.creative_screen.select(tab);
             game.draw_creative(&mut creative);
             for batch in [survival, creative] {
-                assert!(batch.vertices.iter().any(|v| inside(profile, v.uv)));
+                assert!(batch.vertices.iter().any(|v| inside(preview, v.uv)));
                 assert!(batch.vertices.iter().all(|v| !inside(texture, v.uv)));
             }
             assert_eq!(
@@ -366,8 +373,30 @@ fn only_eligible_layers_of_an_uncanceled_avatar_are_asked() {
                     avatar.invisible = false;
                     avatar.extra.spectator = true;
                     assert!(draw(game).is_empty(), "spectators have no layers");
-                    game.player_model.as_mut().unwrap().extra.spectator = false;
+                    let avatar = game.player_model.as_mut().unwrap();
+                    avatar.extra.spectator = false;
+                    let cape = Arc::make_mut(&mut avatar.kind)
+                        .layers
+                        .remove("player#cape")
+                        .unwrap();
+                    assert!(draw(game).is_empty(), "a missing cape model cannot submit");
+                    Arc::make_mut(&mut game.player_model.as_mut().unwrap().kind)
+                        .layers
+                        .insert("player#cape".into(), cape);
+
                     game.armor[1] = Some(ItemStack::new("minecraft:elytra", 1));
+                    let mut server_items = game.items().clone();
+                    server_items
+                        .items
+                        .get_mut("minecraft:elytra")
+                        .unwrap()
+                        .equip_asset = None;
+                    game.server_items = Some(Arc::new(server_items));
+                    assert!(
+                        draw(game).is_empty(),
+                        "the client elytra prototype excludes cape, but the server prototype has no wings"
+                    );
+                    game.server_items = None;
                     assert_eq!(draw(game), [PlayerLayer::Wings], "wings exclude the cape");
                     cancel.store(true, Ordering::Relaxed);
                     assert!(
@@ -382,20 +411,118 @@ fn only_eligible_layers_of_an_uncanceled_avatar_are_asked() {
 
 #[test]
 #[ignore = "daily"]
+fn hidden_world_layers_skip_geometry_and_texture_callbacks() {
+    in_scene_process(
+        "hidden_world_layers_skip_geometry_and_texture_callbacks",
+        || {
+            struct Hide(Arc<AtomicBool>);
+            #[mod_api::__subscriptions]
+            impl Hooks for Hide {
+                fn render_player_pre(
+                    &self,
+                    _: &dyn ClientHost,
+                    event: &mut RenderPlayerPreEvent<'_>,
+                ) -> Flow {
+                    if self.0.load(Ordering::Relaxed) {
+                        event.hidden_layers.hide(StockEntityLayer::Cape).unwrap();
+                        event.hidden_layers.hide(StockEntityLayer::Wings).unwrap();
+                    }
+                    Flow::Continue
+                }
+            }
+
+            let hidden = Arc::new(AtomicBool::new(false));
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let calls = seen.clone();
+            let key = Identifier::parse("picker:masked").unwrap();
+            let pick = listener("picker", move |event| {
+                calls.lock().unwrap().push((event.layer, event.view));
+                let _ = event.choose(PlayerLayerChoice::UseTexture(&key));
+            });
+            with_scene(
+                vec![ModEntry::new("hide", Box::new(Hide(hidden.clone()))), pick],
+                |game| {
+                    profile_cape(game);
+                    let texture = upload(game, "picker:masked", 64, 32);
+                    let profile = game.gui.atlas.sprites[PROFILE];
+                    let equipment = game.gui.atlas.sprites[VANILLA_WINGS];
+                    for layer in [PlayerLayer::Cape, PlayerLayer::Wings] {
+                        hidden.store(false, Ordering::Relaxed);
+                        if layer == PlayerLayer::Wings {
+                            game.armor[1] = Some(ItemStack::new("minecraft:elytra", 1));
+                        }
+                        assert!(uses(&world(game), texture));
+                        assert_eq!(
+                            std::mem::take(&mut *seen.lock().unwrap()),
+                            [(layer, PlayerLayerView::World)]
+                        );
+
+                        hidden.store(true, Ordering::Relaxed);
+                        let vertices = world(game);
+                        assert!(!uses(&vertices, texture));
+                        assert!(!uses(&vertices, profile));
+                        assert!(!uses(&vertices, equipment));
+                        assert!(seen.lock().unwrap().is_empty());
+
+                        let mut preview = HudBatch::scratch([320, 240]);
+                        game.screen = Screen::Inventory;
+                        game.draw_inventory_player(&mut preview, 0.0, 0.0);
+                        assert!(preview.vertices.iter().any(|v| inside(texture, v.uv)));
+                        assert_eq!(
+                            std::mem::take(&mut *seen.lock().unwrap()),
+                            [(layer, PlayerLayerView::InventoryPreview)]
+                        );
+                        game.screen = Screen::Playing;
+                    }
+                },
+            );
+        },
+    );
+}
+
+#[test]
+#[ignore = "daily"]
 fn refusal_and_listener_failure_keep_the_latest_accepted_choice() {
     in_scene_process(
         "refusal_and_listener_failure_keep_the_latest_accepted_choice",
         || {
             let seen = Arc::new(Mutex::new(Vec::new()));
-            let pick = |owner, id| {
-                let key = Identifier::parse(id).unwrap();
-                let seen = seen.clone();
-                listener(owner, move |event| {
-                    seen.lock()
-                        .unwrap()
-                        .push((owner, event.choose(PlayerLayerChoice::UseTexture(&key))))
-                })
-            };
+            struct Dependency<F>(F);
+            #[mod_api::__subscriptions]
+            impl<F> Hooks for Dependency<F>
+            where
+                F: Fn(&mut ResolvePlayerLayerEvent<'_, '_>) + Send + Sync + 'static,
+            {
+                #[listener(priority = -10)]
+                fn resolve_player_layer(
+                    &self,
+                    _: &dyn ClientHost,
+                    event: &mut ResolvePlayerLayerEvent<'_, '_>,
+                ) {
+                    self.0(event);
+                }
+            }
+            let first_key = Identifier::parse("first:texture").unwrap();
+            let first_seen = seen.clone();
+            let first = ModEntry::new(
+                "first",
+                Box::new(Dependency(
+                    move |event: &mut ResolvePlayerLayerEvent<'_, '_>| {
+                        first_seen.lock().unwrap().push((
+                            "first",
+                            event.choose(PlayerLayerChoice::UseTexture(&first_key)),
+                        ));
+                    },
+                )),
+            );
+            let last_key = Identifier::parse("last:texture").unwrap();
+            let dependent_seen = seen.clone();
+            let last = listener("last", move |event| {
+                dependent_seen.lock().unwrap().push((
+                    "last",
+                    event.choose(PlayerLayerChoice::UseTexture(&last_key)),
+                ));
+            });
             let refusals = seen.clone();
             let foreign = Identifier::parse("last:texture").unwrap();
             let freed = Identifier::parse("bad:freed").unwrap();
@@ -406,6 +533,14 @@ fn refusal_and_listener_failure_keep_the_latest_accepted_choice() {
                     "wrong layer",
                     event.choose(PlayerLayerChoice::UseEquipmentTexture),
                 ));
+                {
+                    // Crash attribution is not authority to select another subscriber's image.
+                    let _spoofed = texture_edit("last");
+                    row.push((
+                        "spoofed owner",
+                        event.choose(PlayerLayerChoice::UseTexture(&foreign)),
+                    ));
+                }
                 for (label, id) in [
                     ("foreign", &foreign),
                     ("freed", &freed),
@@ -422,18 +557,22 @@ fn refusal_and_listener_failure_keep_the_latest_accepted_choice() {
                     .push(("panics", event.choose(PlayerLayerChoice::Keep)));
                 panic!("listener failed after staging Keep");
             });
+            let restore = Arc::new(AtomicBool::new(false));
+            let keep = restore.clone();
             let continued = seen.clone();
-            let observer = listener("observer", move |_| {
-                continued.lock().unwrap().push(("observer", Ok(())))
+            let observer = listener("observer", move |event| {
+                let result = if keep.load(Ordering::Relaxed) {
+                    event.choose(PlayerLayerChoice::Keep)
+                } else {
+                    Ok(())
+                };
+                continued.lock().unwrap().push(("observer", result));
             });
-            let mods = vec![
-                pick("first", "first:texture"),
-                pick("last", "last:texture"),
-                bad,
-                panics,
-                observer,
-            ];
-            with_scene(mods, |game| {
+            // The loader has already sorted the dependency before its dependent,
+            // whose normal priority (0) would otherwise run before -10.
+            with_scene(vec![first, last, bad, panics, observer], |game| {
+                profile_cape(game);
+                let profile = game.gui.atlas.sprites[PROFILE];
                 let first = upload(game, "first:texture", 64, 32);
                 let last = upload(game, "last:texture", 64, 32);
                 upload(game, "bad:layout", 64, 64);
@@ -453,6 +592,10 @@ fn refusal_and_listener_failure_keep_the_latest_accepted_choice() {
                         ("last", Ok(())),
                         ("wrong layer", Err(PlayerLayerRefusal::WrongLayer)),
                         (
+                            "spoofed owner",
+                            Err(PlayerLayerRefusal::Texture(DynamicTextureError::NotOwned))
+                        ),
+                        (
                             "foreign",
                             Err(PlayerLayerRefusal::Texture(DynamicTextureError::NotOwned))
                         ),
@@ -465,6 +608,11 @@ fn refusal_and_listener_failure_keep_the_latest_accepted_choice() {
                         ("observer", Ok(())),
                     ]
                 );
+                restore.store(true, Ordering::Relaxed);
+                let out = world(game);
+                assert!(uses(&out, profile));
+                assert!(!uses(&out, first));
+                assert!(!uses(&out, last));
             });
         },
     );

@@ -34,11 +34,14 @@ impl Game<'_> {
         } else {
             return ResolvedPlayerLayerTexture::Keep;
         };
-        let resolve = |id: &mod_api::Identifier| {
-            let owner = mod_api::content::crash::current_native_mod();
+        let resolve = |subscriber: &str, id: &mod_api::Identifier| {
             let rect = self
                 .dynamic_textures
-                .owned_region(self.gui.atlas.dynamic_texture_pool.as_ref(), owner, id)
+                .owned_region(
+                    self.gui.atlas.dynamic_texture_pool.as_ref(),
+                    Some(subscriber),
+                    id,
+                )
                 .map_err(PlayerLayerRefusal::Texture)?;
             // Both built-in meshes sample the 64×32 layout: PlayerCapeModel's
             // 64×64 layer definition halves the cape cube's UV height.

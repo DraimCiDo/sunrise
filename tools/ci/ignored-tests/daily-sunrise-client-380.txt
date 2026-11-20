@@ -1,0 +1,1 @@
+sunrise-client game::native_render_pair_tests::stock_hides_are_draw_local_and_refused_callbacks_cannot_erase_them lib daily resources

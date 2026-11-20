@@ -28,15 +28,16 @@ fn resolve_player_layer(&self, _host: &dyn ClientHost, event: &mut ResolvePlayer
 owned by the calling mod. `Keep` restores the normal choice; not answering leaves
 an earlier choice alone. Wings can also choose `UseEquipmentTexture` to bypass
 the profile texture without hiding the wings. The last accepted choice in
-dependency dispatch order wins; a refusal or a failed listener does not undo
+dependency order wins, regardless of listener priority. A refusal or a failed listener does not undo
 an earlier listener's accepted choice.
 
 Each choice applies to one layer in one draw. A cape choice does not affect
 wings, and the world choice does not carry into either inventory. A cape can
 be supplied when the profile has none, but the hook cannot make ineligible
 layers draw: spectator, cape visibility and worn equipment rules still apply.
-Wings still require worn wing equipment. If the whole draw is canceled, no
-layer texture is requested.
+Wings still require worn wing equipment. Canceling the whole draw or hiding
+one of these layers with the [stock layer mask](#hiding-a-stock-layer) suppresses
+its texture callback as well as its geometry.
 
 ## 1. Write the layer
 
@@ -132,3 +133,31 @@ own that don't run layers, so `add` refuses them.
 and player in view each frame, after their layers (NeoForge's `RenderLivingEvent.Post` and
 `RenderPlayerEvent.Post`), for a mod that draws over every entity rather than over one type's renderer
 ([model drawing](model-drawing.md)).
+
+## Hiding a stock layer
+
+Use `event.hidden_layers.hide(selector)` in the client's world `render_player_pre` or
+`render_living_pre` hook. This is separate from `register_entity_layers`, which adds layers and
+is not cancellable, and from `event.hidden`, which hides parts of the body model.
+
+```rust,ignore
+use mod_api::{ArmorLayerPass, ArmorLayerSlot, StockEntityLayer};
+
+// In a pre hook, after selecting the player or mob this applies to:
+let _ = event.hidden_layers.hide(StockEntityLayer::Armor(
+    ArmorLayerSlot::Chest,
+    ArmorLayerPass::Glint,
+));
+```
+
+`Cape`, `Wings`, `HeadItem`, and `HeldItem(Hand::Main)` or `HeldItem(Hand::Off)` suppress
+whole stock layers. `Armor(slot, pass)` suppresses only the chosen `Base`, `Glint`, or `Trim`
+pass. A renderer without the selected layer returns `HideLayerError::Unsupported`; an empty slot
+or a layer that would not draw this frame is not an error. Hiding a cape does not change the
+player's cape texture, wing texture selection, or equipment.
+
+A player's pre hook runs before its living pre hook. Successful hides accumulate, repeated hides
+have no additional effect, and a refused callback cannot discard an earlier listener's edits.
+The mask starts empty for each world draw and does not reach the inventory or creative preview.
+The base model and mod-added layers still draw, in the same order, unless a pre hook cancels the
+whole draw.

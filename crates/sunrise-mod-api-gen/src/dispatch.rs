@@ -1095,9 +1095,21 @@ pub(super) fn emit<'a>(
             "Flow::Continue",
             "Default::default()",
         );
+        let layer_editor = args
+            .iter()
+            .find(|(_, ty)| ty.to_token_stream().to_string() == "& mod_api :: HiddenLayers");
         let run = |expression: &str| {
+            let guarded = format!("super::runtime::refusable(contained, || {expression})");
+            let guarded = match layer_editor {
+                // An event field can be reassigned by a listener. Lend the original editor
+                // again before each call, inside the same refusal boundary as the draw.
+                Some((editor, _)) => {
+                    format!("{editor}.guard(|| {{ {event}.{editor} = {editor}; {guarded} }})")
+                }
+                None => guarded,
+            };
             format!(
-                "match super::runtime::refusable(contained, || {expression}) {{ Ok(answer) => answer, Err(refusal) => {{ {restore_statement}refusal.report(); {refused_value} }} }}"
+                "match {guarded} {{ Ok(answer) => answer, Err(refusal) => {{ {restore_statement}refusal.report(); {refused_value} }} }}"
             )
         };
         // One callee's call: a mod's, or a scoped hook's part's.
@@ -1232,7 +1244,7 @@ pub(super) fn emit<'a>(
                      for (_, {mod_entry}) in super::listening(HookId::{hook_id}) {{
                          if super::runtime::poisoned(HookId::{hook_id}, {mod_entry}.id) {{ continue; }}
                          let {mod_item} = {entered}.enter({mod_entry}, \"{name}\");
-                         let mut {staged} = {o}.__stage();
+                         let mut {staged} = {o}.__stage({mod_entry}.id);
                          {local_event}
                          match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| super::runtime::refusable(contained, || {mod_item}.{name}({invoke})))) {{
                              Ok(Ok(())) => *{o} = {staged},

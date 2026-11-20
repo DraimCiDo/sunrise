@@ -513,6 +513,13 @@ fn sun_weight(in: Out, added: vec3<f32>) -> f32 {
 // it to the frame. The light bytes carry the sprite's origin and the colour bytes its size, both
 // as breaking::stage_light packs them.
 fn energy_swirl_base(in: Out) -> vec4<f32> {
+    if in.overlay == 47u {
+        // The armor's texture still supplies its cutout, never its color. Draw only the
+        // additive contribution of the foil; a hidden material must not occlude the body.
+        if textureSample(atlas, atlas_sampler, in.uv).a * in.color.a < 0.1 { discard; }
+        let glint = textureSample(glint_armor_tex, glint_sampler, armor_glint_uv(in.glint_uv));
+        return vec4(glint_over(vec4(0.0), glint).rgb, 1.0);
+    }
     let bytes = round(in.color * 255.0);
     let size = vec2(bytes.x + bytes.y * 256.0, bytes.z + bytes.w * 256.0) / 65535.0;
     let color = textureSample(atlas, atlas_sampler, crumbling_uv(in.uv, in.wrap, size, textureDimensions(atlas)));
@@ -526,6 +533,7 @@ fn energy_swirl_fog(in: Out) -> f32 {
 }
 @fragment fn fs_energy_swirl(in: Out) -> @location(0) vec4<f32> {
     let color = energy_swirl_base(in);
+    if in.overlay == 47u { return vec4(frame_stored(vec4(color.rgb * (1.0 - energy_swirl_fog(in)), 0.0)).rgb, 0.0); }
     return frame_stored(vec4(mix(color.rgb, globals.fog_color.rgb, energy_swirl_fog(in)), color.a));
 }
 

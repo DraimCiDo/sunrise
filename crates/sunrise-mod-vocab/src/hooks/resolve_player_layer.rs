@@ -8,12 +8,13 @@ pub trait Hooks {
     /// client host. It does not change the profile, equipment, or any other draw.
     ///
     /// The choice starts at `Keep`. Use `event.choose(...)` to propose a
-    /// choice. Listeners run in dependency dispatch order, and the last accepted
-    /// choice wins. A refusal preserves the previous choice; a failing listener's
-    /// changes are discarded. A cape may be supplied even if the profile has none.
-    /// The cape choice never affects wings, and neither choice can hide a layer.
+    /// choice. Listeners run in dependency order, ignoring listener priority, and
+    /// the last accepted choice wins. A refusal preserves the previous choice;
+    /// a failing listener's changes are discarded. A cape may be supplied even
+    /// if the profile has none. Neither choice can hide a layer, and a layer
+    /// hidden by a world render pre-hook is not queried.
     ///
-    /// Not on wasm: the decision borrows the frame's live texture lookup.
+    /// The decision borrows the frame's live texture lookup for this draw.
     #[hook(
         side = "client",
         contract = "collect",
