@@ -45,7 +45,8 @@ socket2 = { version = "0.6", optional = true }
 rustix = { version = "1.1", features = ["fs", "net"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_Storage_FileSystem", "Win32_Security_Authorization", "Win32_System_Pipes", "Win32_System_IO", "Win32_System_Threading"], optional = true }
+# Durable replacement needs MoveFileExW even without runtime-process.
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 
 [[example]]
 name = "holder_actor"
@@ -56,7 +57,7 @@ required-features = ["runtime-process"]
 # decoders for models, blockstates and item definitions. Consumers that only read packages leave it off.
 default = ["references"]
 references = ["dep:sunrise-assets"]
-runtime-process = ["dep:cap-std", "dep:cap-fs-ext", "dep:os_pipe", "dep:libc", "dep:windows-sys", "dep:getrandom", "dep:subtle", "dep:socket2", "dep:rustix"]
+runtime-process = ["dep:cap-std", "dep:cap-fs-ext", "dep:os_pipe", "dep:libc", "windows-sys/Win32_Foundation", "windows-sys/Win32_System_Console", "windows-sys/Win32_Security_Authorization", "windows-sys/Win32_System_Pipes", "windows-sys/Win32_System_IO", "windows-sys/Win32_System_Threading", "dep:getrandom", "dep:subtle", "dep:socket2", "dep:rustix"]
 prebuilt = ["dep:cap-std", "dep:tar", "dep:xz4rust"]
 # The mod registry's index (docs/modding/src/reference/registry-index.md): the launcher, the registry server and its CI.
 index = ["dep:minisign-verify", "dep:sunrise-shader-api", "dep:libc"]

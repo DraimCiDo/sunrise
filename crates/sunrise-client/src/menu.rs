@@ -1311,15 +1311,17 @@ impl Menu {
             return None;
         }
         if take.xp < 0 {
-            self.state.ground = Some(crate::stations::grindstone_xp_base(
-                env.enchantments,
-                take.top.as_ref(),
-                take.bottom.as_ref(),
-            ));
+            self.state.ground = Some(take.vanilla_amount(env));
         }
+        let xp = (take.xp >= 0).then_some(take.xp);
+        self.grindstone_take_inputs(env, take);
+        xp
+    }
+
+    /// Replace the inputs and run `slotsChanged`, after the server has awarded experience.
+    pub fn grindstone_take_inputs(&mut self, env: &Env, take: GrindstoneTake) {
         self.put(env, 0, take.new_top);
         self.put(env, 1, take.new_bottom);
-        (take.xp >= 0).then_some(take.xp)
     }
 
     /// `AnvilMenu.setItemName` (`ServerboundRenameItemPacket`): false when
@@ -2826,6 +2828,11 @@ impl Menu {
 impl Menu {
     /// `MerchantContainer.updateSellItem`.
     pub fn merchant_update(&mut self, env: &Env) {
+        self.merchant_update_result(env.items);
+    }
+
+    /// Update a detached menu after an accepted edit of its live offer.
+    pub fn merchant_update_result(&mut self, items: &Items) {
         self.touch();
         let Some(m) = self.state.merchant.as_mut() else {
             return;
@@ -2843,7 +2850,7 @@ impl Menu {
         }
         if !m.offers.is_empty() {
             let (active, result) =
-                crate::merchant::sell_item(&m.offers, env.items, a, b, Some(m.selection_hint));
+                crate::merchant::sell_item(&m.offers, items, a, b, Some(m.selection_hint));
             m.active = active;
             m.future_xp = if result.is_some() {
                 active.map_or(0, |i| m.offers[i].xp)
@@ -3092,6 +3099,70 @@ pub(crate) mod tests {
         let mut menu = Menu::new(kind);
         menu.creative = true;
         test(&env, &mut menu);
+    }
+
+    #[test]
+    fn a_handled_replacement_goes_through_the_clicked_slots_rules() {
+        bare_env(|env| {
+            let mut menu = Menu::new(Kind::Grindstone);
+            let handled = |clicked| StackedOutcome {
+                canceled: true,
+                handled: true,
+                clicked: Some(clicked),
+                ..StackedOutcome::default()
+            };
+            // The result slot's onTake would not run: nothing goes in, nothing is taken out.
+            menu.set_slot(env, 2, stack("dirt", 1));
+            for clicked in [None, stack("stone", 1)] {
+                let outcome = handled(clicked);
+                let env = Env {
+                    stacked: Some(&outcome),
+                    ..*env
+                };
+                menu.click(&env, 2, 0, Input::Pickup).unwrap();
+                assert!(outcome.refused.get());
+                assert_eq!(menu.slot(2), stack("dirt", 1).as_ref());
+            }
+            // An input takes a damageable item the slot's own rules admit, and only that.
+            let outcome = handled(stack("dirt", 1));
+            let env = Env {
+                stacked: Some(&outcome),
+                ..*env
+            };
+            menu.click(&env, 0, 0, Input::Pickup).unwrap();
+            assert!(outcome.refused.get());
+            assert_eq!(menu.slot(0), None);
+        });
+    }
+
+    #[test]
+    fn a_handled_replacement_cannot_skip_a_potion_slots_take_effects() {
+        bare_env(|env| {
+            let mut menu = Menu::new(Kind::Brewing);
+            menu.brewed_potion_hook = true;
+            let potion = stack("potion", 1);
+            menu.set_slot(env, 0, potion.clone());
+            let answer = StackedOutcome {
+                canceled: true,
+                handled: true,
+                clicked: Some(None),
+                carried: Some(potion.clone()),
+                ..StackedOutcome::default()
+            };
+            let handled = Env {
+                stacked: Some(&answer),
+                ..*env
+            };
+            menu.click(&handled, 0, 0, Input::Pickup).unwrap();
+            assert_eq!(menu.slot(0), potion.as_ref());
+            assert_eq!(menu.carried, None);
+            assert!(menu.brewed_potion_takes.is_empty());
+
+            menu.click(env, 0, 0, Input::Pickup).unwrap();
+            assert_eq!(menu.slot(0), None);
+            assert_eq!(menu.carried, potion);
+            assert_eq!(menu.brewed_potion_takes, [stack("potion", 1).unwrap()]);
+        });
     }
 
     #[test]
@@ -4034,6 +4105,7 @@ pub(crate) mod tests {
             slots: 2,
             data_slots: 0,
             results: vec![],
+            inputs: Vec::new(),
             links: None,
             crafting: None,
         })));
@@ -4069,6 +4141,7 @@ pub(crate) mod tests {
             slots: 1,
             data_slots: 0,
             results: vec![],
+            inputs: Vec::new(),
             links: None,
             crafting: None,
         })));
@@ -4260,7 +4333,7 @@ pub(crate) mod tests {
         assert_eq!(step(&after, "minecraft:player", Step), answered);
         assert_eq!(step(&after, "minecraft:cow", Step), own);
         assert_eq!(step(&after, "minecraft:player", Place), own);
-        // Fall, trample, jump and the ender teleport read it as well.
+        // Fall, jump and the ender teleport read it as well.
         let landing = |context: &LoopContext| {
             let (mut distance, mut multiplier, mut cancel) = (3.0, 1.0, false);
             crate::landing::native_living_fall(
@@ -4271,8 +4344,6 @@ pub(crate) mod tests {
                 &mut multiplier,
                 &mut cancel,
             );
-            let mut trample = false;
-            crate::landing::native_farmland_trample(context, 1, [0, 0, 0], 0, 1.0, &mut trample);
             let (mut target, mut teleport) = ([1.0, 2.0, 3.0], false);
             crate::mobs::enderman::native_ender_entity_teleport(
                 context,
@@ -4283,16 +4354,10 @@ pub(crate) mod tests {
                 &mut teleport,
             );
             crate::motion::native_living_jump(context, 1, "minecraft:cow", [0.0, 0.42, 0.0]);
-            (distance, multiplier, cancel, trample, target, teleport)
+            (distance, multiplier, cancel, target, teleport)
         };
-        assert_eq!(
-            landing(&before),
-            (3.0, 1.0, false, false, [1.0, 2.0, 3.0], false)
-        );
-        assert_eq!(
-            landing(&after),
-            (4.0, 2.0, false, true, [1.0, 3.0, 3.0], true)
-        );
+        assert_eq!(landing(&before), (3.0, 1.0, false, [1.0, 2.0, 3.0], false));
+        assert_eq!(landing(&after), (4.0, 2.0, false, [1.0, 3.0, 3.0], true));
         assert_eq!(JUMPS.get(), 2);
         // Heal and drown read it as well.
         let health = |context: &LoopContext| {
@@ -4358,6 +4423,7 @@ pub(crate) mod tests {
                 slots: 27,
                 data_slots: 0,
                 results: vec![],
+                inputs: Vec::new(),
                 links: None,
                 crafting: None,
             }));
@@ -4556,6 +4622,7 @@ pub(crate) mod tests {
             slots: 4,
             data_slots: 0,
             results: vec![3],
+            inputs: Vec::new(),
             links: None,
             crafting: None,
         })))
@@ -4663,6 +4730,7 @@ pub(crate) mod tests {
             slots: 10,
             data_slots: 0,
             results: vec![],
+            inputs: Vec::new(),
             links: None,
             crafting: Some(crate::containers::ModCrafting {
                 grid: 1,

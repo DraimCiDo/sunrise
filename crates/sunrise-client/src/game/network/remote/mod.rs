@@ -617,9 +617,21 @@ pub(super) struct Remote {
     /// sent none the game takes): owned by the connection, so entering a level touches no other
     /// level's facts, the integrated server's included.
     pub(in crate::game) level_facts: Option<Arc<sunrise_world::dimension_type::DimensionFacts>>,
-    /// The sky, fog and cloud attributes (and timelines) of the level from the server's type, for a
-    /// level of a mod or a pack (`None` for a built-in level, or when the type is refused).
-    pub(in crate::game) level_environment: Option<sunrise_client::environment::Environment>,
+    /// The sky, fog and cloud attributes (and timelines) of the level from the server's type over
+    /// the client's own environment of that type: what gameplay reads. `None` when the type is
+    /// refused, or has no data at all: neither the server sent it nor the client's resources hold
+    /// it (`fill_known_entries` fills a known pack's entries from the client's own files).
+    pub(in crate::game) level_environment: Option<Arc<sunrise_client::environment::Environment>>,
+    /// The same over the packs' Polytone stack of that type, what the frame draws (`None` without
+    /// pack modifiers, or for a type the packs have no stack of: any but the three vanilla IDs).
+    pub(in crate::game) level_pack_environment:
+        Option<Arc<sunrise_client::environment::Environment>>,
+    /// The level's synchronized dimension type, which both environments are built from again
+    /// when the packs change.
+    synced_type: Option<(String, serde_json::Value)>,
+    /// Both environments by synchronized type name, with what they were built from, so that a
+    /// level of an unchanged type is entered again without reading the biome files.
+    level_environments: HashMap<String, level_format::LevelEnvironments>,
     /// Connection-owned facts, cached by level and the full named type identity.
     facts_cache: HashMap<
         String,
@@ -1258,6 +1270,9 @@ impl Game<'_> {
             level_key: mod_api::DimensionKey::OVERWORLD,
             level_facts: None,
             level_environment: None,
+            level_pack_environment: None,
+            synced_type: None,
+            level_environments: Default::default(),
             facts_cache: Default::default(),
             added_levels: Default::default(),
             viewed: Default::default(),
@@ -1508,6 +1523,9 @@ impl Game<'_> {
             level_key: mod_api::DimensionKey::OVERWORLD,
             level_facts: None,
             level_environment: None,
+            level_pack_environment: None,
+            synced_type: None,
+            level_environments: Default::default(),
             facts_cache: Default::default(),
             added_levels: Default::default(),
             viewed: Default::default(),
@@ -2473,11 +2491,11 @@ impl Game<'_> {
         // A Sunrise server's bulk edit sends whole columns with the light
         // from before its relight; any other server's packet light is final.
         let relight_resent = r.quiet_commands;
-        let format = r.level_format(spawn, self.res.environment());
+        let format = r.level_format(spawn);
         let (dimension, shape) = (format.dimension, format.shape);
         r.chunk_format = format.chunk_format;
         r.level_facts = format.facts;
-        r.level_environment = format.environment;
+        r.synced_type = format.synced_type;
         r.dimension = dimension;
         r.resolve_clocks();
         self.world.day_time = r.clock_time(r.default_clock);
@@ -2502,6 +2520,7 @@ impl Game<'_> {
         r.predictions.clear();
         self.set_mode_id(spawn.game_type);
         self.dim = Dim::from_id(&spawn.dimension);
+        self.build_level_environments();
         self.audio.set_world(&spawn.dimension);
         // ClientPacketListener.handleLogin / handleRespawn: the server's
         // Player.getLastDeathLocation, for the recovery compass.
@@ -10739,6 +10758,9 @@ pub(crate) mod tests {
     }
     mod client_handles_tests {
         include!("client_handles_tests.rs");
+    }
+    mod client_level_environment_tests {
+        include!("client_level_environment_tests.rs");
     }
     mod client_level_lifecycle_tests {
         include!("client_level_lifecycle_tests.rs");

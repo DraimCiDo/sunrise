@@ -1,5 +1,4 @@
-//! Durable file publication, shared by the carrier ownership store (the
-//! client's world save) and the server's region WAL.
+//! Durable file publication for saves and other persistent game state.
 //!
 //! A file's contents are made durable by writing a temporary sibling,
 //! `sync_all`ing it, and moving it over the destination with
@@ -8,26 +7,30 @@
 //! `rename` plus an `fsync` of the directory on Unix. Every API failure is
 //! an error; nothing silently falls back to a weaker write.
 //!
-//! The pattern is the server's write-ahead transaction
-//! (`sunrise-server/src/prune/transaction.rs`); this crate carries it
-//! because it is the one place both the client and the server depend on
-//! that does not forbid `unsafe`, which the direct Windows call needs.
+use std::io::{self, Write};
+use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::{fs, fs::File};
 
-use std::{fs, io, path::Path};
+#[cfg(any(unix, windows))]
+fn parent(path: &Path) -> &Path {
+    path.parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
 
-/// The directory of `path` synced, so a rename into it is on the disk
-/// (POSIX; Windows has no directory handle to sync, and its write-through
-/// move is journaled by NTFS).
-fn sync_dir(path: &Path) -> io::Result<()> {
+/// Syncs the directory containing `path`, including any rename into it (Unix).
+/// On Windows [`replace`] instead uses a write-through move.
+pub fn sync_parent(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
-    fs::File::open(path)?.sync_all()?;
+    fs::File::open(parent(path))?.sync_all()?;
     #[cfg(not(unix))]
     let _ = path;
     Ok(())
 }
 
-/// Moves `from` onto `to` durably. Both must live in the same directory;
-/// `to` may not exist yet.
+/// Moves a synced `from` onto `to` and makes the destination durable.
+/// Both must live on the same filesystem; `to` may not exist yet.
 pub fn replace(from: &Path, to: &Path) -> io::Result<()> {
     #[cfg(windows)]
     {
@@ -42,7 +45,8 @@ pub fn replace(from: &Path, to: &Path) -> io::Result<()> {
         // behavior when calling Win32 directly, including a destination
         // that does not exist yet.
         let from = fs::canonicalize(from)?;
-        let to = fs::canonicalize(to.parent().unwrap())?.join(to.file_name().unwrap());
+        let name = to.file_name().ok_or(io::ErrorKind::InvalidInput)?;
+        let to = fs::canonicalize(parent(to))?.join(name);
         let from: Vec<_> = from.as_os_str().encode_wide().chain(Some(0)).collect();
         let to: Vec<_> = to.as_os_str().encode_wide().chain(Some(0)).collect();
         // Both paths are owned, nul-terminated buffers valid for this
@@ -60,41 +64,46 @@ pub fn replace(from: &Path, to: &Path) -> io::Result<()> {
     }
     #[cfg(not(windows))]
     fs::rename(from, to)?;
-    sync_dir(to.parent().unwrap())
+    sync_parent(to)
 }
 
 /// Writes `bytes` to `path` so that, once this returns, the file on disk
 /// holds exactly these bytes: a temporary sibling, `sync_all`, then a
 /// durable [`replace`]. A failed publication removes the temporary.
 pub fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    use std::io::Write;
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("data");
-    let temporary = path.with_file_name(format!(".{name}.durable-new"));
-    let written = fs::File::create(&temporary).and_then(|mut file| {
-        file.write_all(bytes)?;
-        file.sync_all()
-    });
-    match written {
-        Ok(()) => match replace(&temporary, path) {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                let _ = fs::remove_file(&temporary);
-                Err(error)
-            }
-        },
-        Err(error) => {
-            let _ = fs::remove_file(&temporary);
-            Err(error)
-        }
-    }
+    write_with(path, |file| file.write_all(bytes))
 }
 
-/// Removes `path`, then makes the directory entry's removal durable the
-/// same way [`write`] makes a replacement durable. A missing file is
-/// already gone.
+/// Publishes `path` only after `write` has finished writing its temporary sibling.
+pub fn write_with(path: &Path, write: impl FnOnce(&mut File) -> io::Result<()>) -> io::Result<()> {
+    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+    path.file_name().ok_or(io::ErrorKind::InvalidInput)?;
+    for _ in 0..16 {
+        let id = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
+        let temporary =
+            path.with_file_name(format!(".sunrise-write-{}-{id}.tmp", std::process::id()));
+        let mut file = match File::create_new(&temporary) {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        };
+        let written = write(&mut file).and_then(|()| file.sync_all());
+        drop(file);
+        return written
+            .and_then(|()| replace(&temporary, path))
+            .inspect_err(|_| {
+                let _ = fs::remove_file(&temporary);
+            });
+    }
+    Err(io::ErrorKind::AlreadyExists.into())
+}
+
+/// Removes `path`, syncing its parent directory on Unix. A missing file is already gone.
+/// Windows does not flush the unlink here: a journal removed this way can reappear after
+/// power loss, so the caller must be able to replay it safely.
 pub fn remove(path: &Path) -> io::Result<()> {
     match fs::remove_file(path) {
-        Ok(()) => sync_dir(path.parent().unwrap_or(path)),
+        Ok(()) => sync_parent(path),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
     }

@@ -1135,6 +1135,25 @@ fn pickup(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
     if let Some(outcome) = rules.stacked() {
         (canceled, handled) = (outcome.canceled, outcome.handled);
         if canceled && handled {
+            // The replacement goes through the clicked slot's rules (`mayPickup`, `mayPlace`, its
+            // size); one they refuse changes nothing.
+            if let Some(clicked) = &outcome.clicked
+                && clicked.as_ref() != view.get(i).as_ref()
+                && (view.get(i).is_some() && !view.may_pickup(i, rules)
+                    || clicked.as_ref().is_some_and(|stack| {
+                        let (may_place, max) = view.slot_rules(i, stack, rules);
+                        let max = view
+                            .container_limits
+                            .get(i)
+                            .copied()
+                            .flatten()
+                            .map_or(max, |limit| max.min(limit));
+                        !may_place || stack.count > max
+                    }))
+            {
+                outcome.refused.set(true);
+                return;
+            }
             if let Some(carried) = outcome.carried.clone() {
                 view.guest.carried = carried;
             }
@@ -2045,6 +2064,7 @@ pub(crate) mod tests {
             slots: 5,
             data_slots: 0,
             results: vec![],
+            inputs: Vec::new(),
             links: None,
             crafting: Some(ModCrafting {
                 grid: 1,
@@ -2173,6 +2193,7 @@ pub(crate) mod tests {
             slots: 6,
             data_slots: 0,
             results: vec![],
+            inputs: Vec::new(),
             crafting: None,
             links: Some(ModLinks { from: 2, count: 4 }),
         }));
