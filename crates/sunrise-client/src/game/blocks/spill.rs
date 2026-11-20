@@ -632,10 +632,33 @@ impl GameLevel<'_> {
         let key = (pos.x, pos.y, pos.z);
         let at = [pos.x, pos.y, pos.z];
         self.unpack_loot(super::container_loot::LootTarget::Block(key), None);
-        if let Some(entity) = self.world.block_entities.get(&key) {
-            let saved = self.encode_live_block_entity(key, entity, &self.facts.get(state).name);
+        let block = &self.facts.get(state).name;
+        if let Some(carried) = self.world.block_entities.carried(&key) {
+            // MovingPistonBlock.getDrops rolls the carried state. Its block entity
+            // and position-owned fields left the live map when the piston moved it.
+            use sunrise_client::save::{PendingContainerLoot, block_entity_encode::DataFields};
+            let data = &carried.position_data;
+            let pending = data
+                .get(&"PendingLoot".into())
+                .and_then(PendingContainerLoot::from_tag);
+            let fields = DataFields {
+                lock: data.get(&"Source".into()).and_then(|tag| tag.get("lock")),
+                custom_name: data.get(&"Name".into()),
+                pending: pending.as_ref(),
+                hopper_cooldown: match data.get(&"HopperCooldown".into()) {
+                    Some(Tag::Int(cooldown)) => Some(*cooldown),
+                    _ => None,
+                },
+            };
+            let saved = self.encode_loot_block_entity(key, &carried.entity, block, fields, || {
+                Some(sunrise_client::block_entities::BlockEntities::snapshot_generation())
+            });
+            self.pending
+                .record_source(at, source_snapshot(saved, None, None));
+        } else if let Some(entity) = self.world.block_entities.get(&key) {
+            let saved = self.encode_live_block_entity(key, entity, block);
             self.pending.record_from(self.world, at, saved);
-        } else if let Some(tag) = saved_entity(self.world, [pos.x, pos.y, pos.z]) {
+        } else if let Some(tag) = saved_entity(self.world, at) {
             self.pending.record_saved(at, &tag);
         }
         let dynamic = self.pending.dynamic(at);
@@ -1586,6 +1609,73 @@ mod tests {
                 let (taken, after) = break_of(game, dirt, "minecraft:dirt", None);
                 assert_eq!(after, dirt_after);
                 assert!(taken.canceled && taken.items.is_empty() && taken.experience == 0);
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn aborting_a_block_break_restores_a_merged_experience_orb() {
+        struct Award;
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Award {
+            fn block_drops(
+                &self,
+                _: &dyn mod_api::LevelHost,
+                event: &mut mod_api::BlockDropsEvent<'_>,
+            ) -> mod_api::Flow {
+                assert!(event.drops.is_empty());
+                event.experience = 1;
+                mod_api::Flow::Continue
+            }
+        }
+        let mods = vec![mod_api::ModEntry::new("award", Box::new(Award))].into();
+        mod_platform::testing::with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                use std::sync::Arc;
+                use sunrise_core::random::{LegacyRandom, LevelRandom};
+                game.options.dedicated = Some(Vec::new());
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)));
+                let pos = [3, 64, 4];
+                let state = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:sculk")
+                    .unwrap();
+                let mut items = game.items().clone();
+                items.set_loot_tables(Arc::new(
+                    [(
+                        "minecraft:blocks/sculk".into(),
+                        serde_json::json!({"pools": []}),
+                    )]
+                    .into_iter()
+                    .collect(),
+                ));
+                game.server_items = Some(Arc::new(items));
+                game.next_entity = 35; // The next id is Random(7).nextInt(40), this empty roll's first draw.
+                game.add_orb([3.5, 64.5, 4.5], 1);
+                game.orbs[0].count = 2;
+                game.orbs[0].age = 123;
+                game.world.set(pos[0], pos[1], pos[2], state).unwrap();
+                game.world.random = LevelRandom::for_level(LegacyRandom::new(7));
+                let outer = game.transaction_open();
+                let inner = game.transaction_open();
+                game.destroy_block_dropping(pos).unwrap();
+                assert_eq!(game.orbs.len(), 1);
+                assert_eq!(
+                    (game.orbs[0].value, game.orbs[0].count, game.orbs[0].age),
+                    (1, 3, 0)
+                );
+                game.transaction_close(&inner, true);
+                game.transaction_close(&outer, false);
+                assert_eq!(game.orbs.len(), 1);
+                assert_eq!(
+                    (game.orbs[0].value, game.orbs[0].count, game.orbs[0].age),
+                    (1, 2, 123)
+                );
             });
         });
     }

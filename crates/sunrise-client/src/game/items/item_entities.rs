@@ -30,6 +30,52 @@ pub(super) fn orb_award_area(at: [f64; 3]) -> Aabb {
     Aabb::new(centre.subtract(half), centre.add_vector(half))
 }
 
+/// The part of an existing orb an award can change. Also the transaction before-image.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct OrbFields {
+    value: i32,
+    count: u32,
+    age: i32,
+}
+
+impl OrbFields {
+    pub(super) fn read(orb: &ExperienceOrb) -> Self {
+        Self {
+            value: orb.value,
+            count: orb.count,
+            age: orb.age,
+        }
+    }
+
+    pub(super) fn write(self, orb: &mut ExperienceOrb) {
+        (orb.value, orb.count, orb.age) = (self.value, self.count, self.age);
+    }
+
+    fn awarded(self, mut result: Self) -> Option<Self> {
+        // A merge listener's value/count write is the merged orb. With no
+        // write the save representation must still hold the increment.
+        if (result.value, result.count) == (self.value, self.count) {
+            if result.count >= crate::orb_limits::MAX_COUNT {
+                return None;
+            }
+            result.count += 1;
+        }
+        result.age = 0;
+        Some(result)
+    }
+}
+
+struct OrbAwardPreview<'a, 'g> {
+    game: &'a mut Game<'g>,
+    outer: Option<(Dim, ExperienceOrb)>,
+}
+
+impl Drop for OrbAwardPreview<'_, '_> {
+    fn drop(&mut self) {
+        self.game.orb_award_target = self.outer.take();
+    }
+}
+
 impl Game<'_> {
     pub(super) fn tick_items(&mut self) {
         let mut round = self.item_update_round();
@@ -457,29 +503,47 @@ impl Game<'_> {
                     continue;
                 }
                 let vanilla = o.can_merge(merge_id as u32, value as i32);
-                let (join, id, count, age) = (o.join, o.id, o.count, o.age);
-                let orb_value = o.value;
-                if !self.orb_merges(id, orb_value, count, 0, value as i32, 1, vanilla) {
-                    self.restore_orb(join, orb_value, count, age);
-                    continue;
-                }
+                let (join, id) = (o.join, o.id);
+                let before = OrbFields::read(o);
+                let accepted =
+                    self.orb_merges(id, before.value, before.count, 0, value as i32, 1, vanilla);
                 let Some(i) = self.orbs.locate(join) else {
                     continue;
                 };
-                let o = &mut self.orbs[i];
-                // A mod's write in the merge hook is the merged orb; else one more in its count.
-                if (o.value, o.count) == (orb_value, count) {
-                    if count >= crate::orb_limits::MAX_COUNT {
-                        continue;
-                    }
-                    o.count += 1;
+                if accepted && let Some(after) = before.awarded(OrbFields::read(&self.orbs[i])) {
+                    self.journal_orb_merge(join, before);
+                    after.write(&mut self.orbs[i]);
+                    return true;
                 }
-                o.age = 0;
-                return true;
+                before.write(&mut self.orbs[i]);
             }
         }
         false
     }
+    /// Decide a blast's merge at the award site, but keep its writes on the
+    /// candidate until the block's final drop decision. The orb API sees the
+    /// projected target, including one from an earlier, still-pending award.
+    pub(super) fn preview_orb_award(
+        &mut self,
+        target: ExperienceOrb,
+        value: u32,
+        merge_id: i32,
+    ) -> Option<OrbFields> {
+        let before = OrbFields::read(&target);
+        let vanilla = target.can_merge(merge_id as u32, value as i32);
+        let id = target.id;
+        let outer = self.orb_award_target.replace((self.dim, target));
+        let preview = OrbAwardPreview { game: self, outer };
+        if !preview
+            .game
+            .orb_merges(id, before.value, before.count, 0, value as i32, 1, vanilla)
+        {
+            return None;
+        }
+        let (_, target) = preview.game.orb_award_target.as_ref().unwrap();
+        before.awarded(OrbFields::read(target))
+    }
+
     /// Puts back what a merge hook may have written to the orb `join`: a refused merge
     /// leaves both orbs as they were.
     fn restore_orb(&mut self, join: crate::join_seq::JoinSeq, value: i32, count: u32, age: i32) {

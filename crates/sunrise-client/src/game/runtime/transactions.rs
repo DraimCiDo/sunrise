@@ -194,6 +194,8 @@ pub(super) struct Level {
     mob_lengths: HashMap<u32, usize>,
     /// Each item entity's stack before this transaction first wrote it.
     item_entities: HashMap<u32, ItemStack>,
+    /// Existing orbs before a spawning award merged into them at this depth.
+    orb_merges: HashMap<crate::join_seq::JoinSeq, super::item_entities::OrbFields>,
     /// Each guest's menu storage before this transaction first wrote it, by connection.
     menus: HashMap<u32, KeptMenus>,
     /// The scoreboard before this transaction first wrote it (`journal_scoreboard`), whole.
@@ -657,7 +659,12 @@ impl Game<'_> {
                 match (level.dimension)
                     .and_then(|dim| entities::open_in(&mut self.transactions, dim))
                 {
-                    Some(enclosing) => enclosing.lifetimes.merge(lifetimes),
+                    Some(enclosing) => {
+                        enclosing.lifetimes.merge(lifetimes);
+                        for (join, kept) in level.orb_merges {
+                            enclosing.orb_merges.entry(join).or_insert(kept);
+                        }
+                    }
                     None => self.commit_entity_journal(lifetimes, |_| {}),
                 }
             }
@@ -1317,11 +1324,26 @@ impl Game<'_> {
             }
         }
     }
+    pub(super) fn journal_orb_merge(
+        &mut self,
+        join: crate::join_seq::JoinSeq,
+        before: super::item_entities::OrbFields,
+    ) {
+        if let Some(level) = entities::open_in(&mut self.transactions, self.dim) {
+            level.orb_merges.entry(join).or_insert(before);
+        }
+    }
+
     fn roll_back(&mut self, mut level: Level) {
         self.roll_back_in_flight(&mut level);
         self.scratch_roll_back(std::mem::take(&mut level.scratch_kept));
         // Discard deferred effects before undoing tentative action storage.
         level.after.clear();
+        for (join, fields) in level.orb_merges {
+            if let Some(i) = self.orbs.locate(join) {
+                fields.write(&mut self.orbs[i]);
+            }
+        }
         // Restore slots and undo only their recorded modifier edits. Explicit
         // attribute writes survive an abort, and no item query runs here.
         let equipment = std::mem::take(&mut level.equipment);

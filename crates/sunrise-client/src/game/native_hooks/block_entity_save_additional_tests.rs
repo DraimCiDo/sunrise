@@ -400,9 +400,10 @@ mod tests {
         use sunrise_client::{command::args::GameMode, mobs::MobEvent, motion::PlayerMotion};
         use sunrise_core::geometry::Vec3;
 
-        struct CopyPayload(Arc<Mutex<Vec<(Cause, Option<mod_api::BlockEntityRef>)>>>);
+        type Seen = (Cause, Option<mod_api::BlockEntityRef>);
+        struct ObserveRoll(Arc<Mutex<Vec<Seen>>>);
         #[mod_api::__subscriptions]
-        impl Hooks for CopyPayload {
+        impl Hooks for ObserveRoll {
             fn block_drops(
                 &self,
                 level: &dyn LevelHost,
@@ -412,19 +413,25 @@ mod tests {
                     .lock()
                     .unwrap()
                     .push((event.cause(), event.block_entity));
-                if let Some(entity) = event.block_entity {
-                    let serial = match level
-                        .block_entity_data(entity)
-                        .and_then(|mut tag| tag.remove(&"count".into()))
-                    {
-                        Some(Tag::Int(serial)) => serial,
-                        other => panic!("outgoing serializer payload missing: {other:?}"),
-                    };
-                    event.drops[0].stack = mod_api::ItemStack::new(
-                        mod_api::__private::item_key("minecraft:emerald").unwrap(),
-                        serial as u32,
-                    )
-                    .unwrap();
+                let [drop] = event.drops.as_slice() else {
+                    panic!("expected one rolled drop")
+                };
+                let copied = drop
+                    .stack
+                    .components()
+                    .and_then(|patch| patch.as_nbt().get(&"minecraft:custom_data".into()));
+                match event.block_entity {
+                    Some(entity) => {
+                        let mut payload =
+                            level.block_entity_data(entity).expect("outgoing payload");
+                        let serial = payload.remove(&"count".into()).expect("serializer output");
+                        assert_eq!(copied.and_then(|tag| tag.get("serial")), Some(&serial));
+                        assert_eq!(
+                            copied.and_then(|tag| tag.get("name")),
+                            payload.get(&"CustomName".into())
+                        );
+                    }
+                    None => assert!(copied.is_none()),
                 }
                 mod_api::Flow::Continue
             }
@@ -433,7 +440,7 @@ mod tests {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mods = vec![
             ModEntry::new("test", Box::new(Mod(serial.clone()))),
-            ModEntry::new("observer", Box::new(CopyPayload(seen.clone()))),
+            ModEntry::new("observer", Box::new(ObserveRoll(seen.clone()))),
         ]
         .into();
         mod_platform::testing::with_mods(mods, || {
@@ -456,6 +463,18 @@ mod tests {
                 game.lan_acting_entity = Some(20);
                 game.lan_acting_permission = Some(0);
                 game.set_mode(GameMode::Survival);
+                let mut items = game.items().clone();
+                items.set_loot_tables(Arc::new(["dirt", "poppy"].into_iter().map(|block| {
+                    (format!("minecraft:blocks/{block}"), serde_json::json!({
+                        "pools": [{"rolls": 1, "entries": [{"type": "minecraft:item", "name": "minecraft:emerald",
+                            "modifier": {"type": "minecraft:copy_custom_data", "source": "block_entity", "ops": [
+                                {"source": "count", "target": "serial", "op": "replace"},
+                                {"source": "CustomName", "target": "name", "op": "replace"}
+                            ]}
+                        }]}]
+                    }))
+                }).collect()));
+                game.server_items = Some(Arc::new(items));
                 let at = [7, 64, 4];
                 let reg = game.pack.assets.registry;
                 let dirt = reg.default_state("minecraft:dirt").unwrap();
@@ -475,6 +494,7 @@ mod tests {
                     ("mob", Cause::MobBreak),
                     ("piston", Cause::Level(LevelCause::Piston)),
                     ("command", Cause::Level(LevelCause::Command)),
+                    ("in-flight", Cause::Level(LevelCause::Command)),
                     (
                         "blast",
                         Cause::Explosion {
@@ -528,6 +548,43 @@ mod tests {
                             });
                         }
                         "command" => game.destroy_block_dropping(at).unwrap(),
+                        "in-flight" => {
+                            use sunrise_core::{geometry::Direction, position::BlockPos};
+                            use sunrise_world::level::MovingPiston;
+                            let from = BlockPos::new(at[0], at[1], at[2]);
+                            let to = BlockPos::new(8, 64, 4);
+                            let name = Tag::compound([("text", Tag::String("Travelling".into()))]);
+                            game.world
+                                .block_names
+                                .insert((from.x, from.y, from.z), name);
+                            game.with_level(|_, level, ticks| {
+                                level.carry_mod_block_entity(from, to);
+                                ticks.moving_pistons.push((
+                                    to,
+                                    MovingPiston {
+                                        moved_state: dirt,
+                                        direction: Direction::East,
+                                        extending: true,
+                                        source: false,
+                                        progress: 0.5,
+                                        progress_o: 0.0,
+                                        last_ticked: 0,
+                                        death_ticks: 0,
+                                        id: 0,
+                                    },
+                                ));
+                            });
+                            let moving = reg.default_state("minecraft:moving_piston").unwrap();
+                            game.world
+                                .set(from.x, from.y, from.z, game.world.air)
+                                .unwrap();
+                            game.world.set(to.x, to.y, to.z, moving).unwrap();
+                            let key = (to.x, to.y, to.z);
+                            assert!(game.world.block_entities.carried(&key).is_some());
+                            assert!(game.world.block_entities.get(&key).is_none());
+                            game.destroy_block_dropping([to.x, to.y, to.z]).unwrap();
+                            assert!(game.world.block_entities.carried(&key).is_none());
+                        }
                         "blast" => {
                             let start = mod_api::ExplosionStart::from(
                                 mod_api::__private::built::ExplosionStart {
@@ -562,16 +619,37 @@ mod tests {
                     assert_eq!(*cause, expected, "{kind}");
                     assert_eq!(game.dropped.len(), 1, "{kind}");
                     let item = &game.dropped[0].stack;
+                    assert_eq!(
+                        (&*item.item, item.count),
+                        ("minecraft:emerald", 1),
+                        "{kind}"
+                    );
                     if kind == "entity-free" {
                         assert!(snapshot.is_none());
-                        assert_eq!((&*item.item, item.count), ("minecraft:dirt", 1));
+                        assert!(
+                            item.extra
+                                .as_ref()
+                                .and_then(|extra| extra.custom_data())
+                                .is_none()
+                        );
                         assert_eq!(serial.load(Ordering::Relaxed), before);
                     } else {
+                        let copied = item
+                            .extra
+                            .as_ref()
+                            .and_then(|extra| extra.custom_data())
+                            .unwrap();
                         assert_eq!(
-                            (&*item.item, item.count),
-                            ("minecraft:emerald", before as u32),
+                            copied.get(&"serial".into()),
+                            Some(&Tag::Int(before)),
                             "{kind}"
                         );
+                        if kind == "in-flight" {
+                            assert_eq!(
+                                copied.get(&"name".into()),
+                                Some(&Tag::compound([("text", Tag::String("Travelling".into()))]))
+                            );
+                        }
                         assert_eq!(
                             serial.load(Ordering::Relaxed),
                             before + 1,

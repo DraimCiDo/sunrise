@@ -1470,6 +1470,7 @@ struct Game<'a> {
     applied_modifiers: Vec<(String, String)>,
     experience: Experience,
     orbs: sunrise_client::join_seq::JoinList<ExperienceOrb>,
+    orb_award_target: Option<(Dim, ExperienceOrb)>,
     xp_delay: u32,
     ordered: ordered_tick::OrderedTicks,
     level_up_sound: sunrise_client::entities::LevelUpSound,
@@ -2844,26 +2845,15 @@ impl Game<'_> {
     /// `LootContext.getLevel` gives it (`Level.isRaining`: rain above 0.2;
     /// `isThundering`: thunder above 0.9; neither where `canHaveWeather` is
     /// false: a level with a ceiling or no sky light, or the End).
-    fn loot_place_at(
-        &self,
-        origin: [f64; 3],
-        block_entity: Option<sunrise_core::nbt::Tag>,
-    ) -> sunrise_world::loot::LootPlace {
-        let (block_entity, block_components) = match block_entity {
-            Some(saved) => {
-                let source = spill::source_snapshot(saved, None, None);
-                (Some(source.nbt), Some(source.components))
-            }
-            None => (None, None),
-        };
+    fn loot_place_at(&self, origin: [f64; 3]) -> sunrise_world::loot::LootPlace {
         let (rain, thunder) = self.world.weather.levels(1.0);
         // Level.canHaveWeather: sky light, no ceiling and not the End.
         let weather =
             self.world.shape.sky_light && !self.world.shape.has_ceiling && self.dim != Dim::End;
         sunrise_world::loot::LootPlace {
             origin: Some(origin),
-            block_entity,
-            block_components,
+            block_entity: None,
+            block_components: None,
             storage: Some(self.score.storage.snapshot()),
             level: Some(sunrise_world::loot::LootLevel {
                 dimension: self.dim.id().to_owned(),
@@ -2886,7 +2876,7 @@ impl Game<'_> {
         source: Option<&sunrise_world::loot::copy::BlockSource>,
     ) -> Vec<ItemStack> {
         let dynamic = self.pending.dynamic(pos);
-        let place = self.loot_place_at(pos.map(|v| f64::from(v) + 0.5), None);
+        let place = self.loot_place_at(pos.map(|v| f64::from(v) + 0.5));
         let (_, entity) = self.native_clicker();
         let mut drops = sunrise_world::loot::with_native_loot_place(place, || {
             let roll = sunrise_client::items::BlockLootRoll {
@@ -11200,6 +11190,7 @@ impl<'a> Game<'a> {
             applied_modifiers: Vec::new(),
             experience: Experience::default(),
             orbs: Default::default(),
+            orb_award_target: None,
             xp_delay: 0,
             ordered: Default::default(),
             level_up_sound: Default::default(),

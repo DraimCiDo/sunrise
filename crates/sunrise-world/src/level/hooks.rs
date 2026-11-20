@@ -615,12 +615,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let b = self.b;
         let state = self.state(pos);
         if b.data(state).is(Class::LilyPad) {
-            self.destroy_block_with_cause(
-                pos,
-                true,
-                super::flags::UPDATE_LIMIT,
-                super::DropCause::NeighbourUpdate,
-            );
+            self.destroy_block(pos, true, super::flags::UPDATE_LIMIT);
         }
     }
 

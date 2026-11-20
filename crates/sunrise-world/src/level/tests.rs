@@ -4207,6 +4207,38 @@ fn update_shape_hook_can_answer_for_the_block() {
 
 #[test]
 #[ignore = "daily"]
+fn collision_and_scheduled_support_loss_keep_distinct_drop_causes() {
+    let f = fixture().expect("prepared level resources");
+    let b = &f.behaviours;
+    let pos = BlockPos::new(1, 64, 1);
+    for (block, expected) in [
+        ("minecraft:lily_pad", DropCause::Unspecified),
+        ("minecraft:cactus", DropCause::NeighbourUpdate),
+        ("minecraft:pale_hanging_moss", DropCause::NeighbourUpdate),
+    ] {
+        let mut level = TestLevel::new(b);
+        let mut ticks = Ticks::new(0);
+        let state = f.registry.default_state(block).unwrap();
+        level.set_raw(pos, state);
+        match block {
+            "minecraft:lily_pad" => b.boat_inside(&mut level, &mut ticks, pos),
+            _ => b.scheduled_block_tick(&mut level, &mut ticks, pos),
+        }
+        let drops: Vec<_> = level
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                LevelEvent::DropResources { pos, state, cause } => Some((*pos, *state, *cause)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(drops, [(pos, state, expected)], "{block}");
+        assert_eq!(level.block_state(pos), b.air(), "{block}");
+    }
+}
+
+#[test]
+#[ignore = "daily"]
 fn the_level_chooses_the_state_a_block_is_placed_in() {
     use crate::fluid::{FluidKind, FluidState};
     use std::cell::RefCell;

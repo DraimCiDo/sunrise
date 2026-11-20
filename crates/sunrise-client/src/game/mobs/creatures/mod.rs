@@ -6367,13 +6367,6 @@ impl Game<'_> {
                 Hit::None => {}
             },
             (ProjectileKind::LargeFireball { power }, hit) => {
-                // Fireball explosions are caused by the shooter. A direct hit
-                // on the player takes `projectile_owner`, so read the owner
-                // from the fireball.
-                let owner = match p.owner {
-                    Some(Who::Mob(id)) => Some(id),
-                    _ => None,
-                };
                 if let Hit::Entity { who, .. } = hit {
                     match who {
                         Who::Player => {
@@ -6409,11 +6402,18 @@ impl Game<'_> {
                         }
                     }
                 }
-                self.combat.explosion_owner = owner;
+                // Explosion.getIndirectSourceEntity: the projectile's living owner,
+                // including the player who deflected it, is the cause of the blast.
+                let outer_blast = self.take_blast_state();
+                match p.owner {
+                    Some(Who::Player) => self.set_blast_owner(p.owner, p.guest),
+                    Some(Who::Mob(id)) if self.mobs.iter().any(|m| m.id == id && !m.removed) => {
+                        self.combat.explosion_owner = Some(id);
+                    }
+                    _ => {}
+                }
                 self.combat.explosion_in_water = p.touching_water;
-                // The blast's source names the owner, so a dragon it kills
-                // remembers the player who shot it.
-                self.set_blast_by_player(p.owner == Some(Who::Player));
+                self.set_blast_by_player(self.combat.blast_owner_player);
                 // LargeFireball.onHit: the fire follows
                 // `EventHooks.canEntityGrief(level, getOwner())`, so a mod's
                 // answer for whoever owns the fireball decides: the ghast that
@@ -6428,10 +6428,8 @@ impl Game<'_> {
                         .with_silence(self.entity_silent(p.id))
                         .with_entity(p.id, "minecraft:fireball"),
                 );
-                self.combat.explosion_direct = None;
                 self.set_blast_by_player(false);
-                self.combat.explosion_owner = None;
-                self.combat.explosion_in_water = false;
+                self.restore_blast_state(outer_blast);
                 result?;
             }
             // AbstractThrownPotion.onHit, then onHitAsPotion from the stack it
