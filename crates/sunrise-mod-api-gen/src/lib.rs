@@ -3,9 +3,6 @@ mod catalog;
 mod dispatch_fixtures;
 mod exports;
 mod game_modules;
-mod interface_cache;
-#[cfg(test)]
-mod interface_cache_tests;
 #[cfg(test)]
 mod listener_output_fixture;
 #[cfg(feature = "mixed-output-fixture")]
@@ -299,32 +296,6 @@ fn complete_hook_constants(
         &format!("pub mod {module} {{\n{defaults}"),
         1,
     ))
-}
-
-/// A catalog hook point, as a raw injection's `target` can name it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HookPoint {
-    pub name: String,
-    /// The contract version an injection's `hook_version` names.
-    pub version: u64,
-    /// The function the hook is called from: an injection's `target` for it.
-    pub target: String,
-    /// A scoped hook is a Part method alone and has no `Hooks` method.
-    pub scoped: bool,
-}
-
-/// The catalog's hook points, from the declaration files, as the generator reads them.
-pub fn hook_points(root: &Path) -> Result<Vec<HookPoint>, String> {
-    Ok(Catalog::load(root)?
-        .hooks
-        .into_iter()
-        .map(|hook| HookPoint {
-            scoped: hook.scope.is_some(),
-            name: hook.name,
-            version: hook.version,
-            target: hook.target,
-        })
-        .collect())
 }
 
 /// Serialize hook names and NeoForge counterparts for the port-pack event report.
@@ -639,7 +610,7 @@ thread_local! {
 
 /// Tracks the stager's stamp, `.sunrise-source-staged`, only in a staged copy. Cargo reruns a build
 /// script on every build while a tracked path is missing, so tracking an absent stamp rebuilt
-/// sunrise-mod-points, sunrise-client and every crate above them on each `cargo` invocation of an
+/// sunrise-client and every crate above them on each `cargo` invocation of an
 /// ordinary checkout. A stamp never appears in a tree that was already built: staging writes it
 /// first, into a fresh copy, and refuses a tree that already has one.
 pub(crate) fn rerun_if_staged(root: &std::path::Path) {
@@ -668,15 +639,11 @@ pub mod internals_view;
 pub mod loops;
 pub mod notes;
 pub mod patch;
-pub mod points;
 pub mod replace;
 pub(crate) mod source;
 pub mod staging;
 pub mod surface;
-pub use build::{
-    GUEST_OUTPUT, generate, generate_api_parts, generate_engine_points, generate_points,
-    generate_render, write_if_changed,
-};
+pub use build::{GUEST_OUTPUT, generate, generate_api_parts, generate_render, write_if_changed};
 pub use counterparts::generate as generate_counterparts;
 pub use notes::generate as generate_hook_notes;
 mod staged;
@@ -704,9 +671,9 @@ pub fn generate_test_hooks(root: &Path, out_dir: &Path) -> Result<(), String> {
 mod tests {
     use quote::ToTokens;
     #[test]
-    fn hook_points_come_from_the_catalog_and_its_fragments() {
+    fn hooks_keep_their_versions_targets_and_scopes() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let points = super::hook_points(&root).unwrap();
+        let points = super::Catalog::load(&root).unwrap().hooks;
         let frame = points
             .iter()
             .find(|p| p.name == "render_frame_pre")
@@ -721,12 +688,12 @@ mod tests {
             frame.target,
             "sunrise_client::game::native_hooks::render_frame_pre::Game<'_>::native_render_frame_pre"
         );
-        assert!(!frame.scoped);
+        assert!(frame.scope.is_none());
         let scoped = points
             .iter()
             .find(|p| p.name == "pre_remove_side_effects")
             .unwrap();
-        assert!(scoped.scoped);
+        assert!(scoped.scope.is_some());
         assert_eq!(scoped.version, 2);
     }
 

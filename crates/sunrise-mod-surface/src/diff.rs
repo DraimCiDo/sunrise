@@ -896,7 +896,6 @@ fn pair<T>(
 }
 
 const ENGINE_KINDS: [(&str, &str); 3] = [
-    ("point", "Injection points"),
     ("loop", "Published loops"),
     ("internal", "Listed internals (advisory)"),
 ];
@@ -985,7 +984,7 @@ impl Diff {
             self.new
         );
         if engine_changes {
-            text.push_str("\nEngine catalogs (point and loop removals and changes are breaking)\n");
+            text.push_str("\nEngine catalogs (loop removals and changes are breaking)\n");
             for (prefix, title) in ENGINE_KINDS {
                 let records = || self.changes.iter().filter(|c| record_kind(&c.id) == prefix);
                 // Only an audit includes internals; show their section when they change.

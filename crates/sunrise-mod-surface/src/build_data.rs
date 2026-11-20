@@ -1,4 +1,4 @@
-//! The SDK's build-pinned data (`build-data.tar.xz`): `points.json`, `internals.json`,
+//! The SDK's build-pinned data (`build-data.tar.xz`): `internals.json`,
 //! `loops.json` and `functions.json`, written by the staging pass and read by the launcher and the
 //! mod tools. Each file opens with the same header, `schema` and `build.commit`, so a file names
 //! the game build it describes and a reader refuses a schema it does not know, by name, before
@@ -9,8 +9,6 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 /// The build-data schema this source writes and reads. A new field does not bump it; a removed
 /// or redefined one does.
 pub const SCHEMA: u32 = 1;
-/// The injection points and the `Wire` types their records may hold.
-pub const POINTS: &str = "points.json";
 /// The staged internals' signatures.
 pub const INTERNALS: &str = "internals.json";
 /// The published loops.
@@ -18,8 +16,8 @@ pub const LOOPS: &str = "loops.json";
 /// The function index: where each function a mixin may target is, and whether it can take a
 /// replacement.
 pub const FUNCTIONS: &str = "functions.json";
-/// The four files, in the order the archive holds them.
-pub const FILES: [&str; 4] = [FUNCTIONS, INTERNALS, LOOPS, POINTS];
+/// The files, in the order the archive holds them.
+pub const FILES: [&str; 3] = [FUNCTIONS, INTERNALS, LOOPS];
 /// The release asset holding them.
 pub const ARCHIVE: &str = "build-data.tar.xz";
 

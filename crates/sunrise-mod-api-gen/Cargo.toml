@@ -15,7 +15,6 @@ mixed-output-fixture = []
 
 [dependencies]
 sunrise-game-discovery = { path = "../sunrise-game-discovery" }
-sunrise-mod-point-shape = { path = "../sunrise-mod-point-shape" }
 sunrise-mod-surface = { path = "../sunrise-mod-surface" }
 mod_call = { package = "sunrise-mod-call", path = "../sunrise-mod-call" }
 sunrise-mod-source = { path = "../sunrise-mod-source" }

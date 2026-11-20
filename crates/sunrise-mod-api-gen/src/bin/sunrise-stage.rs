@@ -1,11 +1,11 @@
-//! `sunrise-stage ROOT POINTS_JSON INTERNALS_JSON COMMIT`: expose internals, mark points and give functions their replacement slots in a staged
-//! source copy, then write the build data (`points.json`, `internals.json`, `loops.json`) with the
+//! `sunrise-stage ROOT INTERNALS_JSON COMMIT`: expose internals and give functions their replacement slots in a staged
+//! source copy, then write the build data (`internals.json`, `loops.json`, `functions.json`) with the
 //! header naming COMMIT, the source's full commit sha (#589). Never run on a working tree.
 //!
-//! `sunrise-stage surface ROOT OUT [--without-calls] [--with-points-and-loops] [--with-internals]`:
+//! `sunrise-stage surface ROOT OUT [--without-calls] [--with-loops] [--with-internals]`:
 //! write the SDK surface (`surface.json`) of the source tree at ROOT to OUT, and nothing else. It
 //! only reads the tree, so a working tree is fine. The engine options are for comparisons: choose
-//! the same options for both exports. `--with-internals` also includes points and loops.
+//! the same options for both exports. `--with-internals` also includes loops.
 //!
 //! `sunrise-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]`: list
 //! what the mod in MOD_DIR uses of SURFACE, each item with the place that brought it in, then
@@ -32,14 +32,14 @@ use sunrise_mod_api_gen::surface::{ExportOptions, export_with};
 fn surface(args: &[PathBuf]) {
     let [root, out, flags @ ..] = args else {
         fail(
-            "usage: sunrise-stage surface ROOT OUT [--without-calls] [--with-points-and-loops] [--with-internals]",
+            "usage: sunrise-stage surface ROOT OUT [--without-calls] [--with-loops] [--with-internals]",
         )
     };
     let mut options = ExportOptions::default();
     for flag in flags {
         match flag.to_str() {
             Some("--without-calls") => options.without_calls = true,
-            Some("--with-points-and-loops") => options.with_points_and_loops = true,
+            Some("--with-loops") => options.with_loops = true,
             Some("--with-internals") => options.with_internals = true,
             _ => fail(format!("unknown option {}", flag.display())),
         }
@@ -252,9 +252,8 @@ fn surface_diff(args: &[PathBuf]) -> ! {
                 continue;
             }
             if api_notes_only {
-                file.ids.retain(|id| {
-                    !matches!(id.split_once(':'), Some(("point" | "loop" | "internal", _)))
-                });
+                file.ids
+                    .retain(|id| !matches!(id.split_once(':'), Some(("loop" | "internal", _))));
             }
             for id in diff.attach(&file.note, &file.ids) {
                 stale.push(format!(
@@ -295,11 +294,11 @@ fn main() {
     }
     let usage = || {
         eprintln!(
-            "usage: sunrise-stage ROOT POINTS_JSON INTERNALS_JSON COMMIT [--sync-internals]\n       sunrise-stage surface ROOT OUT [--without-calls] [--with-points-and-loops] [--with-internals]\n       sunrise-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--api-notes-only] [--landed SHA] [--json OUT] [--gate]\n       sunrise-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]\n       sunrise-stage fits USES_JSON TARGET_SURFACE"
+            "usage: sunrise-stage ROOT INTERNALS_JSON COMMIT [--sync-internals]\n       sunrise-stage surface ROOT OUT [--without-calls] [--with-loops] [--with-internals]\n       sunrise-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--api-notes-only] [--landed SHA] [--json OUT] [--gate]\n       sunrise-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]\n       sunrise-stage fits USES_JSON TARGET_SURFACE"
         );
         std::process::exit(2)
     };
-    let [root, list, internals, commit, options @ ..] = &args[..] else {
+    let [root, internals, commit, options @ ..] = &args[..] else {
         usage()
     };
     // Discovery never builds or publishes a game.
@@ -311,19 +310,14 @@ fn main() {
     let Some(commit) = commit.to_str() else {
         usage()
     };
-    let build = point_shape::build_data::Build {
+    let build = staging::Build {
         commit: commit.to_owned(),
     };
-    match staging::stage(root, list, internals, mode, &build) {
+    match staging::stage(root, internals, mode, &build) {
         Ok(staging::Staged {
-            points: staged,
             replace,
             internals: widened,
         }) => {
-            println!(
-                "staged {} points ({} with a head only; {} functions have no API record) in {} files",
-                staged.points, staged.head_only, staged.refused, staged.files
-            );
             println!(
                 "gave {} functions a replacement slot in {} files of {} crates",
                 replace.functions, replace.files, replace.crates

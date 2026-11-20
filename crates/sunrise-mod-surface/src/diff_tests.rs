@@ -5,39 +5,24 @@ use crate::*;
 
 #[test]
 fn engine_catalogs_share_the_diff_and_note_gate() {
-    let point = |signature_hash: &str| {
-        EngineItem::new(
-            "point:game::tick".into(),
-            EngineContract::Point {
-                name: "game_tick".into(),
-                signature_hash: signature_hash.into(),
-            },
-        )
-    };
-    let old = functions(vec![]).with_engine_items(vec![
-        point("old"),
-        EngineItem::new(
-            "loop:entities.tick".into(),
-            EngineContract::Loop {
-                entry: "Game::tick_entities".into(),
-                generic: "tick_entities_with".into(),
-                slot: "Slot".into(),
-                side: "server".into(),
-            },
-        ),
-    ]);
-    let new = functions(vec![]).with_engine_items(vec![
-        point("new"),
-        EngineItem::new(
-            "internal:fn:game::step".into(),
-            EngineContract::Internal {
-                signature: "fn step()".into(),
-                signature_hash: "step".into(),
-                shape_only: false,
-                opaque_reason: None,
-            },
-        ),
-    ]);
+    let old = functions(vec![]).with_engine_items(vec![EngineItem::new(
+        "loop:entities.tick".into(),
+        EngineContract::Loop {
+            entry: "Game::tick_entities".into(),
+            generic: "tick_entities_with".into(),
+            slot: "Slot".into(),
+            side: "server".into(),
+        },
+    )]);
+    let new = functions(vec![]).with_engine_items(vec![EngineItem::new(
+        "internal:fn:game::step".into(),
+        EngineContract::Internal {
+            signature: "fn step()".into(),
+            signature_hash: "step".into(),
+            shape_only: false,
+            opaque_reason: None,
+        },
+    )]);
     let mut report = diff(&old, &new);
     assert_eq!(
         report
@@ -47,12 +32,10 @@ fn engine_catalogs_share_the_diff_and_note_gate() {
             .collect::<Vec<_>>(),
         [
             ("loop:entities.tick", ChangeKind::Removed, Class::Breaking),
-            ("point:game::tick", ChangeKind::Changed, Class::Breaking),
             ("internal:fn:game::step", ChangeKind::Added, Class::Advisory),
         ]
     );
-    assert_eq!(report.changes[1].what, ["signature hash: `old` → `new`"]);
-    assert_eq!(report.undeclared().count(), 2);
+    assert_eq!(report.undeclared().count(), 1);
     assert!(
         report
             .attach(
@@ -61,7 +44,7 @@ fn engine_catalogs_share_the_diff_and_note_gate() {
                     why: "Tick moved.".into(),
                     migrate: None
                 },
-                &["loop:entities.tick".into(), "point:game::tick".into()],
+                &["loop:entities.tick".into()],
             )
             .is_empty()
     );
