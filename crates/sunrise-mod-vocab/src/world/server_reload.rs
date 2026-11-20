@@ -70,11 +70,6 @@ impl ServerReloadContext {
 /// phases deterministically; they do not remove the barrier. On any error all
 /// pending applies are dropped, keeping the previous data and function library.
 pub trait ServerReloadListener: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::server_reload_listener::<Self>();
-    }
     /// Parse and validate new data without changing the listener's live state.
     ///
     /// As vanilla's `SimpleJsonResourceReloadListener.scanDirectory`, a

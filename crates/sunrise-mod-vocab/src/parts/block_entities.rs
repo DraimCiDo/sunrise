@@ -3,11 +3,6 @@ use super::*;
 /// side asked about, its handler, or none to leave it to the next provider. A closure
 /// `|host, at| Some(Box::new(Tank(at)))` is one.
 pub trait BlockCapabilityProvider<T: ?Sized>: Send + Sync {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::block_capability_provider::<Self>();
-    }
     /// The handler for the block entity at `at`, or none.
     fn provide(&self, host: &mut dyn ServerHost, at: BlockSide) -> Option<Box<T>>;
 }
@@ -182,7 +177,7 @@ impl dyn Registrar + '_ {
     /// [`Self::block_entity_part`] for a Part with typed state (`BlockEntityPartState`):
     /// each block entity of type `kind` keeps one `P::Data`, under `P::DATA`. Refused, and
     /// reported as the mod's registration refusal, when `P::DATA` syncs, copies on death,
-    /// lacks the codec a wasm mod needs, is outside the mod's namespaces (a Part on another
+    /// is outside the mod's namespaces (a Part on another
     /// package's type declares its state key as its own package does), or names a key
     /// this mod already declared with another type.
     pub fn block_entity_part_with_state<P: crate::BlockEntityPartState>(

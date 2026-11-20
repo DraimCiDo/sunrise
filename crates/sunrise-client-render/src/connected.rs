@@ -17,8 +17,9 @@ use sunrise_world::block_state_properties::BlockProperties;
 use sunrise_world::registry::{BlockRegistry, BlockStateId};
 
 /// The highest collision point of every block state of `registry`, by id, from the prepared
-/// `cached-collision.nbt`: `f64::NEG_INFINITY` for an empty shape and for a state whose shape
-/// depends on the world (read as empty, as the shape queries do).
+/// `cached-collision.nbt`: `f64::NEG_INFINITY` for an empty shape and for a state with no cached
+/// shape, which is one whose shape depends on the world (`cached_shape` answers `None`: vanilla
+/// asks the block). Such a state counts as having no shape, like air.
 pub fn collision_heights(
     prepared: &std::path::Path,
     registry: &BlockRegistry,

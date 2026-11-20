@@ -80,7 +80,7 @@ harness named checks that loader against vanilla).
 | Paintings, mob effect icons | `atlases/paintings.json`, `textures/mob_effect/` | works | loaded from the overlay |
 | Locator bar styles | `waypoint_style/` | works | `locator_bar.rs` loads `waypoint_style/*.json` (`WaypointStyleManager`); `game/locator_bar.rs` draws the bar |
 | Post effects (spectating a creeper, spider or enderman; glowing outlines) | `post_effect/`, `shaders/post/` | works | `post_chain.rs` reads `post_effect/*.json` and `post_glsl.rs` translates the `shaders/post/*.vsh`/`.fsh` with naga (their imports resolved as the core shaders' are), with depth inputs, persistent targets and `TextureInput`; a pass binds only what its stages read. One rule for a refused pass, whatever refuses it (more blocks, samplers or `uniform` keywords than the device binds to both stages, checked before any analysis; more than a stage's limit read; the translator; its configuration; or the device, for its modules, layout or pipeline): a pass naming vanilla's shaders runs on the built-in stand-ins, and any other refuses its effect, named in the log |
-| Core shaders | `shaders/core/`, `shaders/include/` | partly | `core/text` draws the GUI's text (HUDs moved by its vertex shader, text effects), `core/rendertype_lines` the block outline (both strokes of a high contrast one; hitboxes, chunk borders and other debug lines still draw natively), `core/sky` and `core/stars` the overworld's sky disc and stars, `core/lightmap` (with `core/screenquad`) the 16x16 light texture from `LightmapInfo`, and `core/clouds` the clouds from the faces `CloudRenderer.buildMesh` encodes (`CloudFaces`, read as a storage buffer) and `CloudInfo` (natively under Improved Transparency, a shader pack, or HDR output's cloud marks); each of these but the text and the clouds takes the packs' Polytone expression uniforms on its own shaders (`polytone/shader_modifiers`, `polytone_post.rs`, `gfx/expression_blocks.rs`), translated by naga (`sunrise-client-render` `core_shader.rs`, `hud/pack_text.rs`, `gfx/core_lines.rs`, `gfx/core_sky.rs`, `gfx/core_lightmap.rs`, `gfx/core_clouds.rs`); the other core shaders aren't run (#13218) |
+| Core shaders | `shaders/core/`, `shaders/include/` | partly | `core/text` draws the GUI's text (HUDs moved by its vertex shader, text effects) and the world's text on vanilla's polygon-offset and see-through paths (text displays, name tags; other world text, Improved Transparency's depth-tested text and the native world text among them, draws with native shaders), `core/rendertype_lines` the block outline (both strokes of a high contrast one; hitboxes, chunk borders and other debug lines still draw natively), `core/sky` and `core/stars` the overworld's sky disc and stars, `core/lightmap` (with `core/screenquad`) the 16x16 light texture from `LightmapInfo`, and `core/clouds` the clouds from the faces `CloudRenderer.buildMesh` encodes (`CloudFaces`, read as a storage buffer) and `CloudInfo` (natively under Improved Transparency, a shader pack, or HDR output's cloud marks); each of these but the clouds takes the packs' Polytone expression uniforms on its own shaders (`polytone/shader_modifiers`, `polytone_post.rs`, `gfx/expression_blocks.rs`), translated by naga (`sunrise-client-render` `core_shader.rs`, `hud/pack_text.rs`, `gfx/core_lines.rs`, `gfx/core_sky.rs`, `gfx/core_lightmap.rs`, `gfx/core_clouds.rs`, `gfx/core_text.rs`); the other core shaders aren't run (#13218) |
 | OptiFine / CIT Resewn custom item textures (`type=item`: `texture`, `model`, `texture.<name>`, `model.<name>`; `type=armor`: `texture`, `texture.<layer>` with the pre-1.21.2 layer names such as `diamond_layer_1`, `leather_layer_2_overlay`; `type=elytra`: `texture`; `type=enchantment` layers on GUI items; `useGlint=false` in `cit.properties`, which removes vanilla's glint from items) | `optifine/cit/`, `mcpatcher/cit/`, `citresewn/cit/` | partly | `item_render/cit.rs`, `cit_armor.rs`, `cit_glint.rs` and `hud/cit_glint.rs` tests; enchantment layers on held, dropped, framed and worn items, and `anim/` glints, come later; special renderers (heads, shields, banners) keep their vanilla look; only players and armour stands wear CIT armour and elytra, other mobs keep vanilla's; worn trims are unchanged; armour textures above 1024x512 (16 times vanilla's 64x32) draw vanilla |
 | GPU warn list, regional compliance | `gpu_warnlist.json`, `regional_compliancies.json` | n/a | OpenGL driver warnings and play-time notices for some regions; not used |
 
@@ -92,16 +92,18 @@ reads the pack; what is left is the GUI scaling types and the core shaders, plus
 
 A pack's `assets/<ns>/polytone/shader_modifiers/<shader>.json` (`minecraft/.../core/lightmap.json` is the shader
 `minecraft:core/lightmap`) maps uniform block names to expressions (wiki "Expression Uniforms on Any Shader"). The
-packs' lightmap (`core/lightmap` with `core/screenquad`), sky (`core/sky`), stars (`core/stars`) and block outline
-(`core/rendertype_lines`) take them, each from its own shaders' files (`gfx/expression_blocks.rs`); the GUI's text
-doesn't yet:
+packs' lightmap (`core/lightmap` with `core/screenquad`), sky (`core/sky`), stars (`core/stars`), block outline
+(`core/rendertype_lines`) and text (`core/text`: the GUI's, the polygon-offset text of text displays and name tags,
+and the see-through text, each pipeline with its own blocks; other world text draws natively) take them, each from
+its own shaders' files (`gfx/expression_blocks.rs`):
 
 - A block one of its stages reads, declared `uniform Name { float value; };`, holds its expression's value each
-  frame. The sky, stars and outline each use a single modifier file. Only the lightmap uses two files: for a block
-  read by both stages or defined in both files, it looks in the fragment shader's (`core/lightmap`) first, then in
-  the vertex shader's (`core/screenquad`). Otherwise, it uses the file for the stage that reads the block. A block
-  no stage reads is not bound, and a stage that only declares it doesn't decide its shape. If a block a stage reads
-  is not one float, or has no expression, the affected pipeline uses its built-in shader.
+  frame. The sky, stars, outline and text each use a single modifier file (the text's for all three of its
+  programs). Only the lightmap uses two files: for a block read by both stages or defined in both files, it looks in
+  the fragment shader's (`core/lightmap`) first, then in the vertex shader's (`core/screenquad`). Otherwise, it uses
+  the file for the stage that reads the block. A block no stage reads is not bound, and a stage that only declares
+  it doesn't decide its shape. If a block a stage reads is not one float, or has no expression, the affected
+  pipeline uses its built-in shader (the light texture is computed natively, the text drawn natively).
 - Each block, vanilla's and `LightmapInfo` included, of each of these pipelines is bound only to the stages that read it, and counts against
   the device's limit of uniform blocks per stage (`max_uniform_buffers_per_shader_stage`, 12 by default) for those
   stages only: a shader over it in either stage is refused.
@@ -113,12 +115,15 @@ doesn't yet:
   nests at most 16 levels deep (a statement, its expression, each bracket and each unary operator), both checked as
   it is parsed. A file over any of these, or whose path names no shader, is refused whole, named by its path in the
   log.
+- Where no world runs (the title screen and its menus, a loading screen, the file fixer, the saving screen), the
+  text's expression uniforms and `PolyGlobals` are 0: the game gives the text none of them, and the frame writes
+  zeros.
 - The programs are resolved once when the pack's shaders load. Each frame evaluates them for the installed pack
   pipelines; each pipeline uploads 16 bytes per expression uniform when it prepares a draw.
 - Polytone's `PolyGlobals` block (wiki "Extra Shader Uniforms": the projection and model-view matrices, the sun's
   angle, the day time, the frame's ticks, and the player's block and position) is given to each of these shaders
-  and to every post effect's pass that reads it, with the same values, in the same std140 layout
-  (`sunrise-polytone` `globals.rs`). A pack declaring the block itself reads the same values as in Java with
+  and to every post effect's pass that reads it, with the same values, in the same std140 layout (`sunrise-polytone`
+  `globals.rs`). A pack declaring the block itself reads the same values as in Java with
   Polytone 26.3: on a core sky shader and a post chain, its pixels are within the spread a control pack without
   the block shows between the two. It is bound only to the stages
   that read it, before the expression uniforms, and counts against the same limit.
@@ -133,9 +138,10 @@ doesn't yet:
   matched. A pack's own file is read instead of the built-in, and one that can't be read refuses the shader by its
   path.
 - The game builds the block only when something reads it, at most once a frame: when an installed pack core shader
-  reads it (the lightmap's not under fullbright, which keeps the light texture white), or when a post effect that
-  runs has a pass reading it. Each reading core pipeline writes its 176 bytes to the GPU when it uploads its blocks
-  for its draw; a post pass writes them when it draws (zeros on a frame without them, as on the title screen).
+  reads it (the lightmap's not under fullbright, which keeps the light texture white; the text's only where a world
+  runs), or when a post effect that runs has a pass reading it. Each reading core pipeline writes its 176 bytes to
+  the GPU when it uploads its blocks for its draw; a post pass writes them when it draws (zeros on a frame without
+  them, as on the title screen).
 - The block is the game's, on the core and post shaders alike: a shader declaring it other than that layout (each
   member of its type at its offset; a leading part of the block is fine), a `shader_modifiers` file giving it, a
   post chain's expression uniform of that name, or a pass's `uniforms` giving it, is refused, named in the log. A
@@ -147,7 +153,7 @@ doesn't yet:
 | Gap | Size | Where |
 | --- | --- | --- |
 | GUI scaling `tile`, `stretch` | small | `ui.rs` |
-| Core shaders but GUI text, the block outline, the sky and the stars | large | [#13218](https://github.com/horizon-rust/horizon/issues/13218) |
+| Core shaders but the text (GUI, polygon-offset world, see-through), the block outline, the sky, the stars, the lightmap and the clouds | large | [#13218](https://github.com/horizon-rust/horizon/issues/13218) |
 
 ## Testing a pack
 

@@ -4,7 +4,6 @@ use super::{Game, Screen};
 use sunrise_client::{
     Result,
     confirm_screen::Confirm,
-    dialog::Dialog,
     hud::{HudBatch, rgba},
     text::{self, ClickEvent, Text},
     ui,
@@ -318,7 +317,7 @@ impl Game<'_> {
         let tag = registries.tag("minecraft:dialog", "minecraft:pause_screen_additions")?;
         // addCustomDialogButtons' label: computeExternalTitle falls back to the title.
         let button = |dialog_tag: Tag| -> Option<(Text, Tag)> {
-            let dialog = Dialog::parse(&dialog_tag)?;
+            let dialog = self.decode_dialog(&dialog_tag, Some(registries))?;
             let label = dialog.external_title.unwrap_or(dialog.title);
             Some((label, dialog_tag))
         };

@@ -14,7 +14,7 @@ suggest something. A pull request for a roadmap item carries its `roadmap:<id>` 
 queue (the hub, or `/suggest` on Discord) rather than to issues, which are for bugs.
 
 **Mod-related pull requests come here too.** Sunrise is where the mod API is built: the mod API, native hooks and
-events for mods, native mods, content mods (`.smod`), mixins, wasm mods, `cargo sunrise-mod`, `sunrise-mods`, mod
+events for mods, native mods, content mods (`.smod`), mixins, `cargo sunrise-mod`, `sunrise-mods`, mod
 builds and the registry, and their docs ([mods](docs/mods.md), [native mods](docs/native-mods.md)). A change to the mod
 API follows its clean-break rules ([AGENTS.md](AGENTS.md#mod-api-the-clean-break)).
 
@@ -143,10 +143,9 @@ needs prepared resources, a child process or the network.
 | --- | --- | --- |
 | Push | every pull request push | `format`, `verify-static` |
 | Gate | rollup and sync pull requests, pushes to main | `lint`, `verify` (unit tests only), `verify-static` |
-| Daily | once a day on main's head | every test that boots the game or needs prepared resources, the wasm fixture, `fn-replace-check`, the SDK build and its linkage probe, the machine sample built against the mod API, the modding book's quickstart run with the mod tool alone, and vanilla parity on the main head captured at dispatch |
+| Daily | once a day on main's head | every test that boots the game or needs prepared resources, `fn-replace-check`, the SDK build and its linkage probe, the machine sample built against the mod API, the modding book's quickstart run with the mod tool alone, and vanilla parity on the main head captured at dispatch |
 
-**A unit test** uses no prepared resources, boots no game, starts no child process, uses no network and no compiled
-wasm fixture, and finishes in under 2 seconds. Any other test is a daily test: it carries `#[ignore]` and a row in
+**A unit test** uses no prepared resources, boots no game, starts no child process, uses no network, and finishes in under 2 seconds. Any other test is a daily test: it carries `#[ignore]` and a row in
 `tools/ci/ignored-tests/` (the format is in that folder's README). `verify` fails a unit test that takes over 5
 seconds and `verify-static` one that boots the game.
 In Linux `verify`, test binaries run normally under an inet guard: opening, binding or connecting an IPv4/IPv6

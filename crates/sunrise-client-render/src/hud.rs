@@ -1286,7 +1286,7 @@ impl HudAtlas {
     }
     /// The atlas above, with the pool of slots for client mods' dynamic textures
     /// (`dynamic_textures::DYNAMIC_TEXTURE_SLOTS` of each class, 10.5 MiB of texels) only when
-    /// `pool` says a client mod is loaded, native or wasm: a game without mods packs no slot
+    /// `pool` says a client mod is loaded: a game without mods packs no slot
     /// and its atlas does not grow. `game` is the game's own resources, without the packs: a
     /// pack's core shader (text, block outline, sky, stars, lightmap) is one that differs from
     /// the game's, so a `root` given as its own `game` loads none.
@@ -1305,6 +1305,12 @@ impl HudAtlas {
             atlas.gui.keys(),
         ));
         Ok(atlas)
+    }
+    /// The packs' core shaders at `root` over the game's own resources `game`, as
+    /// [`Self::build_over_with_dynamic_textures`] loads them, for tests of the pipelines.
+    #[cfg(test)]
+    pub(crate) fn load_pack_shaders(&mut self, root: &ResourceSource, game: &ResourceSource) {
+        pack_text::load_shaders(self, root, game);
     }
     /// Empty slots written at run time: map textures (game/blocks/maps/mod.rs),
     /// client mods' dynamic textures (only with `pool`), downloaded skins, world
@@ -2391,7 +2397,8 @@ impl HudBatch {
             });
         }
     }
-    /// Keep per-vertex depth for an orthographic GUI model, with +z toward the viewer.
+    /// Keep per-vertex depth for an orthographic GUI model, with +z toward the viewer. `clip` is
+    /// an explicit scissor in GUI pixels, cut to whole device pixels as it always was.
     pub fn depth_since(&mut self, start: usize, clip: [f32; 4]) {
         self.depth_glint_since(start, self.vertices.len(), clip);
     }
@@ -2399,6 +2406,32 @@ impl HudBatch {
     /// ([`Self::quad_3d_glint`]) follow its own from `glint`: both share the
     /// depth buffer, and the glint is drawn over the model in the same pass.
     pub fn depth_glint_since(&mut self, start: usize, glint: usize, clip: [f32; 4]) {
+        let [x0, y0, x1, y1] = clip.map(|v| (v * self.scale).max(0.0) as u32);
+        self.depth_pass_since(
+            start,
+            glint,
+            [x0, y0, x1.saturating_sub(x0), y1.saturating_sub(y0)],
+        );
+    }
+    /// [`Self::depth_glint_since`] for the screen bounds of the geometry itself (`lo` to `hi`, in
+    /// GUI pixels): the scissor takes every device pixel the bounds touch, so the min edges round
+    /// down and the max edges up.
+    pub fn depth_glint_over(&mut self, start: usize, glint: usize, lo: [f32; 2], hi: [f32; 2]) {
+        let [x0, y0] = lo.map(|v| (v * self.scale).max(0.0).floor() as u32);
+        let [x1, y1] = hi.map(|v| (v * self.scale).max(0.0).ceil() as u32);
+        self.depth_pass_since(
+            start,
+            glint,
+            [x0, y0, x1.saturating_sub(x0), y1.saturating_sub(y0)],
+        );
+    }
+    /// [`Self::depth_since`] for the screen bounds of the geometry itself: see
+    /// [`Self::depth_glint_over`].
+    pub fn depth_over(&mut self, start: usize, lo: [f32; 2], hi: [f32; 2]) {
+        self.depth_glint_over(start, self.vertices.len(), lo, hi);
+    }
+    /// The depth runs of `start..` with the scissor `clip` in device pixels (`[x, y, w, h]`).
+    fn depth_pass_since(&mut self, start: usize, glint: usize, clip: [u32; 4]) {
         let glint = glint.clamp(start, self.vertices.len());
         let vertices = &mut self.vertices[start..];
         if vertices.is_empty() {
@@ -2415,8 +2448,6 @@ impl HudBatch {
         for v in vertices {
             v.depth = (max - v.depth) / (max - min).max(f32::EPSILON);
         }
-        let [x0, y0, x1, y1] = clip.map(|v| (v * self.scale).max(0.0) as u32);
-        let clip = [x0, y0, x1.saturating_sub(x0), y1.saturating_sub(y0)];
         // Separate previews clear depth independently, even if their scissors match.
         if glint > start {
             self.blends
@@ -3353,15 +3384,25 @@ impl HudRenderer {
             cit_glint::CitGlintPass::new(device, queue, self.format, &self.layout, t, self.coverage)
         });
     }
-    /// Draw the GUI's text with `shader` (`HudAtlas::text_shader`), or natively.
+    /// Draw the GUI's text with `shader` (`HudAtlas::text_shaders`' `gui`, with the Polytone
+    /// expression uniforms its stages read, `shader_modifiers`), or natively.
     pub fn set_text_shader(
         &mut self,
         device: &wgpu::Device,
-        shader: Option<&crate::core_shader::CoreProgram>,
+        shader: Option<(
+            &crate::core_shader::CoreProgram,
+            &[crate::polytone_post::ExpressionUniform],
+        )>,
     ) {
         self.pack_text = shader.and_then(|shader| {
             pack_text::PackText::new(device, self.format, &self.atlas_view, shader, self.coverage)
         });
+    }
+    /// The GUI text's Polytone blocks, when a pack's text shader draws it.
+    pub(crate) fn text_expression_blocks(
+        &mut self,
+    ) -> Option<&mut crate::gfx::expression_blocks::ExpressionBlocks> {
+        self.pack_text.as_mut().map(|text| &mut text.extra)
     }
     /// Stage the batch's `patches` and `image_patches` (client mods' dynamic textures) into
     /// the shared atlas texture.
@@ -6381,6 +6422,37 @@ texture=wide",
                 .iter()
                 .all(|v| v.depth.is_finite() && (0.0..=1.0).contains(&v.depth))
         );
+    }
+
+    /// At GUI scale 2, geometry ending at GUI x = 5.375 reaches device x = 10.75 and takes
+    /// the pixel centred at 10.5. An explicit clip ending at GUI x = 5.125 reaches device
+    /// x = 10.25 and gains no column.
+    #[test]
+    fn a_depth_scissor_over_geometry_rounds_outward_and_an_explicit_clip_does_not() {
+        let quad = |batch: &mut HudBatch| {
+            let start = batch.vertices.len();
+            batch.quad_3d(
+                [
+                    [0.625, 1.0, 0.0],
+                    [0.625, 3.25, 0.0],
+                    [5.375, 3.25, 1.0],
+                    [5.375, 1.0, 1.0],
+                ],
+                [[0.0; 2]; 4],
+                u32::MAX,
+            );
+            start
+        };
+        let mut batch = HudBatch::scratch([640, 480]);
+        batch.scale = 2.0;
+        let start = quad(&mut batch);
+        batch.depth_over(start, [0.625, 1.0], [5.375, 3.25]);
+        assert_eq!(batch.runs(), vec![(0..6, Blend::Depth([1, 2, 10, 5]))]);
+        let mut batch = HudBatch::scratch([640, 480]);
+        batch.scale = 2.0;
+        let start = quad(&mut batch);
+        batch.depth_since(start, [0.625, 1.0, 5.125, 3.25]);
+        assert_eq!(batch.runs(), vec![(0..6, Blend::Depth([1, 2, 9, 4]))]);
     }
 
     #[test]

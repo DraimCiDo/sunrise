@@ -188,7 +188,7 @@ pub fn resolve(mods: &[Mod<'_>]) -> Result<Resolution, Error> {
 /// Physical library order, independent of manifest validation/dispatch overrides.
 ///
 /// Every active code dependency still needs its API package. Version ranges and
-/// dispatch order are logical rules; actual Cargo/wasm imports and ABI validation
+/// dispatch order are logical rules; actual Cargo imports and ABI validation
 /// remain the compiler/linker's responsibility and never fall back silently.
 pub fn resolve_links(mods: &[Mod<'_>]) -> Result<Resolution, Error> {
     resolve_all(mods, &[], &Overrides::default(), true)
@@ -205,7 +205,7 @@ pub fn resolve_with_rules(
 }
 
 /// Resolve one applicable installed manifest snapshot with one shared policy for
-/// native, wasm and content packages. Indices in the result refer to `manifests`.
+/// native and content packages. Indices in the result refer to `manifests`.
 pub fn resolve_manifests(
     manifests: &[&crate::Manifest],
     running: Side,
@@ -219,7 +219,7 @@ pub fn resolve_manifests(
         .iter()
         .zip(&declared)
         .map(|(manifest, dependencies)| {
-            let code = manifest.native.is_some() || manifest.wasm.is_some();
+            let code = manifest.native.is_some();
             Mod {
                 id: &manifest.id,
                 version: &manifest.version,

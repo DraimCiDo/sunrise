@@ -2,8 +2,7 @@
 """The daily run's summary (.github/workflows/daily.yml): the `daily-green` tag and one issue per failing test.
 
 Reads this run's jobs (names, conclusions and step names from the Actions API, never a log) and the legs' verdict
-files (tools/ci/ignored_tests.py --report, and tools/ci/cargo_test_verdict.py for the wasm fixture's own tests: test
-identity, kind, panic location, policy file), then:
+files (tools/ci/ignored_tests.py --report: test identity, kind, panic location, policy file), then:
 - every leg green: moves the tag `daily-green` to the commit;
 - a failing test: files `Daily: <crate> <test>` (label `bug`) with its panic location, this run as the first that
   saw it and as suspects the pull requests merged since the previous daily run that changed its package's folders
@@ -85,14 +84,12 @@ FRESH = "sdk / fresh"
 # Steps whose reports name failing tests. Failures outside those steps still need a job-level issue.
 WINDOWS_ROWS_JOB = "windows-runtime-leases / runtime-leases"
 WINDOWS_ROWS_STEP = "The Windows-only daily rows"
-WASM_STD_BUILD, WASM_STD_COMPARE = "wasm-std-names / build (", "wasm-std-names / compare"
-FIXTURE_TESTS_STEPS = ("Validate and load the fixture", "Run the client tests that load the compiled fixture")
 # The SDK legs' checks of the SDK they just built (prebuilt-game-build.yml), by step: a failed one is its own issue per
 # check and platform, `Daily: sdk <check> (<platform>)`, closed only by a run in which that step passed.
 SDK_BUILD = "sdk / build "
 SDK_CHECKS = {
     "Two mod libraries share the game's exact Rust state": "native linkage probe",
-    "The starter mod checks against the API source alone, host and wasm32": "API-source check",
+    "The starter mod checks against the API source alone": "API-source check",
     "The source stages with this commit's build data": "source stage",
 }
 SDK_CHECK = "sdk-check"
@@ -227,18 +224,14 @@ def failed_steps(job):
 
 
 def report_for(job, reports):
-    """Match a verdict to its job by shard, by the Windows rows marker, or by the fixture's `needs` variable."""
+    """Match a verdict to its job by shard or by the Windows rows marker."""
     name = job["name"]
     for report in reports:
         if any(name.endswith(f"({shard})") for shard in report.get("shards", ())):
             return report
         if name == WINDOWS_ROWS_JOB and report.get("windows_rows") is True:
             return report
-    fixture = [report for report in reports if report.get("needs")] if name == "wasm-mods / fixture" else []
-    if not fixture:
-        return None
-    return {key: [entry for report in fixture for entry in report.get(key, ())]
-            for key in ("problems", "passed", "incomplete")}
+    return None
 
 
 def known(name, legs):
@@ -316,9 +309,6 @@ def verdicts(jobs, reports, results, legs, parity_report, all_legs):
     if results.get(LINUX_SDK_CALL, {}).get("result", "success") != "success":
         linux_sdk_red.add("sdk")  # the leg's own item (its failed `fresh`, say) is the Linux legs' too
     blocked = []  # the legs that read the Linux SDK and failed only for its missing input
-    # The wasm std comparison needs both builds: one that failed is the item, not the comparison it skipped.
-    std_build_failed = any(job["name"].startswith(WASM_STD_BUILD) and job["conclusion"] in ("failure", "cancelled", "timed_out")
-                           and not never_started(job) for job in jobs)
     for job in leg_jobs(jobs, all_legs):
         if never_started(job) or job["name"].startswith(f"{PARITY} / "):
             continue  # parity uses its own verdict, including when the job passed
@@ -334,8 +324,6 @@ def verdicts(jobs, reports, results, legs, parity_report, all_legs):
             continue
         if job["conclusion"] == "skipped" and job["name"].split(" / ", 1)[0] in helpers:
             continue  # its leg's failed helper is the one item for it, below
-        if job["name"] == WASM_STD_COMPARE and job["conclusion"] == "skipped" and std_build_failed:
-            continue
         steps = failed_steps(job)
         problems = [dict(item, leg=job["name"]) for item in (report or {}).get("problems", ())]
         by_name = [item for item in problems if named(item)]
@@ -349,16 +337,15 @@ def verdicts(jobs, reports, results, legs, parity_report, all_legs):
                           if report["incomplete"] else
                           "failed tests whose names are withheld" if problems else "failed outside its tests")
                 unfinished.append((job["name"], job["conclusion"], steps, reason))
-        elif ((job["name"] == "wasm-mods / fixture" and len(steps) == 1 and steps[0] in FIXTURE_TESTS_STEPS)
-              or (job["name"] == WINDOWS_ROWS_JOB and WINDOWS_ROWS_STEP in steps)) and (
-                  by_name or (report or {}).get("incomplete")):
+        elif job["name"] == WINDOWS_ROWS_JOB and WINDOWS_ROWS_STEP in steps and (
+                by_name or (report or {}).get("incomplete")):
             tests += by_name
             # A command that failed without naming a test (a build failure beside a named one) is the leg's item too.
             if report["incomplete"] or len(by_name) < len(problems):
                 unfinished.append((job["name"], job["conclusion"], steps, "a test run did not complete: " + ". ".join(
                     stopped_text(entry if isinstance(entry, dict) else {}) for entry in report["incomplete"])
                     if report["incomplete"] else "failed tests whose names are withheld"))
-            elif job["name"] == WINDOWS_ROWS_JOB and (outside := [step for step in steps if step != WINDOWS_ROWS_STEP]):
+            elif outside := [step for step in steps if step != WINDOWS_ROWS_STEP]:
                 unfinished.append((job["name"], job["conclusion"], outside, "failed outside its tests"))
         elif job["name"].startswith(SDK_BUILD) and any(step in SDK_CHECKS for step in steps):
             platform = job["name"][len(SDK_BUILD):]
