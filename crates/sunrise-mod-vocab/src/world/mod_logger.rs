@@ -2,7 +2,6 @@
 use std::{fmt, panic::Location, sync::OnceLock};
 
 /// Severity of a runtime diagnostic, independent of any logging crate.
-// no wire: only used with this process's native logger and borrowed Rust formatting arguments.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum LogLevel {
@@ -19,7 +18,6 @@ pub enum LogLevel {
 }
 
 /// The result of submitting a record to the game log.
-// no wire: a native sink's queue acknowledgment, not a transport value.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum LogOutcome {
@@ -64,7 +62,6 @@ pub fn install_mod_log_sink(enabled: fn(log::Level) -> bool, enqueue: Enqueue) {
 /// Keep or copy it into hooks, Parts or workers. It needs no world, Host or transaction;
 /// a queued record remains queued if registration is refused or a transaction rolls back.
 // exhaustive: its field is private, so mods cannot construct or retarget it.
-// no wire: bound to this process's sink and accepts borrowed Rust formatting arguments.
 #[derive(Clone, Copy)]
 pub struct ModLogger {
     id: Option<&'static str>,
