@@ -687,7 +687,7 @@ pub mod tests {
     }
 
     #[cfg(test)]
-    static OWNERS_PROGRESS: AttachmentType<u32> = AttachmentType {
+    const OWNERS_PROGRESS: AttachmentType<u32> = AttachmentType {
         namespace: "owner",
         name: "progress",
         default: || 0,
@@ -696,7 +696,7 @@ pub mod tests {
         sync: false,
     };
     #[cfg(test)]
-    static B_PROGRESS: AttachmentType<u32> = AttachmentType {
+    const B_PROGRESS: AttachmentType<u32> = AttachmentType {
         namespace: "b",
         name: "progress",
         default: || 0,
@@ -705,7 +705,9 @@ pub mod tests {
         sync: false,
     };
     #[cfg(test)]
-    struct Keeps<const OWNERS: bool>;
+    struct Keeps<const OWNERS: bool> {
+        state_key: AttachmentType<u32>,
+    }
     #[cfg(test)]
     #[mod_api::sunrise_part]
     impl BlockPart for Keeps<true> {}
@@ -715,7 +717,9 @@ pub mod tests {
     #[cfg(test)]
     impl BlockEntityPartState for Keeps<true> {
         type Data = u32;
-        const DATA: &'static AttachmentType<u32> = &OWNERS_PROGRESS;
+        fn state_key(&self) -> &AttachmentType<u32> {
+            &self.state_key
+        }
     }
     #[cfg(test)]
     #[mod_api::sunrise_part]
@@ -726,7 +730,9 @@ pub mod tests {
     #[cfg(test)]
     impl BlockEntityPartState for Keeps<false> {
         type Data = u32;
-        const DATA: &'static AttachmentType<u32> = &B_PROGRESS;
+        fn state_key(&self) -> &AttachmentType<u32> {
+            &self.state_key
+        }
     }
     #[cfg(test)]
     struct KeepsState<const OWNERS: bool>;
@@ -739,7 +745,8 @@ pub mod tests {
         fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
             r.register_attachment_type("b:progress", false).unwrap();
             let press = r.block_entity_type_key("owner:press");
-            let _ = r.block_entity_part_with_state(&press, Keeps::<OWNERS>);
+            let state_key = if OWNERS { OWNERS_PROGRESS } else { B_PROGRESS };
+            let _ = r.block_entity_part_with_state(&press, Keeps::<OWNERS> { state_key });
         }
     }
 

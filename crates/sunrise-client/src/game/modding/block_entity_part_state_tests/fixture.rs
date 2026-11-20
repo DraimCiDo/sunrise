@@ -1,7 +1,7 @@
 //! A block entity Part whose tick exercises the Part state accessors.
 use mod_api::*;
 
-pub static COUNT: AttachmentType<i32> = AttachmentType {
+pub const COUNT: AttachmentType<i32> = AttachmentType {
     namespace: "part_state_fixture",
     name: "part_state_count",
     default: || 0,
@@ -36,7 +36,9 @@ pub static MARK: AttachmentType<i32> = AttachmentType {
 /// - 0: an aborted edit, a refused recursive edit, then a committed count;
 /// - 1: an edit of an undecodable saved value is refused before its closure runs, then `MARK`
 ///   is set to 1.
-pub struct Counter;
+pub struct Counter {
+    state_key: AttachmentType<i32>,
+}
 #[mod_api::sunrise_part]
 impl BlockPart for Counter {}
 #[mod_api::sunrise_part]
@@ -46,7 +48,7 @@ impl BlockEntityPart for Counter {
         let entity = host.block_entity_identity(level, event.pos).unwrap();
         match event.entity.data[0] {
             1 => {
-                let refused = Counter::edit_state(host, entity, |_, _| panic!("ran"));
+                let refused = self.edit_state(host, entity, |_, _| panic!("ran"));
                 assert_eq!(
                     refused,
                     Err(PartStateError::Attachment {
@@ -59,13 +61,13 @@ impl BlockEntityPart for Counter {
             }
             _ => {
                 let aborted: Result<(), ()> = host.transaction(|host, _| {
-                    assert_eq!(Counter::edit_state(host, entity, |_, n| *n = 100), Ok(()));
+                    assert_eq!(self.edit_state(host, entity, |_, n| *n = 100), Ok(()));
                     Err(())
                 });
                 assert_eq!(aborted, Err(()));
-                let recursive = Counter::edit_state(host, entity, |host, n| {
+                let recursive = self.edit_state(host, entity, |host, n| {
                     *n += 1;
-                    Counter::edit_state(host, entity, |_, n| *n = 50)
+                    self.edit_state(host, entity, |_, n| *n = 50)
                 });
                 assert_eq!(recursive, Ok(Err(PartStateError::Reentrant)));
             }
@@ -74,7 +76,9 @@ impl BlockEntityPart for Counter {
 }
 impl BlockEntityPartState for Counter {
     type Data = i32;
-    const DATA: &'static AttachmentType<i32> = &COUNT;
+    fn state_key(&self) -> &AttachmentType<i32> {
+        &self.state_key
+    }
 }
 
 pub fn register(registrar: &mut dyn Registrar) {
@@ -88,7 +92,7 @@ pub fn register(registrar: &mut dyn Registrar) {
         .blocks(&["part_state_fixture:part_state"])
         .build();
     registrar
-        .block_entity_part_with_state(&kind, Counter)
+        .block_entity_part_with_state(&kind, Counter { state_key: COUNT })
         .unwrap();
 }
 

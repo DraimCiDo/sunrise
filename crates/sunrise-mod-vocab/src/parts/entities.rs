@@ -156,7 +156,7 @@ impl dyn Registrar + '_ {
         self.declare_entity_part_state(
             entity,
             type_name::<P>(),
-            crate::PartStateDeclaration::of(P::DATA),
+            crate::PartStateDeclaration::of(part.state_key()),
         )?;
         self.entity_part(entity, part);
         Ok(())

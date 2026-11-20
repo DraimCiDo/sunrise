@@ -42,44 +42,52 @@ pub trait BlockEntityPartState: BlockEntityPart + Sized {
     type Data: Clone + Send + Sync + 'static;
     /// Its attachment key, default and codec. The owner declares the key at registration;
     /// without a codec the value is kept for the session only.
-    const DATA: &'static AttachmentType<Self::Data>;
+    fn state_key(&self) -> &AttachmentType<Self::Data>;
 
     /// The block entity's value, or the default when it has none. Inserts nothing.
-    fn state(host: &dyn Host, entity: BlockEntityRef) -> Result<Self::Data, PartStateError> {
-        Ok(Self::state_existing(host, entity)?.unwrap_or_else(Self::DATA.default))
+    fn state(&self, host: &dyn Host, entity: BlockEntityRef) -> Result<Self::Data, PartStateError> {
+        Ok(self
+            .state_existing(host, entity)?
+            .unwrap_or_else(|| (self.state_key().default)()))
     }
 
     /// The block entity's value, or `None` when it has none. Inserts nothing.
     fn state_existing(
+        &self,
         host: &dyn Host,
         entity: BlockEntityRef,
     ) -> Result<Option<Self::Data>, PartStateError> {
-        read_state(host, entity, Self::DATA)
+        read_state(host, entity, self.state_key())
     }
 
     /// The value through a read-only level, or its default. Inserts nothing.
     /// No chunk loading or loot generation; unloaded/stale holders fail, clients read the
     /// default. Owning game thread only, never reachable from worker-thread hook bodies.
     fn state_in(
+        &self,
         level: &dyn crate::LevelHost,
         entity: BlockEntityRef,
     ) -> Result<Self::Data, PartStateError> {
-        Ok(Self::state_existing_in(level, entity)?.unwrap_or_else(Self::DATA.default))
+        Ok(self
+            .state_existing_in(level, entity)?
+            .unwrap_or_else(|| (self.state_key().default)()))
     }
     /// The existing value through a read-only level. No chunk loading or loot generation;
     /// unloaded/stale holders fail and clients return None. Owning game thread only, never
     /// reachable from worker-thread hook bodies.
     fn state_existing_in(
+        &self,
         level: &dyn crate::LevelHost,
         entity: BlockEntityRef,
     ) -> Result<Option<Self::Data>, PartStateError> {
+        let key = self.state_key();
         level
-            .block_entity_part_snapshot(entity, Self::DATA.namespace, Self::DATA.name)?
-            .query(Self::DATA)
-            .map_err(|error| attachment(Self::DATA, error))?
+            .block_entity_part_snapshot(entity, key.namespace, key.name)?
+            .query(key)
+            .map_err(|error| attachment(key, error))?
             .get(AttachmentHolder::BlockEntity(entity))
             .map_err(|error| match error {
-                AttachmentRowError::Value(error) => attachment(Self::DATA, error),
+                AttachmentRowError::Value(error) => attachment(key, error),
                 _ => PartStateError::Stale,
             })
     }
@@ -87,11 +95,12 @@ pub trait BlockEntityPartState: BlockEntityPart + Sized {
     /// Changes the block entity's value with `edit`, starting from the default when it has
     /// none, and stores the result: see [`edit_part_state`].
     fn edit_state<R>(
+        &self,
         host: &mut dyn ServerHost,
         entity: BlockEntityRef,
         edit: impl FnOnce(&mut dyn ServerHost, &mut Self::Data) -> R,
     ) -> Result<R, PartStateError> {
-        edit_part_state(host, entity, Self::DATA, edit)
+        edit_part_state(host, entity, self.state_key(), edit)
     }
 }
 
@@ -380,10 +389,7 @@ thread_local! {
 struct Editing;
 
 impl Editing {
-    fn enter<T>(
-        entity: AttachmentHolder,
-        key: &'static AttachmentType<T>,
-    ) -> Result<Self, PartStateError> {
+    fn enter<T>(entity: AttachmentHolder, key: &AttachmentType<T>) -> Result<Self, PartStateError> {
         EDITING.with_borrow_mut(|editing| {
             let this = (entity, key.namespace, key.name);
             if editing.contains(&this) {
@@ -414,7 +420,7 @@ impl Drop for Editing {
 pub fn edit_part_state<H: PartStateHolder, T: Clone + Send + Sync + 'static, R>(
     host: &mut dyn ServerHost,
     entity: H,
-    key: &'static AttachmentType<T>,
+    key: &AttachmentType<T>,
     edit: impl FnOnce(&mut dyn ServerHost, &mut T) -> R,
 ) -> Result<R, PartStateError> {
     let _editing = Editing::enter(entity.attachment_holder(), key)?;

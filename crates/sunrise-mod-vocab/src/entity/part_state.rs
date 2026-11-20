@@ -53,29 +53,33 @@ pub trait EntityPartState: EntityPart + Sized {
     type Data: Clone + Send + Sync + 'static;
     /// Its attachment key, default and codec. The owner declares the key at registration;
     /// without a codec the value is kept for the session only.
-    const DATA: &'static AttachmentType<Self::Data>;
+    fn state_key(&self) -> &AttachmentType<Self::Data>;
 
     /// The entity's value, or the default when it has none. Inserts nothing.
-    fn state(host: &dyn Host, entity: EntityRef) -> Result<Self::Data, PartStateError> {
-        Ok(Self::state_existing(host, entity)?.unwrap_or_else(Self::DATA.default))
+    fn state(&self, host: &dyn Host, entity: EntityRef) -> Result<Self::Data, PartStateError> {
+        Ok(self
+            .state_existing(host, entity)?
+            .unwrap_or_else(|| (self.state_key().default)()))
     }
 
     /// The entity's value, or `None` when it has none. Inserts nothing.
     fn state_existing(
+        &self,
         host: &dyn Host,
         entity: EntityRef,
     ) -> Result<Option<Self::Data>, PartStateError> {
-        read_state(host, entity, Self::DATA)
+        read_state(host, entity, self.state_key())
     }
 
     /// Changes the entity's value with `edit`, starting from the default when it has none,
     /// and stores the result: see [`edit_part_state`]. A stale handle never creates a map.
     fn edit_state<R>(
+        &self,
         host: &mut dyn ServerHost,
         entity: EntityRef,
         edit: impl FnOnce(&mut dyn ServerHost, &mut Self::Data) -> R,
     ) -> Result<R, PartStateError> {
-        edit_part_state(host, entity, Self::DATA, edit)
+        edit_part_state(host, entity, self.state_key(), edit)
     }
 }
 

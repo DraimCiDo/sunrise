@@ -29,12 +29,14 @@ mod tests {
     }
 
     /// A Press whose state has no codec: kept for the session by a native mod.
-    struct Session;
+    struct Session {
+        state_key: AttachmentType<u32>,
+    }
     #[mod_api::sunrise_part]
     impl BlockPart for Session {}
     #[mod_api::sunrise_part]
     impl BlockEntityPart for Session {}
-    static SESSION: AttachmentType<u32> = AttachmentType {
+    const SESSION: AttachmentType<u32> = AttachmentType {
         namespace: "porter",
         name: "session",
         default: || 0,
@@ -44,7 +46,9 @@ mod tests {
     };
     impl BlockEntityPartState for Session {
         type Data = u32;
-        const DATA: &'static AttachmentType<u32> = &SESSION;
+        fn state_key(&self) -> &AttachmentType<u32> {
+            &self.state_key
+        }
     }
     struct DeclaresSession;
     #[mod_api::__subscriptions]
@@ -52,7 +56,7 @@ mod tests {
         fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
             r.register_attachment_type("porter:session", false).unwrap();
             let kind = r.block_entity_type("press").blocks(&[]).build();
-            let _ = r.block_entity_part_with_state(&kind, Session);
+            let _ = r.block_entity_part_with_state(&kind, Session { state_key: SESSION });
         }
     }
 

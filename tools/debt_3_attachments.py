@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Replay the mechanical steps for typed attachment registration (debt item 3).
 
-Run `imports` first. `registrations` and `receivers` are for the commits that
-introduce AttachmentDescriptor/AttachmentKey and make Part state instance-based.
-Those passes leave key ownership, mixed raw/host fixtures and negative cases for
-hand fixes. Use --dry-run to inspect a pass without writing files.
+Run `imports` first, then `receivers` to make Part state instance-based using
+the existing AttachmentType. Run `registrations` when introducing
+AttachmentDescriptor/AttachmentKey; it leaves key ownership, mixed raw/host
+fixtures and negative cases for hand fixes. Use --dry-run to inspect a pass.
 """
 
 import argparse
@@ -174,7 +174,7 @@ def registrations(changes):
             "true", "registrar", {"chain": 12},
         ),
         (
-            "modding/block_entity_part_state_tests.rs", "static PROGRESS", "part_state:progress",
+            "modding/block_entity_part_state_tests.rs", "const PROGRESS", "part_state:progress",
             "false", "r", {"indent": 12},
         ),
         (
@@ -182,7 +182,7 @@ def registrations(changes):
             "false", "r", {"indent": 12},
         ),
         (
-            "modding/entity_part_state_tests.rs", "static CHARGE", "part_state:charge",
+            "modding/entity_part_state_tests.rs", "const CHARGE", "part_state:charge",
             "false", "r", {"indent": 12},
         ),
         ("modding/native_general_renderers_tests.rs", "static FUEL", "test:fuel", "true", "r", {}),
@@ -224,8 +224,10 @@ def registrations(changes):
     register_call(changes, snapshot, "sync_route:value", "true", "VALUE", "r", indent=12)
 
     fixture = GAME + "modding/block_entity_part_state_tests/fixture.rs"
-    for symbol, name in (("COUNT", "part_state_count"), ("MARK", "part_state_mark")):
-        descriptor(changes, fixture, f"pub static {symbol}: AttachmentType<i32> = AttachmentType {{", "mod_api", f"part_state_fixture:{name}", "false")
+    for symbol, storage, name in (
+        ("COUNT", "const", "part_state_count"), ("MARK", "static", "part_state_mark"),
+    ):
+        descriptor(changes, fixture, f"pub {storage} {symbol}: AttachmentType<i32> = AttachmentType {{", "mod_api", f"part_state_fixture:{name}", "false")
     changes.replace(
         fixture,
         '    for name in ["part_state_count", "part_state_mark"] {\n'
@@ -244,30 +246,36 @@ def registrations(changes):
     ):
         path = API_PARTS + path
         descriptor(
-            changes, path, f"static {symbol}: AttachmentType<u32> = AttachmentType {{",
+            changes, path, f"const {symbol}: AttachmentType<u32> = AttachmentType {{",
             "crate", attachment_id, "false",
         )
         register_call(changes, path, attachment_id, "false", symbol, "r", statement=indent)
 
 
 def receivers(changes):
-    # Switch trait implementations to a field on their Part. The registration
-    # wiring constructs those Parts using the owned keys in a subsequent edit.
-    for path, holder, static_refs in (
-        ("block/part_state.rs", "BlockEntityRef", 9),
-        ("entity/part_state.rs", "EntityRef", 3),
+    for path, holder in (
+        ("block/part_state.rs", "BlockEntityRef"),
+        ("entity/part_state.rs", "EntityRef"),
     ):
         path = VOCAB + path
-        changes.replace(path, "const DATA: &'static AttachmentType<Self::Data>;", "fn state_key(&self) -> &AttachmentKey<Self::Data>;")
+        changes.replace(path, "const DATA: &'static AttachmentType<Self::Data>;", "fn state_key(&self) -> &AttachmentType<Self::Data>;")
         changes.replace(path, f"fn state(host: &dyn Host, entity: {holder})", f"fn state(&self, host: &dyn Host, entity: {holder})")
         changes.replace(path, "    fn state_existing(\n        host:", "    fn state_existing(\n        &self,\n        host:")
         changes.replace(path, "    fn edit_state<R>(\n        host:", "    fn edit_state<R>(\n        &self,\n        host:")
-        changes.replace(path, "Self::state_existing(host, entity)", "self.state_existing(host, entity)")
+        changes.replace(path, "Self::state_existing(host, entity)?.unwrap_or_else(Self::DATA.default)", "self.state_existing(host, entity)?.unwrap_or_else(|| (self.state_key().default)())")
+        changes.replace(path, "read_state(host, entity, Self::DATA)", "read_state(host, entity, self.state_key())")
+        changes.replace(path, "edit_part_state(host, entity, Self::DATA, edit)", "edit_part_state(host, entity, self.state_key(), edit)")
         if holder == "BlockEntityRef":
             for name in ("state_in", "state_existing_in"):
                 changes.replace(path, f"    fn {name}(\n        level:", f"    fn {name}(\n        &self,\n        level:")
-            changes.replace(path, "Self::state_existing_in(level, entity)", "self.state_existing_in(level, entity)")
-        changes.replace(path, "Self::DATA", "self.state_key()", count=static_refs)
+            changes.replace(path, "Self::state_existing_in(level, entity)?.unwrap_or_else(Self::DATA.default)", "self.state_existing_in(level, entity)?.unwrap_or_else(|| (self.state_key().default)())")
+            changes.replace(
+                path,
+                "        level\n            .block_entity_part_snapshot(entity, Self::DATA.namespace, Self::DATA.name)?",
+                "        let key = self.state_key();\n        level\n            .block_entity_part_snapshot(entity, key.namespace, key.name)?",
+            )
+            changes.replace(path, "Self::DATA", "key", count=3)
+            changes.replace(path, "key: &'static AttachmentType<T>,", "key: &AttachmentType<T>,", count=2)
 
     for path in ("parts/block_entities.rs", "parts/entities.rs"):
         changes.replace(VOCAB + path, "crate::PartStateDeclaration::of(P::DATA)", "crate::PartStateDeclaration::of(part.state_key())")
@@ -286,34 +294,60 @@ def receivers(changes):
     ):
         changes.replace(
             path, f"{indent}{declaration};",
-            f"{indent}{declaration} {{\n{indent}    state_key: mod_api::AttachmentKey<{ty}>,\n"
+            f"{indent}{declaration} {{\n{indent}    state_key: AttachmentType<{ty}>,\n"
             f"{indent}}}",
         )
 
-    for path, key, ty, indent in (
-        (press, "PROGRESS", "i32", "    "),
-        (charge, "CHARGE", "i32", "    "),
-        (counter, "COUNT", "i32", "    "),
-        (blocks, "OWNERS_PROGRESS", "u32", "        "),
-        (blocks, "B_PROGRESS", "u32", "        "),
-        (namespaces, "SESSION", "u32", "        ")
+    for path, key, ty, indent, visibility in (
+        (press, "PROGRESS", "i32", "    ", ""),
+        (charge, "CHARGE", "i32", "    ", ""),
+        (counter, "COUNT", "i32", "    ", "pub "),
+        (blocks, "OWNERS_PROGRESS", "u32", "        ", ""),
+        (blocks, "B_PROGRESS", "u32", "        ", ""),
+        (namespaces, "SESSION", "u32", "        ", ""),
     ):
+        changes.replace(path, f"{visibility}static {key}: AttachmentType<{ty}>", f"{visibility}const {key}: AttachmentType<{ty}>")
         changes.replace(
             path,
             f"{indent}const DATA: &'static AttachmentType<{ty}> = &{key};",
-            f"{indent}fn state_key(&self) -> &mod_api::AttachmentKey<{ty}> {{\n"
+            f"{indent}fn state_key(&self) -> &AttachmentType<{ty}> {{\n"
             f"{indent}    &self.state_key\n{indent}}}",
         )
 
     changes.replace(press, "Press::edit_state(host, entity, |_, ticks| *ticks += 1)", "self.edit_state(host, entity, |_, ticks| *ticks += 1)")
     changes.replace(counter, "Counter::edit_state(", "self.edit_state(", count=4)
-    # The fixture setup supplies one `part` using the test installation's key.
-    for path, part, methods in (
-        (press, "Press", {"state": 16, "state_existing": 1, "state_in": 4, "state_existing_in": 4, "edit_state": 18}),
-        (charge, "Charge", {"state": 21, "state_existing": 1, "edit_state": 28}),
+    for path, old, new in (
+        (press, "(&kind, Press)", "(&kind, Press { state_key: PROGRESS })"),
+        (charge, "(kind, Charge)", "(kind, Charge { state_key: CHARGE })"),
+        (counter, "(&kind, Counter)", "(&kind, Counter { state_key: COUNT })"),
+        (blocks, "            let _ = r.block_entity_part_with_state(&press, Keeps::<OWNERS>);",
+         "            let state_key = if OWNERS { OWNERS_PROGRESS } else { B_PROGRESS };\n"
+         "            let _ = r.block_entity_part_with_state(&press, Keeps::<OWNERS> { state_key });"),
+        (namespaces, "(&kind, Session)", "(&kind, Session { state_key: SESSION })"),
     ):
+        changes.replace(path, old, new)
+
+    # Give the test bodies a Part configured with the same declaration as registration.
+    for path, part, holder, key, cases, stored, methods in (
+        (press, "Press", "BlockEntityRef", "PROGRESS", 7, 12,
+         {"state": 16, "state_existing": 1, "state_in": 4, "state_existing_in": 4, "edit_state": 18}),
+        (charge, "Charge", "EntityRef", "CHARGE", 5, 22,
+         {"state": 21, "state_existing": 1, "edit_state": 28}),
+    ):
+        changes.replace(
+            path,
+            "fn with_state_mod(name: &str, test: impl FnOnce(&mut Game<'_>))",
+            f"fn with_state_mod(name: &str, test: impl FnOnce(&mut Game<'_>, &{part}))",
+        )
+        changes.replace(path, "test(game);", f"test(game, &{part} {{ state_key: {key} }});")
+        changes.replace(path, "with_state_mod(NAME, |game|", "with_state_mod(NAME, |game, part|", count=cases)
+        changes.replace(path, f"fn stored(game: &mut Game<'_>, entity: {holder})", f"fn stored(part: &{part}, game: &mut Game<'_>, entity: {holder})")
+        changes.replace(path, "stored(game, ", "stored(part, game, ", count=stored)
         for name, count in methods.items():
             changes.replace(path, f"{part}::{name}(", f"part.{name}(", count=count)
+
+    for test in ("item_slot_writes_save_but_menu_data_is_transient", "a_nested_item_write_marks_the_level_written_not_the_level_committing"):
+        changes.replace(press, f'{test}";\n    with_state_mod(NAME, |game, part|', f'{test}";\n    with_state_mod(NAME, |game, _|')
 
 
 def main():

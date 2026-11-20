@@ -189,7 +189,7 @@ impl dyn Registrar + '_ {
     ) -> Result<(), crate::BlockEntityStateError> {
         self.declare_block_entity_part_state(
             type_name::<P>(),
-            crate::PartStateDeclaration::of(P::DATA),
+            crate::PartStateDeclaration::of(part.state_key()),
         )?;
         self.block_entity_part(kind, part)
             .map_err(crate::BlockEntityStateError::Part)
