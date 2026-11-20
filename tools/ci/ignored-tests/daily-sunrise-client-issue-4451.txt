@@ -1868,7 +1868,6 @@ sunrise-client game::native_player_disconnect_tests::a_second_disconnect_while_p
 sunrise-client game::native_player_disconnect_tests::disconnect_reaches_acting_and_displaced_players lib daily resources
 sunrise-client game::native_player_disconnect_tests::disconnect_refuses_the_owner_stale_and_offline_players lib daily resources
 sunrise-client game::native_player_disconnect_tests::disconnect_sends_the_reason_to_that_guest_only lib daily resources
-sunrise-client game::native_player_disconnect_tests::wasm_disconnect_crosses_the_generated_forwarder lib daily resources
 sunrise-client game::native_player_food::tests::a_stale_handle_gives_nothing lib daily resources
 sunrise-client game::native_player_food::tests::levels_are_added_taken_and_clamped_at_zero lib daily resources
 sunrise-client game::native_player_food::tests::more_points_than_an_int_are_refused_untouched lib daily resources
@@ -2631,8 +2630,6 @@ sunrise-client game::villager_professions::tests::villager_native_slots_ignore_d
 sunrise-client game::villager_professions::tests::villager_no_mods_world_retains_farmer_composter_and_five_levels lib daily resources
 sunrise-client game::villager_professions::tests::villager_overlapping_poi_publishes_zero_entries lib daily resources
 sunrise-client game::villager_professions::tests::villager_reserved_profession_publishes_zero_entries lib daily resources
-sunrise-client game::villager_professions::tests::villager_wasm_engineer_declaration_resolves_with_assembler lib daily resources
-sunrise-client game::villager_professions::tests::villager_wasm_slots_ignore_declaring_mod_order lib daily resources
 sunrise-client game::villagers::birth_tests::rejected_birth_leaves_bed_free_and_parents_resting lib daily resources
 sunrise-client game::villagers::birth_tests::untouched_birth_claims_one_bed_and_announces_one_baby lib daily resources
 sunrise-client game::villagers::birth_tests::villager_birth_is_raw_and_does_not_post_the_animal_hook lib daily resources

@@ -57,7 +57,6 @@ sunrise-client game::mounts::tests::saddling_and_armouring_play_at_pitch_one_fro
 sunrise-client game::native_block_entity_transform_tests::structure_transform_placement_rotations_mirrors_unset_and_refusal lib daily child-process
 sunrise-client game::native_chat_recipients_tests::a_chat_line_hidden_from_one_receiver_reaches_the_others lib daily resources
 sunrise-client game::native_chat_recipients_tests::say_and_me_are_asked_per_receiver_and_a_whisper_is_not lib daily resources
-sunrise-client game::native_config_files::tests::compiled_wasm_bulk_files_use_actual_game_filesystem_roots lib daily wasm-fixture
 sunrise-client game::native_config_files::tests::world_bulk_files_survive_save_reload_backup_and_world_deletion lib daily game-boot
 sunrise-client game::native_datafix_tests::a_mods_host_upgrades_old_data_and_refuses_by_name lib daily game-boot
 sunrise-client game::native_disconnect_tests::a_client_mod_leaves_at_the_end_of_the_frame_with_its_reason lib daily resources
@@ -172,7 +171,6 @@ sunrise-client game::remote::interaction_event_tests::mapping_press_tests::input
 sunrise-client game::remote::interaction_event_tests::mapping_press_tests::opening_a_screen_releases_mod_holds lib daily resources
 sunrise-client game::remote::interaction_event_tests::mapping_press_tests::the_host_presses_by_name_and_refuses_the_others lib daily resources
 sunrise-client game::remote::interaction_event_tests::predicted_use_tests::native_client_prediction_owns_the_hand_loop lib daily game-boot
-sunrise-client game::remote::interaction_event_tests::predicted_use_tests::wasm_client_prediction_owns_the_hand_loop lib daily wasm-fixture
 sunrise-client game::remote::tests::predicted_block_notice_tests::applied_placement_carries_predicted_true lib daily game-boot
 sunrise-client game::remote::tests::predicted_block_notice_tests::confirmed_prediction_has_no_duplicate lib daily game-boot
 sunrise-client game::remote::tests::predicted_block_notice_tests::denied_prediction_notifies_predicted_to_server_once lib daily game-boot

@@ -170,9 +170,6 @@ jobs:
           for leg in sdk-leg-linux sdk-leg-linux-server; do
             [ -d "$FNR_SCRATCH/legs/$leg" ] || { echo "::error::the daily run's sdk job left no $leg artifact"; exit 1; }
           done
-      - name: The API source's wasm32 check
-        if: steps.sdk.outputs.source != 'published'
-        run: rustup target add wasm32-unknown-unknown
       # As sdk-publish.yml's index job: one build data and surface across the legs, the API source, sdk.json.
       - name: Assemble the SDK release folder
         if: steps.sdk.outputs.source != 'published'
@@ -204,7 +201,7 @@ jobs:
       - name: Function replacement check (build and link)
         run: |
           # api_only has no [native] row; beside alpha the mixed set still takes the engine route.
-          FNR_ROUTE=prebuilt FNR_MODS="alpha beta one ten fdshape support registry wasmtime lower loop loop_second api_only" \
+          FNR_ROUTE=prebuilt FNR_MODS="alpha beta one ten fdshape support registry lower loop loop_second api_only" \
             tools/ci/fn_replace_check.sh "$LAUNCHER" "$FNR_SCRATCH/sdk-base" "$FNR_SCRATCH/check" 2>&1 \
             | tee "$FNR_SCRATCH/fnr-check.log"
           grep -E 'Function replacement:|: [0-9]+ ms$|^Mods compiled against the prebuilt game in |^Runner load:' \
