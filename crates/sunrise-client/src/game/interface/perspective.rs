@@ -824,7 +824,7 @@ impl Game<'_> {
         let pre = self.mod_render_pre(
             m,
             Some(who),
-            true,
+            mod_api::StockLayerMask::PLAYER,
             listened,
             alpha as f32,
             camera,

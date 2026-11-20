@@ -10,52 +10,17 @@
 //! [`Game::render_canceled`], which the frame's entity pass starts afresh.
 pub use mod_api::game::{MobRender, PlayerRender};
 
+use super::native_entity_renderers::Resolved;
 use super::{Game, native_block_entity_draw::BlockEntityDraw};
 use glam::{DVec3, Mat4};
 use mod_api::{EntityRenderState, HiddenLayers, HiddenParts, HookId, PosedParts, StockLayerMask};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use sunrise_client::{
     block_entity_render::diffuse_lights,
     fast_hash::FxHashSet,
     mesher::Vertex,
     mobs::{Mob, Species, anim, render, villager},
 };
-
-/// The stock layer capabilities do not depend on today's equipment, visibility or pose.
-fn stock_layers(is_player: bool, species: Species) -> StockLayerMask {
-    use Species::*;
-    let armor = is_player
-        || matches!(
-            species,
-            Giant
-                | Zombie
-                | Husk
-                | Drowned
-                | ZombieVillager
-                | Skeleton
-                | Stray
-                | Bogged
-                | Parched
-                | WitherSkeleton
-                | Piglin
-                | PiglinBrute
-                | ZombifiedPiglin
-        );
-    let illager = matches!(species, Evoker | Illusioner | Pillager | Vindicator);
-    let head = armor
-        || illager
-        || matches!(
-            species,
-            Mannequin | Villager | WanderingTrader | CopperGolem | SulfurCube
-        );
-    let both_hands = armor || illager || matches!(species, Mannequin | Allay | Vex | CopperGolem);
-    let main = both_hands
-        || matches!(
-            species,
-            Villager | WanderingTrader | Witch | Panda | Fox | Dolphin
-        );
-    StockLayerMask::new(is_player, head, main, both_hands, armor)
-}
 
 /// What the frame's entity pass decided about the mods' render hooks: whether any mod listens to
 /// the pair (asked once a frame), and the entities a pre hook canceled.
@@ -208,7 +173,7 @@ impl Game<'_> {
         &self,
         mob: &Mob,
         who: Option<PlayerRender<'_>>,
-        is_player: bool,
+        supported_layers: StockLayerMask,
         listened: bool,
         partial: f32,
         camera: DVec3,
@@ -221,7 +186,8 @@ impl Game<'_> {
         }
         let local = who.as_ref().is_some_and(|who| who.local);
         let mut canceled = false;
-        let hidden_layers = HiddenLayers::__new(stock_layers(is_player, mob.species()));
+        let layer_mask = Cell::default();
+        let hidden_layers = HiddenLayers::__new(supported_layers, &layer_mask);
         if let Some(who) = &who {
             self.mod_entity_draw(mob, local, partial, camera, light, out, |render, draw| {
                 self.native_render_player_pre(
@@ -259,10 +225,11 @@ impl Game<'_> {
     }
     /// The renderer a mod registered for `mob`'s type (`register_entity_renderers`), drawn in place
     /// of its model and its vanilla layers, from a draw at its feet, not turned: true when it
-    /// drew. False when none is registered for the type, and when it fails this frame (then it is
-    /// asked no more until resources reload): the type draws its own model.
+    /// drew. If it fails (and is disabled until resources reload), the stock renderer draws instead.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn mod_living_renderer_geometry(
         &self,
+        resolved: &Resolved<dyn mod_api::EntityRenderer>,
         mob: &Mob,
         partial: f32,
         camera: DVec3,
@@ -270,15 +237,12 @@ impl Game<'_> {
         in_level: bool,
         out: &mut Vec<Vertex>,
     ) -> bool {
-        let Some(resolved) = super::native_entity_renderers::living_renderer(mob) else {
-            return false;
-        };
         let entity = entity_render_state(mob, mob.id, partial);
         let feet = mob.previous.lerp(mob.position, f64::from(partial));
         let feet = DVec3::new(feet.x, feet.y, feet.z);
         let block = [feet.x, feet.y, feet.z].map(|c| c.floor() as i32);
         self.mod_entity_renderer_geometry(
-            &resolved,
+            resolved,
             &entity,
             &mob.kind.id,
             feet - camera,

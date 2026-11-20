@@ -295,9 +295,11 @@ struct ClippedEntity {
     @location(0) color: vec4<f32>,
     @builtin(frag_depth) depth: f32,
 }
-@fragment fn fs_entity_clipped(in: Out, @builtin(front_facing) front: bool) -> ClippedEntity {
-    let color = entity_written_color(in, entity_color(in, front));
+fn clipped_entity(in: Out, color: vec4<f32>) -> ClippedEntity {
     return ClippedEntity(color, min(in.clip.z + globals.world_view.y / in.proj.w, 1.0));
+}
+@fragment fn fs_entity_clipped(in: Out, @builtin(front_facing) front: bool) -> ClippedEntity {
+    return clipped_entity(in, entity_written_color(in, entity_color(in, front)));
 }
 @fragment fn fs_entity_unmarked(in: Out, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     return frame_stored(entity_color(in, front));
@@ -531,10 +533,17 @@ fn energy_swirl_fog(in: Out) -> f32 {
                 linear_fog(in.fog_distance.y, globals.fog.z, globals.fog.w));
     return f * globals.fog_color.a;
 }
-@fragment fn fs_energy_swirl(in: Out) -> @location(0) vec4<f32> {
+fn energy_swirl_color(in: Out) -> vec4<f32> {
     let color = energy_swirl_base(in);
-    if in.overlay == 47u { return vec4(frame_stored(vec4(color.rgb * (1.0 - energy_swirl_fog(in)), 0.0)).rgb, 0.0); }
-    return frame_stored(vec4(mix(color.rgb, globals.fog_color.rgb, energy_swirl_fog(in)), color.a));
+    let fog = energy_swirl_fog(in);
+    if in.overlay == 47u { return frame_stored(vec4(color.rgb * (1.0 - fog), 0.0)); }
+    return frame_stored(vec4(mix(color.rgb, globals.fog_color.rgb, fog), color.a));
+}
+@fragment fn fs_energy_swirl(in: Out) -> @location(0) vec4<f32> {
+    return energy_swirl_color(in);
+}
+@fragment fn fs_foil_clipped(in: Out) -> ClippedEntity {
+    return clipped_entity(in, energy_swirl_color(in));
 }
 
 // RenderPipelines.WATER_MASK: depth only (the pipeline masks the colour off).

@@ -545,11 +545,7 @@ impl Game<'_> {
     ) {
         // The layer also draws on an invisible mob.
         let species = mob.species();
-        if species == Species::SnowGolem
-            || sunrise_client::mobs::species::body_slot(species)
-            || sunrise_client::mobs::equine::is_equine(species)
-            || sunrise_client::mobs::raider::is_captain(mob)
-        {
+        if !render::has_head_item_layer(mob) || sunrise_client::mobs::raider::is_captain(mob) {
             return;
         }
         let local_player = self

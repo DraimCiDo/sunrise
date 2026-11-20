@@ -21,7 +21,7 @@ pub trait Hooks {
     /// `hidden_layers.hide(layer)` hides a stock layer or armor pass for this world draw only.
     /// It does not affect the base model, registered layers, or any preview. Hides from successful
     /// listeners accumulate; an unsupported selector returns a typed error without editing the mask.
-    /// Not on wasm: `hidden_layers` lends the current stock renderer's native editor.
+    /// A panicking or refused callback does not contribute hides.
     #[hook(
         side = "client",
         version = 3,

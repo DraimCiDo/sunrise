@@ -11,7 +11,7 @@ impl Game<'_> {
         entity: &MobRender<'_>,
         draw: &mut BlockEntityDraw,
         hidden: &mut HiddenParts,
-        hidden_layers: &mod_api::HiddenLayers,
+        hidden_layers: &mod_api::HiddenLayers<'_>,
         canceled: &mut bool,
     ) {
         self.fire_render_living_pre(entity, draw, hidden, hidden_layers, canceled);

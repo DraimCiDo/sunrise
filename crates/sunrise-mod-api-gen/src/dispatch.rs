@@ -1035,9 +1035,11 @@ pub(super) fn emit<'a>(
             }
             None => format!("super::entered(HookId::{hook_id}, \"{name}\")"),
         };
-        // A listener refused by the phase gate restores event fields from a
-        // snapshot taken before its call. Outside `World` only (`contained`); in `World` the
-        // call is the plain one.
+        // Ordinary listeners restore a refused call's writable fields outside `World` only.
+        // Draw-local layer editors also contain panics and restore the snapshot in every phase.
+        let layer_editor = args
+            .iter()
+            .find(|(_, ty)| ty.to_token_stream().to_string() == "& mod_api :: HiddenLayers < '_ >");
         let snapshot = fresh_name("snapshot", &mut used);
         let saved = fresh_name("saved", &mut used);
         let mut snaps: Vec<String> = Vec::new();
@@ -1069,6 +1071,8 @@ pub(super) fn emit<'a>(
         }
         let snapshot_statement = if snaps.is_empty() {
             String::new()
+        } else if layer_editor.is_some() {
+            format!("let {saved} = ({},); ", snaps.join(", "))
         } else {
             // A snapshot that only copies is no work to defer: `then_some`.
             let (then, arm) = if !snaps.iter().any(|snap| snap.starts_with("ToOwned")) {
@@ -1083,6 +1087,8 @@ pub(super) fn emit<'a>(
         };
         let restore_statement = if snaps.is_empty() {
             String::new()
+        } else if layer_editor.is_some() {
+            restores.join(" ")
         } else {
             format!(
                 "if let Some({saved}) = {snapshot} {{ {} }} ",
@@ -1094,22 +1100,17 @@ pub(super) fn emit<'a>(
         } else {
             "Default::default()"
         };
-        let layer_editor = args
-            .iter()
-            .find(|(_, ty)| ty.to_token_stream().to_string() == "& mod_api :: HiddenLayers");
         let run = |expression: &str| {
-            let guarded = format!("super::runtime::refusable(contained, || {expression})");
-            let guarded = match layer_editor {
-                // An event field can be reassigned by a listener. Lend the original editor
-                // again before each call, inside the same refusal boundary as the draw.
-                Some((editor, _)) => {
-                    format!("{editor}.guard(|| {{ {event}.{editor} = {editor}; {guarded} }})")
-                }
-                None => guarded,
-            };
-            format!(
-                "match {guarded} {{ Ok(answer) => answer, Err(refusal) => {{ {restore_statement}refusal.report(); {refused_value} }} }}"
-            )
+            if let Some((editor, _)) = layer_editor {
+                // Lend the original editor again if a listener reassigned its event field.
+                format!(
+                    "{{ {event}.{editor} = {editor}; match {editor}.guard(|| super::runtime::render_layer_callback(|| {expression})) {{ Ok(answer) => answer, Err(()) => {{ {restore_statement} {refused_value} }} }} }}"
+                )
+            } else {
+                format!(
+                    "match super::runtime::refusable(contained, || {expression}) {{ Ok(answer) => answer, Err(refusal) => {{ {restore_statement}refusal.report(); {refused_value} }} }}"
+                )
+            }
         };
         // One callee's call: a mod's, or a scoped hook's part's.
         let call = |callee: &str, exit: &str| {
