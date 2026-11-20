@@ -10,7 +10,7 @@ its own that counts only those.
 
 `wasmtime` depends on `sunrise-wasmtime`, the game's one wasmtime: its `[[native.mixin]]` helper calls a function of the mod crate that builds an `Engine`, compiles a module from bytes and runs its `add`, printing `fnr: wasmtime add 2+3=5`. It is in the main set, so the mod's link to the game's copy is checked from inside the game process.
 
-`api_only` has hooks and an `[[inject]]` listener and no `[native]` table row. Alone (`FNR_ROUTE=prebuilt-api`) it
+`api_only` has a typed hook and no native patches. Alone (`FNR_ROUTE=prebuilt-api`) it
 takes the API route: the package's prebuilt API executable with the launcher's `sunrise_native_mods` library. In the
 main set, beside mods with `[[native.mixin]]` rows (`FNR_ROUTE=prebuilt`), the whole set takes the engine route.
 

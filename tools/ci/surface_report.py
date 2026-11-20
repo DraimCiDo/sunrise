@@ -5,10 +5,8 @@ writes the classified report to the job summary. The base comes from the event: 
 GitHub's merge commit, whose first parent is the base; on a dispatch with `pr`, GitHub's compare API gives the merge
 base of that pull request's head and its base branch. Only that one commit is fetched (`--depth 1`, in CI's shallow
 checkout; a full clone is never fetched shallow), and only its `Cargo.toml`, `crates/` and `tools/layering` are
-unpacked. The engine catalogs are read from source; the workspace
-manifest resolves inherited dependencies for crates with injection points. CI compares points and loops, not
-listed internals. To audit internals too, use --with-internals; --trees BASE HEAD accepts local source trees, which it
-only reads. With --build-base-tool, a BASE the head's tool cannot read is exported by BASE's own `sunrise-stage`,
+unpacked. The engine catalogs are read from source. CI compares published loops, not listed internals.
+To audit internals too, use --with-internals; --trees BASE HEAD accepts local source trees, which it only reads. With --build-base-tool, a BASE the head's tool cannot read is exported by BASE's own `sunrise-stage`,
 built from that tree: it compiles and runs BASE's code, build scripts included, so pass it only for a whole checkout
 you trust.
 
@@ -158,7 +156,7 @@ def report(tool: str, base: Path, head: Path, work: Path, gate_on: bool, *,
     trees' own; `landed` selects the notes of one merge."""
     # The base's records may predate the call names: its export names none (`--without-calls`),
     # which no comparison reads.
-    catalogs = "--with-internals" if with_internals else "--with-points-and-loops"
+    catalogs = "--with-internals" if with_internals else "--with-loops"
 
     def export(name: str, exporter: str, tree: Path, flags: list[str]) -> subprocess.CompletedProcess:
         return subprocess.run([exporter, "surface", str(tree), str(work / f"{name}.json"), *flags, catalogs],

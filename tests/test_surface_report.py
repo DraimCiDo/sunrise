@@ -172,7 +172,7 @@ echo '{{}}' > "$3"
         exports = [call.split() for call in calls.splitlines() if call.startswith("surface ")]
         self.assertEqual(len(exports), 2)
         for call in exports:
-            self.assertIn("--with-points-and-loops", call)
+            self.assertIn("--with-loops", call)
         self.assertIn("--notes ", calls)
         code, text, calls = self.run_report(diff_exit=1, gate_on=True)
         self.assertEqual(code, 1)
@@ -194,8 +194,6 @@ echo '{{}}' > "$3"
 @unittest.skipUnless(os.environ.get("SUNRISE_STAGE_TOOL"), "set SUNRISE_STAGE_TOOL to test the real gate")
 class EngineCatalogGateTests(unittest.TestCase):
     ITEMS = [
-        {"id": "point:sunrise_client::game::Game::tick", "kind": "point", "hash": "point-1",
-         "name": "tick", "signature_hash": "old-point"},
         {"id": "loop:entities.tick", "kind": "loop", "hash": "loop-1", "entry": "Game::tick_entities",
          "generic": "tick_entities_with", "slot": "TickSlot", "side": "server"},
         {"id": "internal:fn:sunrise_client::game::Game::tick [feature = \"fixture\"]",
@@ -215,19 +213,19 @@ class EngineCatalogGateTests(unittest.TestCase):
             return surface_report.compare(os.environ["SUNRISE_STAGE_TOOL"], work / "base", work / "head", work, True,
                                           with_internals=True)
 
-    def test_undeclared_point_and_loop_removals_fail_and_declared_removals_pass(self):
-        code, text = self.compare(self.ITEMS, [])
+    def test_undeclared_loop_removal_fails_and_declared_removal_passes(self):
+        loop = self.ITEMS[0]
+        record = loop["id"]
+        code, text = self.compare([loop], [])
         self.assertEqual(code, 1, text)
-        ids = [item["id"] for item in self.ITEMS[:2]]
-        for record in ids:
-            self.assertIn(f"- {record} (removed)", text)
-            self.assertIn(f"breaking change without a change note: {record}", text)
-        code, text = self.compare(self.ITEMS, [], notes=ids)
+        self.assertIn(f"- {record} (removed)", text)
+        self.assertIn(f"breaking change without a change note: {record}", text)
+        code, text = self.compare([loop], [], notes=[record])
         self.assertEqual(code, 0, text)
         self.assertNotIn("breaking change without a change note:", text)
 
     def test_undeclared_internal_removal_is_advisory_and_listed(self):
-        internal = self.ITEMS[2]
+        internal = self.ITEMS[1]
         code, text = self.compare([internal], [])
         self.assertEqual(code, 0, text)
         self.assertIn("Surface: advisory (0 breaking, 0 conditional, 0 additive, 1 advisory;", text)
@@ -238,21 +236,19 @@ class EngineCatalogGateTests(unittest.TestCase):
     def test_additions_pass_and_each_kind_has_a_count(self):
         code, text = self.compare([], self.ITEMS)
         self.assertEqual(code, 0, text)
-        self.assertIn("0 breaking, 0 conditional, 2 additive, 1 advisory", text)
-        for kind in ("Injection points", "Published loops", "Listed internals (advisory)"):
+        self.assertIn("0 breaking, 0 conditional, 1 additive, 1 advisory", text)
+        for kind in ("Published loops", "Listed internals (advisory)"):
             self.assertIn(f"{kind}: 1 added, 0 removed, 0 changed", text)
 
     def test_changed_contracts_keep_their_ids(self):
-        point, loop, internal = self.ITEMS
+        loop, internal = self.ITEMS
         code, text = self.compare(self.ITEMS, [
-            dict(point, hash="point-2", signature_hash="new-point"),
             dict(loop, hash="loop-2", slot="NewTickSlot"),
             dict(internal, hash="internal-2", signature="fn tick(&mut self)", signature_hash="new-internal"),
         ])
         self.assertEqual(code, 1, text)
-        self.assertIn("2 breaking, 0 conditional, 0 additive, 1 advisory", text)
-        for item, detail in zip(self.ITEMS, ("`old-point` → `new-point`", "`TickSlot` → `NewTickSlot`",
-                                            "`fn tick(&self)` → `fn tick(&mut self)`")):
+        self.assertIn("1 breaking, 0 conditional, 0 additive, 1 advisory", text)
+        for item, detail in zip(self.ITEMS, ("`TickSlot` → `NewTickSlot`", "`fn tick(&self)` → `fn tick(&mut self)`")):
             self.assertIn(f"- {item['id']} (changed)", text)
             self.assertIn(detail, text)
         self.assertNotIn("(removed)", text)

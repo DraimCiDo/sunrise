@@ -1,9 +1,4 @@
 {
-  "__private/points.rs::OPEN": {
-    "type": "Mutex<Open>",
-    "category": "dispatch table",
-    "reason": "Temporary points exception pending #2697: open injection-listener routing and seal state remain in the unchanged points module."
-  },
   "block/part_state.rs::EDITING": {
     "type": "RefCell<Vec<(AttachmentHolder,&'staticstr,&'staticstr)>>",
     "category": "reentrancy guard",

@@ -745,13 +745,13 @@ class DailySummaryTests(unittest.TestCase):
         self.assertCountEqual(closed, ["issues/7", "issues/8"])
         # A named failure beside a command that failed without one (a build failure): both are filed.
         api = Api(jobs)
-        broken = {"shard": "sunrise-mod-points", "reason": "failed without a failed test (a build failure)",
+        broken = {"shard": "sunrise-mod-api-gen", "reason": "failed without a failed test (a build failure)",
                   "cargo_exit": 101}
         self.run_summary(api, [dict(own, incomplete=[broken])], results=dict(LEGS, **{"wasm-mods": {"result": "failure"}}))
         created = {body["title"]: body["body"] for _, path, body in api.writes if path == "issues"}
         self.assertEqual(sorted(created), ["Daily: sunrise-mod-wasm compiled_guest_strict_math",
                                            "Daily: wasm-mods / fixture did not complete"])
-        self.assertIn("`sunrise-mod-points`: failed without a failed test (a build failure) (cargo exit 101)",
+        self.assertIn("`sunrise-mod-api-gen`: failed without a failed test (a build failure) (cargo exit 101)",
                       created["Daily: wasm-mods / fixture did not complete"])
         # The step failed before any report was uploaded: the leg's one issue, never a crash of the filing.
         api = Api(jobs)
