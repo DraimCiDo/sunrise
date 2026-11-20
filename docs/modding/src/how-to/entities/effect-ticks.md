@@ -20,15 +20,19 @@ Implement the Part with `#[mod_api::sunrise_part]`. Its two methods are:
 
 These are version 3 methods in the `effect` scope, keyed by `effect`; there are no
 corresponding global `Hooks` methods. Each Part has its own `apply`, starting false,
-so one package's cadence never drives another package's action. Parts run by mod
-dispatch order, then registration order, sharing the same holder snapshots.
+so one package's cadence never drives another package's action. The declaring package's
+Parts run first within that effect, even with `order = "before"` or `"none"`. Other Parts
+run by mod dispatch order, then registration order. All share the same holder snapshots.
+This owner-first rule is specific to effects; it does not change package dispatch or
+the order of block entity Parts.
 
-A Part may attach to an effect declared by its own package or by a package listed in
-its `[dependencies]` (required or optional). Dependencies dispatch first. An attachment
-without that dependency refuses loading, naming the effect, its declaring package and
-the dependency to add. An absent optional package skips its Parts and key requests;
-a present optional package must declare the requested effect. Unknown effects keep
-the normal unknown-key refusal. An override dropping the dependency also drops permission.
+A Part may attach to an effect declared by its own package or by an active required
+or optional dependency in its `[dependencies]`. An attachment without that
+dependency refuses loading, naming the effect, its declaring package and the dependency to add.
+If the effect's namespace is the ID of an absent package, its Part and key request are
+skipped only when an optional dependency row applies on the installation side and survives
+instance overrides. A present package must declare the requested effect; other unknown effects
+keep the normal unknown-key refusal.
 
 Unresolved keys refuse with `MobEffectPartError::InvalidKey`; vanilla effects refuse
 immediately with `MobEffectPartError::VanillaEffect`; attaching the same concrete

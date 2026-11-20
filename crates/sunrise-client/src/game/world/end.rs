@@ -374,8 +374,17 @@ impl EyeOfEnder {
 
 impl Game<'_> {
     /// The environment attributes the frame draws: the packs' Polytone layers over the
-    /// current dimension's, when a pack has some. Gameplay keeps `dim_environment`.
+    /// current dimension's, when a pack has some. Gameplay keeps `dim_environment`. A client of a
+    /// server draws the type its server sent, with the packs' layers over it where they have a
+    /// stack of that type.
     pub(super) fn view_environment(&self) -> &Environment {
+        if let Some(own) = self.remote.as_ref().and_then(|r| {
+            r.level_pack_environment
+                .as_deref()
+                .or(r.level_environment.as_deref())
+        }) {
+            return own;
+        }
         match (&self.pack.environments, self.dim) {
             (Some(e), Dim::Overworld) => &e[0],
             (Some(e), Dim::Nether) => &e[1],
@@ -386,11 +395,11 @@ impl Game<'_> {
 
     /// The environment attributes of the current dimension.
     pub(super) fn dim_environment(&self) -> &Environment {
-        // A client of a server draws a level of a mod or a pack with the type the server sent.
+        // A client of a server takes the type the server sent, built-in levels included.
         if let Some(own) = self
             .remote
             .as_ref()
-            .and_then(|r| r.level_environment.as_ref())
+            .and_then(|r| r.level_environment.as_deref())
         {
             return own;
         }
