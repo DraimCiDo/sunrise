@@ -1137,6 +1137,12 @@ pub(crate) fn records_selected(
     points: &[GamePoint],
     selected: Option<&std::collections::BTreeSet<String>>,
 ) -> String {
+    // A source tree's empty catalog leaves the modules empty, with nothing to import.
+    let glob = (!points.is_empty()).then(|| {
+        quote!(
+            use super::*;
+        )
+    });
     let enabled = |point: &GamePoint| {
         selected.is_none_or(|names| {
             names.contains(&point.name) || names.contains(&format!("{}_return", point.name))
@@ -1247,6 +1253,16 @@ pub(crate) fn records_selected(
     .expect("point variants");
     let debug_names = ids.variants.iter().map(|variant| variant.ident.to_string());
     let places_code = place_items(&places);
+    // A source tree's empty catalog has no entry to fill in.
+    let guest_table = if guest_entries.is_empty() {
+        quote!([None; POINT_COUNT])
+    } else {
+        quote!({
+            let mut table = [None; POINT_COUNT];
+            #guest_entries
+            table
+        })
+    };
     quote! {
         #(#records)*
         /// Target names for native load diagnostics.
@@ -1275,11 +1291,7 @@ pub(crate) fn records_selected(
         mod guest_exports {
             use super::*;
             type Dispatch = fn(PointId, &mut ::mod_api::wire::Reader<'_>, &mut ::mod_api::wire::Writer) -> Result<(), ::mod_api::wire::WireError>;
-            pub(super) static TABLE: [Option<(PointId, Dispatch)>; POINT_COUNT] = {
-                let mut table = [None; POINT_COUNT];
-                #guest_entries
-                table
-            };
+            pub(super) static TABLE: [Option<(PointId, Dispatch)>; POINT_COUNT] = #guest_table;
             #guest_functions
         }
         /// A point's place: its head and return in catalog order.
@@ -1300,7 +1312,7 @@ pub(crate) fn records_selected(
         #[doc(hidden)]
         pub const POINT_COUNT: usize = PointId::__Count as usize;
         /// Typed API listener aliases and constructors, generated from the point catalog.
-        pub mod listeners { use super::*; #(#listeners)* }
+        pub mod listeners { #glob #(#listeners)* }
     }
     .to_string()
 }
@@ -1310,6 +1322,12 @@ pub(crate) fn engine_records(
     points: &[GamePoint],
     selected: Option<&std::collections::BTreeSet<String>>,
 ) -> String {
+    // A source tree's empty catalog leaves the modules empty, with nothing to import.
+    let glob = (!points.is_empty()).then(|| {
+        quote!(
+            use super::*;
+        )
+    });
     let parse = |code: &str| {
         code.parse::<proc_macro2::TokenStream>()
             .expect("generated points")
@@ -1357,9 +1375,9 @@ pub(crate) fn engine_records(
         /// Number of engine point places.
         pub const POINT_COUNT: usize = PointId::__Count as usize;
         /// Checked function types used by typed dispatch.
-        pub mod listeners { use super::*; #(#listeners)* }
+        pub mod listeners { #glob #(#listeners)* }
         /// Typed dispatch through the installed provider.
-        pub mod dispatch { use super::*; #(#dispatch)* }
+        pub mod dispatch { #glob #(#dispatch)* }
     }
     .to_string()
 }

@@ -38,6 +38,8 @@ pub fn subscriptions() -> Vec<(String, String)> {
     })
 }
 
+// Each point's generated export calls it; a source tree's empty catalog has none.
+#[allow(dead_code)]
 pub(crate) fn fire(
     place: PointId,
     index: u32,
