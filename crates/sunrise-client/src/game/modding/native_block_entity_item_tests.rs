@@ -675,7 +675,7 @@ fn a_kept_slot_goes_back_only_into_the_block_entity_it_came_from() {
                 .default_state("minecraft:barrel")
                 .unwrap();
             let outcome = mod_api::run_transaction(game, |game, tx| {
-                assert_eq!(items.extract(game, tx, 0, &stone, 10), 10);
+                assert_eq!(items.extract_at(game, tx, 0, &stone, 10), 10);
                 // Deliberately use the non-journaled engine path to test the generation guard.
                 assert!(game.apply_native_block_write([3, 64, 1], state, 0, None));
                 Err::<(), ()>(())
