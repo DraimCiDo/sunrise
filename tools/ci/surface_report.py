@@ -5,10 +5,8 @@ writes the classified report to the job summary. The base comes from the event: 
 GitHub's merge commit, whose first parent is the base; on a dispatch with `pr`, GitHub's compare API gives the merge
 base of that pull request's head and its base branch. Only that one commit is fetched (`--depth 1`, in CI's shallow
 checkout; a full clone is never fetched shallow), and only its `Cargo.toml`, `crates/` and `tools/layering` are
-unpacked. The engine catalogs are read from source; the workspace
-manifest resolves inherited dependencies for crates with injection points. CI compares points and loops, not
-listed internals. To audit internals too, use --with-internals; --trees BASE HEAD accepts local source trees, which it
-only reads. With --build-base-tool, a BASE the head's tool cannot read is exported by BASE's own `sunrise-stage`,
+unpacked. The engine catalogs are read from source. CI compares published loops, not listed internals.
+To audit internals too, use --with-internals; --trees BASE HEAD accepts local source trees, which it only reads. With --build-base-tool, a BASE the head's tool cannot read is exported by BASE's own `sunrise-stage`,
 built from that tree: it compiles and runs BASE's code, build scripts included, so pass it only for a whole checkout
 you trust.
 
@@ -20,10 +18,12 @@ not change or cannot be read, and, with `gate = true` in tools/ci/surface.toml (
 names.
 
 A new note that carries `landed = "<merge sha>"` is retroactive: it is left out of the comparison above and checked
-against that merge instead. The merge and its first parent are fetched and exported (each by its own commit's tool
-when the head's cannot read it), and `surface-diff --landed` attaches the note and fails when an id did not change there.
-That costs two exports, only on a pull request that adds such a note. A merge that does not have two parents, or a
-tree that cannot be exported, fails naming the note and the sha.
+against that merge instead. Both the merge and its first parent must already use the native-only surface schema.
+Each is exported by its own tool to verify its schema; `surface-diff --landed` then fails if an id did not change there.
+The notes that merge brought itself (new against its first parent) count as coverage there, read apart from the late
+ones (`--covered-by`), so the comparison lists as unnoted only what no note covers, then or now. That costs two exports,
+only on a pull request that adds such a note. A merge that does not have two parents, or a tree that cannot be
+exported, fails naming the note and the sha.
 """
 
 from argparse import ArgumentParser
@@ -43,6 +43,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 NOTES = "crates/sunrise-mod-vocab/changes"
+# Remove this audit and its gate branch after the first complete schema-3 SDK publishes.
+SCHEMA_RESET = "tools/ci/surface-schema-3-reset.json"
 # GitHub refuses a step summary over 1 MiB; the full report stays in the step log.
 # Counted in bytes of UTF-8, frame included.
 SUMMARY_LIMIT = 200_000
@@ -148,60 +150,122 @@ def last_line(text: str) -> str:
     return lines[-1] if lines else "no message"
 
 
+def export_surface(tool: str, tree: Path, output: Path, *flags: str) -> subprocess.CompletedProcess:
+    return subprocess.run([tool, "surface", str(tree), str(output), *flags], capture_output=True, text=True)
+
+
+def audited_checkpoint(reset_path: Path, work: Path, old_hash: str, tool: str) -> tuple[Path | None, str]:
+    """Verify the one-time transition using both plain SDK exports, before adding any engine catalogs."""
+    reset = json.loads(reset_path.read_text())
+    plain = reset["plain"]
+    if old_hash != plain["old"]:
+        return None, f"The schema-2 base {old_hash} is not the audited schema-reset base.\n"
+    missing = [change["id"] for change in reset["diff"]["changes"]
+               if change["class"] == "breaking" and not change.get("notes")]
+    if missing:
+        return None, f"The schema-reset audit lacks change notes for {', '.join(missing)}.\n"
+    checkpoint = work / "schema-reset"
+    checkpoint.mkdir()
+    output = work / "base.json"
+    commit = reset["checkpoint"]
+    try:
+        unpack(commit, checkpoint)
+        done = export_surface(tool, checkpoint, output)
+        if done.returncode != 0:
+            done = export_surface(base_tool(commit, work), checkpoint, output)
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+        return None, f"Could not export the schema-reset checkpoint: {error}.\n"
+    if done.returncode != 0:
+        return None, f"Could not export the schema-reset checkpoint: {last_line(done.stderr)}.\n"
+    actual = json.loads(output.read_text())
+    if (actual["schema"], actual["hash"]) != (3, plain["new"]):
+        return None, "The schema-reset checkpoint does not reproduce the audited schema-3 surface.\n"
+    return checkpoint, (f"Audited schema 2 → 3 reset: {plain['old']} → {plain['new']} ({SCHEMA_RESET}).\n"
+                        "Checking all subsequent changes against that checkpoint.\n")
+
+
 def report(tool: str, base: Path, head: Path, work: Path, gate_on: bool, *,
            with_internals: bool = False, own_base_tool: Callable[[], str] | None = None,
            own_head_tool: Callable[[], str] | None = None,
-           notes: tuple[Path, Path] | None = None, landed: str | None = None) -> tuple[int, str]:
+           notes: tuple[Path, Path] | None = None, landed: str | None = None,
+           covered: tuple[Path, Path] | None = None) -> tuple[int, str]:
     """Exports both trees at once, diffs them; (exit code, report text). `own_base_tool` gives the base's own
-    sunrise-stage, for a base the head's cannot read, and `own_head_tool` the head tree's, for a head tree that is
-    not this checkout (a landed merge). `notes` is the (new, base) pair of change-note folders when they are not the
-    trees' own; `landed` selects the notes of one merge."""
-    # The base's records may predate the call names: its export names none (`--without-calls`),
-    # which no comparison reads.
-    catalogs = "--with-internals" if with_internals else "--with-points-and-loops"
+    sunrise-stage, for a base the head's cannot read; landed comparisons always use both trees' own exporters.
+    `notes` is the (new, base) pair of change-note folders when they are not the
+    trees' own; `landed` selects the notes of one merge, and `covered` a (new, base) pair whose new notes count as
+    coverage only (that merge's own)."""
+    catalogs = "--with-internals" if with_internals else "--with-loops"
 
-    def export(name: str, exporter: str, tree: Path, flags: list[str]) -> subprocess.CompletedProcess:
-        return subprocess.run([exporter, "surface", str(tree), str(work / f"{name}.json"), *flags, catalogs],
-                              capture_output=True, text=True)
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        # Drain both subprocesses' diagnostics while they run so a full pipe cannot stall an export.
-        exports = {name: pool.submit(export, name, tool, tree, flags)
-                   for name, tree, flags in (("base", base, ["--without-calls"]), ("head", head, []))}
-    head_export = exports["head"].result()
-    # This checkout's own tree failing is a broken generator, which no other step would catch.
-    if head_export.returncode != 0 and own_head_tool is None:
-        return 1, f"The surface export of this tree failed: {last_line(head_export.stderr)}.\n"
+    exports = {}
+    if landed is None:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            # Drain both subprocesses' diagnostics while they run so a full pipe cannot stall an export.
+            exports = {name: pool.submit(export_surface, tool, tree, work / f"{name}.json", catalogs)
+                       for name, tree in (("base", base), ("head", head))}
+        head_export = exports["head"].result()
+        if head_export.returncode != 0:
+            return 1, f"The surface export of this tree failed: {last_line(head_export.stderr)}.\n"
     note = ""
-    for name, tree, flags, done, own_tool in (("head", head, [], head_export, own_head_tool),
-                                              ("base", base, ["--without-calls"], exports["base"].result(),
-                                               own_base_tool)):
-        if done.returncode == 0:
-            continue
-        # An older tree this tool holds to a newer rule or format: that tree's own tool reads it.
-        why = f"the head's sunrise-stage cannot read the {name} tree ({last_line(done.stderr)})"
+    trees = (("base", base, own_base_tool), ("head", head, own_head_tool))
+    for name, tree, own_tool in trees:
+        if landed is None:
+            done = exports[name].result()
+            if done.returncode == 0:
+                continue
+            why = f"the head's sunrise-stage cannot read the {name} tree ({last_line(done.stderr)})"
+        else:
+            # The current tool can sometimes export an old tree, but would silently omit records from its schema.
+            why = f"the landed {name} must be exported in its original schema"
         if own_tool is None:
             return 1, f"No surface report: {why}.\n"
         try:
-            own = export(name, own_tool(), tree, flags)
+            output = work / f"{name}.json"
+            # The plain SDK export is shared across tool versions. Use the current catalog reader
+            # for both trees so an older generator does not have to know the current audit options.
+            own = export_surface(own_tool(), tree, output)
         except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
             return 1, f"No surface report: {why}, and the {name}'s own could not be used: {error}.\n"
         if own.returncode != 0:
             return 1, f"No surface report: {why}, nor can the {name}'s own ({last_line(own.stderr)}).\n"
         note += f"The {name} was exported by its own sunrise-stage: {why}.\n"
-    code, text = compare(tool, base, head, work, gate_on, with_internals=with_internals, notes=notes, landed=landed)
+        reset_path = head / SCHEMA_RESET
+        if landed is not None:
+            schema = json.loads(output.read_text())["schema"]
+            if schema < 3:
+                side = "first parent" if name == "base" else "merge"
+                return 1, (f"The {side} uses surface schema {schema}; a landed note requires both trees to use "
+                           "the native-only surface schema (3 or later). Put notes for older merges in changes/history/.\n")
+        elif name == "base" and not with_internals and reset_path.is_file():
+            old = json.loads(output.read_text())
+            if old.get("schema") == 2:
+                checkpoint, text = audited_checkpoint(reset_path, work, old["hash"], tool)
+                note += text
+                if checkpoint is None:
+                    return 1, note
+                base = tree = checkpoint
+        catalogs_command = [tool, "surface-catalogs", str(tree), str(output)]
+        if with_internals:
+            catalogs_command.append("--with-internals")
+        audited = subprocess.run(catalogs_command, capture_output=True, text=True)
+        if audited.returncode != 0:
+            return 1, f"No surface report: could not audit the {name} catalogs ({last_line(audited.stderr)}).\n"
+    code, text = compare(tool, base, head, work, gate_on, with_internals=with_internals, notes=notes, landed=landed,
+                         covered=covered)
     return code, note + text
 
 
 def compare(tool: str, base: Path, head: Path, work: Path, gate_on: bool, *,
             with_internals: bool, notes: tuple[Path, Path] | None = None,
-            landed: str | None = None) -> tuple[int, str]:
-    """Run the gate on the exported documents and the change notes (the trees' own unless `notes` is given)."""
+            landed: str | None = None, covered: tuple[Path, Path] | None = None) -> tuple[int, str]:
+    """Run the gate on the exported documents and the change notes (the trees' own unless `notes` is given);
+    `covered` is a (new, base) pair of note folders whose new notes count as coverage only."""
     new_notes, base_notes = notes or (head / NOTES, base / NOTES)
     command = [tool, "surface-diff", str(work / "base.json"), str(work / "head.json"),
                "--notes", str(new_notes), "--base-notes", str(base_notes), "--json", str(work / "diff.json")]
     if landed:
         command += ["--landed", landed]
+    if covered:
+        command += ["--covered-by", str(covered[0]), "--covered-base", str(covered[1])]
     if gate_on:
         command.append("--gate")
     diff = subprocess.run(command, capture_output=True, text=True)
@@ -257,11 +321,15 @@ def landed_check(tool: str, head: Path, base: Path, work: Path, shas: dict[str, 
                 fetch(commit, folder / name)
         except (OSError, subprocess.CalledProcessError) as error:
             return 1, text + f"Landed check failed for {who}: a tree could not be fetched: {error}.\n"
-        # Both are older trees: each falls back to its own commit's tool when this one refuses it.
+        # The late notes are this pull request's, checked against the merge; the merge's own notes (new against its
+        # first parent) are read apart from them, as coverage.
+        for tree in ("base", "head"):
+            (folder / tree / NOTES).mkdir(parents=True, exist_ok=True)
         sub_code, sub_text = report(tool, folder / "base", folder / "head", folder, False,
                                     own_base_tool=(lambda: own_tool(parent)) if own_tool else None,
                                     own_head_tool=(lambda: own_tool(sha)) if own_tool else None,
-                                    notes=(head / NOTES, base / NOTES), landed=sha)
+                                    notes=(head / NOTES, base / NOTES), landed=sha,
+                                    covered=(folder / "head" / NOTES, folder / "base" / NOTES))
         if sub_code != 0:
             code = 1
         text += f"Landed {who}, first parent {parent}:\n{sub_text}"

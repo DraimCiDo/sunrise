@@ -460,8 +460,7 @@ pub(crate) const PARSER_STACK: usize = 16 << 20;
 pub(crate) enum Unread {
     /// It does not parse, at this line.
     Parse(usize),
-    /// The parser's own stack could not be had, so parsing would risk the caller's: always on
-    /// wasm, which has no threads.
+    /// The parser's own stack could not be reserved.
     NoStack,
 }
 
@@ -470,23 +469,15 @@ pub(crate) fn read(text: &str) -> Result<Syntax<'_>, Unread> {
     // The parser reads nesting by recursion. [`too_deep`] bounds it, and a stack of its own
     // leaves room for any file within that bound, wherever the scan is called from. Without one
     // the file is not parsed at all.
-    #[cfg(not(target_family = "wasm"))]
-    {
-        std::thread::scope(|scope| {
-            match std::thread::Builder::new()
-                .stack_size(PARSER_STACK)
-                .spawn_scoped(scope, || parse(text))
-            {
-                Ok(thread) => thread.join().unwrap_or(Err(Unread::NoStack)),
-                Err(_) => Err(Unread::NoStack),
-            }
-        })
-    }
-    #[cfg(target_family = "wasm")]
-    {
-        let _ = text;
-        Err(Unread::NoStack)
-    }
+    std::thread::scope(|scope| {
+        match std::thread::Builder::new()
+            .stack_size(PARSER_STACK)
+            .spawn_scoped(scope, || parse(text))
+        {
+            Ok(thread) => thread.join().unwrap_or(Err(Unread::NoStack)),
+            Err(_) => Err(Unread::NoStack),
+        }
+    })
 }
 
 pub(crate) fn parse(text: &str) -> Result<Syntax<'_>, Unread> {

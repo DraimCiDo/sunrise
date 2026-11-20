@@ -28,7 +28,7 @@ fn gui_render_post(&self, _: &dyn ClientHost, event: &mut GuiRenderPostEvent<'_>
 }
 ```
 
-The four calls are on the client host, the same for native and wasm mods (the pixels cross as bytes). They change
+The four calls are on the client host. They change
 the game's atlas, so they take `&mut dyn ClientHost`: call them from a hook that has it, such as `client_tick_post`,
 not from inside a draw.
 
@@ -66,7 +66,7 @@ textures of their own, for larger images, are not part of this API.
 An update re-patches the slot the image holds, so a size of another class is `ClassChange`: free the image and create
 it again at the new size.
 
-The pool exists only when a client mod is loaded, native or wasm: a game without mods has no slot and its atlas does
+The pool exists only when a client mod is loaded; a game without mods has no slot and its atlas does
 not grow. Where there is no pool (a server, or no client mod loaded) every call is `Unavailable`.
 
 ## Budgets
@@ -102,7 +102,7 @@ Match `DynamicTextureError` non-exhaustively.
 
 ## Inline images in chat and signs
 
-Native and wasm mods can implement `Hooks::substitute_inline_images` to display atlas sprites in chat history and on
+Implement `Hooks::substitute_inline_images` to display atlas sprites in chat history and on
 both sign faces. Each call sees one translated, styled `event.run` with legacy formatting already applied. The hook
 runs before wrapping, width measurement and bidi reordering, not for each glyph as it is painted.
 

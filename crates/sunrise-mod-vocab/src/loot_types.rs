@@ -1,7 +1,5 @@
 //! Static, unsynced loot function and condition map-codec registries.
-use crate::wire::{Reader, Wire, WireError, Writer};
 use crate::{Identifier, LootContext, LootStack, RandomSource, Tags};
-use std::sync::Arc;
 #[path = "loot_types/owned.rs"]
 pub(crate) mod owned;
 
@@ -40,11 +38,6 @@ pub trait LootTypeContext {
 /// A map codec in `Registries.LOOT_FUNCTION_TYPE`, registered before data loads.
 /// Values are immutable and shared between rolls; do not retain random state.
 pub trait ModLootFunction: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::mod_loot_function::<Self>();
-    }
     /// Decode-equivalent field validation, run once per entry at load, not roll time.
     /// A failure refuses the entire candidate data generation.
     fn validate(&self, data: &LootEntryData) -> Result<(), String>;
@@ -65,16 +58,10 @@ pub trait ModLootFunction: Send + Sync + 'static {
         context: &mut dyn LootTypeContext,
     ) -> Result<LootStack, String>;
 }
-crate::wire::wire_handlers::handler!(dyn ModLootFunction, "ModLootFunction");
 
 /// A map codec in `Registries.LOOT_CONDITION_TYPE`, registered before data loads.
 /// Terms run in order and short-circuit; a skipped term draws no random.
 pub trait ModLootCondition: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::mod_loot_condition::<Self>();
-    }
     /// Validate this entry once at load; failures refuse the candidate generation.
     fn validate(&self, data: &LootEntryData) -> Result<(), String>;
     /// Parameters this codec reads. Absent parameters must be handled at runtime.
@@ -85,4 +72,3 @@ pub trait ModLootCondition: Send + Sync + 'static {
     fn test(&self, data: &LootEntryData, context: &mut dyn LootTypeContext)
     -> Result<bool, String>;
 }
-crate::wire::wire_handlers::handler!(dyn ModLootCondition, "ModLootCondition");

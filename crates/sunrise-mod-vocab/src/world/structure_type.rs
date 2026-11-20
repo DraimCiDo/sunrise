@@ -43,7 +43,6 @@ impl From<(crate::Identifier, String)> for StructureError {
 /// found: the start's position (vanilla's `Structure.findGenerationPoint`
 /// answer) and its pieces (`Structure.generatePieces`), at least one.
 // exhaustive: mods build it themselves as find_generation_point's answer
-#[derive(sunrise_mod_api_macros::Wire)]
 pub struct FoundStructure {
     /// Where the start sits, in world blocks.
     pub position: [i32; 3],
@@ -56,11 +55,6 @@ pub struct FoundStructure {
 /// data pack structure with `"type": "modid:tower"`. Implemented once, kept by
 /// the game; deterministic and stateless.
 pub trait StructureType: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::structure_type::<Self>();
-    }
     /// `Structure.findGenerationPoint` with `generatePieces`: the start's
     /// position and its pieces for the chunk `context` names, or `None` for
     /// "no start in this chunk". The height and biome queries the context
@@ -135,11 +129,6 @@ impl PieceBeardifier {
 /// the engine's (`StructurePiece.createTag`: the type id, `BB`, `O`, `GD`)
 /// around [`add_additional_save_data`](StructurePiece::add_additional_save_data).
 pub trait StructurePiece: std::fmt::Debug + Send + Sync {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::structure_piece::<Self>();
-    }
     /// `StructurePiece.getBoundingBox`: the piece's box, in world blocks.
     fn bounding_box(&self) -> BoundingBox;
     /// Override terrain shaping, even when the structure's adjustment is `None`.

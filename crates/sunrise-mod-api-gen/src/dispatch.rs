@@ -1017,8 +1017,7 @@ pub(super) fn emit<'a>(
             }
             None => format!("super::entered(HookId::{hook_id}, \"{name}\")"),
         };
-        // A listener refused by the phase gate (#3123) answers what a refused wasm call answers
-        // (`wire::refusal_value`), and the event fields it may have written are put back from a
+        // A listener refused by the phase gate restores event fields from a
         // snapshot taken before its call. Outside `World` only (`contained`); in `World` the
         // call is the plain one.
         let snapshot = fresh_name("snapshot", &mut used);
@@ -1026,7 +1025,7 @@ pub(super) fn emit<'a>(
         let mut snaps: Vec<String> = Vec::new();
         let mut restores: Vec<String> = Vec::new();
         // A `&mut dyn Trait` field is a registrar or a draw surface: its effects stand, as the
-        // effects of a refused wasm listener's earlier calls do, and it has no value to copy.
+        // surface has no whole value to copy.
         for (field, by_reference) in rollback
             .iter()
             .filter(|(field, _)| !surfaces.contains(field))
@@ -1072,11 +1071,11 @@ pub(super) fn emit<'a>(
                 restores.join(" ")
             )
         };
-        let refused_value = crate::wire::refusal_value(
-            result.trim() == "-> Flow",
-            "Flow::Continue",
-            "Default::default()",
-        );
+        let refused_value = if result.trim() == "-> Flow" {
+            "Flow::Continue"
+        } else {
+            "Default::default()"
+        };
         let run = |expression: &str| {
             format!(
                 "match super::runtime::refusable(contained, || {expression}) {{ Ok(answer) => answer, Err(refusal) => {{ {restore_statement}refusal.report(); {refused_value} }} }}"

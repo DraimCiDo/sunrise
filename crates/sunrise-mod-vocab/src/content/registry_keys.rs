@@ -9,7 +9,6 @@ use crate::{
 use std::sync::Arc;
 
 impl BlockKey {
-    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
         let known =
             crate::parts::registration_membership(crate::parts::RegistrationKeyKind::Block, slot)
@@ -19,7 +18,6 @@ impl BlockKey {
 }
 
 impl FluidKey {
-    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
         let known =
             crate::parts::registration_membership(crate::parts::RegistrationKeyKind::Fluid, slot)
@@ -35,7 +33,6 @@ impl FluidKey {
 }
 
 impl ItemKey {
-    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
         let known =
             crate::parts::registration_membership(crate::parts::RegistrationKeyKind::Item, slot)
@@ -333,7 +330,6 @@ fn ordered_id(
     table.read().ok()?.as_ref()?.id(slot).map(str::to_owned)
 }
 
-#[cfg(any(not(target_arch = "wasm32"), test))]
 fn ordered_slot_is_live(
     table: &std::sync::RwLock<Option<sunrise_mod_runtime::registry_keys::Names>>,
     slot: u32,
@@ -428,7 +424,6 @@ pub fn enchantment_keys() -> Vec<EnchantmentKey> {
 
 impl EntityTypeKey {
     /// Validate an incoming slot against the built-in registry, not a world's mapping.
-    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
         crate::parts::registration_membership(crate::parts::RegistrationKeyKind::EntityType, slot)
             .unwrap_or_else(|| {
@@ -443,7 +438,6 @@ impl EntityTypeKey {
 
 impl MenuKey {
     /// Validate an incoming slot against the built-in registry, not a world's mapping.
-    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
         ordered_slot_is_live(resolved_menus(), slot)
             .then_some(Self(slot))
@@ -453,7 +447,6 @@ impl MenuKey {
 
 impl EnchantmentKey {
     /// Validate an incoming slot against the loaded registry, not a world's mapping.
-    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
         ordered_slot_is_live(&ENCHANTMENTS, slot)
             .then_some(Self(slot))
@@ -483,7 +476,6 @@ pub fn enchantment_key_id(key: EnchantmentKey) -> Option<String> {
 }
 
 impl EffectKey {
-    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
         let known =
             crate::parts::registration_membership(crate::parts::RegistrationKeyKind::Effect, slot)
@@ -501,7 +493,6 @@ impl EffectKey {
 }
 
 impl BlockEntityTypeKey {
-    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
         let known = crate::parts::registration_membership(
             crate::parts::RegistrationKeyKind::BlockEntityType,
@@ -528,7 +519,6 @@ impl DimensionKey {
     /// `minecraft:the_end`.
     pub const END: Self = Self(2);
 
-    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
         let key = Self(slot);
         dimension_id(key).ok_or("unknown DimensionKey slot")?;
@@ -757,7 +747,6 @@ pub fn effect_key_by_index(index: usize) -> Option<EffectKey> {
 }
 
 impl crate::BoolGameRuleKey {
-    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
         let known = crate::parts::registration_membership(
             crate::parts::RegistrationKeyKind::GameRule,
@@ -769,7 +758,6 @@ impl crate::BoolGameRuleKey {
 }
 
 impl crate::IntGameRuleKey {
-    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
         let known = crate::parts::registration_membership(
             crate::parts::RegistrationKeyKind::GameRule,
@@ -810,7 +798,6 @@ pub fn game_event_key_id(key: crate::GameEventKey) -> Option<String> {
     )
 }
 impl crate::GameEventKey {
-    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
         crate::parts::registration_membership(crate::parts::RegistrationKeyKind::GameEvent, slot)
             .unwrap_or_else(|| {
