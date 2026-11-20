@@ -3,8 +3,9 @@ use super::*;
 use sunrise_mod_runtime::attachments::CheckedAttachmentType;
 
 /// A job-local attachment transaction. No decoded value is shared with live state.
-/// Use [`Self::get`] and [`Self::set`] with a registered attachment key that has a
-/// persistence codec. A stale key is refused without consulting a live world.
+/// Use [`Self::get`], [`Self::set`] and [`Self::remove`] with the current registration's
+/// key, retained by the listener, for an attachment with a persistence codec. A stale key
+/// is refused without consulting a live world or chunk holder.
 /// Any refused operation poisons the job even if the listener ignores its error.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]

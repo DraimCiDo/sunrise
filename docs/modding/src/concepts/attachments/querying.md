@@ -1,9 +1,10 @@
 # Query attachment holders
 
 Use `AttachmentQueries` to find loaded holders of an issued `AttachmentKey<T>` without
-checking every entity, chunk or block entity. Register your descriptor and keep the returned key as described in
-[server attachments](../attachments.md). Import `AttachmentQueriesMut` for server
-writes.
+checking every entity, chunk or block entity. Register the descriptor once and keep
+its key on the querying mod or Part. For a dependency's attachment, look up the
+owner's key during registration; see [Attachments](../attachments.md). Import
+`AttachmentQueriesMut` for server writes.
 
 ## Read a snapshot
 
@@ -136,7 +137,8 @@ do not themselves register a holder.
 | `AttachmentError::HolderBusy` | Physical storage is temporarily unavailable during an engine pass. Retry after the pass. The refused store writes no value and registers no holder. |
 | `AttachmentError::UnsupportedHolder(family)` | The physical family cannot own attachments. Retrying does not help. `family` is a lowercase identifier, not an engine type. |
 | `AttachmentRowError::HolderBusy` / `AttachmentRowError::UnsupportedHolder(family)` | The corresponding error from a retained row write. |
-| `AttachmentRowError::StaleHolder` | The row's holder is missing or its captured residency is invalid. |
+| `AttachmentRowError::StaleHolder` | The row's holder is missing or its captured residency is invalid. Discard the row and query again. |
+| `AttachmentError::StaleKey` / `AttachmentRowError::Value(AttachmentError::StaleKey)` | The key came from an earlier installation. Re-querying with the same key cannot repair it; use the key obtained at current registration. |
 
 The `UnsupportedHolder` family text is limited to 256 UTF-8 bytes at the wire
 boundary; longer names are rejected.

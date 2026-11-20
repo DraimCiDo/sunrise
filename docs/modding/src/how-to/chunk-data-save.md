@@ -8,9 +8,12 @@ cannot be written, the worker retries with stored block-entity payloads and keep
 
 `chunk_data_save` receives `&dyn ChunkDiskHost` and a `ChunkDataSaveEvent`.
 The event's `data` is a typed, job-local attachment store. Use its `get`, `set`
-and `remove` methods with an issued `AttachmentKey<T>` whose descriptor has a
-persistence codec. The type itself does not need to implement `Wire`. A stale key
-or codec error refuses the whole job even if the listener ignores the error.
+and `remove` methods with the `AttachmentKey<T>` you retained from registration.
+Register the descriptor once with a persistence codec, or obtain the owner's key
+as described in [Attachments](../concepts/attachments.md). `T` itself need not
+implement `Wire`. An old installation's key or a codec error refuses the whole job,
+even if the listener ignores the error. This job-local store has no live chunk
+holder to refresh.
 
 The callback runs on the persistence worker after capture and before encoding.
 For example, capturing 7, writing 8 in the callback and later writing 9 in the

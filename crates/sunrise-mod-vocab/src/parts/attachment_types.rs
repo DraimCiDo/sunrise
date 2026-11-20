@@ -4,7 +4,9 @@ use crate::{AttachmentCodec, AttachmentError, Holder, LevelRandomHost};
 use sunrise_mod_runtime::attachments::{AttachmentType, CheckedAttachmentType};
 
 // no wire: an authoring descriptor contains process-local callbacks.
-/// An attachment's saved name, default and optional persistence policies.
+/// Declares an attachment's saved name, default, optional codec and policies.
+/// Submit it once in [`crate::Hooks::register`] with `registrar.register_attachment_type`,
+/// then keep the returned [`AttachmentKey`] on the Part or mod that will use it.
 pub struct AttachmentDescriptor<T> {
     id: &'static str,
     default: fn() -> T,
@@ -14,7 +16,8 @@ pub struct AttachmentDescriptor<T> {
 }
 
 impl<T> AttachmentDescriptor<T> {
-    /// Start a transient attachment. `id` must explicitly name the owning package's namespace.
+    /// Start a transient attachment with an explicit `namespace:name` owned by the registrar's
+    /// package. Keep the old ID and codec when migrating saved data.
     pub const fn new(id: &'static str, default: fn() -> T) -> Self {
         Self {
             id,
@@ -31,8 +34,8 @@ impl<T> AttachmentDescriptor<T> {
         self
     }
 
-    /// Send the saved form to clients that track the holder, at transaction commit.
-    /// Registration refuses this policy without a codec.
+    /// Send the saved form to clients that track the holder. Writes publish at the outermost
+    /// commit and rolled-back writes send nothing. Registration refuses this policy without a codec.
     pub const fn sync(mut self) -> Self {
         self.sync = true;
         self
@@ -148,8 +151,12 @@ impl RegisteredAttachment {
 }
 
 // no wire: a key holds a process-local registration identity and its typed callbacks.
-/// An owned handle to one registration, obtained from the registrar and kept on a mod or Part.
-/// A key from a different installation cannot read or write an attachment of the same name.
+/// An owned handle to one attachment registration. Keep it on the mod or Part and borrow it
+/// for reads and writes. Clones use the same registration and the owner's callbacks.
+///
+/// A key from an earlier installation returns [`AttachmentError::StaleKey`] even if its name
+/// and Rust type match a current registration. This is independent of the holder's lifetime:
+/// a live key does not keep entities or chunks loaded.
 pub struct AttachmentKey<T: 'static>(Arc<AttachmentRegistration<T>>);
 
 impl<T> Clone for AttachmentKey<T> {
@@ -250,7 +257,8 @@ impl<T: Clone + Send + Sync + 'static> AttachmentKey<T> {
         self.live()?.remove(host.attachments(), holder)
     }
 
-    /// Queue the current value for the clients tracking the holder, if the type syncs.
+    /// Queue the current value for the clients tracking the holder, if the attachment syncs.
+    /// Like a synced write, this publishes only on commit.
     pub fn sync_data(&self, host: &mut dyn Host, holder: Holder) -> Result<(), AttachmentError> {
         self.live()?.sync_data(host.attachments(), holder)
     }
@@ -326,7 +334,10 @@ pub trait AttachmentTypesRegistrar {
 }
 
 impl dyn Registrar + '_ {
-    /// Register the descriptor once and keep the key on the mod or Part that uses it.
+    /// Register the descriptor once in [`crate::Hooks::register`] and keep the issued key on the
+    /// mod or Part that uses it. The name must belong to this package and be unique. A refusal
+    /// fails installation even if the result is ignored.
+    ///
     /// Sync and copy-on-death both require a codec. A `side = "server"` package may use, but
     /// cannot declare, a synced attachment.
     pub fn register_attachment_type<T: Send + Sync + 'static>(
@@ -339,9 +350,10 @@ impl dyn Registrar + '_ {
             .map_err(|_| format!("attachment {id}: registrar returned a different value type"))
     }
 
-    /// Obtain an owned key that shares the owner's default, codec and policies. Look it up after
-    /// the owner registers it (declare a dependency to order the packages). An unknown id gives
-    /// `Undeclared`; a different `T` gives `TypeMismatch`.
+    /// Obtain an owned key that shares the owner's default, codec and policies. In
+    /// [`crate::Hooks::register`], look it up after the owner registers it (declare a dependency
+    /// to order the packages). Do not submit a second descriptor. An unknown id gives
+    /// [`AttachmentError::Undeclared`]; a different `T` gives [`AttachmentError::TypeMismatch`].
     pub fn attachment_key<T: Send + Sync + 'static>(
         &self,
         id: &str,

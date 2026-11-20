@@ -94,8 +94,9 @@ impl EntityRenderAttachments {
     }
 
     /// Borrows the synced value of `key`, or returns `Ok(None)` if absent or not captured.
-    /// Never inserts a default and never reads the live world. It uses the registered codec
-    /// and refuses keys from earlier installations even if the snapshot has no matching row.
+    /// Keep the issued key on the renderer. This uses the owner's codec and never inserts
+    /// a default or checks live residency. An old key returns [`AttachmentError::StaleKey`]
+    /// even if the snapshot has no matching field.
     pub fn get<T: Send + Sync + 'static>(
         &self,
         key: &AttachmentKey<T>,

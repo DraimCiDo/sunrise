@@ -18,7 +18,7 @@ cargo doc -p sunrise-mod-api --no-deps --open
 | `BlockPart`, `ItemPart`, `BlockEntityPart`, `MenuPart`, `EntityPart` | Per-object behaviour ([Parts](../concepts/parts.md)) |
 | `Host`, `ServerHost`, `ClientHost` | What a hook can ask of the game, split by side |
 | `Registrar` | What a mod declares in `Hooks::register`: keys, Parts, settings |
-| `AttachmentDescriptor`, `AttachmentKey` | Register data a mod keeps on objects, and use its issued key ([Attachments](../concepts/attachments.md)) |
+| `AttachmentDescriptor`, `AttachmentKey` | Register an attachment once, retain its issued key on the Part or mod, or obtain the owner's key with `registrar.attachment_key::<T>(id)` ([Attachments](../concepts/attachments.md)) |
 | `Wire` | Encoding typed payloads and other API data ([Wire types](../concepts/wire-types.md)) |
 
 

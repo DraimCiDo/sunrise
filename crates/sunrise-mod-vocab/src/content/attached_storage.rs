@@ -59,7 +59,8 @@ pub type AttachedFluids = AttachedStacks<FluidResource>;
 
 impl<R: StackedResource> AttachedStacks<R> {
     /// `size` indices of `attachment` on `holder`, each holding up to `capacity` of what `valid`
-    /// accepts. Returns `None` if `size` exceeds the codecs' 4096-index limit.
+    /// accepts. The handler owns the issued key; clone it if the provider also retains it.
+    /// Returns `None` if `size` exceeds the codecs' 4096-index limit.
     pub fn new(
         attachment: AttachmentKey<StackList<R>>,
         holder: Holder,
@@ -78,7 +79,7 @@ impl<R: StackedResource> AttachedStacks<R> {
             valid,
         })
     }
-    /// One index (`ItemStackResourceHandler`, a single tank).
+    /// One index (`ItemStackResourceHandler`, a single tank). Owns the issued key.
     pub fn single(
         attachment: AttachmentKey<StackList<R>>,
         holder: Holder,
@@ -216,7 +217,7 @@ pub struct AttachedEnergy {
 
 impl AttachedEnergy {
     /// `attachment` on `holder`, holding up to `capacity`, at most `max_insert` in and
-    /// `max_extract` out per call.
+    /// `max_extract` out per call. The handler owns the issued key.
     pub fn new(
         attachment: AttachmentKey<u32>,
         holder: Holder,

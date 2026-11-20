@@ -57,12 +57,12 @@ Block entity types can only be declared by a package's code, not by content file
 A `side = "server"` package whose Part on such a type listens to a client hook is refused like any other
 client-side Part.
 
-The Part's state (`block_entity_part_with_state`) is a key the attaching package declared with
-`register_attachment_type`, which accepts only that package's own namespace. It is saved in the block entity's
-attachment compound under that package's id, not under the owner's. A Part reaches the owner's state only through an
-attachment the owner declared (the public attachment API); a key nobody declared is refused at load, naming the
-package. When the attaching package is removed, what it saved stays in the block entity, unread (the saved
-attachment compound keeps entries it does not know on save), and is read again if the package comes back.
+For its own state, the attaching package registers a descriptor in its own namespace and stores
+its issued key on the Part. The data is saved under the attachment key's name, not the block
+entity type's name. To share an attachment with the type's owner, declare a dependency and obtain
+`r.attachment_key::<T>(id)` after the owner registers it. A missing registration refuses the lookup;
+do not register the owner's name yourself. When a package is absent, its saved attachment stays
+unread in the block entity and can be read again when the package returns.
 
 ## Removal side effects
 
@@ -124,8 +124,10 @@ let done = self.edit_state(host, entity, |_, progress| {
   of its own. The closure gets a copy and the host, and no store borrow is held while it runs. The
   result is stored when the closure returns.
 - Every call checks that the key and holder are still current. A handle from another level gives `PartStateError::OtherLevel`.
-  A removed, replaced or unloaded block entity gives `Stale`. After a reload the saved value is read
-  under the new handle.
+  A removed, replaced or unloaded block entity gives `Stale`. After a chunk reload, read the saved
+  value through the new holder handle. A key from a previous mod installation instead gives
+  `PartStateError::Attachment` with `AttachmentError::StaleKey`; use a key obtained during current
+  registration.
 - An edit stores nothing, and its transaction aborts with everything the closure wrote, in these
   cases:
   - the closure panics and the panic unwinds. A panic that aborts

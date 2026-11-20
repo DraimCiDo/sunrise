@@ -37,8 +37,9 @@ use std::fmt;
 ///
 /// Reads take `&dyn Host` and return a snapshot; edits take `&mut dyn ServerHost`, run in
 /// their own nested transaction and store the new value only when the closure returns, as
-/// [`BlockEntityPartState`]'s do. Every call first checks that `entity` is of the open
-/// world and still names a resident entity, in the level this host is in:
+/// [`BlockEntityPartState`]'s do. Calls check both the current key and the resident entity.
+/// A key from an earlier installation gives [`PartStateError::Attachment`] with
+/// [`AttachmentError::StaleKey`]. Holder refusals are separate:
 /// - a removed, unloaded or moved entity refuses with [`PartStateError::Stale`];
 /// - an entity in another level refuses with [`PartStateError::OtherLevel`];
 /// - an entity out of its level's lists for its own tick refuses with
@@ -56,9 +57,9 @@ use std::fmt;
 pub trait EntityPartState: EntityPart + Sized {
     /// The value each entity of the Part's type keeps.
     type Data: Clone + Send + Sync + 'static;
-    /// This Part instance's attachment key, default and codec. Return the same key throughout
-    /// the Part's lifetime; the registrar reads it before attaching the Part. Without a codec
-    /// the value lasts for the session only.
+    /// Borrow the issued key stored on this Part. Return the same key throughout the Part's
+    /// lifetime; the registrar reads it before attaching the Part. Without a codec the value
+    /// lasts for the session only.
     fn state_key(&self) -> &AttachmentKey<Self::Data>;
 
     /// The entity's value, or the default when it has none. Inserts nothing.

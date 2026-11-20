@@ -23,6 +23,12 @@ What a hook's return value means depends on its kind:
 
 A hook with no receiver gets no `Host`.
 
+A mod that keeps data on game objects registers the [attachment descriptor](attachments.md)
+once in `Hooks::register` and stores the returned key on the Part or mod. To use a dependency's
+attachment, obtain its owner's key from the registrar rather than registering the name again.
+In later hooks, pass the host and holder to the key. A stale key names an old registration;
+a stale holder names an object that is no longer the same resident object.
+
 ## Player tick hooks
 
 `player_tick_pre` and `player_tick_post` bracket the player's body tick on both

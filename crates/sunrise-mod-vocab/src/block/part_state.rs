@@ -13,7 +13,8 @@ use std::{cell::RefCell, fmt, sync::Arc};
 ///
 /// Implement it beside [`BlockEntityPart`] and attach the Part with
 /// [`Registrar::block_entity_part_with_state`](crate::Registrar). `BlockEntityPart`
-/// itself stays object-safe: this trait is only for the typed calls below.
+/// itself stays object-safe: this trait is only for the typed calls below. Register the
+/// descriptor once and store its issued key on the Part before attaching it.
 ///
 /// ```rust,ignore
 /// struct Press {
@@ -35,19 +36,19 @@ use std::{cell::RefCell, fmt, sync::Arc};
 ///
 /// Reads take `&dyn Host` and return a snapshot. Edits take `&mut dyn ServerHost`, run in
 /// their own nested transaction and store the new value only when the closure returns.
-/// Every call first checks that `entity` is still the block entity it named, in the
-/// level this host is in: a replaced, removed or unloaded one refuses with
-/// [`PartStateError::Stale`]. A block entity out of the world for its own tick still
-/// answers, through [`BlockEntitiesHost::block_entity_identity`].
+/// Calls check the key's installation and that `entity` still names the same block entity.
+/// An old key gives [`PartStateError::Attachment`] with [`AttachmentError::StaleKey`]; a
+/// replaced, removed or unloaded holder gives [`PartStateError::Stale`]. A block entity out of
+/// the world for its own tick still answers through [`BlockEntitiesHost::block_entity_identity`].
 ///
 /// Server-side only for now: the state key must not sync or copy on death, and a client
 /// reads the default.
 pub trait BlockEntityPartState: BlockEntityPart + Sized {
     /// The value each block entity of the Part's type keeps.
     type Data: Clone + Send + Sync + 'static;
-    /// This Part instance's attachment key, default and codec. Return the same key throughout
-    /// the Part's lifetime; the registrar reads it before attaching the Part. Without a codec
-    /// the value lasts for the session only.
+    /// Borrow the issued key stored on this Part. Return the same key throughout the Part's
+    /// lifetime; the registrar reads it before attaching the Part. Without a codec the value
+    /// lasts for the session only.
     fn state_key(&self) -> &AttachmentKey<Self::Data>;
 
     /// The block entity's value, or the default when it has none. Inserts nothing.
@@ -381,7 +382,8 @@ fn attachment<T>(key: &AttachmentKey<T>, error: AttachmentError) -> PartStateErr
     }
 }
 
-/// [`BlockEntityPartState::state_existing`] for any key.
+/// [`BlockEntityPartState::state_existing`] for an issued key and a scoped holder, without
+/// inserting a default. A stale holder and a stale key are separate refusals.
 pub fn read_state<H: PartStateHolder, T: Clone + Send + Sync + 'static>(
     host: &dyn Host,
     entity: H,

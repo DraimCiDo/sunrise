@@ -10,7 +10,8 @@ pub trait AttachmentQueries: Host {
     /// Capture a SNAPSHOT of membership and value bindings in the current dimension.
     /// Later changes appear only in fresh queries. This is a residency view: an
     /// entity removed but not yet swept may still appear; stale writes fail.
-    /// Construction never clones or decodes values; iteration decodes lazily.
+    /// Construction never clones or decodes values; iteration decodes lazily. A key from
+    /// an earlier installation returns [`AttachmentError::StaleKey`].
     fn query<'key, T: Send + Sync + 'static>(
         &self,
         key: &'key AttachmentKey<T>,
@@ -93,12 +94,14 @@ impl<T: Clone + Send + Sync + 'static> AttachmentRowMut<'_, T> {
             AttachmentHolder::Level(_) => Holder::Level,
         })
     }
-    /// Replace through the ordinary write path, refusing stale residency first.
+    /// Replace through the ordinary write path. An invalid residency returns
+    /// [`AttachmentRowError::StaleHolder`]; a stale key on a resident row returns
+    /// [`AttachmentRowError::Value`] with [`AttachmentError::StaleKey`].
     pub fn set(&self, host: &mut dyn ServerHost, value: T) -> Result<(), AttachmentRowError> {
         let holder = self.holder_for_write(host)?;
         self.key.set(host, holder, value).map_err(write_error)
     }
-    /// Remove through the ordinary write path, refusing stale residency first.
+    /// Remove through the ordinary write path, with the same checks as [`Self::set`].
     pub fn remove(&self, host: &mut dyn ServerHost) -> Result<Option<T>, AttachmentRowError> {
         let holder = self.holder_for_write(host)?;
         self.key.remove(host, holder).map_err(write_error)

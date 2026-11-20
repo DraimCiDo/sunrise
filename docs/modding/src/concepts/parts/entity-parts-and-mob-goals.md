@@ -84,7 +84,8 @@ An entity Part that keeps a value on each entity of its type (a robot's charge, 
 declares it with `EntityPartState` and attaches with `r.entity_part_with_state(kind, part)`, beside
 `entity_part`. The value lives in the entity's attachment map, saved with the entity through the
 attachment codec and kept by transactions, through the same calls and rules as
-[block entity Part state](block-entity-types.md#part-state).
+[block entity Part state](block-entity-types.md#part-state). Register the descriptor once,
+store its issued key on the Part and return a borrow from `state_key`.
 
 ```rust,ignore
 struct Robot {
@@ -116,7 +117,9 @@ let full = self.edit_state(host, robot, |_, charge| {
     the root commit), unloaded or moved under a new id, gives `PartStateError::Stale`, and
     `edit_state` creates no map;
   - an entity resident in another level than the host's gives `OtherLevel`;
-  - an entity out of its level's lists for its own tick gives `HolderBusy`.
+  - an entity out of its level's lists for its own tick gives `HolderBusy`;
+  - a prior installation's key gives `PartStateError::Attachment` with `AttachmentError::StaleKey`.
+    Finding a fresh entity handle does not make the old key usable.
 - A reloaded entity has a new handle, which reads the saved value; a value without a codec is gone.
 - Changing level, a lone mob or general entity is rebuilt under a new id: the old handle is `Stale`,
   and the state arrives with the entity under its new id. A vehicle a player rides keeps its id, and

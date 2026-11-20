@@ -23,7 +23,7 @@ pub trait Hooks {
   with default pickup delay, and `experience` awards (amount, position) entries as orbs.
   Each list is limited to 1024 entries and positions must be finite. It runs inside
   the level's write with the level host, like `neighbor_changed`; the block entity is still in place, so the part
-  reads its attachments with `key.get_existing_in(host, Holder::BlockEntity(pos))` using the key it registered.
+  reads its attachments with `key.get_in(host, Holder::BlockEntity(pos))` using the key it retained at registration.
   A part that returns nothing draws nothing.
   A block entity that removes its own block during its `block_entity_tick` or `menu_button` is out of the level for
   that call, so its part isn't asked: its attachments go with it, and only its container slots come back out."#]

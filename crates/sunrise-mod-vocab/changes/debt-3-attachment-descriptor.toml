@@ -1,21 +1,26 @@
+# The AttachmentTypesRegistrar member records changed, not the call-only trait record.
+# Registrar::*_part_with_state, the declaration methods and AttachmentRowMut::{set,remove}
+# keep their signatures; their refusal changes are recorded on the error types below.
+# The removed AttachmentDeclarations lookup was doc-hidden, so it has no exported ID.
 ids = [
-    "trait:BlockEntityPartState",
-    "assoc:BlockEntityPartState::DATA",
-    "method:BlockEntityPartState::state_key",
-    "method:BlockEntityPartState::state",
-    "method:BlockEntityPartState::state_existing",
-    "method:BlockEntityPartState::state_in",
-    "method:BlockEntityPartState::state_existing_in",
-    "method:BlockEntityPartState::edit_state",
-    "trait:EntityPartState",
-    "assoc:EntityPartState::DATA",
-    "method:EntityPartState::state_key",
-    "method:EntityPartState::state",
-    "method:EntityPartState::state_existing",
-    "method:EntityPartState::edit_state",
-    "fn:edit_part_state",
-    "trait:Registrar",
-    "trait:AttachmentTypesRegistrar",
+    "type:AttachmentType",
+    "type:AttachmentType.namespace",
+    "type:AttachmentType.name",
+    "type:AttachmentType.default",
+    "type:AttachmentType.codec",
+    "type:AttachmentType.copy_on_death",
+    "type:AttachmentType.sync",
+    "handle:AttachmentType::get",
+    "handle:AttachmentType::has",
+    "handle:AttachmentType::get_existing",
+    "handle:AttachmentType::with_decoded",
+    "handle:AttachmentType::set",
+    "handle:AttachmentType::remove",
+    "handle:AttachmentType::sync_data",
+    "type:AttachmentEntry",
+    "handle:AttachmentEntry::from_saved",
+    "handle:AttachmentEntry::saved",
+    "handle:AttachmentEntry::read",
     "method:AttachmentTypesRegistrar::register_attachment_type",
     "method:AttachmentTypesRegistrar::submit_attachment",
     "method:AttachmentTypesRegistrar::lookup_attachment",
@@ -38,36 +43,63 @@ ids = [
     "handle:AttachmentKey::set",
     "handle:AttachmentKey::remove",
     "handle:AttachmentKey::sync_data",
+    "handle:AttachmentKey::get_in",
+    "handle:AttachmentKey::has_in",
+    "handle:AttachmentKey::get_existing_in",
+    "handle:AttachmentKey::set_in",
+    "handle:AttachmentKey::remove_in",
+    "handle:AttachmentKey::sync_data_in",
     "type:AttachmentError",
     "type:AttachmentError.StaleKey",
+    "type:AttachmentRowError",
+    "trait:BlockEntityPartState",
+    "assoc:BlockEntityPartState::DATA",
+    "method:BlockEntityPartState::state_key",
+    "method:BlockEntityPartState::state",
+    "method:BlockEntityPartState::state_existing",
+    "method:BlockEntityPartState::state_in",
+    "method:BlockEntityPartState::state_existing_in",
+    "method:BlockEntityPartState::edit_state",
+    "trait:EntityPartState",
+    "assoc:EntityPartState::DATA",
+    "method:EntityPartState::state_key",
+    "method:EntityPartState::state",
+    "method:EntityPartState::state_existing",
+    "method:EntityPartState::edit_state",
+    "type:PartStateDeclaration",
+    "handle:PartStateDeclaration::of",
+    "handle:PartStateDeclaration::check",
+    "type:PartStateRefusal",
+    "type:PartStateRefusal.Incompatible",
+    "type:PartStateRefusal.StaleKey",
+    "type:PartStateError",
+    "type:BlockEntityStateError",
+    "type:EntityPartStateError",
+    "fn:read_state",
+    "fn:edit_part_state",
+    "method:AttachmentQueries::query",
+    "method:AttachmentQueriesMut::query_mut",
+    "handle:AttachmentBatch::query",
+    "handle:EntityRenderAttachments::get",
+    "handle:OriginalPlayerRef::attachment",
+    "handle:ChunkDiskData::get",
+    "handle:ChunkDiskData::set",
+    "handle:ChunkDiskData::remove",
+    "handle:AttachedStacks::new",
+    "handle:AttachedStacks::single",
+    "handle:AttachedEnergy::new",
 ]
-why = "Register the attachment's name, type, default, codec and policies together, so all consumers of an issued key use the owner's callbacks. Keys from past installations are refused even when their name and Rust type match. The Part instance supplies its state key instead of a type-wide static. Saved names, holder checks and transaction behavior are unchanged."
-migrate = """\
-    Replace `r.register_attachment_type("mod:counter", synced)` with \
-    `let counter = r.register_attachment_type(AttachmentDescriptor::new("mod:counter", default))?`. \
-    Use the same full saved name and default function. Move `codec: Some(codec)` into \
-    `.serialize(codec)` on the descriptor. Add `.sync()` for `synced = true` or `.copy_on_death()` \
-    for `copy_on_death: true`; both require the codec. Store the returned `AttachmentKey<T>` \
-    on the consuming mod or Part. For ordinary attachment access, use `counter.get(host, holder)`, \
-    `counter.has(host, holder)`, `counter.get_existing(host, holder)`, `counter.set(host, holder, value)`, \
-    `counter.remove(host, holder)` and `counter.sync_data(host, holder)` in place of calling those methods \
-    on a static `AttachmentType<T>`. Pass the hook host rather than its raw storage adapter. \
-    For another package's attachment, declare a dependency and replace a locally assembled typed key \
-    with `r.attachment_key::<T>("owner:counter")?` in your registration after the owner. \
-    Handle `TypeMismatch` for a wrong Rust type and `Undeclared` for a missing name. \
-    If an operation returns `AttachmentError::StaleKey`, discard the key and obtain one during the \
-    current installation's registration pass; do not retry with the stale key. \
-    The object-safe registrar operations are `submit_attachment(descriptor.into())` and \
-    `lookup_attachment(id)`, returning an opaque `RegisteredAttachment`; use the typed inherent \
-    methods above when the value type is known. \
-    Replace `const DATA` on `BlockEntityPartState` or `EntityPartState` with \
-    `fn state_key(&self) -> &AttachmentKey<Self::Data>` returning a borrow of the Part's key field. \
-    Initialize that field in the Part passed to `block_entity_part_with_state` or `entity_part_with_state`; \
-    keep the same namespace and name. Replace `P::DATA` with `part.state_key()`. \
-    Replace `P::state(host, entity)`, `P::state_existing(host, entity)`, and `P::edit_state(host, entity, edit)` \
-    with `part.state(host, entity)`, `part.state_existing(host, entity)`, and `part.edit_state(host, entity, edit)` \
-    (`self` in a Part hook). For block entities, replace `P::state_in(level, entity)` and \
-    `P::state_existing_in(level, entity)` with `part.state_in(level, entity)` and \
-    `part.state_existing_in(level, entity)`. Pass a borrow of the issued key to \
-    `edit_part_state(host, entity, &key, edit)`. \
-    """
+why = "The owner registers the attachment's type, saved name, default, codec and policies together. Everyone who uses it gets a key for that same registration. The Part keeps the key on the instance, and a key left over from a prior installation cannot access values by matching a name. Saved names, attachment bytes and sync at commit are unchanged."
+migrate = """
+Replace `r.register_attachment_type("mod:counter", synced)` plus `static COUNTER: AttachmentType<T> = AttachmentType { ... }` with `let counter = r.register_attachment_type(AttachmentDescriptor::new("mod:counter", default))?` in a fallible helper called from `Hooks::register`. Move `codec: Some(codec)` to `.serialize(codec)`, add `.sync()` when `synced` was true and `.copy_on_death()` when that flag was true. Both policies require `.serialize(codec)`. Keep the same `namespace:name`, codec and saved representation; existing saves and attachment sync bytes do not need migration. Registration refusal still fails installation even if ignored.
+
+Store `counter: AttachmentKey<T>` on the Part or mod that uses it; clone the key for multiple consumers. Replace `COUNTER.get(store, holder)` (and `has`, `get_existing`, `set`, `remove`, `sync_data`) with `self.counter.get(host, holder)` and the same operations on the issued key. Pass the hook host, not `host.attachments()`. For a `LevelRandomHost`, use `key.get_in(level, holder)`, `has_in`, `get_existing_in`, `set_in`, `remove_in` or `sync_data_in`. The raw decoded-cache read `with_decoded` has no replacement that inspects only the cache: use `let value = key.get_existing(host, holder)?; read(value.as_ref())` for an optional value (this may decode saved data), or borrow the row value from an attachment query. Raw `AttachmentEntry` construction and inspection are no longer mod APIs; for live values use `AttachmentKey`, and for snapshots read `host.query(&key)?.iter()` or `host.query(&key)?.get(holder)`.
+
+For a dependency's attachment, declare the dependency and use `r.attachment_key::<T>("owner:counter")?` during your registration, after the owner registers it. Do not submit the descriptor again. This replaces assembling a typed descriptor by hand or checking the old `attachment_declarations().validate_attachment_type(...)` lookup. The owner's codec and policies apply. Unknown IDs give `AttachmentError::Undeclared`; mismatched `T` gives `AttachmentError::TypeMismatch`. When implementing `AttachmentTypesRegistrar`, replace the name/bool method with `submit_attachment(&mut self, descriptor: ErasedAttachmentDescriptor) -> Result<RegisteredAttachment, String>` and `lookup_attachment(&self, id: &str) -> Result<RegisteredAttachment, AttachmentError>`; for callers with a known `T`, use the typed methods on `dyn Registrar`.
+
+On `BlockEntityPartState` or `EntityPartState`, replace `const DATA: &'static AttachmentType<Self::Data>` with `fn state_key(&self) -> &AttachmentKey<Self::Data>` returning a borrow of the key field. Initialize that field in the Part passed to `r.block_entity_part_with_state(&kind, part)` or `r.entity_part_with_state(kind, part)`; those calls still take the Part instance, not a separate key argument. Replace `P::DATA` with `part.state_key()`. Replace `P::state(host, entity)`, `P::state_existing(host, entity)` and `P::edit_state(host, entity, edit)` with `part.state(host, entity)`, `part.state_existing(host, entity)` and `part.edit_state(host, entity, edit)` (`self` in a Part hook). For block entities, likewise replace `P::state_in(level, entity)` and `P::state_existing_in(level, entity)` with `part.state_in(level, entity)` and `part.state_existing_in(level, entity)`. Pass `&key` instead of `&TYPE` to `read_state(host, entity, &key)`, `edit_part_state(host, entity, &key, edit)` and `PartStateDeclaration::of(&key)`. Pass the matching in-flight `Option<&RegisteredAttachment>` to `declaration.check(current_record)`. The declaration is `Clone`, not `Copy` or `Wire`; clone it if you need another in-process copy. Match `PartStateRefusal::StaleKey` for a declaration from the wrong pass; remove the old `Incompatible` arm and handle `AttachmentError::TypeMismatch` at typed lookup instead.
+
+Pass `&key` in place of `&TYPE` to `host.query`, `host.query_mut`, `batch.query`, `render_attachments.get`, `original.attachment(host, ...)`, and `ChunkDiskData::{get,set,remove}`. Retain the issued key on the renderer or disk listener. `AttachedStacks::{new,single}` (including `AttachedItems` and `AttachedFluids`) and `AttachedEnergy::new` take `key` by value instead of `&TYPE`; pass `key.clone()` if the provider also keeps it.
+
+On `AttachmentError::StaleKey`, discard the key and use one obtained at the current registration. The type and name can still match. For Part reads and edits this is `PartStateError::Attachment { error: AttachmentError::StaleKey, .. }`, not `PartStateError::Stale`. Row writes still use `row.set(host, value)` and `row.remove(host)`; a resident row with a stale key gives `AttachmentRowError::Value(AttachmentError::StaleKey)`, whereas an invalid residency gives `AttachmentRowError::StaleHolder`. Obtain a fresh holder or query for stale residency, not a new key. A stale key in a disk callback refuses the job, not a live chunk holder.
+"""

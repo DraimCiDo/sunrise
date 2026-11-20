@@ -39,9 +39,13 @@
 //! | [`BlockPart`], [`ItemPart`], [`BlockEntityPart`], [`MenuPart`], [`EntityPart`] | Behaviour for the objects a mod attaches a Part to. |
 //! | [`Registrar`] | What a mod declares in [`Hooks::register`]: registry keys, Parts and settings. |
 //! | [`Host`], [`ServerHost`], [`ClientHost`] | The game as a hook sees it, split by side so a call on the wrong side does not compile. |
-//! | [`AttachmentDescriptor`], [`AttachmentKey`] | Register data a mod keeps on levels, chunks, entities and other holders, and use its issued key. |
+//! | [`AttachmentDescriptor`], [`AttachmentKey`] | Register each attachment once and keep the issued key on the Part or mod. |
 //! | [`Wire`](derive@Wire) | The derive that encodes typed payloads and other values. |
 //!
+//!
+//! In `Hooks::register`, submit your `AttachmentDescriptor` with `registrar.register_attachment_type`.
+//! For a dependency's attachment, use `registrar.attachment_key::<T>(id)` after the owner registers it.
+//! Keep the returned key for this installation; the name alone cannot replace it.
 //!
 //! # Guides in the book
 //!

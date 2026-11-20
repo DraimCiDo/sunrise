@@ -2,18 +2,21 @@
 
 Register each attachment once in `Hooks::register`. The descriptor supplies the
 fully qualified name, the default and any persistence or sync policy. Keep the
-returned `AttachmentKey<T>` on the Part or mod that uses it.
+returned `AttachmentKey<T>` on the Part or mod that uses it. One descriptor
+supplies the policy for every holder that uses this key; do not register it again
+for another Part. Clone the issued key if several Parts need it.
 
 ```rust,ignore
 use mod_api::{AttachmentCodec, AttachmentDescriptor, AttachmentError, Compound, Holder, Tag};
 
-// During Hooks::register:
+// In a fallible registration helper called by Hooks::register:
 let counter = registrar.register_attachment_type(
-    AttachmentDescriptor::new("example:counter", || 0i32)
+    AttachmentDescriptor::new("example:counter", || 0_i32)
         .serialize(AttachmentCodec {
             encode: |n| Ok([("count".into(), Tag::Int(*n))].into()),
             decode: |data: &Compound| match data.get(&"count".into()) {
-                Some(Tag::Int(n)) => Ok(*n), _ => Err(AttachmentError::Decode),
+                Some(Tag::Int(n)) => Ok(*n),
+                _ => Err(AttachmentError::Decode),
             },
         }),
 )?;
@@ -30,12 +33,12 @@ make an attachment synced; use `.sync()` to enable syncing. Both `.sync()` and
 To use another package's attachment, declare a dependency so the owner
 registers first. Look up the key in your own `Hooks::register` with
 `registrar.attachment_key::<T>("owner:counter")`. The key shares the owner's
-default, codec and policy. The wrong Rust type returns `AttachmentError::TypeMismatch`;
-an unregistered name returns `AttachmentError::Undeclared` with the caller and
-attachment id. A server package can use a synced attachment owned by a package
-that joins the client comparison, but cannot register one itself. At load,
-registration refusals come first, then undeclared uses, then server-package
-admission.
+default, codec and policy. Do not submit a second descriptor for that name.
+The wrong Rust type returns `AttachmentError::TypeMismatch`; an unregistered name
+returns `AttachmentError::Undeclared` with the caller and attachment ID. For an
+optional dependency, handle lookup failure before attaching the Part. A server
+package can use a synced attachment owned by a package that joins the client
+comparison, but cannot register one itself.
 
 ## Reading and writing
 
@@ -46,11 +49,13 @@ and `getExistingData`): `has` says whether a value is stored, saved or set, even
 before it decodes, and `get_existing` returns `None` instead of the default. Neither
 adds anything to the holder's saved data. `set` runs the optional codec before
 changing the value, returning an `AttachmentError` if it cannot encode.
-Saved names are still `(namespace, name)`. An issued key also identifies one
-installation: a key from another installation returns `AttachmentError::StaleKey`,
-even if the same name and Rust type were registered again. On a server, a missing
-holder is an error, not a new phantom holder; a client
-keeps a copy for any holder it is asked about (see the sync paragraph below).
+Saved names are still `(namespace, name)` and the codec writes the same bytes.
+A key from another installation returns `AttachmentError::StaleKey`, even if the
+same name and Rust type were registered again. Obtain a fresh key at registration;
+looking up a new holder does not repair an old key. A live key does not keep a holder
+loaded: a missing server holder yields `AttachmentError::MissingHolder`, and an
+invalid scoped query row yields `AttachmentRowError::StaleHolder` on write. A client
+keeps a copy for holders it is asked about (see [Synchronization](#synchronization)).
 `AttachmentError` distinguishes `MissingHolder`, `TypeMismatch`, `Decode`, `Encode`,
 `InvalidNamespace` (a malformed saved compound), `InvalidCopyPolicy` (death-copy
 without a codec) and `InvalidSyncPolicy` (sync without a codec), `HolderBusy` (storage temporarily
@@ -81,7 +86,8 @@ Each borrowed row has `holder()`, `value()`, and explicit `set(host, replacement
 `remove(host)` methods. These validate residency against the host's current
 dimension and then use the ordinary attachment journal. There is no `&mut T`,
 implicit transaction, or commit on drop: wrap a system in `host.transaction` for
-all-or-nothing writes. Unload or replacement produces `AttachmentRowError::StaleHolder`.
+all-or-nothing writes. Unload or replacement produces `AttachmentRowError::StaleHolder`;
+a resident row with an old key produces `AttachmentRowError::Value(AttachmentError::StaleKey)`.
 Rows retain captured values even after successful write-through updates.
 
 Traversal follows dense index order: insertion appends, and removal fills its slot
@@ -168,6 +174,7 @@ an issued `AttachmentKey<T>` and reads the old value even when
 The original's `position`, `dimension`, `level`, and `inventory_slot` methods read the
 same pre-copy player. Inventory slot numbers are 0–35 for the main inventory,
 100–103 for boots through helmet, and -106 for the off hand. Every original read expires
-when the hook returns; keeping the handle does not keep the old player alive.
+when the hook returns; keeping the handle does not keep the old player alive. A
+current key on an expired original returns `MissingHolder`, not `StaleKey`.
 The snapshot retains shared attachment bindings, not a deep freeze of interior mutability.
 With no `player_clone` listener, no original snapshot is allocated.

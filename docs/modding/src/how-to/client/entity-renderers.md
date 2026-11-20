@@ -61,7 +61,7 @@ row's identity, age, pose and a frozen snapshot of its synced attachments
 ([attachments](../../concepts/attachments.md)).
 
 ```rust,ignore
-// During mod registration, keep the returned key for the renderer:
+// In a fallible helper called by Hooks::register, obtain and retain the key:
 let fuel = registrar.register_attachment_type(
     AttachmentDescriptor::new("example:fuel", || 0_i32).serialize(FUEL_CODEC).sync(),
 )?;
@@ -87,9 +87,12 @@ impl EntityRenderer for Missile {
 
 A row is eligible for extraction after its first attachment snapshot arrives. A field that could
 not fit into the bounded render snapshot reads as `None`; it does not stop the row from being
-submitted. A key from a previous mod installation returns `AttachmentError::StaleKey`;
-use the key issued during the current registration. `yaw`, `pitch` and `age` are interpolated to the frame. The pose stack starts at the row's
-interpolated position.
+submitted. Use the key from current registration (look up a dependency's key with
+`registrar.attachment_key::<T>(id)`). An old installation's key returns
+`AttachmentError::StaleKey`, not `None`, even if the field was not captured. The
+read only consults the frozen frame, not live entity residency. `yaw`, `pitch` and
+`age` are interpolated to the frame. The pose stack starts at the row's interpolated
+position.
 
 ### A living entity's frame
 

@@ -141,10 +141,10 @@ impl dyn Registrar + '_ {
         self.attach_entity_part(entity, type_name::<P>(), Arc::new(part));
     }
     /// [`Self::entity_part`] for a Part with typed state (`EntityPartState`): each entity
-    /// of type `entity` keeps one `P::Data` under `part.state_key()`. The registrar reads
-    /// the key before attaching the Part. It refuses keys that sync, copy on death, or reuse
-    /// a name this mod declared with another type. The key's owner must declare it, whether
-    /// it belongs to this package or another. The entity type is checked once every type is
+    /// of type `entity` keeps one `P::Data` under `part.state_key()`. Store the issued key
+    /// on the Part before attaching it. The registrar refuses stale keys and keys that sync
+    /// or copy on death. For another package's attachment, use `attachment_key` after the
+    /// owner registers the descriptor. The entity type is checked once every type is
     /// known, when the game loads: only mob types (vanilla and mod) and mod general entity
     /// types keep Part state. `minecraft:player`, any other vanilla family and an unknown id
     /// refuse the load, naming the type. `entity_part` itself checks no type.

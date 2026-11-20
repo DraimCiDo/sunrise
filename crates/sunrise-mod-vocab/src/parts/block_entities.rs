@@ -178,9 +178,9 @@ impl dyn Registrar + '_ {
     }
     /// [`Self::block_entity_part`] for a Part with typed state (`BlockEntityPartState`):
     /// each block entity of type `kind` keeps one `P::Data` under `part.state_key()`.
-    /// The registrar reads the key before attaching the Part. It refuses keys that sync,
-    /// copy on death, or reuse a name this mod declared with another type. The key's
-    /// owner must declare it, whether it belongs to this package or another.
+    /// Store the issued key on the Part before attaching it. The registrar refuses a key
+    /// from another registration pass or one that syncs or copies on death. For another
+    /// package's attachment, use `attachment_key` after its owner registers the descriptor.
     pub fn block_entity_part_with_state<P: crate::BlockEntityPartState>(
         &mut self,
         kind: &crate::BlockEntityTypeKey,

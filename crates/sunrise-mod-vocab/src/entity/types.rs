@@ -1148,6 +1148,8 @@ pub struct OriginalPlayerRef {
 impl OriginalPlayerRef {
     /// Read the original's attachment, including nonpersistent and non-copy-on-death data.
     /// A missing value answers its default without changing the replacement player.
+    /// Use the key retained from registration. A stale key is distinct from an original
+    /// player handle whose hook has expired.
     pub fn attachment<T: Clone + Send + Sync + 'static>(
         self,
         host: &mut dyn crate::Host,
