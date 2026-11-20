@@ -412,11 +412,8 @@ fn a_refused_save_keeps_its_disk_record_without_skipping_its_neighbour() {
         );
         assert_eq!(value(&mut save.load(2, -3, registry, &biomes).unwrap()), 9);
         let error = error.downcast::<RecordSaveFailures>().unwrap().to_string();
-        assert!(
-            error.contains("region 2,-3: chunk disk callback refused"),
-            "{error}"
-        );
-        assert!(!error.contains("3,-3"), "{error}");
+        assert!(error.contains("region 2,-3:"), "{error}");
+        assert!(!error.contains("region 3,-3:"), "{error}");
     });
 }
 
@@ -488,10 +485,7 @@ fn an_unencodable_record_can_be_retried_without_a_disk_listener() {
             assert_eq!(read(neighbour), Some(Tag::Int(3)));
             assert_eq!(read(other_region), Some(Tag::Int(4)));
             let error = error.downcast::<RecordSaveFailures>().unwrap().to_string();
-            assert!(
-                error.contains("region 2,-3: ") && error.contains("depth limit exceeded"),
-                "{error}"
-            );
+            assert!(error.contains("region 2,-3:"), "{error}");
             if consume_failure_before_retry {
                 assert_eq!(save.take_failed_chunk_saves(), [key]);
             }

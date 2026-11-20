@@ -188,10 +188,8 @@ fn a_compressed_size_rejection_does_not_skip_healthy_records_in_either_region() 
         );
         assert_eq!(disk.raw_chunk(1, 0), Some(old));
         assert_eq!(failed.keys().copied().collect::<Vec<_>>(), [(1, 0)]);
-        assert_eq!(
-            failed[&(1, 0)].to_string(),
-            "compressed chunk limit exceeded"
-        );
+        let cause = failed[&(1, 0)].get_ref().unwrap();
+        assert!(cause.is::<sunrise_world::region::CompressedChunkLimit>());
     }
 }
 

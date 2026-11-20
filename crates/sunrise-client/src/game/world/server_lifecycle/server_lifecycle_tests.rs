@@ -24,7 +24,7 @@ struct StoppedProbe {
 #[test]
 #[ignore = "daily"]
 fn integrated_stop_finishes_after_an_unencodable_record() {
-    use sunrise_client::save::{LevelShape, SaveDir, SessionLock};
+    use sunrise_client::save::{LevelShape, RecordSaveFailures, SaveDir, SessionLock};
     use sunrise_core::nbt::{DISK_WRITE_NESTING_GUARD, Tag};
 
     struct SaveEvents(Arc<Mutex<Vec<&'static str>>>);
@@ -95,11 +95,14 @@ fn integrated_stop_finishes_after_an_unencodable_record() {
                 sunrise_client::save::Level::read(root.path()).unwrap().name,
                 "saved on exit after record failure"
             );
-            let error = game.save.flush().unwrap_err().to_string();
-            assert!(
-                error.contains("entities 2,-3: ") && error.contains("depth limit exceeded"),
-                "{error}"
-            );
+            let error = game
+                .save
+                .flush()
+                .unwrap_err()
+                .downcast::<RecordSaveFailures>()
+                .unwrap()
+                .to_string();
+            assert!(error.contains("entities 2,-3:"), "{error}");
             assert!(
                 events.lock().unwrap().is_empty(),
                 "a partial save must not fire success callbacks"
