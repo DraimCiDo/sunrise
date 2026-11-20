@@ -23,6 +23,8 @@ mod projectile_targets;
 mod projectile_world;
 pub(super) use projectile_world::ProjWorld;
 mod pufferfish_player;
+#[cfg(test)]
+pub(in crate::game) mod render_fixture;
 mod residency;
 #[cfg(test)]
 mod retained_limits_tests;
@@ -141,6 +143,12 @@ pub(super) struct NativeSound {
     /// The entity the sound follows (`ClientboundSoundEntityPacket`), sent
     /// from `at`, where it was when the mod queued the sound.
     pub entity: Option<i32>,
+}
+
+/// Shared state for the mob runs in one entity pass.
+pub(in crate::game) struct MobDrawFrame<'a> {
+    living: LivingFrame<'a>,
+    precheck: bool,
 }
 
 #[derive(Default)]
@@ -8170,15 +8178,14 @@ impl Game<'_> {
         }
     }
 
-    pub(in crate::game) fn mob_geometry(
+    pub(in crate::game) fn begin_mob_geometry(
         &self,
         camera: glam::DVec3,
         alpha: f64,
-        out: &mut Vec<Vertex>,
-    ) {
+    ) -> MobDrawFrame<'_> {
         // The coarse mob bounds pay off only in dense async scenes; otherwise,
         // keep the existing exact mesh-culling path.
-        if self.settings.sunrise.entity_culling == EntityCullingMode::Asynchronous
+        let precheck = self.settings.sunrise.entity_culling == EntityCullingMode::Asynchronous
             && self
                 .async_occlusion_culler
                 .as_ref()
@@ -8186,25 +8193,8 @@ impl Game<'_> {
             && self.settings.sunrise.entity_culling_precheck != 0
             && self.mobs.len() >= self.settings.sunrise.entity_culling_precheck as usize
             && !self.pack_shadow_casters.0
-            && mod_api::__private::mods().is_empty()
-        {
-            self.mob_geometry_inner::<true>(camera, alpha, out);
-        } else {
-            self.mob_geometry_inner::<false>(camera, alpha, out);
-        }
-    }
-
-    fn mob_geometry_inner<const PRECHECK: bool>(
-        &self,
-        camera: glam::DVec3,
-        alpha: f64,
-        out: &mut Vec<Vertex>,
-    ) {
-        let scale = self.view_scale();
-        // Who watches (`Entity.isInvisibleTo`): the local player's team.
-        let viewer = self.player_team();
+            && mod_api::__private::mods().is_empty();
         self.rendered_mobs.set(0);
-        let (skinning, listened) = (self.skinning(), self.mob_render_listened());
         // What custom entity model animations read of the frame.
         sunrise_client::mobs::cem_anim::set_frame(sunrise_client::mobs::cem_anim::Frame {
             time: self.world.game_time as f64 + alpha,
@@ -8224,19 +8214,77 @@ impl Game<'_> {
                 == sunrise_client::camera::CameraType::ThirdPersonFront,
             ..Default::default()
         });
-        let frame = LivingFrame {
-            camera,
-            alpha,
-            scale,
-            viewer,
-            skinning,
-            listened,
-        };
-        for mob in &self.mobs {
-            self.living_geometry::<PRECHECK>(mob, &frame, out);
+        MobDrawFrame {
+            precheck,
+            living: LivingFrame {
+                camera,
+                alpha,
+                scale: self.view_scale(),
+                viewer: self.player_team(),
+                skinning: self.skinning(),
+                listened: self.mob_render_listened(),
+            },
         }
-        // Close the last tracked mob's span before the remaining world entities.
+    }
+
+    pub(in crate::game) fn mob_run_geometry(
+        &self,
+        frame: &MobDrawFrame<'_>,
+        fire: super::FlameView<'_>,
+        range: std::ops::Range<usize>,
+        out: &mut Vec<Vertex>,
+    ) {
+        if frame.precheck {
+            self.mob_run::<true>(&frame.living, fire, range, out);
+        } else {
+            self.mob_run::<false>(&frame.living, fire, range, out);
+        }
+    }
+
+    fn mob_run<const PRECHECK: bool>(
+        &self,
+        frame: &LivingFrame<'_>,
+        fire: super::FlameView<'_>,
+        range: std::ops::Range<usize>,
+        out: &mut Vec<Vertex>,
+    ) {
+        for mob in &self.mobs[range] {
+            self.living_geometry::<PRECHECK>(mob, frame, out);
+            // Blaze.isOnFire: a charged blaze burns. The billboard has its own visibility
+            // test, independent of model culling, but the render pre hook still cancels it.
+            let blazing = mob.species() == Species::Blaze && mob.extra.flag;
+            if (mob.is_on_fire() || blazing) && !mob.removed && !self.render_canceled(mob.id) {
+                let at = mob.previous.lerp(mob.position, frame.alpha);
+                if fire.contains(at, mob.width(), mob.height()) {
+                    // The flames don't track the model's motion.
+                    self.mark_motion(out.len(), 0);
+                    self.mark_entity(out.len(), &mob.kind.id);
+                    fire.emit(self, at, mob.width(), mob.height(), out);
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::game) fn mob_geometry(
+        &self,
+        camera: glam::DVec3,
+        alpha: f64,
+        out: &mut Vec<Vertex>,
+    ) {
+        let frame = self.begin_mob_geometry(camera, alpha);
+        let fire = self.entity_flame_view(camera, None);
+        self.mob_run_geometry(&frame, fire, 0..self.mobs.len(), out);
         self.mark_motion(out.len(), 0);
+        self.other_creature_geometry(camera, alpha, out);
+    }
+
+    pub(in crate::game) fn other_creature_geometry(
+        &self,
+        camera: glam::DVec3,
+        alpha: f64,
+        out: &mut Vec<Vertex>,
+    ) {
         self.general_entity_geometry(camera, alpha, out);
         self.elder_apparition_geometry(alpha, out);
         self.spawner_geometry(camera, alpha, out);

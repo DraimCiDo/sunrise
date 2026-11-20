@@ -132,19 +132,43 @@ fn events(heard: &Arc<Mutex<Heard>>) -> Vec<String> {
 fn two_entities_are_asked_in_the_draw_queues_order() {
     let heard = Arc::default();
     with_pair(&heard, |game| {
-        game.mobs.push(mob(game, "minecraft:zombie", 91, 0.0));
+        game.pack_ids = Some(Default::default());
+        let mut zombie = mob(game, "minecraft:zombie", 91, 0.0);
+        zombie.fire_ticks = 20;
+        game.mobs.push(zombie);
+        admit_own_player(game, false);
         game.mobs.push(mob(game, "minecraft:cow", 92, 2.0));
-        let out = mob_frame(game);
+        let (out, ..) = game.entity_geometry(CAMERA, 1.0, None, Vec::new());
         assert_eq!(
             events(&heard),
             [
                 "living_pre 91",
                 "living_post 91",
+                "player_pre true",
+                "living_pre 4321",
+                "living_post 4321",
+                "player_post true",
                 "living_pre 92",
                 "living_post 92"
             ]
         );
-        assert_eq!(markers(&out), 8, "each pre hook's marker is kept");
+        assert_eq!(markers(&out), 12, "each pre hook's marker is kept");
+        let motion = game.entity_motion.borrow();
+        let tracked: Vec<_> = motion.iter().copied().filter(|&(_, id)| id != 0).collect();
+        assert_eq!(
+            tracked.iter().map(|&(_, id)| id).collect::<Vec<_>>(),
+            [(1 << 32) | 91, Game::MOTION_OWN_PLAYER, (1 << 32) | 92]
+        );
+        assert!(tracked[0].0 < tracked[1].0 && tracked[1].0 < tracked[2].0);
+        let &(flame_start, _) = motion
+            .iter()
+            .find(|&&(start, id)| id == 0 && (tracked[0].0 + 1..tracked[1].0).contains(&start))
+            .expect("the zombie's fire follows its model and has no motion id");
+        let spans = game.entity_spans.borrow();
+        assert!(spans.iter().any(|span| span.start == flame_start));
+        let local = spans.iter().find(|span| span.player).unwrap();
+        assert_eq!(local.start, tracked[1].0);
+        assert!(!local.hidden);
     });
 }
 
@@ -153,9 +177,11 @@ fn two_entities_are_asked_in_the_draw_queues_order() {
 fn a_canceled_living_pre_skips_the_model_and_the_post_hook() {
     let heard: Arc<Mutex<Heard>> = Arc::default();
     with_pair(&heard, |game| {
-        game.mobs.push(mob(game, "minecraft:zombie", 91, 0.0));
+        let mut burning = mob(game, "minecraft:zombie", 91, 0.0);
+        burning.fire_ticks = 20;
+        game.mobs.push(burning);
         let drawn = mob_frame(game);
-        assert!(drawn.len() > 4, "its model, beside the marker");
+        assert!(drawn.len() > 4, "its model and flame, beside the marker");
         events(&heard);
         heard.lock().unwrap().cancel_living.push(91);
         let canceled = mob_frame(game);
@@ -163,7 +189,7 @@ fn a_canceled_living_pre_skips_the_model_and_the_post_hook() {
         assert_eq!(
             canceled.len(),
             4,
-            "the marker alone, no model: {}",
+            "the marker alone, no model or flame: {}",
             canceled.len()
         );
         assert_eq!(markers(&canceled), 4);
@@ -207,9 +233,8 @@ fn a_culled_entity_is_asked_neither_hook() {
     });
 }
 
-/// This window's player in third person, drawn by the game's own path for it, with its own entity
-/// id 4321; spectating when `spectator`.
-fn own_player_frame(game: &mut Game<'_>, spectator: bool) -> Vec<Vertex> {
+/// Admit this window's player in third person with entity id 4321.
+fn admit_own_player(game: &mut Game<'_>, spectator: bool) {
     let at = sunrise_core::geometry::Vec3::new(0.5, 64.0, 0.5);
     let mut player = sunrise_client::motion::PlayerMotion::new(game.motion, at).unwrap();
     player.entity_id = 4321;
@@ -218,8 +243,13 @@ fn own_player_frame(game: &mut Game<'_>, spectator: bool) -> Vec<Vertex> {
         remote.entity_id = 4321;
     }
     game.camera_type = sunrise_client::camera::CameraType::ThirdPersonBack;
+    game.resident_entities.local_player.renew();
     game.tick_player_model();
     game.player_model.as_mut().unwrap().extra.spectator = spectator;
+}
+
+fn own_player_frame(game: &mut Game<'_>, spectator: bool) -> Vec<Vertex> {
+    admit_own_player(game, spectator);
     game.prepare_entity_culling();
     let mut out = Vec::new();
     game.player_model_geometry(CAMERA, 1.0, &mut out);

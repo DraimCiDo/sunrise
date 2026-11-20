@@ -1,6 +1,5 @@
-//! One living entity's draw in the frame's mob pass (`LivingEntityRenderer.submit` and the
-//! layers, hooks, outline and beam around it), moved out of `mob_geometry_inner`: the pass
-//! works out the frame once (`LivingFrame`) and asks this for each mob in turn.
+//! One living entity's draw (`LivingEntityRenderer.submit` and the layers, hooks, outline
+//! and beam around it). The ordered entity pass shares one `LivingFrame` across its mob runs.
 use super::*;
 
 /// What the mob pass works out once a frame for every living entity it draws.
