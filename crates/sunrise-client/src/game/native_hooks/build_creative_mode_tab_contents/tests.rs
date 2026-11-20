@@ -471,3 +471,38 @@ fn creative_catalog_builds_lazily_and_edits_before_filtering_on_both_sides() {
         });
     });
 }
+
+/// A dedicated server's `creative_tabs` builds vanilla's tabs from the prepared catalog: the
+/// building blocks tab starts with oak log, as the client's creative screen shows it.
+#[test]
+#[ignore = "daily"]
+fn a_servers_creative_tabs_hold_vanillas_items() {
+    mod_platform::testing::with_mods(Vec::new().into(), || {
+        let _world = PhaseOwner::scope(ModPhase::World);
+        with_game_role(fixture_root(), ExecutionRole::DedicatedServer, |game| {
+            install_dedicated_holders(game, 2);
+            for permissions in [
+                CreativeTabPermissions::Normal,
+                CreativeTabPermissions::Operator,
+            ] {
+                let tabs = ItemsHost::creative_tabs(game, permissions).unwrap();
+                let building = tabs.tab("minecraft:building_blocks").unwrap();
+                assert_eq!(building.display_items[0], stack("minecraft:oak_log", 1));
+                assert!(
+                    !tabs
+                        .tab("minecraft:natural_blocks")
+                        .unwrap()
+                        .display_items
+                        .is_empty()
+                );
+                assert!(
+                    !tabs
+                        .tab("minecraft:search")
+                        .unwrap()
+                        .display_items
+                        .is_empty()
+                );
+            }
+        });
+    });
+}
