@@ -67,7 +67,7 @@ the storage-relative `Holder`, it carries the handle's world scope.
 
 ## Querying holders
 
-Import `AttachmentQueries` to use `host.query(&TYPE)` on either host side. The
+Import `AttachmentQueries` to use `host.query(&key)` on either host side. The
 returned batch is a **snapshot** of membership and stored value bindings in the
 host's current dimension. Its `iter()` borrows `&T` without cloning values and
 lazily decodes saved entries; malformed or incompatible values produce row errors,
@@ -75,7 +75,7 @@ not defaults. Later sets, removals and unloads appear only in fresh queries. Thi
 is a residency view: an entity queued for removal can appear until the removal sweep. Captured handles do not keep holders loaded, and stale writes fail.
 Interior mutability inside `T` is not deep-frozen by a snapshot.
 
-On a server, import `AttachmentQueriesMut` for `host.query_mut(&TYPE)` (`T: Clone`).
+On a server, import `AttachmentQueriesMut` for `host.query_mut(&key)` (`T: Clone`).
 Each borrowed row has `holder()`, `value()`, and explicit `set(host, replacement)` /
 `remove(host)` methods. These validate residency against the host's current
 dimension and then use the ordinary attachment journal. There is no `&mut T`,
@@ -161,8 +161,8 @@ spawn carries its synced entries).
 ## Reading the original player
 
 `player_clone` supplies `event.original: OriginalPlayerRef` alongside the replacement's
-`event.player` UUID. During that hook, `event.original.attachment(host, &TYPE)` takes
-an `AttachmentType<T>` for the attachment and reads the old value even when
+`event.player` UUID. During that hook, `event.original.attachment(host, &key)` takes
+an issued `AttachmentKey<T>` and reads the old value even when
 `copy_on_death` is false or the type has no codec. Use the issued key with
 `key.get(host, Holder::Player(event.player))` for the replacement's retained value or fresh default. This works on death and on return from the End.
 The original's `position`, `dimension`, `level`, and `inventory_slot` methods read the

@@ -358,7 +358,7 @@ fn a_denied_break_restores_wall_sign_text_and_synced_attachments() {
     use sunrise_mod_runtime::attachments::AttachmentSync;
     use sunrise_protocol::attachment_sync::{Message, encode};
 
-    static VALUE: AttachmentType<i32> = AttachmentType {
+    const VALUE: AttachmentType<i32> = AttachmentType {
         namespace: "break_test",
         name: "wall_sign",
         default: || 0,
@@ -372,7 +372,25 @@ fn a_denied_break_restores_wall_sign_text_and_synced_attachments() {
         copy_on_death: false,
         sync: true,
     };
-    on_a_client(mod_api::Mods::default(), |game| {
+    struct WallSignAttachment;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for WallSignAttachment {
+        fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+            r.register_attachment_type(
+                mod_api::AttachmentDescriptor::new("break_test:wall_sign", VALUE.default)
+                    .serialize(VALUE.codec.unwrap())
+                    .sync(),
+            )
+            .unwrap();
+        }
+    }
+    let mods = vec![mod_api::ModEntry::new(
+        "break_test",
+        Box::new(WallSignAttachment),
+    )]
+    .into();
+    on_a_client(mods, |game| {
+        let key = mod_api::testing::registered_attachment_fixture::<i32>("break_test:wall_sign");
         let spawn = play::SpawnInfo {
             dimension_type: 0,
             dimension: "minecraft:overworld".into(),
@@ -415,7 +433,7 @@ fn a_denied_break_restores_wall_sign_text_and_synced_attachments() {
             let host: &dyn Host = game;
             host.attachment_query(VALUE.namespace, VALUE.name)
                 .unwrap()
-                .query(&VALUE)
+                .query(&key)
                 .unwrap()
                 .iter()
                 .map(|row| *row.unwrap().value)

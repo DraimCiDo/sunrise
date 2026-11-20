@@ -41,7 +41,6 @@ impl PartRegistrar {
             game_rules,
             custom_stats,
             entity_tick_each,
-            attachment_uses,
             block_entity_types,
             entity_attributes,
             general_entity_types,

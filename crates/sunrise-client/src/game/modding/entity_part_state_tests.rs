@@ -32,19 +32,10 @@ const CHARGE: AttachmentType<i32> = AttachmentType {
     sync: false,
 };
 
-/// Kept for the session only: no codec.
-static SCRATCH: AttachmentType<i32> = AttachmentType {
-    namespace: "part_state",
-    name: "scratch",
-    default: || 0,
-    codec: None,
-    copy_on_death: false,
-    sync: false,
-};
-
 /// Keeps a charge on each entity of its types.
 struct Charge {
     state_key: mod_api::AttachmentKey<i32>,
+    scratch: mod_api::AttachmentKey<i32>,
 }
 #[mod_api::sunrise_part]
 impl EntityPart for Charge {
@@ -67,11 +58,18 @@ struct StateMod {
 #[mod_api::__subscriptions]
 impl Hooks for StateMod {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type(
-            mod_api::AttachmentDescriptor::new("part_state:charge", CHARGE.default)
-                .serialize(CHARGE_CODEC),
-        )
-        .unwrap();
+        let state_key = r
+            .register_attachment_type(
+                mod_api::AttachmentDescriptor::new("part_state:charge", CHARGE.default)
+                    .serialize(CHARGE_CODEC),
+            )
+            .unwrap();
+        let scratch = r
+            .register_attachment_type(mod_api::AttachmentDescriptor::new(
+                "part_state:scratch",
+                || 0_i32,
+            ))
+            .unwrap();
         r.declare_general_entity(
             "robot",
             mod_api::GeneralEntityCategory::Misc,
@@ -91,8 +89,14 @@ impl Hooks for StateMod {
             .into_iter()
             .chain(self.refused)
         {
-            r.entity_part_with_state(kind, Charge { state_key: CHARGE })
-                .unwrap();
+            r.entity_part_with_state(
+                kind,
+                Charge {
+                    state_key: state_key.clone(),
+                    scratch: scratch.clone(),
+                },
+            )
+            .unwrap();
         }
     }
 }
@@ -116,7 +120,13 @@ fn with_state_mod(name: &str, test: impl FnOnce(&mut Game<'_>, &Charge)) {
             .chunks
             .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
         game.native_joins_skip();
-        test(game, &Charge { state_key: CHARGE });
+        test(
+            game,
+            &Charge {
+                state_key: mod_api::testing::registered_attachment_fixture("part_state:charge"),
+                scratch: mod_api::testing::registered_attachment_fixture("part_state:scratch"),
+            },
+        );
     });
 }
 
@@ -264,12 +274,12 @@ fn entity_part_state_is_per_entity_through_edits_transactions_and_panics() {
             *n = 10;
             (
                 part.edit_state(host, a, |_, n| *n = 99),
-                edit_part_state(host, a, &SCRATCH, |_, n| *n = 1),
+                edit_part_state(host, a, &part.scratch, |_, n| *n = 1),
             )
         });
         assert_eq!(inner, Ok((Err(PartStateError::Reentrant), Ok(()))));
         assert_eq!(stored(part, game, a), Some(10));
-        assert_eq!(read_state(game, a, &SCRATCH), Ok(Some(1)));
+        assert_eq!(read_state(game, a, &part.scratch), Ok(Some(1)));
 
         // An undecodable saved value refuses before the closure runs and keeps its bytes.
         let mut saved = Attachments::default();
@@ -360,7 +370,7 @@ fn a_removed_or_unloaded_entity_is_stale_and_a_reloaded_one_reads_its_saved_valu
         // before the rows go, then loaded back from that NBT under a fresh id.
         assert_eq!(part.edit_state(game, again, |_, n| *n = 7), Ok(()));
         assert_eq!(
-            edit_part_state(game, again, &SCRATCH, |_, n| *n = 4),
+            edit_part_state(game, again, &part.scratch, |_, n| *n = 4),
             Ok(())
         );
         let saved = game.entity_chunks(&HashSet::from([(0, 0)]), true);
@@ -383,7 +393,7 @@ fn a_removed_or_unloaded_entity_is_stale_and_a_reloaded_one_reads_its_saved_valu
         assert_eq!(part.state(game, again), Err(PartStateError::Stale));
         assert_eq!(stored(part, game, reloaded), Some(7));
         assert_eq!(
-            read_state(game, reloaded, &SCRATCH),
+            read_state(game, reloaded, &part.scratch),
             Ok(None),
             "session only"
         );

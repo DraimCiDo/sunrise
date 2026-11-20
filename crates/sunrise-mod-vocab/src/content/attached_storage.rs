@@ -1,6 +1,6 @@
 //! Stock storage a mod attaches to an entity, a player, a chunk or the level, as NeoForge 26.3
 //! mods keep an `ItemStacksResourceHandler`, a `FluidStacksResourceHandler` or a
-//! `SimpleEnergyHandler` in an attachment: handlers over an [`AttachmentKey`] the mod declares,
+//! `SimpleEnergyHandler` in an attachment: handlers own an [`AttachmentKey`] issued at registration,
 //! saved by its codec. Every write is an attachment write, so the game's transaction journal,
 //! which keeps each holder's attachment map, puts it back on an abort.
 use crate::content::registry_keys::{fluid_id, fluid_key, item_id, item_key_by_identifier};
@@ -94,7 +94,9 @@ impl<R: StackedResource> AttachedStacks<R> {
         if index >= self.size {
             return None;
         }
-        let borrowed = self.attachment.with_decoded(host, self.holder, |list| {
+        let attachment = self.attachment.live().ok()?;
+        let store = host.attachments();
+        let borrowed = attachment.with_decoded(store, self.holder, |list| {
             list.map(|list| list.get(index).and_then(|held| held.as_ref()).cloned())
         });
         match borrowed {
@@ -102,9 +104,8 @@ impl<R: StackedResource> AttachedStacks<R> {
             Ok(Some(held)) => held,
             // Nothing decoded yet: `get_existing` decodes a saved value once, and the store
             // keeps its decoded copy for the borrowed reads after it.
-            _ => self
-                .attachment
-                .get_existing(host, self.holder)
+            _ => attachment
+                .get_existing(store, self.holder)
                 .ok()
                 .flatten()
                 .and_then(|list| list.into_iter().nth(index).flatten()),
@@ -114,9 +115,12 @@ impl<R: StackedResource> AttachedStacks<R> {
     /// `size` that the holder keeps are preserved, so a write through a smaller view never
     /// deletes them.
     fn write(&self, host: &mut dyn ServerHost, index: usize, now: Option<(R, u32)>) -> bool {
-        let mut list = self
-            .attachment
-            .get_existing(host, self.holder)
+        let Ok(attachment) = self.attachment.live() else {
+            return false;
+        };
+        let store = host.attachments();
+        let mut list = attachment
+            .get_existing(store, self.holder)
             .ok()
             .flatten()
             .unwrap_or_default();
@@ -125,9 +129,9 @@ impl<R: StackedResource> AttachedStacks<R> {
         }
         list[index] = now.filter(|(_, amount)| *amount > 0);
         if list.iter().all(Option::is_none) {
-            self.attachment.remove(host, self.holder).is_ok()
+            attachment.remove(store, self.holder).is_ok()
         } else {
-            self.attachment.set(host, self.holder, list).is_ok()
+            attachment.set(store, self.holder, list).is_ok()
         }
     }
 }

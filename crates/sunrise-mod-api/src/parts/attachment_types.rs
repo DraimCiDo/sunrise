@@ -87,24 +87,9 @@ impl AttachmentTypesRegistrar for PartRegistrar {
 }
 
 impl PartRegistrar {
-    // Declaration conflicts have already refused installation. Check all load-known
-    // uses before considering the side of the package that owns each declaration.
+    // Only synced declarations affect join admission; a dependent may still look one up.
     pub(crate) fn validate_attachment_admission(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
-        for (caller, namespace, name) in &self.attachment_uses {
-            if !self
-                .attachment_types
-                .get(namespace.as_str())
-                .is_some_and(|types| types.contains_key(name.as_str()))
-            {
-                errors.push(format!(
-                    "package {caller} attachment {namespace}:{name}: undeclared attachment use"
-                ));
-            }
-        }
-        if !errors.is_empty() {
-            return Err(errors);
-        }
         for package in crate::load_state::current_packages()
             .iter()
             .filter(|p| p.side() == crate::Side::Server)
@@ -294,9 +279,6 @@ mod tests {
             missing.sync_data(&mut store, crate::Holder::Level),
             Err(error.clone())
         );
-        let batch: crate::AttachmentBatch =
-            sunrise_mod_runtime::attachments::AttachmentBatch::empty().into();
-        assert_eq!(batch.query(&missing).err(), Some(error));
     }
     #[test]
     fn a_key_from_the_previous_install_cannot_run_its_default_or_mutate() {
@@ -353,6 +335,44 @@ mod tests {
         assert_eq!(current.get(&mut store, holder), Ok(91));
         assert_eq!(current.set(&mut store, holder, 18), Ok(()));
         assert_eq!(current.get(&mut store, holder), Ok(18));
+    }
+
+    #[test]
+    fn worldless_attachment_consumers_refuse_a_stale_issued_key() {
+        let issue = || {
+            let mut registrar = PartRegistrar::new("a");
+            let key = (&mut registrar as &mut dyn crate::Registrar)
+                .register_attachment_type(
+                    crate::AttachmentDescriptor::new("a:mana", || 37_u32)
+                        .serialize(MANA_CODEC)
+                        .sync(),
+                )
+                .unwrap();
+            super::super::install_registrar(registrar, &crate::parts::tests::rule_schema())
+                .unwrap();
+            key
+        };
+        let old = issue();
+        let mut store = Store::default();
+        old.set(&mut store, crate::Holder::Level, 73).unwrap();
+        let batch: crate::AttachmentBatch =
+            sunrise_mod_runtime::attachments::AttachmentBatch::empty().into();
+        let render = crate::EntityRenderAttachments::from_synced(&store.0);
+        let saved = store.0.to_nbt();
+        let current = mod_vocab::testing::rebuild_parts(|| Ok::<_, ()>(issue())).unwrap();
+        assert_eq!(render.get(&current), Ok(Some(&73)));
+        assert_eq!(render.get(&old), Err(crate::AttachmentError::StaleKey));
+        assert_eq!(
+            batch.query(&old).err(),
+            Some(crate::AttachmentError::StaleKey)
+        );
+        let mut data = crate::ChunkDiskData::from_nbt(saved.clone()).unwrap();
+        let refusal = data.set(&old, 99).unwrap_err();
+        assert_eq!(refusal.key, "a:mana");
+        assert_eq!(refusal.reason, "StaleKey");
+        assert_eq!(data.finish(), Err(refusal));
+        let mut data = crate::ChunkDiskData::from_nbt(saved).unwrap();
+        assert_eq!(data.get(&current), Ok(73));
     }
 
     #[test]
@@ -495,48 +515,29 @@ mod tests {
         );
     }
     #[test]
-    fn load_checks_conflicts_then_undeclared_uses_then_server_declarations() {
+    fn load_reports_descriptor_conflict_before_server_admission() {
         crate::load_state::with_test_package_inventory(
             vec![package("test_pkg", crate::Side::Server)],
             || {
                 let mut conflict = PartRegistrar::new("test_pkg");
-                (&mut conflict as &mut dyn crate::Registrar)
-                    .register_attachment_type(
-                        crate::AttachmentDescriptor::new("test_pkg:mana", || 37u32)
-                            .serialize(MANA_CODEC)
-                            .sync(),
-                    )
-                    .unwrap();
-                assert_eq!((&mut conflict as &mut dyn crate::Registrar).register_attachment_type(crate::AttachmentDescriptor::new("a:mana", || 37u32)).err(), Some("package test_pkg attachment a:mana: namespace belongs to package a, not test_pkg".into()));
-                assert_eq!(super::super::install_registrar(conflict, &crate::parts::tests::rule_schema()), Err(vec!["package test_pkg attachment a:mana: namespace belongs to package a, not test_pkg".into()]));
-                let mut missing = PartRegistrar::new("test_pkg");
-                (&mut missing as &mut dyn crate::Registrar)
-                    .register_attachment_type(
-                        crate::AttachmentDescriptor::new("test_pkg:mana", || 37u32)
-                            .serialize(MANA_CODEC)
-                            .sync(),
-                    )
-                    .unwrap();
-                let key = crate::AttachmentType {
-                    namespace: "test_pkg",
-                    name: "missing",
-                    default: || 0u32,
-                    codec: None,
-                    copy_on_death: false,
-                    sync: false,
-                };
-                missing
-                    .declare_block_entity_part_state(
-                        "test_pkg::Part",
-                        crate::PartStateDeclaration::of(&key),
-                    )
+                let r: &mut dyn crate::Registrar = &mut conflict;
+                r.register_attachment_type(
+                    crate::AttachmentDescriptor::new("test_pkg:mana", || 37u32)
+                        .serialize(MANA_CODEC)
+                        .sync(),
+                )
+                .unwrap();
+                let refusal = r
+                    .register_attachment_type(crate::AttachmentDescriptor::new("a:mana", || 37u32))
+                    .err()
                     .unwrap();
                 assert_eq!(
-                    super::super::install_registrar(missing, &crate::parts::tests::rule_schema()),
-                    Err(vec![
-                        "package test_pkg attachment test_pkg:missing: undeclared attachment use"
-                            .into()
-                    ])
+                    refusal,
+                    "package test_pkg attachment a:mana: namespace belongs to package a, not test_pkg"
+                );
+                assert_eq!(
+                    super::super::install_registrar(conflict, &crate::parts::tests::rule_schema()),
+                    Err(vec![refusal])
                 );
                 assert!(!mod_vocab::__private::parts_installation::parts_installed());
             },

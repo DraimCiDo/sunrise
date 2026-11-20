@@ -9,16 +9,20 @@ mod writer_stack;
 struct Listener {
     saves: Arc<AtomicUsize>,
     loads: Arc<AtomicUsize>,
+    key: Mutex<Option<mod_api::AttachmentKey<i32>>>,
 }
 #[mod_api::sunrise_mod]
 impl Hooks for Listener {
+    fn register(&self, registrar: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+        *self.key.lock().unwrap() = Some(fixture::register(registrar));
+    }
     fn chunk_data_save(&self, _: &dyn ChunkDiskHost, event: &mut ChunkDataSaveEvent<'_>) {
         self.saves.fetch_add(1, Ordering::Relaxed);
-        fixture::save(event.data);
+        fixture::save(event.data, self.key.lock().unwrap().as_ref().unwrap());
     }
     fn chunk_data_load(&self, host: &dyn ChunkDiskHost, event: &mut ChunkDataLoadEvent<'_>) {
         self.loads.fetch_add(1, Ordering::Relaxed);
-        fixture::load(host, event.data);
+        fixture::load(host, event.data, self.key.lock().unwrap().as_ref().unwrap());
     }
 }
 fn context(save: &SaveDir) {
@@ -67,10 +71,15 @@ fn with_listener(run: impl FnOnce(Arc<AtomicUsize>, Arc<AtomicUsize>)) {
         Box::new(Listener {
             saves: saves.clone(),
             loads: loads.clone(),
+            key: Mutex::default(),
         }),
     )]
     .into();
-    mod_platform::testing::with_mods(mods, || run(saves, loads));
+    mod_platform::testing::with_mods(mods, || {
+        mod_platform::__private::part_tests::install_parts_fixture(mod_api::__private::mods())
+            .unwrap();
+        run(saves, loads);
+    });
 }
 
 #[test]
@@ -183,13 +192,24 @@ mod echo {
     #[derive(Default)]
     pub struct Echo {
         pub seen: Arc<Mutex<Vec<(mod_api::ChunkDiskKind, i32)>>>,
+        pub key: Mutex<Option<mod_api::AttachmentKey<i32>>>,
     }
     #[mod_api::sunrise_mod]
     impl Hooks for Echo {
+        fn register(
+            &self,
+            registrar: &mut dyn mod_api::Registrar,
+            _: &mod_api::RegistrationContext,
+        ) {
+            *self.key.lock().unwrap() = Some(fixture::register(registrar));
+        }
         fn chunk_data_save(&self, host: &dyn ChunkDiskHost, event: &mut ChunkDataSaveEvent<'_>) {
             // A worker callback has no live world: the old handle's path refuses.
             assert!(host.backend().is_none());
-            let value = event.data.get(&fixture::VALUE).unwrap();
+            let value = event
+                .data
+                .get(self.key.lock().unwrap().as_ref().unwrap())
+                .unwrap();
             self.seen.lock().unwrap().push((host.job().kind, value));
         }
     }
@@ -199,10 +219,17 @@ fn with_echo(run: impl FnOnce(Arc<Mutex<Vec<(mod_api::ChunkDiskKind, i32)>>>)) {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let mods = vec![mod_api::ModEntry::new(
         "chunk_disk_fixture",
-        Box::new(Echo { seen: seen.clone() }),
+        Box::new(Echo {
+            seen: seen.clone(),
+            key: Mutex::default(),
+        }),
     )]
     .into();
-    mod_platform::testing::with_mods(mods, || run(seen));
+    mod_platform::testing::with_mods(mods, || {
+        mod_platform::__private::part_tests::install_parts_fixture(mod_api::__private::mods())
+            .unwrap();
+        run(seen);
+    });
 }
 fn disk_value(path: &Path, registry: &BlockRegistry, biomes: &Biomes) -> Option<i32> {
     SaveDir::new(

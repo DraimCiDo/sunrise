@@ -1,13 +1,13 @@
 # Query attachment holders
 
-Use `AttachmentQueries` to find loaded holders of an `AttachmentType<T>` without
-checking every entity, chunk or block entity. Declare your key as described in
+Use `AttachmentQueries` to find loaded holders of an issued `AttachmentKey<T>` without
+checking every entity, chunk or block entity. Register your descriptor and keep the returned key as described in
 [server attachments](../attachments.md). Import `AttachmentQueriesMut` for server
 writes.
 
 ## Read a snapshot
 
-Call `host.query(&TYPE)` on `&dyn Host`, then borrow rows with `batch.iter()`.
+Call `host.query(key)` on `&dyn Host`, then borrow rows with `batch.iter()`.
 Each successful row contains a copyable `holder` and a borrowed `value: &T`.
 Match `AttachmentHolder` to obtain an `EntityRef`, `PlayerRef`, `BlockEntityRef`,
 `ChunkRef` or `LevelRef`.
@@ -17,22 +17,12 @@ For example, sum a counter across its holders:
 ```rust,ignore
 use mod_api::*;
 
-static VALUE: AttachmentType<u32> = AttachmentType {
-    namespace: "example",
-    name: "value",
-    default: || 0,
-    codec: None,
-    copy_on_death: false,
-    sync: false,
-};
-
-fn register(registrar: &mut dyn Registrar) -> Result<(), String> {
-    registrar.register_attachment_type(AttachmentDescriptor::new("example:value", VALUE.default))?;
-    Ok(())
+fn register(registrar: &mut dyn Registrar) -> Result<AttachmentKey<u32>, String> {
+    registrar.register_attachment_type(AttachmentDescriptor::new("example:value", || 0_u32))
 }
 
-fn total(host: &dyn Host) -> Result<u32, AttachmentRowError> {
-    let batch = host.query(&VALUE).map_err(AttachmentRowError::Value)?;
+fn total(host: &dyn Host, key: &AttachmentKey<u32>) -> Result<u32, AttachmentRowError> {
+    let batch = host.query(key).map_err(AttachmentRowError::Value)?;
     let mut total = 0;
     for row in batch.iter() {
         total += *row?.value;
@@ -46,7 +36,7 @@ fn total(host: &dyn Host) -> Result<u32, AttachmentRowError> {
 | Value bounds | Iteration requires `T: Send + Sync + 'static`, not `Clone`. |
 | Snapshot | Membership and stored value bindings are captured at query creation. Create a fresh query to see later sets, removals, loads or unloads. |
 | Borrowing | Rows borrow from the batch, not the host, and cannot outlive the batch. You can use the host while retaining a batch. |
-| Defaults | Queries never initialize defaults, dirty holders or queue synchronization. An absent key produces an empty batch. |
+| Defaults | Queries never initialize defaults, dirty holders or queue synchronization. A live key with no stored bindings produces an empty snapshot. |
 | Saved data | Saved values on bound holders decode lazily when visited, without an earlier typed read. Malformed data and incompatible Rust types produce row errors instead of defaults. |
 | Interior mutability | A snapshot does not deep-freeze interior mutability inside `T`. |
 
@@ -58,17 +48,19 @@ not scan rows. Decode and type errors use `AttachmentRowError::Value`.
 `Ok(None)` means the holder is absent from the snapshot, including when its data
 has not arrived through synchronization. It does not prove the holder is alive:
 `get` performs no host liveness check. A retained query reads its captured value
-even after a live replacement or removal.
+even after a live replacement or removal. Binding an untyped retained batch
+with `batch.query(key)` checks that the key was issued by the current installation;
+an old key returns `AttachmentError::StaleKey` without borrowing the world.
 
 ## Write explicitly on the server
 
-Call `host.query_mut(&TYPE)` on `&mut dyn ServerHost`. Values require
+Call `host.query_mut(key)` on `&mut dyn ServerHost`. Values require
 `T: Clone + Send + Sync + 'static`. Each row provides `holder()`, `value()`,
 `set(host, replacement)` and `remove(host)`; it does not provide `&mut T`.
 
 ```rust,ignore
-fn increment(host: &mut dyn ServerHost) -> Result<(), AttachmentRowError> {
-    let batch = host.query_mut(&VALUE).map_err(AttachmentRowError::Value)?;
+fn increment(host: &mut dyn ServerHost, key: &AttachmentKey<u32>) -> Result<(), AttachmentRowError> {
+    let batch = host.query_mut(key).map_err(AttachmentRowError::Value)?;
     for row in batch.iter() {
         let row = row?;
         row.set(host, *row.value() + 1)?;
@@ -82,7 +74,8 @@ fn increment(host: &mut dyn ServerHost) -> Result<(), AttachmentRowError> {
 - Each write validates the captured residency against the supplied host's current
   dimension. Unloaded, replaced or missing holders produce
   `AttachmentRowError::StaleHolder`. A host for another dimension does not
-  retarget the row, and a refused write does not revive the holder.
+  retarget the row, and a refused write does not revive the holder. A stale key
+  on a still-resident row gives `AttachmentRowError::Value(AttachmentError::StaleKey)`.
 - Removing only the attachment value does not invalidate a loaded holder. A
   retained row can set a replacement value on that holder.
 - Writes join your existing transaction. For an all-or-nothing loop, import

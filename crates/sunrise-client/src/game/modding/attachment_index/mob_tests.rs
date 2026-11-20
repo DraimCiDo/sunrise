@@ -1,5 +1,5 @@
 use super::*;
-use crate::game::native_entity_refs::tests::with_game;
+use crate::game::native_entity_refs::tests::{with_game, with_game_attachment};
 use mod_api::{AttachmentQueries, AttachmentQueriesMut, AttachmentType};
 use sunrise_core::nbt::Tag;
 
@@ -11,6 +11,14 @@ static VALUE: AttachmentType<i32> = AttachmentType {
     copy_on_death: false,
     sync: false,
 };
+
+fn with_fixture(test: impl FnOnce(&mut Game<'_>, mod_api::AttachmentKey<i32>)) {
+    with_game_attachment(
+        "test",
+        || mod_api::AttachmentDescriptor::new("test:mana", VALUE.default),
+        test,
+    );
+}
 
 fn mob(uuid: [i32; 4]) -> Tag {
     Tag::compound([
@@ -40,7 +48,7 @@ fn mob(uuid: [i32; 4]) -> Tag {
 #[test]
 #[ignore = "daily"]
 fn saved_mob_binding_survives_store_back_and_retires_at_sweep() {
-    with_game(|game| {
+    with_fixture(|game, key| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
         let uuid = [17, 18, 19, 20];
@@ -50,7 +58,7 @@ fn saved_mob_binding_survives_store_back_and_retires_at_sweep() {
         let key = ("test".into(), "mana".into());
         assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
         VALUE.set(game, Holder::Entity(id), 7).unwrap();
-        let old = game.query_mut(&VALUE).unwrap();
+        let old = game.query_mut(&key).unwrap();
         let row = old.iter().next().unwrap().unwrap();
         let work = index.lock().unwrap().work_count();
         let replacement = game.mobs[0].clone();
@@ -61,7 +69,7 @@ fn saved_mob_binding_survives_store_back_and_retires_at_sweep() {
         assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
         assert_eq!(VALUE.get(game, Holder::Entity(id)), Ok(7));
         assert_eq!(
-            game.query(&VALUE)
+            game.query(&key)
                 .unwrap()
                 .iter()
                 .next()
@@ -92,7 +100,7 @@ fn saved_mob_binding_survives_store_back_and_retires_at_sweep() {
 #[test]
 #[ignore = "daily"]
 fn saved_mob_binding_tracks_serialized_transfer_and_parked_levels() {
-    with_game(|game| {
+    with_fixture(|game, key| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
         let uuid = [21, 22, 23, 24];
@@ -101,7 +109,7 @@ fn saved_mob_binding_tracks_serialized_transfer_and_parked_levels() {
         let key = ("test".into(), "mana".into());
         assert_eq!(source.lock().unwrap().snapshot(&key).len(), 1);
         VALUE.set(game, Holder::Entity(id), 11).unwrap();
-        let batch = game.query_mut(&VALUE).unwrap();
+        let batch = game.query_mut(&key).unwrap();
         let row = batch.iter().next().unwrap().unwrap();
         game.enter_level(Dim::Nether).unwrap();
         assert_eq!(source.lock().unwrap().snapshot(&key).len(), 1);
@@ -145,12 +153,12 @@ fn saved_mob_binding_tracks_serialized_transfer_and_parked_levels() {
 #[test]
 #[ignore = "daily"]
 fn saved_mob_binding_rebinds_retained_id_with_a_new_generation() {
-    with_game(|game| {
+    with_fixture(|game, key| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
         let id = game.load_mob(mob([25, 26, 27, 28]), None).unwrap();
         VALUE.set(game, Holder::Entity(id), 13).unwrap();
-        let batch = game.query_mut(&VALUE).unwrap();
+        let batch = game.query_mut(&key).unwrap();
         let row = batch.iter().next().unwrap().unwrap();
         let holder = game.entity(id).unwrap();
         let source = game.attachment_indexes[&Dim::Overworld].clone();
@@ -189,7 +197,7 @@ fn saved_mob_binding_rebinds_retained_id_with_a_new_generation() {
 #[ignore = "daily"]
 fn mob_first_store_binds_and_nested_rollback_retires_authority() {
     use mod_api::{AttachmentError, HostTransaction};
-    with_game(|game| {
+    with_fixture(|game, key| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
         let uuid = [71, 72, 73, 74];
@@ -239,7 +247,7 @@ fn mob_first_store_binds_and_nested_rollback_retires_authority() {
         VALUE.set(game, holder, 11).unwrap();
         assert!(game.mobs[0].attachment_lifetime.is_bound());
         assert_eq!(
-            game.query(&VALUE)
+            game.query(&key)
                 .unwrap()
                 .iter()
                 .next()
@@ -307,7 +315,7 @@ fn tnt_with_real_lifetime_accepts_first_store() {
 #[ignore = "daily"]
 fn mob_inner_first_binding_commit_outer_abort_invalidates_retained_row() {
     use mod_api::{AttachmentError, HostTransaction};
-    with_game(|game| {
+    with_fixture(|game, key| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
         let uuid = [91, 92, 93, 94];
@@ -321,7 +329,7 @@ fn mob_inner_first_binding_commit_outer_abort_invalidates_retained_row() {
         let result: Result<(), AttachmentError> = game.transaction(|host, _| {
             let inner: Result<(), AttachmentError> = host.transaction(|host, _| {
                 VALUE.set(host, holder, 13)?;
-                retained = Some(host.query_mut(&VALUE).unwrap());
+                retained = Some(host.query_mut(&key).unwrap());
                 Ok(())
             });
             inner?;

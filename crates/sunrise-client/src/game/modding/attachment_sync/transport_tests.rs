@@ -95,10 +95,11 @@ pub(super) fn set_level(game: &Game<'_>, value: i32, commit: bool) {
 /// The window's synced copy of the level's value.
 fn window_value(game: &mut Game<'_>) -> Option<i32> {
     let host: &dyn Host = game;
+    let key = mod_api::testing::registered_attachment_fixture::<i32>("sync_route:value");
     let rows = host
         .attachment_query("sync_route", "value")
         .unwrap()
-        .query(&VALUE)
+        .query(&key)
         .ok()?;
     rows.iter().next().map(|row| *row.unwrap().value)
 }

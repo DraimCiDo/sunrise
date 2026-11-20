@@ -94,20 +94,21 @@ impl EntityRenderAttachments {
     }
 
     /// Borrows the synced value of `key`, or returns `Ok(None)` if absent or not captured.
-    /// Never inserts a default and never reads the live world. A captured value uses the key's
-    /// codec, just as on the synced client holder.
+    /// Never inserts a default and never reads the live world. It uses the registered codec
+    /// and refuses keys from earlier installations even if the snapshot has no matching row.
     pub fn get<T: Send + Sync + 'static>(
         &self,
         key: &AttachmentKey<T>,
     ) -> Result<Option<&T>, AttachmentError> {
-        crate::parts::validate_attachment_use(key.namespace, key.name, key.sync)?;
+        let descriptor = key.live()?;
+        let field = key.parts();
         self.data
             .entries
             .binary_search_by(|(namespace, name, _)| {
-                (namespace.as_str(), name.as_str()).cmp(&(key.namespace, key.name))
+                (namespace.as_str(), name.as_str()).cmp(&field)
             })
             .ok()
-            .map(|i| self.data.entries[i].2.read(key))
+            .map(|i| descriptor.read(&self.data.entries[i].2))
             .transpose()
     }
 }

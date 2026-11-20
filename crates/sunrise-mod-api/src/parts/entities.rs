@@ -191,7 +191,7 @@ impl EntitiesRegistrar for PartRegistrar {
         // 🤖 Agent: one leaked id per declaration, once at startup, so a refusal can name the
         // type in the `Copy` refusal it shares with block entities.
         let kind: &'static str = Box::leak(entity.into());
-        match self.check_part_state(declaration) {
+        match self.check_part_state(&declaration) {
             Ok(()) => {
                 self.entity_part_states.push(
                     mod_vocab::__private::EntityPartStateDeclaration::new(

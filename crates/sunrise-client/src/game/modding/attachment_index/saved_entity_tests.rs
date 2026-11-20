@@ -1,5 +1,5 @@
 use super::*;
-use crate::game::native_entity_refs::tests::with_game;
+use crate::game::native_entity_refs::tests::{with_game, with_game_attachment};
 use mod_api::{AttachmentQueries, AttachmentQueriesMut, AttachmentType};
 use std::collections::HashSet;
 use sunrise_core::nbt::Tag;
@@ -106,10 +106,18 @@ static VALUE: AttachmentType<i32> = AttachmentType {
     sync: false,
 };
 
+fn with_fixture(test: impl FnOnce(&mut Game<'_>, mod_api::AttachmentKey<i32>)) {
+    with_game_attachment(
+        "saved_entity",
+        || mod_api::AttachmentDescriptor::new("saved_entity:value", VALUE.default),
+        test,
+    );
+}
+
 #[test]
 #[ignore = "daily"]
 fn saved_entity_loaders_publish_and_retire_the_authoritative_owner() {
-    with_game(|game| {
+    with_fixture(|game, key| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
         for (n, kind) in [
@@ -181,7 +189,7 @@ fn saved_entity_loaders_publish_and_retire_the_authoritative_owner() {
             };
             assert_ne!(entity.id(), 0, "{kind}");
             VALUE.set(game, Holder::Entity(entity.id()), 19).unwrap();
-            let old = game.query_mut(&VALUE).unwrap();
+            let old = game.query_mut(&key).unwrap();
             let row = old.iter().next().unwrap().unwrap();
             let work = index.lock().unwrap().work_count();
             // Exercise the clone-replay boundary used by vehicle/projectile ticks.
@@ -239,7 +247,7 @@ fn saved_entity_loaders_publish_and_retire_the_authoritative_owner() {
 #[test]
 #[ignore = "daily"]
 fn saved_binding_family_first_stores_publish_to_queries() {
-    with_game(|game| {
+    with_fixture(|game, key| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
         let index = game.attachment_indexes[&Dim::Overworld].clone();
@@ -259,7 +267,7 @@ fn saved_binding_family_first_stores_publish_to_queries() {
                 );
                 VALUE.set(game, holder, 7).unwrap();
                 {
-                    let query = game.query(&VALUE).unwrap();
+                    let query = game.query(&key).unwrap();
                     let rows: Vec<_> = query.iter().map(|row| row.unwrap()).collect();
                     assert_eq!(rows.len(), 1, "{} first store", $kind);
                     assert_eq!(rows[0].holder, AttachmentHolder::Entity(entity), "{}", $kind);
@@ -288,7 +296,7 @@ fn saved_binding_family_first_stores_publish_to_queries() {
         let id = game.tnts[0].id;
         VALUE.set(game, Holder::Entity(id), 9).unwrap();
         assert!(
-            game.query(&VALUE).unwrap().iter().next().is_none(),
+            game.query(&key).unwrap().iter().next().is_none(),
             "unindexed family"
         );
     });

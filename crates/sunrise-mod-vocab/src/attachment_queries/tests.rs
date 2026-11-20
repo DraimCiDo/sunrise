@@ -97,16 +97,10 @@ fn all_scoped_variants_write_and_remove_the_exact_storage_target() {
         ),
         (AttachmentHolder::Level(level), Holder::Level),
     ];
-    let registration = crate::__private::check_attachment_descriptor(
-        AttachmentDescriptor::new("mapping:value", VALUE.default).into(),
-        "mapping",
-        "value",
-    )
-    .unwrap();
-    crate::parts::install_input(crate::parts::installation::InstalledInput {
-        attachment_types: HashMap::from([("mapping", HashMap::from([("value", registration)]))]),
-        ..Default::default()
-    });
+    let key = crate::parts::install_attachment_fixture(AttachmentDescriptor::new(
+        "mapping:value",
+        || 0_u32,
+    ));
     let mut host = Store::default();
     for (scoped, target) in cases {
         let mut map = Attachments::default();
@@ -127,7 +121,7 @@ fn all_scoped_variants_write_and_remove_the_exact_storage_target() {
         VALUE.set(&mut map, target, 99).unwrap();
         host.maps.insert(target, map);
     }
-    let batch = host.query_mut(&VALUE).unwrap();
+    let batch = host.query_mut(&key).unwrap();
     assert_eq!(batch.iter().len(), 5);
     let captured = || {
         batch
@@ -183,5 +177,5 @@ fn all_scoped_variants_write_and_remove_the_exact_storage_target() {
             Ok(&99)
         );
     }
-    assert_eq!(host.query(&VALUE).unwrap().iter().len(), 0);
+    assert_eq!(host.query(&key).unwrap().iter().len(), 0);
 }

@@ -9,15 +9,6 @@ const COUNT_CODEC: mod_api::AttachmentCodec<i32> = AttachmentCodec {
     },
 };
 
-pub const COUNT: AttachmentType<i32> = AttachmentType {
-    namespace: "part_state_fixture",
-    name: "part_state_count",
-    default: || 0,
-    codec: Some(COUNT_CODEC),
-    copy_on_death: false,
-    sync: false,
-};
-
 const MARK_CODEC: mod_api::AttachmentCodec<i32> = AttachmentCodec {
     encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
     decode: |saved| match saved.get(&"n".into()) {
@@ -26,22 +17,13 @@ const MARK_CODEC: mod_api::AttachmentCodec<i32> = AttachmentCodec {
     },
 };
 
-/// Set to 1 after the undecodable-value check, so the game sees it ran to the end.
-pub static MARK: AttachmentType<i32> = AttachmentType {
-    namespace: "part_state_fixture",
-    name: "part_state_mark",
-    default: || 0,
-    codec: Some(MARK_CODEC),
-    copy_on_death: false,
-    sync: false,
-};
-
 /// Each tick does what its block entity's first data slot says:
 /// - 0: an aborted edit, a refused recursive edit, then a committed count;
 /// - 1: an edit of an undecodable saved value is refused before its closure runs, then `MARK`
 ///   is set to 1.
 pub struct Counter {
     state_key: mod_api::AttachmentKey<i32>,
+    mark: mod_api::AttachmentKey<i32>,
 }
 #[mod_api::sunrise_part]
 impl BlockPart for Counter {}
@@ -61,7 +43,10 @@ impl BlockEntityPart for Counter {
                         error: AttachmentError::Decode,
                     })
                 );
-                assert_eq!(edit_part_state(host, entity, &MARK, |_, m| *m = 1), Ok(()));
+                assert_eq!(
+                    edit_part_state(host, entity, &self.mark, |_, m| *m = 1),
+                    Ok(())
+                );
             }
             _ => {
                 let aborted: Result<(), ()> = host.transaction(|host, _| {
@@ -86,18 +71,15 @@ impl BlockEntityPartState for Counter {
 }
 
 pub fn register(registrar: &mut dyn Registrar) {
-    registrar
+    let state_key = registrar
         .register_attachment_type(
-            mod_api::AttachmentDescriptor::new(
-                "part_state_fixture:part_state_count",
-                COUNT.default,
-            )
-            .serialize(COUNT_CODEC),
+            mod_api::AttachmentDescriptor::new("part_state_fixture:part_state_count", || 0_i32)
+                .serialize(COUNT_CODEC),
         )
         .unwrap();
-    registrar
+    let mark = registrar
         .register_attachment_type(
-            mod_api::AttachmentDescriptor::new("part_state_fixture:part_state_mark", MARK.default)
+            mod_api::AttachmentDescriptor::new("part_state_fixture:part_state_mark", || 0_i32)
                 .serialize(MARK_CODEC),
         )
         .unwrap();
@@ -106,7 +88,7 @@ pub fn register(registrar: &mut dyn Registrar) {
         .blocks(&["part_state_fixture:part_state"])
         .build();
     registrar
-        .block_entity_part_with_state(&kind, Counter { state_key: COUNT })
+        .block_entity_part_with_state(&kind, Counter { state_key, mark })
         .unwrap();
 }
 

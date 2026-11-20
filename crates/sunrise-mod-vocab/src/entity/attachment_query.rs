@@ -1,6 +1,6 @@
 //! Owned snapshot data of attachment queries.
 use crate::*;
-use sunrise_mod_runtime::attachments::{self as runtime, index};
+use sunrise_mod_runtime::attachments::{self as runtime, CheckedAttachmentType, index};
 
 /// A SNAPSHOT of membership and value bindings in the host's current dimension.
 /// Later changes require a fresh query. This is a residency view: removed but
@@ -16,14 +16,21 @@ impl From<runtime::AttachmentBatch<AttachmentHolder>> for AttachmentBatch {
     }
 }
 impl AttachmentBatch {
-    /// Bind a type without eagerly decoding or cloning any value.
+    /// Bind a live registered key without eagerly decoding or cloning any value.
+    /// A key from an earlier installation returns `StaleKey` even without a host.
     /// This view borrows only the key, never the host.
     pub fn query<T: Send + Sync + 'static>(
         self,
         key: &AttachmentKey<T>,
     ) -> Result<AttachmentQuery<'_, T>, AttachmentError> {
-        crate::parts::validate_attachment_use(key.namespace, key.name, key.sync)?;
-        self.0.query(key)
+        Ok(self.query_checked(key.live()?))
+    }
+
+    pub(crate) fn query_checked<T: Send + Sync + 'static>(
+        self,
+        descriptor: &CheckedAttachmentType<T>,
+    ) -> AttachmentQuery<'_, T> {
+        self.0.query_checked(descriptor)
     }
 }
 /// A typed snapshot whose iterator borrows values from its captured bindings.
@@ -167,7 +174,7 @@ mod tests {
     fn wire_attachment_rows_and_stale_tokens() {
         use crate::wire::{Reader, Writer};
         use sunrise_core::nbt::{Compound, Tag};
-        static CODED: AttachmentType<u32> = AttachmentType {
+        const CODED: AttachmentType<u32> = AttachmentType {
             namespace: "test",
             name: "coded",
             default: || 0,
@@ -192,13 +199,16 @@ mod tests {
         let mut out = Writer::new();
         out.put(&batch);
         let decoded: AttachmentBatch = Reader::new(out.bytes()).take().unwrap();
-        let query = decoded.query(&CODED).unwrap();
+        let key = crate::parts::install_attachment_fixture(
+            AttachmentDescriptor::new("test:coded", CODED.default).serialize(CODED.codec.unwrap()),
+        );
+        let query = decoded.query(&key).unwrap();
         let row = query.iter().next().unwrap().unwrap();
         assert_eq!(row.holder, holder);
         assert_eq!(*row.value, 73);
         assert_eq!(query.get(holder), Ok(Some(73)));
         let empty = AttachmentBatch::from(runtime::AttachmentBatch::empty());
-        assert_eq!(empty.query(&CODED).unwrap().get(holder), Ok(None));
+        assert_eq!(empty.query(&key).unwrap().get(holder), Ok(None));
         let token = AttachmentWriteToken::from(row.write_token());
         assert_eq!(token.validate(&index.lock().unwrap()), Ok(()));
         index.lock().unwrap().unload(holder).into_result();
@@ -229,7 +239,11 @@ mod tests {
         let batch = AttachmentBatch::from(runtime::AttachmentBatch::new(
             index.lock().unwrap().snapshot_named("test", "value"),
         ));
-        let query = batch.query(&KEY).unwrap();
+        let key = crate::parts::install_attachment_fixture(AttachmentDescriptor::new(
+            "test:value",
+            KEY.default,
+        ));
+        let query = batch.query(&key).unwrap();
         let row = query.iter().next().unwrap().unwrap();
         assert_eq!(row.holder, holder);
         assert_eq!(*row.value, 7);

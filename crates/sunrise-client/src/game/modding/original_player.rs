@@ -196,6 +196,7 @@ mod tests {
     };
 
     struct Listener {
+        keys: Mutex<Option<[mod_api::AttachmentKey<i32>; 3]>>,
         death: bool,
         keep: bool,
         heard: Arc<Mutex<Vec<OriginalPlayerRef>>>,
@@ -204,22 +205,34 @@ mod tests {
     #[mod_api::__subscriptions]
     impl Hooks for Listener {
         fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-            r.register_attachment_type(mod_api::AttachmentDescriptor::new(
-                "clone:unsaved",
-                VALUE.default,
-            ))
-            .unwrap();
-            r.register_attachment_type(
-                mod_api::AttachmentDescriptor::new("clone:retained", RETAINED.default)
-                    .serialize(RETAINED_CODEC)
-                    .copy_on_death(),
-            )
-            .unwrap();
-            r.register_attachment_type(
-                mod_api::AttachmentDescriptor::new("clone:saved", SAVED.default)
-                    .serialize(RETAINED_CODEC),
-            )
-            .unwrap();
+            let unsaved = r
+                .register_attachment_type(mod_api::AttachmentDescriptor::new(
+                    "clone:unsaved",
+                    VALUE.default,
+                ))
+                .unwrap();
+            let retained = r
+                .register_attachment_type(
+                    mod_api::AttachmentDescriptor::new("clone:retained", RETAINED.default)
+                        .serialize(RETAINED_CODEC)
+                        .copy_on_death(),
+                )
+                .unwrap();
+            let saved = r
+                .register_attachment_type(
+                    mod_api::AttachmentDescriptor::new("clone:saved", SAVED.default)
+                        .serialize(RETAINED_CODEC),
+                )
+                .unwrap();
+            assert!(
+                r.attachment_key::<i32>("clone:missing")
+                    .is_err_and(|error| error
+                        == mod_api::AttachmentError::Undeclared {
+                            package_id: "clone".into(),
+                            attachment_id: "clone:missing".into()
+                        })
+            );
+            *self.keys.lock().unwrap() = Some([unsaved, retained, saved]);
         }
         fn player_clone(&self, host: &mut dyn ServerHost, event: &mut PlayerCloneEvent<'_>) {
             assert_eq!(event.was_death, self.death);
@@ -234,21 +247,11 @@ mod tests {
             );
             assert_eq!(original.level(host).unwrap().dimension_id(), dimension.id());
             assert_eq!(VALUE.get(host, holder), Ok(73));
-            const MISSING: AttachmentType<i32> = AttachmentType {
-                name: "missing",
-                ..VALUE
-            };
-            // Never declared, so refused by name (#1448), not read as its default.
-            assert_eq!(
-                original.attachment(host, &MISSING),
-                Err(mod_api::AttachmentError::Undeclared {
-                    package_id: "clone".into(),
-                    attachment_id: "clone:missing".into(),
-                })
-            );
-            assert_eq!(original.attachment(host, &VALUE), Ok(73));
-            assert_eq!(original.attachment(host, &RETAINED), Ok(17));
-            assert_eq!(original.attachment(host, &SAVED), Ok(31));
+            let keys = self.keys.lock().unwrap();
+            let [unsaved, retained, saved] = keys.as_ref().unwrap();
+            assert_eq!(original.attachment(host, unsaved), Ok(73));
+            assert_eq!(original.attachment(host, retained), Ok(17));
+            assert_eq!(original.attachment(host, saved), Ok(31));
             assert_eq!(
                 SAVED.get(host, Holder::Player(event.player)),
                 Ok(if self.death { 0 } else { 31 })
@@ -292,7 +295,7 @@ mod tests {
             assert_eq!(original.inventory_slot(host, 99), None);
             // Replacement writes cannot alter the captured old values.
             VALUE.set(host, Holder::Player(event.player), 99).unwrap();
-            assert_eq!(original.attachment(host, &VALUE), Ok(73));
+            assert_eq!(original.attachment(host, unsaved), Ok(73));
             self.heard.lock().unwrap().push(original);
         }
     }
@@ -302,6 +305,7 @@ mod tests {
         let mods = vec![mod_api::ModEntry::new(
             "clone",
             Box::new(Listener {
+                keys: Mutex::default(),
                 death,
                 keep,
                 heard: heard.clone(),
@@ -376,7 +380,10 @@ mod tests {
                 assert_eq!(original.experience(game), None);
                 assert_eq!(original.effects(game), None);
                 assert_eq!(
-                    original.attachment(game, &VALUE),
+                    original.attachment(
+                        game,
+                        &mod_api::testing::registered_attachment_fixture::<i32>("clone:unsaved")
+                    ),
                     Err(mod_api::AttachmentError::MissingHolder)
                 );
             });

@@ -2220,13 +2220,19 @@ pub(super) mod tests {
         #[mod_api::__subscriptions]
         impl mod_api::Hooks for MapStorage {
             fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+                let key = r
+                    .register_attachment_type(mod_api::AttachmentDescriptor::new(
+                        "crafted_map_fixture:slot",
+                        Vec::new,
+                    ))
+                    .unwrap();
                 let valid: fn(&ItemResource) -> bool = if self.0 { |_| true } else { |_| false };
                 r.entity_capability_before_game(
                     &ENTITY_ITEMS,
                     "minecraft:pig",
                     move |_, entity, ()| {
                         Some(Box::new(AttachedItems::single(
-                            &MAP_SLOT,
+                            key.clone(),
                             Holder::Entity(entity.id()),
                             1,
                             valid,

@@ -687,24 +687,6 @@ pub mod tests {
     }
 
     #[cfg(test)]
-    const OWNERS_PROGRESS: AttachmentType<u32> = AttachmentType {
-        namespace: "owner",
-        name: "progress",
-        default: || 0,
-        codec: None,
-        copy_on_death: false,
-        sync: false,
-    };
-    #[cfg(test)]
-    const B_PROGRESS: AttachmentType<u32> = AttachmentType {
-        namespace: "b",
-        name: "progress",
-        default: || 0,
-        codec: None,
-        copy_on_death: false,
-        sync: false,
-    };
-    #[cfg(test)]
     struct Keeps {
         state_key: mod_api::AttachmentKey<u32>,
     }
@@ -726,15 +708,25 @@ pub mod tests {
     #[cfg(test)]
     #[mod_api::__subscriptions]
     impl<const OWNERS: bool> Hooks for KeepsState<OWNERS> {
-        fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
-            r.register_attachment_type(mod_api::AttachmentDescriptor::new(
-                "b:progress",
-                B_PROGRESS.default,
-            ))
-            .unwrap();
+        fn register(&self, r: &mut dyn Registrar, cx: &RegistrationContext) {
+            let state_key = if OWNERS {
+                match r.attachment_key("owner:progress") {
+                    Ok(key) => key,
+                    Err(error) => {
+                        assert!(
+                            matches!(error, AttachmentError::Undeclared { ref attachment_id, .. } if attachment_id == "owner:progress")
+                        );
+                        cx.refuse("missing owner:progress");
+                        return;
+                    }
+                }
+            } else {
+                r.register_attachment_type(AttachmentDescriptor::new("b:progress", || 0_u32))
+                    .unwrap()
+            };
             let press = r.block_entity_type_key("owner:press");
-            let state_key = if OWNERS { OWNERS_PROGRESS } else { B_PROGRESS };
-            let _ = r.block_entity_part_with_state(&press, Keeps { state_key });
+            r.block_entity_part_with_state(&press, Keeps { state_key })
+                .unwrap();
         }
     }
 
@@ -753,7 +745,7 @@ pub mod tests {
             fn register(&self, r: &mut dyn Registrar, cx: &RegistrationContext) {
                 r.register_attachment_type(mod_api::AttachmentDescriptor::new(
                     "owner:progress",
-                    OWNERS_PROGRESS.default,
+                    || 0_u32,
                 ))
                 .unwrap();
                 Owner.register(r, cx);
@@ -773,10 +765,7 @@ pub mod tests {
             ];
             let registrar = crate::parts::shared::register_all(&mods, |_| false);
             assert_eq!(registrar.refused, Vec::<String>::new());
-            assert_eq!(
-                registrar.attachment_uses,
-                [("b".to_owned(), "b".to_owned(), "progress".to_owned())]
-            );
+            assert!(registrar.attachment_types["b"].contains_key("progress"));
         });
         // The owner's key is only usable when the owner declared it (its public attachment);
         // a part cannot invent a key under the owner's namespace.
@@ -790,10 +779,8 @@ pub mod tests {
                     false
                 })
                 .unwrap_err();
-            assert_eq!(
-                errors,
-                ["package b attachment owner:progress: undeclared attachment use"]
-            );
+            assert_eq!(errors.len(), 1);
+            assert!(errors[0].contains("missing owner:progress"), "{errors:?}");
         });
         crate::load_state::with_test_package_inventory(packages(), || {
             let mods = [
@@ -801,11 +788,8 @@ pub mod tests {
                 ModEntry::new("b", Box::new(KeepsState::<true>)),
             ];
             let registrar = crate::parts::shared::register_all(&mods, |_| false);
-            assert_eq!(
-                registrar.attachment_uses,
-                [("b".to_owned(), "owner".to_owned(), "progress".to_owned())],
-                "a declared key is the owner's public attachment"
-            );
+            assert!(registrar.refused.is_empty(), "{:?}", registrar.refused);
+            assert!(registrar.attachment_types["owner"].contains_key("progress"));
         });
     }
 
@@ -986,7 +970,7 @@ impl BlockEntitiesRegistrar for PartRegistrar {
         part: &'static str,
         declaration: crate::PartStateDeclaration,
     ) -> Result<(), crate::BlockEntityStateError> {
-        self.check_part_state(declaration).map_err(|reason| {
+        self.check_part_state(&declaration).map_err(|reason| {
             let error = declaration.refused(part, reason);
             self.refused.push(format!("{}: {error}", self.mod_id));
             error
@@ -1016,25 +1000,15 @@ impl BlockEntitiesRegistrar for PartRegistrar {
 }
 
 impl PartRegistrar {
-    /// Checks a Part state declaration of either holder and records its key: see
-    /// `PartStateDeclaration::check` or a key used with another Rust type name.
-    /// Owner declarations are checked after all packages have registered.
+    /// Check that this registration pass issued the Part's key, including foreign lookups.
     pub(crate) fn check_part_state(
-        &mut self,
-        declaration: crate::PartStateDeclaration,
+        &self,
+        declaration: &crate::PartStateDeclaration,
     ) -> Result<(), crate::PartStateRefusal> {
-        let key = (declaration.namespace, declaration.name);
-        declaration
-            .check()
-            .and_then(|()| match self.part_states.get(&key) {
-                Some(&declared) if declared != declaration.data_name => {
-                    Err(crate::PartStateRefusal::Incompatible { declared })
-                }
-                _ => Ok(()),
-            })?;
-        self.attachment_uses
-            .push((self.mod_id.into(), key.0.into(), key.1.into()));
-        self.part_states.insert(key, declaration.data_name);
-        Ok(())
+        let current = self
+            .attachment_types
+            .get(declaration.namespace)
+            .and_then(|types| types.get(declaration.name));
+        declaration.check(current)
     }
 }

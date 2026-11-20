@@ -1722,7 +1722,9 @@ mod nested_vehicle_discard_tests {
         assert_eq!(
             host.attachment_query("vehicle_boundary", "value")
                 .unwrap()
-                .query(&VEHICLE_VALUE)
+                .query(&mod_api::testing::registered_attachment_fixture::<i32>(
+                    "vehicle_boundary:value"
+                ))
                 .unwrap()
                 .iter()
                 .count(),
@@ -2079,7 +2081,16 @@ mod nested_vehicle_discard_tests {
                     self.kind
                 )));
                 let batch = host.attachment_query("vehicle_boundary", "value").unwrap();
-                assert_eq!(batch.query(&VEHICLE_VALUE).unwrap().iter().count(), 0);
+                assert_eq!(
+                    batch
+                        .query(&mod_api::testing::registered_attachment_fixture::<i32>(
+                            "vehicle_boundary:value"
+                        ))
+                        .unwrap()
+                        .iter()
+                        .count(),
+                    0
+                );
                 return mod_api::Flow::Cancel;
             }
             mod_api::Flow::Continue
@@ -2110,7 +2121,9 @@ mod nested_vehicle_discard_tests {
                     assert_eq!(
                         game.attachment_query("vehicle_boundary", "value")
                             .unwrap()
-                            .query(&VEHICLE_VALUE)
+                            .query(&mod_api::testing::registered_attachment_fixture::<i32>(
+                                "vehicle_boundary:value"
+                            ))
                             .unwrap()
                             .iter()
                             .count(),
@@ -2137,13 +2150,27 @@ mod nested_vehicle_discard_tests {
     #[test]
     #[ignore = "daily"]
     fn retained_vehicle_is_not_visible_to_selectors_or_attachment_queries() {
+        struct VehicleValue;
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for VehicleValue {
+            fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+                r.register_attachment_type(mod_api::AttachmentDescriptor::new(
+                    "vehicle_boundary:value",
+                    VEHICLE_VALUE.default,
+                ))
+                .unwrap();
+            }
+        }
         for cart in [false, true] {
             let cancel = Arc::new(AtomicBool::new(true));
             let calls = Arc::new(AtomicUsize::new(0));
-            let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
-                "cancel_visibility",
-                Box::new(CancelUntilAllowed { cancel, calls }),
-            )]
+            let mods: mod_api::Mods = vec![
+                mod_api::ModEntry::new(
+                    "cancel_visibility",
+                    Box::new(CancelUntilAllowed { cancel, calls }),
+                ),
+                mod_api::ModEntry::new("vehicle_boundary", Box::new(VehicleValue)),
+            ]
             .into();
             mod_platform::testing::with_mods(mods, || {
                 with_vehicle_tree(cart, false, |game| {
@@ -2159,7 +2186,16 @@ mod nested_vehicle_discard_tests {
                     assert!(game.run_command(&command));
                     set_vehicle_test_attachment(game);
                     let batch = game.attachment_query("vehicle_boundary", "value").unwrap();
-                    assert_eq!(batch.query(&VEHICLE_VALUE).unwrap().iter().count(), 1);
+                    assert_eq!(
+                        batch
+                            .query(&mod_api::testing::registered_attachment_fixture::<i32>(
+                                "vehicle_boundary:value"
+                            ))
+                            .unwrap()
+                            .iter()
+                            .count(),
+                        1
+                    );
                     let vehicle = game.entity(71).unwrap();
                     if cart {
                         game.hurt_cart(
@@ -2178,7 +2214,16 @@ mod nested_vehicle_discard_tests {
                     assert!(game.entity_passengers(vehicle).is_none());
                     assert!(!game.run_command(&command));
                     let batch = game.attachment_query("vehicle_boundary", "value").unwrap();
-                    assert_eq!(batch.query(&VEHICLE_VALUE).unwrap().iter().count(), 0);
+                    assert_eq!(
+                        batch
+                            .query(&mod_api::testing::registered_attachment_fixture::<i32>(
+                                "vehicle_boundary:value"
+                            ))
+                            .unwrap()
+                            .iter()
+                            .count(),
+                        0
+                    );
                 });
             });
         }

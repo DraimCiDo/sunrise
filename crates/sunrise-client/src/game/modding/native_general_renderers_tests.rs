@@ -6,8 +6,7 @@ use super::Game;
 use super::native_entity_renderers::EntityRendererTable;
 use crate::game::general::GeneralTypeCatalog;
 use mod_api::{
-    AttachmentCodec, AttachmentError, AttachmentType, BlockEntityDrawContext, EntityRenderState,
-    EntityRenderer,
+    AttachmentCodec, AttachmentError, BlockEntityDrawContext, EntityRenderState, EntityRenderer,
 };
 use std::{
     collections::BTreeMap,
@@ -80,22 +79,13 @@ const FUEL_CODEC: mod_api::AttachmentCodec<i32> = AttachmentCodec {
     },
 };
 
-/// The type's synced field the renderer reads while drawing.
-static FUEL: AttachmentType<i32> = AttachmentType {
-    namespace: "test",
-    name: "fuel",
-    default: || 0,
-    codec: Some(FUEL_CODEC),
-    copy_on_death: false,
-    sync: true,
-};
-
 /// `test:missile`'s renderer: draws one stone quad from its pose's origin, and keeps the last
 /// state it was handed and the fuel it read from the snapshot.
 #[derive(Default)]
 struct Missile {
     seen: Mutex<Option<EntityRenderState>>,
     fuel: Mutex<Option<i32>>,
+    fuel_key: Mutex<Option<mod_api::AttachmentKey<i32>>>,
 }
 impl EntityRenderer for Missile {
     fn submit(
@@ -104,11 +94,12 @@ impl EntityRenderer for Missile {
         draw: &mut dyn BlockEntityDrawContext,
     ) -> Result<(), String> {
         *self.seen.lock().unwrap() = Some(entity.clone());
+        let key = self.fuel_key.lock().unwrap();
         let fuel = entity
             .attachments
             .as_ref()
             .ok_or("no snapshot")?
-            .get(&FUEL)
+            .get(key.as_ref().ok_or("no fuel key")?)
             .map(|value| value.copied())
             .map_err(|e| format!("{e:?}"))?;
         *self.fuel.lock().unwrap() = fuel;
@@ -160,12 +151,14 @@ struct Scene {
 #[mod_api::__subscriptions]
 impl mod_api::Hooks for Scene {
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type(
-            mod_api::AttachmentDescriptor::new("test:fuel", FUEL.default)
-                .serialize(FUEL_CODEC)
-                .sync(),
-        )
-        .unwrap();
+        let key = r
+            .register_attachment_type(
+                mod_api::AttachmentDescriptor::new("test:fuel", || 0_i32)
+                    .serialize(FUEL_CODEC)
+                    .sync(),
+            )
+            .unwrap();
+        *self.missile.fuel_key.lock().unwrap() = Some(key);
         for path in ["missile", "bomb", "plain"] {
             r.declare_general_entity(
                 path,

@@ -1329,6 +1329,16 @@ pub(super) mod tests {
         with_game_at(fixture_root(), test);
     }
 
+    pub(in crate::game) fn with_game_attachment<T: Send + Sync + 'static>(
+        owner: &'static str,
+        descriptor: impl Fn() -> mod_api::AttachmentDescriptor<T> + Send + Sync + 'static,
+        test: impl FnOnce(&mut super::Game<'_>, mod_api::AttachmentKey<T>),
+    ) {
+        mod_platform::testing::with_attachment_fixture(owner, descriptor, |issued| {
+            with_game(|game| test(game, issued()));
+        });
+    }
+
     pub(in crate::game) fn fixture_root() -> std::path::PathBuf {
         std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap())
     }

@@ -33,19 +33,10 @@ const PROGRESS: AttachmentType<i32> = AttachmentType {
     sync: false,
 };
 
-/// Kept for the session only: no codec.
-static SCRATCH: AttachmentType<i32> = AttachmentType {
-    namespace: "part_state",
-    name: "scratch",
-    default: || 0,
-    codec: None,
-    copy_on_death: false,
-    sync: false,
-};
-
 /// Counts its block entity's ticks in its state.
 struct Press {
     state_key: mod_api::AttachmentKey<i32>,
+    scratch: mod_api::AttachmentKey<i32>,
 }
 #[mod_api::sunrise_part]
 impl BlockPart for Press {}
@@ -74,22 +65,24 @@ struct StateMod;
 #[mod_api::__subscriptions]
 impl Hooks for StateMod {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type(
-            mod_api::AttachmentDescriptor::new("part_state:progress", PROGRESS.default)
-                .serialize(PROGRESS_CODEC),
-        )
-        .unwrap();
+        let state_key = r
+            .register_attachment_type(
+                mod_api::AttachmentDescriptor::new("part_state:progress", PROGRESS.default)
+                    .serialize(PROGRESS_CODEC),
+            )
+            .unwrap();
+        let scratch = r
+            .register_attachment_type(mod_api::AttachmentDescriptor::new(
+                "part_state:scratch",
+                || 0_i32,
+            ))
+            .unwrap();
         let kind = r
             .block_entity_type("press")
             .blocks(&["part_state:press"])
             .build();
-        r.block_entity_part_with_state(
-            &kind,
-            Press {
-                state_key: PROGRESS,
-            },
-        )
-        .unwrap();
+        r.block_entity_part_with_state(&kind, Press { state_key, scratch })
+            .unwrap();
     }
     fn blocks(&self, _: &mod_api::RegistrationContext, e: &mut mod_api::BlocksEvent<'_>) {
         e.register(mod_api::Block::new("part_state:press", "minecraft:barrel").with_item(false))
@@ -122,7 +115,10 @@ fn with_state_mod(name: &str, test: impl FnOnce(&mut Game<'_>, &Press)) {
             test(
                 game,
                 &Press {
-                    state_key: PROGRESS,
+                    state_key: mod_api::testing::registered_attachment_fixture(
+                        "part_state:progress",
+                    ),
+                    scratch: mod_api::testing::registered_attachment_fixture("part_state:scratch"),
                 },
             );
         });
@@ -255,12 +251,12 @@ fn part_state_is_per_block_entity_through_ticks_transactions_and_replacement() {
             *n = 10;
             (
                 part.edit_state(host, a, |_, n| *n = 99),
-                edit_part_state(host, a, &SCRATCH, |_, n| *n = 1),
+                edit_part_state(host, a, &part.scratch, |_, n| *n = 1),
             )
         });
         assert_eq!(inner, Ok((Err(PartStateError::Reentrant), Ok(()))));
         assert_eq!(stored(part, game, a), Some(10));
-        assert_eq!(read_state(game, a, &SCRATCH), Ok(Some(1)));
+        assert_eq!(read_state(game, a, &part.scratch), Ok(Some(1)));
 
         // A value replaced while the closure ran refuses the edit and keeps the old one.
         let changed = part.edit_state(game, a, |host, n| {
@@ -360,7 +356,7 @@ fn part_state_saves_with_its_chunk_and_reloads_under_a_fresh_handle() {
             "an edit marks its chunk for the unload's save"
         );
         assert_eq!(
-            edit_part_state(game, entity, &SCRATCH, |_, n| *n = 4),
+            edit_part_state(game, entity, &part.scratch, |_, n| *n = 4),
             Ok(())
         );
 
@@ -389,7 +385,7 @@ fn part_state_saves_with_its_chunk_and_reloads_under_a_fresh_handle() {
         assert_eq!(part.state(game, entity), Err(PartStateError::Stale));
         assert_eq!(stored(part, game, reloaded), Some(7));
         assert_eq!(
-            read_state(game, reloaded, &SCRATCH),
+            read_state(game, reloaded, &part.scratch),
             Ok(None),
             "session only"
         );
@@ -514,10 +510,14 @@ fn a_nested_item_write_marks_the_level_written_not_the_level_committing() {
 }
 
 /// What the attachment index answers for `entity`'s `PROGRESS`, without the handle check.
-fn indexed(game: &Game<'_>, entity: BlockEntityRef) -> Option<i32> {
+fn indexed(
+    game: &Game<'_>,
+    entity: BlockEntityRef,
+    key: &mod_api::AttachmentKey<i32>,
+) -> Option<i32> {
     use mod_api::AttachmentQueries;
     let host: &dyn mod_api::Host = game;
-    host.query(&PROGRESS)
+    host.query(key)
         .unwrap()
         .get(mod_api::AttachmentHolder::BlockEntity(entity))
         .ok()
@@ -541,7 +541,7 @@ fn a_removal_retires_its_state_only_at_the_root_commit() {
         game.journal_remove_block_entity(pos);
         assert_eq!(part.state(game, a), Err(PartStateError::Stale));
         assert_eq!(
-            indexed(game, a),
+            indexed(game, a, part.state_key()),
             Some(7),
             "still bound until the root commits"
         );
@@ -549,20 +549,20 @@ fn a_removal_retires_its_state_only_at_the_root_commit() {
         assert_eq!(part.edit_state(game, tentative, |_, n| *n = 5), Ok(()));
         game.transaction_close(&seal, false);
         assert_eq!(part.state(game, a), Ok(7));
-        assert_eq!(indexed(game, a), Some(7));
+        assert_eq!(indexed(game, a, part.state_key()), Some(7));
         assert_eq!(part.state(game, tentative), Err(PartStateError::Stale));
-        assert_eq!(indexed(game, tentative), None);
+        assert_eq!(indexed(game, tentative, part.state_key()), None);
 
         // A nested removal committed into its parent is still not published.
         let outer = game.transaction_open();
         let inner = game.transaction_open();
         game.journal_remove_block_entity(pos);
         game.transaction_close(&inner, true);
-        assert_eq!(indexed(game, a), Some(7));
+        assert_eq!(indexed(game, a, part.state_key()), Some(7));
         // The root commit retires it.
         game.transaction_close(&outer, true);
         assert_eq!(part.state(game, a), Err(PartStateError::Stale));
-        assert_eq!(indexed(game, a), None);
+        assert_eq!(indexed(game, a, part.state_key()), None);
         assert!(game.world.block_entities.attachments(pos).is_none());
     });
 }
@@ -642,16 +642,16 @@ fn one_position_replaced_twice_in_an_aborted_transaction_gets_its_original_back(
             tentative.push(replacement);
         }
         assert_eq!(
-            indexed(game, original),
+            indexed(game, original, part.state_key()),
             Some(7),
             "bound until the root commits"
         );
         game.transaction_close(&seal, false);
         assert_eq!(part.state(game, original), Ok(7));
-        assert_eq!(indexed(game, original), Some(7));
+        assert_eq!(indexed(game, original, part.state_key()), Some(7));
         for handle in tentative {
             assert_eq!(part.state(game, handle), Err(PartStateError::Stale));
-            assert_eq!(indexed(game, handle), None);
+            assert_eq!(indexed(game, handle, part.state_key()), None);
         }
     });
 }

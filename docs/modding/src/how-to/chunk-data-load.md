@@ -3,13 +3,14 @@
 `chunk_data_load` receives `&dyn ChunkDiskHost` and a `ChunkDataLoadEvent` after
 a full or proto disk record has decoded, before its attachment store is
 published. A missing record, fresh generation and proto-to-full promotion do
-not fire this hook. The callback uses `event.data.get(&KEY)` and
-`event.data.set(&KEY, value)` to read and edit the typed store of this load.
+not fire this hook. The callback uses `event.data.get(&key)` and
+`event.data.set(&key, value)` to read and edit the typed store of this load.
 For example, reading disk value 8 and setting 9 publishes 9 on success.
 
 The worker host supplies only the job identity and immutable resource reads.
 It has no live backend and is not a `ServerHost`.
-Every typed value needs a persistence codec and must implement `Wire`.
+Use the `AttachmentKey<T>` returned at registration, with a persistence codec on its
+descriptor. A key from an earlier installation refuses the job. `T` need not implement `Wire`.
 Unknown bounded attachment entries are preserved opaquely.
 
 Codec errors and unwinding panics refuse the entire

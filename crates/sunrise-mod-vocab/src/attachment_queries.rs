@@ -15,7 +15,11 @@ pub trait AttachmentQueries: Host {
         &self,
         key: &'key AttachmentKey<T>,
     ) -> Result<AttachmentQuery<'key, T>, AttachmentError> {
-        self.attachment_query(key.namespace, key.name)?.query(key)
+        let descriptor = key.live()?;
+        let (namespace, name) = key.parts();
+        Ok(self
+            .attachment_query(namespace, name)?
+            .query_checked(descriptor))
     }
 }
 impl<H: Host + ?Sized> AttachmentQueries for H {}
@@ -92,15 +96,11 @@ impl<T: Clone + Send + Sync + 'static> AttachmentRowMut<'_, T> {
     /// Replace through the ordinary write path, refusing stale residency first.
     pub fn set(&self, host: &mut dyn ServerHost, value: T) -> Result<(), AttachmentRowError> {
         let holder = self.holder_for_write(host)?;
-        self.key
-            .set(host.attachments(), holder, value)
-            .map_err(write_error)
+        self.key.set(host, holder, value).map_err(write_error)
     }
     /// Remove through the ordinary write path, refusing stale residency first.
     pub fn remove(&self, host: &mut dyn ServerHost) -> Result<Option<T>, AttachmentRowError> {
         let holder = self.holder_for_write(host)?;
-        self.key
-            .remove(host.attachments(), holder)
-            .map_err(write_error)
+        self.key.remove(host, holder).map_err(write_error)
     }
 }

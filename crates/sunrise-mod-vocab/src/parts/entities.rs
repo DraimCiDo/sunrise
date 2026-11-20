@@ -204,8 +204,8 @@ pub trait EntitiesRegistrar {
     fn attach_entity_part(&mut self, entity: &str, kind: &'static str, part: Arc<dyn EntityPart>);
 
     /// Record the state declaration of entity Part `part` on entity type `entity`, or refuse
-    /// it (as the mod's registration refusal too) if it fails `PartStateDeclaration::check`
-    /// or reuses a key with another type. Mods reach it through `entity_part_with_state`.
+    /// it (as the mod's registration refusal too) if the key is stale or its policy is not local
+    /// to the holder. Mods reach it through `entity_part_with_state`.
     fn declare_entity_part_state(
         &mut self,
         entity: &str,

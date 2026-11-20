@@ -1,5 +1,5 @@
 use super::*;
-use crate::game::native_entity_refs::tests::with_game;
+use crate::game::native_entity_refs::tests::with_game_attachment;
 use mod_api::{AttachmentRowError, AttachmentType, AttachmentWriteToken};
 
 static VALUE: AttachmentType<u32> = AttachmentType {
@@ -11,9 +11,12 @@ static VALUE: AttachmentType<u32> = AttachmentType {
     sync: false,
 };
 
-fn capture(game: &Game<'_>) -> Vec<(AttachmentHolder, u32, AttachmentWriteToken)> {
+fn capture(
+    game: &Game<'_>,
+    key: &mod_api::AttachmentKey<u32>,
+) -> Vec<(AttachmentHolder, u32, AttachmentWriteToken)> {
     let batch = game.attachment_query("boundary", "value").unwrap();
-    let query = batch.query(&VALUE).unwrap();
+    let query = batch.query(key).unwrap();
     query
         .iter()
         .map(|row| {
@@ -30,12 +33,13 @@ fn capture(game: &Game<'_>) -> Vec<(AttachmentHolder, u32, AttachmentWriteToken)
 #[test]
 #[ignore = "daily"]
 fn current_dimension_capture_and_foreign_residency_validation() {
-    with_game(|game| {
+    let descriptor = || mod_api::AttachmentDescriptor::new("boundary:value", VALUE.default);
+    with_game_attachment("boundary", descriptor, |game, key| {
         VALUE
             .set(&mut game.world.attachments, Holder::Level, 7)
             .unwrap();
         game.native_level_opened(Dim::Overworld);
-        let rows = capture(game);
+        let rows = capture(game, &key);
         let holder = rows[0].0;
         let token = rows[0].2.clone();
         assert_eq!(game.attachment_validate_write(token.clone()), Ok(()));
@@ -62,12 +66,12 @@ fn current_dimension_capture_and_foreign_residency_validation() {
             game.attachment_validate_write(token.clone()),
             Err(AttachmentRowError::StaleHolder)
         );
-        assert_eq!(capture(game)[0].1, 99);
+        assert_eq!(capture(game, &key)[0].1, 99);
         game.attachment_indexes.insert(Dim::Overworld, original);
         assert_eq!(game.attachment_validate_write(token.clone()), Ok(()));
 
         game.dim = Dim::Nether;
-        assert!(capture(game).is_empty());
+        assert!(capture(game, &key).is_empty());
         assert_eq!(
             game.attachment_validate_write(token),
             Err(AttachmentRowError::StaleHolder)

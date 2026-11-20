@@ -61,16 +61,15 @@ row's identity, age, pose and a frozen snapshot of its synced attachments
 ([attachments](../../concepts/attachments.md)).
 
 ```rust,ignore
-static FUEL: AttachmentType<i32> = /* a synced render read, using FUEL_CODEC */;
+// During mod registration, keep the returned key for the renderer:
+let fuel = registrar.register_attachment_type(
+    AttachmentDescriptor::new("example:fuel", || 0_i32).serialize(FUEL_CODEC).sync(),
+)?;
 
-fn register(registrar: &mut dyn Registrar) -> Result<(), String> {
-    registrar.register_attachment_type(
-        AttachmentDescriptor::new("example:fuel", FUEL.default).serialize(FUEL_CODEC).sync(),
-    )?;
-    Ok(())
+struct Missile {
+    fuel: AttachmentKey<i32>,
 }
-
-struct Missile;
+// Register Missile { fuel } in the renderer registration hook.
 impl EntityRenderer for Missile {
     fn submit(
         &self,
@@ -78,7 +77,7 @@ impl EntityRenderer for Missile {
         draw: &mut dyn BlockEntityDrawContext,
     ) -> Result<(), String> {
         let attachments = entity.attachments.as_ref().ok_or("expected a general entity")?;
-        let fuel = attachments.get(&FUEL).map_err(|error| format!("{error:?}"))?;
+        let fuel = attachments.get(&self.fuel).map_err(|error| format!("{error:?}"))?;
         draw.translate([0.0, fuel.copied().unwrap_or_default() as f32, 0.0]);
         // Submit the missile's model at this pose.
         Ok(())
@@ -88,7 +87,8 @@ impl EntityRenderer for Missile {
 
 A row is eligible for extraction after its first attachment snapshot arrives. A field that could
 not fit into the bounded render snapshot reads as `None`; it does not stop the row from being
-submitted. `yaw`, `pitch` and `age` are interpolated to the frame. The pose stack starts at the row's
+submitted. A key from a previous mod installation returns `AttachmentError::StaleKey`;
+use the key issued during the current registration. `yaw`, `pitch` and `age` are interpolated to the frame. The pose stack starts at the row's
 interpolated position.
 
 ### A living entity's frame

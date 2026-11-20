@@ -50,10 +50,14 @@ pub fn register(registrar: &mut dyn Registrar) {
 }
 
 pub fn register_renderer(renderers: &mut dyn EntityRenderers) {
-    renderers.register(KIND.into(), std::sync::Arc::new(Probe));
+    let fuel =
+        mod_api::testing::registered_attachment_fixture("general_render_fixture:render_fuel");
+    renderers.register(KIND.into(), std::sync::Arc::new(Probe { fuel }));
 }
 
-struct Probe;
+struct Probe {
+    fuel: mod_api::AttachmentKey<i32>,
+}
 impl EntityRenderer for Probe {
     fn submit(
         &self,
@@ -64,7 +68,7 @@ impl EntityRenderer for Probe {
             .attachments
             .as_ref()
             .ok_or("missing render snapshot")?
-            .get(&FUEL)
+            .get(&self.fuel)
             .map_err(|e| format!("{e:?}"))?
             .copied()
             .ok_or("missing fuel")? as f32;

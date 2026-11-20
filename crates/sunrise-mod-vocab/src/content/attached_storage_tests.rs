@@ -1,7 +1,10 @@
 //! The handlers and their codecs, against the fixture host: literal amounts on writes, the
 //! hostile saved shapes refused, and the journal's nested snapshots.
 use super::*;
-use crate::{HostTransaction, ItemKey, testing::FakeHost};
+use crate::{
+    AttachmentDescriptor, HostTransaction, ItemKey, parts::install_attachment_fixture,
+    testing::FakeHost,
+};
 use std::cell::RefCell;
 use sunrise_core::nbt::JavaString;
 
@@ -21,38 +24,6 @@ fn accepts_the_chosen(resource: &ItemResource) -> bool {
     })
 }
 
-static ITEMS: AttachmentType<StackList<ItemResource>> = AttachmentType {
-    namespace: "attached_storage_test",
-    name: "items",
-    default: Vec::new,
-    codec: Some(ITEM_STACKS),
-    copy_on_death: false,
-    sync: false,
-};
-static VALID_ITEMS: AttachmentType<StackList<ItemResource>> = AttachmentType {
-    namespace: "attached_storage_test",
-    name: "valid_items",
-    default: Vec::new,
-    codec: Some(ITEM_STACKS),
-    copy_on_death: false,
-    sync: false,
-};
-static FLUIDS: AttachmentType<StackList<FluidResource>> = AttachmentType {
-    namespace: "attached_storage_test",
-    name: "fluids",
-    default: Vec::new,
-    codec: Some(FLUID_STACKS),
-    copy_on_death: false,
-    sync: false,
-};
-static ENERGY: AttachmentType<u32> = AttachmentType {
-    namespace: "attached_storage_test",
-    name: "energy",
-    default: || 0,
-    codec: None,
-    copy_on_death: false,
-    sync: false,
-};
 const CHUNK: Holder = Holder::Chunk([2, 3]);
 
 /// Complete the fixture load's tables with `items` and `fluids`, so the stacks below resolve.
@@ -101,18 +72,22 @@ fn in_world(test: impl FnOnce()) {
 #[test]
 fn a_fluid_tank_round_trips_through_its_codec_and_moves() {
     in_world(|| {
+        let fluids = install_attachment_fixture(
+            AttachmentDescriptor::new("attached_storage_test:fluids", Vec::new)
+                .serialize(FLUID_STACKS),
+        );
         resolve(&[], &["minecraft:water"]);
         let mut host = FakeHost::new();
         let water = fluid("minecraft:water");
-        let tanks = AttachedFluids::new(&FLUIDS, CHUNK, 3, 1000, |_| true).unwrap();
+        let tanks = AttachedFluids::new(fluids.clone(), CHUNK, 3, 1000, |_| true).unwrap();
         let moved =
             host.transaction(|host, tx| Ok::<_, ()>(tanks.insert_at(host, tx, 1, &water, 250)));
         assert_eq!(moved, Ok(250));
         assert_eq!(tanks.amount(&mut host, 1), 250);
         // The codec of the saved attachment reads back to the same index and amount.
         let server: &mut dyn ServerHost = &mut host;
-        let held = FLUIDS.get_existing(server, CHUNK).unwrap().unwrap();
-        let codec = FLUIDS.codec.as_ref().unwrap();
+        let held = fluids.get_existing(server, CHUNK).unwrap().unwrap();
+        let codec = FLUID_STACKS;
         let saved = (codec.encode)(&held).unwrap();
         let reloaded = (codec.decode)(&saved).unwrap();
         assert_eq!(reloaded[1], Some((water.clone(), 250)));
@@ -129,11 +104,15 @@ fn a_fluid_tank_round_trips_through_its_codec_and_moves() {
 #[test]
 fn extraction_takes_part_and_none_of_another_resource() {
     in_world(|| {
+        let items = install_attachment_fixture(
+            AttachmentDescriptor::new("attached_storage_test:items", Vec::new)
+                .serialize(ITEM_STACKS),
+        );
         resolve(&["minecraft:dirt", "minecraft:cobblestone"], &[]);
         let mut host = FakeHost::new();
         let dirt = item("minecraft:dirt");
         let cobble = item("minecraft:cobblestone");
-        let slots = AttachedItems::new(&ITEMS, CHUNK, 9, 64, |_| true).unwrap();
+        let slots = AttachedItems::new(items, CHUNK, 9, 64, |_| true).unwrap();
         let went =
             host.transaction(|host, tx| Ok::<_, ()>(slots.insert_at(host, tx, 4, &dirt, 30)));
         assert_eq!(went, Ok(30));
@@ -159,13 +138,17 @@ fn extraction_takes_part_and_none_of_another_resource() {
 #[test]
 fn capacity_stays_physical_while_validity_refuses_inserts_only() {
     in_world(|| {
+        let valid_items = install_attachment_fixture(
+            AttachmentDescriptor::new("attached_storage_test:valid_items", Vec::new)
+                .serialize(ITEM_STACKS),
+        );
         resolve(&["minecraft:dirt", "minecraft:cobblestone"], &[]);
         let mut host = FakeHost::new();
         let dirt = item("minecraft:dirt");
         let cobble = item("minecraft:cobblestone");
         CHOSEN.with_borrow_mut(|chosen| *chosen = Some(dirt.to_stack(1).unwrap().item()));
         let only_dirt =
-            AttachedItems::new(&VALID_ITEMS, CHUNK, 4, 500, accepts_the_chosen).unwrap();
+            AttachedItems::new(valid_items.clone(), CHUNK, 4, 500, accepts_the_chosen).unwrap();
         assert_eq!(
             only_dirt.capacity(&mut host, 2, Some(&cobble)),
             64,
@@ -179,7 +162,7 @@ fn capacity_stays_physical_while_validity_refuses_inserts_only() {
             host.transaction(|host, tx| Ok::<_, ()>(only_dirt.insert_at(host, tx, 2, &dirt, 120)));
         assert_eq!(went, Ok(64), "at most the item's stack size per index");
         // A cobblestone another (permissive) handler's write stored reads out through this one.
-        let anything = AttachedItems::new(&VALID_ITEMS, CHUNK, 4, 500, |_| true).unwrap();
+        let anything = AttachedItems::new(valid_items, CHUNK, 4, 500, |_| true).unwrap();
         let _ =
             host.transaction(|host, tx| Ok::<_, ()>(anything.insert_at(host, tx, 3, &cobble, 7)));
         let came =
@@ -193,9 +176,13 @@ fn capacity_stays_physical_while_validity_refuses_inserts_only() {
 #[test]
 fn energy_limits_and_a_nested_abort() {
     in_world(|| {
+        let energy = install_attachment_fixture(AttachmentDescriptor::new(
+            "attached_storage_test:energy",
+            || 0_u32,
+        ));
         resolve(&[], &[]);
         let mut host = FakeHost::new();
-        let battery = AttachedEnergy::new(&ENERGY, CHUNK, 100, 30, 20);
+        let battery = AttachedEnergy::new(energy, CHUNK, 100, 30, 20);
         let past_insert = host.transaction(|host, tx| Ok::<_, ()>(battery.insert(host, tx, 150)));
         assert_eq!(past_insert, Ok(30), "at most max_insert per call");
         let past_extract = host.transaction(|host, tx| Ok::<_, ()>(battery.extract(host, tx, 25)));
@@ -223,13 +210,17 @@ fn energy_limits_and_a_nested_abort() {
 #[test]
 fn a_smaller_view_keeps_higher_indices() {
     in_world(|| {
+        let items = install_attachment_fixture(
+            AttachmentDescriptor::new("attached_storage_test:items", Vec::new)
+                .serialize(ITEM_STACKS),
+        );
         resolve(&["minecraft:dirt"], &[]);
         let mut host = FakeHost::new();
         let dirt = item("minecraft:dirt");
-        let big = AttachedItems::new(&ITEMS, CHUNK, 9, 64, |_| true).unwrap();
+        let big = AttachedItems::new(items.clone(), CHUNK, 9, 64, |_| true).unwrap();
         let went = host.transaction(|host, tx| Ok::<_, ()>(big.insert_at(host, tx, 7, &dirt, 12)));
         assert_eq!(went, Ok(12));
-        let small = AttachedItems::new(&ITEMS, CHUNK, 3, 64, |_| true).unwrap();
+        let small = AttachedItems::new(items, CHUNK, 3, 64, |_| true).unwrap();
         let went = host.transaction(|host, tx| Ok::<_, ()>(small.insert_at(host, tx, 0, &dirt, 5)));
         assert_eq!(went, Ok(5));
         assert_eq!(big.amount(&mut host, 7), 12, "the higher index survived");
@@ -273,11 +264,15 @@ fn a_hostile_slot_is_refused_not_allocated() {
 #[test]
 fn handler_and_codec_limits_agree() {
     in_world(|| {
+        let items = install_attachment_fixture(
+            AttachmentDescriptor::new("attached_storage_test:items", Vec::new)
+                .serialize(ITEM_STACKS),
+        );
         resolve(&["minecraft:dirt"], &[]);
         let mut host = FakeHost::new();
         let dirt = item("minecraft:dirt");
-        assert!(AttachedItems::new(&ITEMS, CHUNK, 4097, 64, |_| true).is_none());
-        let slots = AttachedItems::new(&ITEMS, CHUNK, 4096, 64, |_| true).unwrap();
+        assert!(AttachedItems::new(items.clone(), CHUNK, 4097, 64, |_| true).is_none());
+        let slots = AttachedItems::new(items.clone(), CHUNK, 4096, 64, |_| true).unwrap();
         assert_eq!(
             host.transaction(|host, tx| Ok::<_, ()>(slots.insert_at(host, tx, 4095, &dirt, 1))),
             Ok(1)
@@ -287,8 +282,8 @@ fn handler_and_codec_limits_agree() {
             Ok(0)
         );
         let server: &mut dyn ServerHost = &mut host;
-        let mut held = ITEMS.get_existing(server, CHUNK).unwrap().unwrap();
-        let codec = ITEMS.codec.as_ref().unwrap();
+        let mut held = items.get_existing(server, CHUNK).unwrap().unwrap();
+        let codec = ITEM_STACKS;
         let saved = (codec.encode)(&held).unwrap();
         let decoded = (codec.decode)(&saved).unwrap();
         assert_eq!(decoded.len(), 4096);

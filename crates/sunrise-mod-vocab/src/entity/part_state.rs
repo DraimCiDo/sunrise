@@ -63,9 +63,8 @@ pub trait EntityPartState: EntityPart + Sized {
 
     /// The entity's value, or the default when it has none. Inserts nothing.
     fn state(&self, host: &dyn Host, entity: EntityRef) -> Result<Self::Data, PartStateError> {
-        Ok(self
-            .state_existing(host, entity)?
-            .unwrap_or_else(|| (self.state_key().default)()))
+        let key = self.state_key();
+        Ok(read_state(host, entity, key)?.unwrap_or_else(|| key.descriptor().default_value()))
     }
 
     /// The entity's value, or `None` when it has none. Inserts nothing.
@@ -165,11 +164,11 @@ impl fmt::Display for EntityPartStateError {
 
 impl std::error::Error for EntityPartStateError {}
 
+// no wire: the contained attachment identity belongs to this process's registration.
 /// One entity Part state declaration as registration kept it, for the game to check its
 /// entity type once every type is known.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-#[derive(sunrise_mod_api_macros::Wire)]
 pub struct EntityPartStateDeclaration {
     /// The mod that declared it.
     pub mod_id: String,

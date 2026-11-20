@@ -71,3 +71,46 @@ fn a_mod_scope_does_not_freeze_the_next_scopes_registration() {
         });
     }
 }
+
+/// Run a fixture with one real attachment registration. Fetch its key after setting
+/// up a game, since game setup can run registration again and issue a new key.
+pub fn with_attachment_fixture<T: Send + Sync + 'static, R>(
+    owner: &'static str,
+    descriptor: impl Fn() -> crate::AttachmentDescriptor<T> + Send + Sync + 'static,
+    run: impl FnOnce(&dyn Fn() -> crate::AttachmentKey<T>) -> R,
+) -> R {
+    use std::sync::{Arc, Mutex};
+    struct Owner<D, T: 'static> {
+        descriptor: D,
+        issued: Arc<Mutex<Option<crate::AttachmentKey<T>>>>,
+    }
+    impl<T, D> crate::Hooks for Owner<D, T>
+    where
+        T: Send + Sync + 'static,
+        D: Fn() -> crate::AttachmentDescriptor<T> + Send + Sync + 'static,
+    {
+        fn subscribed(&self) -> &'static [Option<crate::HookId>] {
+            &[]
+        }
+        fn register(&self, registrar: &mut dyn crate::Registrar, _: &crate::RegistrationContext) {
+            *self.issued.lock().unwrap() = Some(
+                registrar
+                    .register_attachment_type((self.descriptor)())
+                    .unwrap(),
+            );
+        }
+    }
+    let issued = Arc::new(Mutex::new(None));
+    let mods: crate::Mods = vec![crate::ModEntry::new(
+        owner,
+        Box::new(Owner {
+            descriptor,
+            issued: issued.clone(),
+        }),
+    )]
+    .into();
+    with_mods(mods.clone(), || {
+        crate::__private::part_tests::install_parts_fixture(&mods).unwrap();
+        run(&|| issued.lock().unwrap().clone().unwrap())
+    })
+}

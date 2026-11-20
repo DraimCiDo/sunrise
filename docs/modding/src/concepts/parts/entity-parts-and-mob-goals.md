@@ -88,20 +88,19 @@ attachment codec and kept by transactions, through the same calls and rules as
 
 ```rust,ignore
 struct Robot {
-    charge: AttachmentType<u32>,
+    charge: AttachmentKey<u32>,
 }
 impl EntityPartState for Robot {
     type Data = u32;
 
-    fn state_key(&self) -> &AttachmentType<Self::Data> {
+    fn state_key(&self) -> &AttachmentKey<Self::Data> {
         &self.charge
     }
 }
-// CHARGE is an AttachmentType<u32> for mymod:charge with CHARGE_CODEC.
-r.register_attachment_type(
-    AttachmentDescriptor::new("mymod:charge", CHARGE.default).serialize(CHARGE_CODEC),
+let charge = r.register_attachment_type(
+    AttachmentDescriptor::new("mymod:charge", || 0_u32).serialize(CHARGE_CODEC),
 )?;
-r.entity_part_with_state("mymod:robot", Robot { charge: CHARGE })?;
+r.entity_part_with_state("mymod:robot", Robot { charge })?;
 
 // In a Robot Part hook:
 let full = self.edit_state(host, robot, |_, charge| {
@@ -112,7 +111,7 @@ let full = self.edit_state(host, robot, |_, charge| {
 
 - On the Part, `self.state` and `self.state_existing` read a snapshot and insert nothing;
   `self.edit_state` runs in a nested transaction of its own, as for block entities.
-- Every call checks the handle first:
+- Every call validates the current key and the entity handle:
   - a handle of another world open, or of an entity that was removed (or whose removal waits for
     the root commit), unloaded or moved under a new id, gives `PartStateError::Stale`, and
     `edit_state` creates no map;

@@ -36,14 +36,6 @@ mod tests {
     impl BlockPart for Session {}
     #[mod_api::sunrise_part]
     impl BlockEntityPart for Session {}
-    const SESSION: AttachmentType<u32> = AttachmentType {
-        namespace: "porter",
-        name: "session",
-        default: || 0,
-        codec: None,
-        copy_on_death: false,
-        sync: false,
-    };
     impl BlockEntityPartState for Session {
         type Data = u32;
         fn state_key(&self) -> &mod_api::AttachmentKey<u32> {
@@ -54,13 +46,11 @@ mod tests {
     #[mod_api::__subscriptions]
     impl Hooks for DeclaresSession {
         fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
-            r.register_attachment_type(mod_api::AttachmentDescriptor::new(
-                "porter:session",
-                SESSION.default,
-            ))
-            .unwrap();
+            let state_key = r
+                .register_attachment_type(AttachmentDescriptor::new("porter:session", || 0_u32))
+                .unwrap();
             let kind = r.block_entity_type("press").blocks(&[]).build();
-            let _ = r.block_entity_part_with_state(&kind, Session { state_key: SESSION });
+            let _ = r.block_entity_part_with_state(&kind, Session { state_key });
         }
     }
 
@@ -78,51 +68,27 @@ mod tests {
     }
 
     #[test]
-    fn part_state_keys_allow_foreign_uses_with_one_type_each() {
-        const fn key<T>(namespace: &'static str, default: fn() -> T) -> AttachmentType<T> {
-            AttachmentType {
-                namespace,
-                name: "progress",
-                default,
-                codec: None,
-                copy_on_death: false,
-                sync: false,
-            }
-        }
-        with_porter(|| {
-            let mut r = PartRegistrar::new("porter");
-            let declare = |r: &mut PartRegistrar, declaration| {
-                r.declare_block_entity_part_state("porter::Press", declaration)
-            };
-            let progress = PartStateDeclaration::of(&key("legacy", || 0_u32));
-            assert_eq!(declare(&mut r, progress), Ok(()));
-            assert_eq!(
-                declare(&mut r, progress),
-                Ok(()),
-                "one key, one type, two parts"
-            );
-            let wider = PartStateDeclaration::of(&key("legacy", || 0_i64));
-            assert_eq!(
-                declare(&mut r, wider),
-                Err(wider.refused(
-                    "porter::Press",
-                    PartStateRefusal::Incompatible { declared: "u32" }
-                ))
-            );
-            assert_eq!(
-                declare(
-                    &mut r,
-                    PartStateDeclaration::of(&key("minecraft", || 0_u32))
-                ),
-                Ok(())
-            );
-            assert_eq!(
-                r.refused.len(),
-                1,
-                "the incompatible layout is the registration refusal"
-            );
-            assert!(r.refused[0].contains("legacy:progress"));
-        });
+    fn part_state_refuses_a_key_from_an_earlier_pass_even_with_the_same_name_and_type() {
+        let mut previous = PartRegistrar::new("porter");
+        let old = (&mut previous as &mut dyn Registrar)
+            .register_attachment_type(AttachmentDescriptor::new("porter:progress", || 0_u32))
+            .unwrap();
+        let mut current = PartRegistrar::new("porter");
+        let new = (&mut current as &mut dyn Registrar)
+            .register_attachment_type(AttachmentDescriptor::new("porter:progress", || 0_u32))
+            .unwrap();
+        let old_declaration = PartStateDeclaration::of(&old);
+        let refusal = old_declaration.refused("porter::Press", PartStateRefusal::StaleKey);
+        assert_eq!(
+            current.declare_block_entity_part_state("porter::Press", old_declaration),
+            Err(refusal)
+        );
+        assert_eq!(
+            current
+                .declare_block_entity_part_state("porter::Press", PartStateDeclaration::of(&new)),
+            Ok(())
+        );
+        assert_eq!(current.refused.len(), 1);
     }
 
     #[test]

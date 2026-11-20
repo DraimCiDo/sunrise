@@ -491,6 +491,7 @@ fn a_loaded_entity_reads_its_saved_attachments_over_the_listeners_and_is_named_b
     .into();
     mod_platform::testing::with_mods(mods, || {
         with_game(|game| {
+            let key = mod_api::testing::registered_attachment_fixture::<i32>("constructing:saved");
             game.options.dedicated = Some(Vec::new());
             let mut saved = sunrise_mod_runtime::attachments::Attachments::default();
             SAVED.set(&mut saved, Holder::Level, 7).unwrap();
@@ -545,7 +546,7 @@ fn a_loaded_entity_reads_its_saved_attachments_over_the_listeners_and_is_named_b
             game.prune_entity_attachments();
             assert!(game.entity_attachments.contains_key(&ghost));
             use mod_api::{AttachmentQueries, AttachmentQueriesMut};
-            let batch = game.query_mut(&SAVED).unwrap();
+            let batch = game.query_mut(&key).unwrap();
             assert_eq!(batch.iter().count(), 1);
             let row = batch.iter().next().unwrap().unwrap();
             assert_eq!(*row.value(), 7);
@@ -572,7 +573,7 @@ fn a_loaded_entity_reads_its_saved_attachments_over_the_listeners_and_is_named_b
                 2,
                 "transfer is not reconstruction"
             );
-            assert_eq!(game.query(&SAVED).unwrap().iter().count(), 1);
+            assert_eq!(game.query(&key).unwrap().iter().count(), 1);
             assert_eq!(
                 row.set(game, 88),
                 Err(mod_api::AttachmentRowError::StaleHolder)
@@ -582,7 +583,7 @@ fn a_loaded_entity_reads_its_saved_attachments_over_the_listeners_and_is_named_b
             game.forget_entity(refused);
             game.prune_entity_attachments();
             assert_eq!(SAVED.get(game, Holder::Entity(arrived)), Ok(9));
-            assert_eq!(game.query(&SAVED).unwrap().iter().count(), 1);
+            assert_eq!(game.query(&key).unwrap().iter().count(), 1);
             game.forget_entity(arrived);
             game.mobs.retain(|mob| mob.id != arrived);
             let rebuilt = game.load_mob(tag("minecraft:pig", 200), None).unwrap();
@@ -602,6 +603,7 @@ fn mob_constructor_first_store_binds_only_the_resident_lifetime() {
     use mod_api::AttachmentQueries;
     observe(|_| {
         with_game(|game| {
+            let key = mod_api::testing::registered_attachment_fixture::<i32>("constructing:value");
             game.options.dedicated = Some(Vec::new());
             game.native_level_opened(Dim::Overworld);
             let id = game
@@ -619,7 +621,7 @@ fn mob_constructor_first_store_binds_only_the_resident_lifetime() {
                     .attachment_lifetime
                     .is_bound()
             );
-            let batch = game.query(&VALUE).unwrap();
+            let batch = game.query(&key).unwrap();
             let rows: Vec<_> = batch.iter().collect();
             assert_eq!(rows.len(), 1);
             let row = rows[0].as_ref().unwrap();
@@ -723,6 +725,7 @@ fn dragon_part_constructor_first_read_indexes_payload_and_same_id_replacement_re
     use mod_api::AttachmentQueries;
     observe(|calls| {
         with_game(|game| {
+            let key = mod_api::testing::registered_attachment_fixture::<i32>("constructing:value");
             game.options.dedicated = Some(Vec::new());
             game.native_level_opened(Dim::Overworld);
             game.spawn_remote_dragon(420, [1.0, 80.0, 1.0], 0.0);
@@ -731,7 +734,7 @@ fn dragon_part_constructor_first_read_indexes_payload_and_same_id_replacement_re
             // performs the store, and there is no subsequent explicit store.
             assert_eq!(VALUE.get_existing(game, holder), Ok(Some(41)));
             assert!(game.dragon.as_mut().unwrap().parts[0].2.is_bound());
-            let batch = game.query(&VALUE).unwrap();
+            let batch = game.query(&key).unwrap();
             let rows: Vec<_> = batch.iter().collect();
             assert_eq!(rows.len(), 1);
             let row = rows[0].as_ref().unwrap();
@@ -757,7 +760,7 @@ fn dragon_part_constructor_first_read_indexes_payload_and_same_id_replacement_re
             game.spawn_remote_dragon(420, [1.0, 80.0, 1.0], 0.0);
             assert!(!game.entity_attachments.contains_key(&421));
             assert!(!game.entity_initialization.initialized.contains(&holder));
-            assert!(game.query(&VALUE).unwrap().iter().next().is_none());
+            assert!(game.query(&key).unwrap().iter().next().is_none());
             assert_eq!(VALUE.get_existing(game, holder), Ok(Some(41)));
             assert_eq!(
                 calls
@@ -768,14 +771,14 @@ fn dragon_part_constructor_first_read_indexes_payload_and_same_id_replacement_re
                     .count(),
                 2
             );
-            assert_eq!(game.query(&VALUE).unwrap().iter().count(), 1);
+            assert_eq!(game.query(&key).unwrap().iter().count(), 1);
             game.remove_remote_dragon(420);
             // No prune pass between removal and network-ID reuse.
             assert!(!game.entity_attachments.contains_key(&421));
             assert!(!game.entity_initialization.initialized.contains(&holder));
             game.spawn_remote_dragon(420, [1.0, 80.0, 1.0], 0.0);
             assert!(!game.entity_attachments.contains_key(&421));
-            assert!(game.query(&VALUE).unwrap().iter().next().is_none());
+            assert!(game.query(&key).unwrap().iter().next().is_none());
             assert_eq!(VALUE.get_existing(game, holder), Ok(Some(41)));
             assert_eq!(
                 calls
@@ -786,7 +789,7 @@ fn dragon_part_constructor_first_read_indexes_payload_and_same_id_replacement_re
                     .count(),
                 3
             );
-            assert_eq!(game.query(&VALUE).unwrap().iter().count(), 1);
+            assert_eq!(game.query(&key).unwrap().iter().count(), 1);
         });
     });
 }

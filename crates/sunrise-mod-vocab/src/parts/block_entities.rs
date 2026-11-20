@@ -258,7 +258,7 @@ pub trait BlockEntitiesRegistrar {
     ) -> Result<(), crate::BlockEntityPartError>;
 
     /// Record the state declaration of Part `part`, or refuse it (as the mod's registration
-    /// refusal too) if it fails `PartStateDeclaration::check` or reuses a key with another type.
+    /// refusal too) if the key is stale or its policy is not local to the holder.
     /// Mods reach it through `block_entity_part_with_state`.
     fn declare_block_entity_part_state(
         &mut self,

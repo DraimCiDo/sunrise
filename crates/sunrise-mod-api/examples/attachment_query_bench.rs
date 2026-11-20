@@ -13,7 +13,7 @@ mod allocations;
 use allocations::measured;
 const HOLDERS: u32 = 10_000;
 const ROUNDS: u32 = 1000;
-static VALUE: AttachmentType<u32> = AttachmentType {
+const VALUE: AttachmentType<u32> = AttachmentType {
     namespace: "bench",
     name: "value",
     default: || panic!("no defaults"),
@@ -137,8 +137,8 @@ fn contribution(holder: AttachmentHolder, value: &u32) -> u64 {
     };
     u64::from(entity.id()) + u64::from(*value)
 }
-fn api(host: &dyn Host) -> u64 {
-    host.query(&VALUE)
+fn api(host: &dyn Host, key: &AttachmentKey<u32>) -> u64 {
+    host.query(key)
         .unwrap()
         .iter()
         .map(|row| {
@@ -163,12 +163,12 @@ fn timed(rounds: u32, mut f: impl FnMut() -> u64) -> f64 {
     }
     start.elapsed().as_secs_f64() * 1e6 / f64::from(rounds)
 }
-fn warm(host: &BenchHost) -> f64 {
+fn warm(host: &BenchHost, key: &AttachmentKey<u32>) -> f64 {
     let rows = host.raw();
-    let batch = host.query(&VALUE).unwrap();
-    assert_eq!(api(host), 99_990_000);
+    let batch = host.query(key).unwrap();
+    assert_eq!(api(host, key), 99_990_000);
     assert_eq!(raw(&rows), 99_990_000);
-    let (_, counts) = measured(|| black_box(api(host)));
+    let (_, counts) = measured(|| black_box(api(host, key)));
     assert_eq!(counts.allocations, 0);
     println!("warm acquisition + traversal allocations: {counts:?}");
     let mut baseline = Vec::new();
@@ -181,7 +181,7 @@ fn warm(host: &BenchHost) -> f64 {
             pair[path] = if path == 0 {
                 timed(ROUNDS, || raw(&black_box(host).raw()))
             } else {
-                timed(ROUNDS, || api(black_box(host as &dyn Host)))
+                timed(ROUNDS, || api(black_box(host as &dyn Host), key))
             };
         }
         let r = timed(ROUNDS, || raw(black_box(&rows)));
@@ -215,7 +215,7 @@ fn warm(host: &BenchHost) -> f64 {
     );
     overhead.max(traversal_overhead)
 }
-fn cold() {
+fn cold(key: &AttachmentKey<u32>) {
     for limit in [1000, HOLDERS as usize] {
         let mut lazy = Vec::new();
         let mut eager = Vec::new();
@@ -223,7 +223,7 @@ fn cold() {
             let host = BenchHost::new(true, true);
             let start = Instant::now();
             let (sum, counts) = measured(|| {
-                host.query(&VALUE)
+                host.query(key)
                     .unwrap()
                     .iter()
                     .take(limit)
@@ -239,7 +239,7 @@ fn cold() {
             let start = Instant::now();
             let (_, eager_counts) = measured(|| {
                 // Eager policy measured using the very same production decode path.
-                let batch = host.query(&VALUE).unwrap();
+                let batch = host.query(key).unwrap();
                 for row in batch.iter() {
                     black_box(row.unwrap().value);
                 }
@@ -263,11 +263,11 @@ fn cold() {
         );
     }
 }
-fn cow(host: &mut BenchHost) {
+fn cow(host: &mut BenchHost, key: &AttachmentKey<u32>) {
     let mut pinned = Vec::new();
     let mut unpinned = Vec::new();
     for _ in 0..9 {
-        let batch = host.query_mut(&VALUE).unwrap();
+        let batch = host.query_mut(key).unwrap();
         let row = batch.iter().next().unwrap().unwrap();
         let start = Instant::now();
         let (_, counts) = measured(|| row.set(host, 123).unwrap());
@@ -371,9 +371,37 @@ fn main() {
         "incremental residency/index requested live bytes: {}",
         memory.live - without_index.live
     );
-    let overhead = warm(&host);
-    cold();
-    cow(&mut host);
+    struct Owner(Arc<Mutex<Option<AttachmentKey<u32>>>>);
+    impl Hooks for Owner {
+        fn subscribed(&self) -> &'static [Option<HookId>] {
+            &[]
+        }
+
+        fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+            let key = r
+                .register_attachment_type(
+                    AttachmentDescriptor::new("bench:value", VALUE.default)
+                        .serialize(VALUE.codec.unwrap()),
+                )
+                .unwrap();
+            *self.0.lock().unwrap() = Some(key);
+        }
+    }
+    let issued = Arc::new(Mutex::new(None));
+    mod_api::__private::install_parts(
+        &[ModEntry::new("bench", Box::new(Owner(issued.clone())))],
+        &mod_api::__private::RuleSchema {
+            category: &|_| false,
+            position: &|_| None,
+            rule_count: 0,
+        },
+        |_| false,
+    )
+    .unwrap();
+    let key = issued.lock().unwrap().take().unwrap();
+    let overhead = warm(&host, &key);
+    cold(&key);
+    cow(&mut host, &key);
     let before = host.raw();
     let (_, idle) = measured(|| {
         for _ in 0..10_000 {

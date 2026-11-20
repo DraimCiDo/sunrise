@@ -1039,3 +1039,14 @@ impl crate::LoopReader for TestReader {
 #[cfg(test)]
 #[path = "testing/handle_level_tests.rs"]
 mod handle_level_tests;
+
+/// Retrieve a key issued by the current test's actual attachment registration.
+pub fn registered_attachment_fixture<T: Send + Sync + 'static>(
+    id: &str,
+) -> crate::AttachmentKey<T> {
+    let (namespace, name) = id.split_once(':').unwrap();
+    crate::parts::installed().unwrap().attachment_types[namespace][name]
+        .clone()
+        .typed()
+        .unwrap()
+}

@@ -5,7 +5,7 @@
 //! transactions, and goes with the block entity when it is removed, replaced or
 //! unloaded. The Part object is shared behaviour and owns no instance's value.
 
-use crate::*;
+use crate::{parts::AttachmentIdentity, *};
 use std::{cell::RefCell, fmt, sync::Arc};
 
 /// A block entity Part's typed state: one value per block entity of the Part's type,
@@ -52,9 +52,8 @@ pub trait BlockEntityPartState: BlockEntityPart + Sized {
 
     /// The block entity's value, or the default when it has none. Inserts nothing.
     fn state(&self, host: &dyn Host, entity: BlockEntityRef) -> Result<Self::Data, PartStateError> {
-        Ok(self
-            .state_existing(host, entity)?
-            .unwrap_or_else(|| (self.state_key().default)()))
+        let key = self.state_key();
+        Ok(read_state(host, entity, key)?.unwrap_or_else(|| key.descriptor().default_value()))
     }
 
     /// The block entity's value, or `None` when it has none. Inserts nothing.
@@ -74,9 +73,9 @@ pub trait BlockEntityPartState: BlockEntityPart + Sized {
         level: &dyn crate::LevelHost,
         entity: BlockEntityRef,
     ) -> Result<Self::Data, PartStateError> {
-        Ok(self
-            .state_existing_in(level, entity)?
-            .unwrap_or_else(|| (self.state_key().default)()))
+        let key = self.state_key();
+        Ok(read_block_state_in(level, entity, key)?
+            .unwrap_or_else(|| key.descriptor().default_value()))
     }
     /// The existing value through a read-only level. No chunk loading or loot generation;
     /// unloaded/stale holders fail and clients return None. Owning game thread only, never
@@ -86,16 +85,7 @@ pub trait BlockEntityPartState: BlockEntityPart + Sized {
         level: &dyn crate::LevelHost,
         entity: BlockEntityRef,
     ) -> Result<Option<Self::Data>, PartStateError> {
-        let key = self.state_key();
-        level
-            .block_entity_part_snapshot(entity, key.namespace, key.name)?
-            .query(key)
-            .map_err(|error| attachment(key, error))?
-            .get(AttachmentHolder::BlockEntity(entity))
-            .map_err(|error| match error {
-                AttachmentRowError::Value(error) => attachment(key, error),
-                _ => PartStateError::Stale,
-            })
+        read_block_state_in(level, entity, self.state_key())
     }
 
     /// Changes the block entity's value with `edit`, starting from the default when it has
@@ -108,6 +98,23 @@ pub trait BlockEntityPartState: BlockEntityPart + Sized {
     ) -> Result<R, PartStateError> {
         edit_part_state(host, entity, self.state_key(), edit)
     }
+}
+
+fn read_block_state_in<T: Clone + Send + Sync + 'static>(
+    level: &dyn LevelHost,
+    entity: BlockEntityRef,
+    key: &AttachmentKey<T>,
+) -> Result<Option<T>, PartStateError> {
+    let descriptor = key.live().map_err(|error| attachment(key, error))?;
+    let (namespace, name) = key.parts();
+    level
+        .block_entity_part_snapshot(entity, namespace, name)?
+        .query_checked(descriptor)
+        .get(AttachmentHolder::BlockEntity(entity))
+        .map_err(|error| match error {
+            AttachmentRowError::Value(error) => attachment(key, error),
+            _ => PartStateError::Stale,
+        })
 }
 
 /// Why a block entity's or an entity's Part state could not be read or changed. Nothing was
@@ -136,7 +143,7 @@ pub enum PartStateError {
     /// nothing and its transaction was aborted.
     Changed,
     /// The attachment store refused the value: it does not decode (its saved bytes are
-    /// kept), does not encode, or the key holds another Rust type.
+    /// kept), does not encode, has another decoded Rust type, or the key is stale.
     Attachment {
         /// The state's namespace.
         namespace: &'static str,
@@ -174,11 +181,8 @@ pub enum PartStateRefusal {
     Sync,
     /// The state key sets `copy_on_death`: Part state does not copy across death.
     CopyOnDeath,
-    /// The same key is already declared with a type of another Rust type name, named here.
-    Incompatible {
-        /// The type the key was first declared with.
-        declared: &'static str,
-    },
+    /// The key was not issued by the in-flight registration pass.
+    StaleKey,
     /// The entity type keeps no entity Part state: a player, a vanilla family no entity part
     /// runs on, or no type at all. Decided once every type is known, when the game loads.
     EntityKind {
@@ -195,10 +199,7 @@ impl PartStateRefusal {
         match self {
             Self::Sync => f.write_str("sync is not supported for part state yet"),
             Self::CopyOnDeath => write!(f, "copy_on_death does not apply to {holder}"),
-            Self::Incompatible { declared } => write!(
-                f,
-                "the key is already declared with type {declared}, a different Rust type"
-            ),
+            Self::StaleKey => f.write_str("the key is stale; obtain it during this registration"),
             Self::EntityKind { kind, reason } => write!(f, "entity type {kind}: {reason}"),
         }
     }
@@ -256,34 +257,42 @@ impl From<BlockEntityPartError> for BlockEntityStateError {
     }
 }
 
-/// One Part state declaration, as the registrar checks it.
-#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq)]
+// no wire: a Part state declaration retains its process-local attachment registration identity.
+/// One Part state declaration, retaining the identity of the issuing registration.
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PartStateDeclaration {
     /// The state's namespace.
     pub namespace: &'static str,
     /// The state's name.
     pub name: &'static str,
-    /// The state type's name, which two declarations of one key must share, and a refusal names.
+    /// The state's Rust type name, reported in a refusal.
     pub data_name: &'static str,
+    identity: AttachmentIdentity,
     sync: bool,
     copy_on_death: bool,
 }
 
 impl PartStateDeclaration {
-    /// The declaration of `key`: what the typed declaration is erased to, for registration.
-    pub fn of<T: 'static>(key: &AttachmentKey<T>) -> Self {
+    /// Erase the data type without losing the key's issuing identity.
+    pub fn of<T: Send + Sync + 'static>(key: &AttachmentKey<T>) -> Self {
+        let (namespace, name) = key.parts();
+        let policy = key.descriptor().policy();
         Self {
-            namespace: key.namespace,
-            name: key.name,
+            namespace,
+            name,
             data_name: std::any::type_name::<T>(),
-            sync: key.sync,
-            copy_on_death: key.copy_on_death,
+            identity: key.identity(),
+            sync: policy.sync,
+            copy_on_death: policy.copy_on_death,
         }
     }
 
-    /// Validate that the state is local to its owning holder.
-    pub fn check(&self) -> Result<(), PartStateRefusal> {
+    /// Require the same registration and a state policy local to the owning holder.
+    pub fn check(&self, current: Option<&RegisteredAttachment>) -> Result<(), PartStateRefusal> {
+        if !current.is_some_and(|record| self.identity.matches(record)) {
+            return Err(PartStateRefusal::StaleKey);
+        }
         if self.sync {
             return Err(PartStateRefusal::Sync);
         }
@@ -361,11 +370,14 @@ impl PartStateHolder for BlockEntityRef {
 fn attachment<T>(key: &AttachmentKey<T>, error: AttachmentError) -> PartStateError {
     match error {
         AttachmentError::MissingHolder => PartStateError::Stale,
-        error => PartStateError::Attachment {
-            namespace: key.namespace,
-            name: key.name,
-            error,
-        },
+        error => {
+            let (namespace, name) = key.parts();
+            PartStateError::Attachment {
+                namespace,
+                name,
+                error,
+            }
+        }
     }
 }
 
@@ -397,7 +409,8 @@ struct Editing;
 impl Editing {
     fn enter<T>(entity: AttachmentHolder, key: &AttachmentKey<T>) -> Result<Self, PartStateError> {
         EDITING.with_borrow_mut(|editing| {
-            let this = (entity, key.namespace, key.name);
+            let (namespace, name) = key.parts();
+            let this = (entity, namespace, name);
             if editing.contains(&this) {
                 return Err(PartStateError::Reentrant);
             }
@@ -430,30 +443,33 @@ pub fn edit_part_state<H: PartStateHolder, T: Clone + Send + Sync + 'static, R>(
     key: &AttachmentKey<T>,
     edit: impl FnOnce(&mut dyn ServerHost, &mut T) -> R,
 ) -> Result<R, PartStateError> {
+    let descriptor = key.live().map_err(|error| attachment(key, error))?;
+    let (namespace, name) = key.parts();
     let _editing = Editing::enter(entity.attachment_holder(), key)?;
     host.transaction(|host, _| {
         let at = entity.part_state_holder(host)?;
         let store = host.attachments();
-        let current = key
+        let current = descriptor
             .get_existing(store, at)
             .map_err(|error| attachment(key, error))?;
         // The value's own allocation: each store makes a new one and a transaction puts
         // the same one back, so it changed exactly when this differs. Holding it keeps
         // its address from being reused.
         let revision = store
-            .decoded(at, key.namespace, key.name)
+            .decoded(at, namespace, name)
             .map_err(|error| attachment(key, error))?;
-        let mut value = current.unwrap_or_else(key.default);
+        let mut value = current.unwrap_or_else(|| descriptor.default_value());
         let answer = edit(host, &mut value);
         entity.part_state_holder(host)?;
         let store = host.attachments();
         let now = store
-            .decoded(at, key.namespace, key.name)
+            .decoded(at, namespace, name)
             .map_err(|error| attachment(key, error))?;
         if !same(revision.as_ref(), now.as_ref()) {
             return Err(PartStateError::Changed);
         }
-        key.set(store, at, value)
+        descriptor
+            .set(store, at, value)
             .map_err(|error| attachment(key, error))?;
         Ok(answer)
     })
@@ -471,31 +487,26 @@ fn same(a: Option<&AttachmentValue>, b: Option<&AttachmentValue>) -> bool {
 mod tests {
     use super::*;
 
-    const fn key(sync: bool, copy_on_death: bool, codec: bool) -> AttachmentType<i32> {
-        AttachmentType {
-            namespace: "test",
-            name: "state",
-            default: || 0,
-            codec: match codec {
-                true => Some(AttachmentCodec {
-                    encode: |_| Ok(Compound::new()),
-                    decode: |_| Ok(0),
-                }),
-                false => None,
-            },
-            copy_on_death,
-            sync,
-        }
-    }
-
     #[test]
     fn declarations_refuse_sync_and_copy_on_death() {
-        let check = |key: &AttachmentType<i32>| PartStateDeclaration::of(key).check();
-        assert_eq!(check(&key(false, false, true)), Ok(()));
-        assert_eq!(check(&key(false, false, false)), Ok(()));
-        assert_eq!(check(&key(true, false, true)), Err(PartStateRefusal::Sync));
+        const CODEC: AttachmentCodec<i32> = AttachmentCodec {
+            encode: |_| Ok(Compound::new()),
+            decode: |_| Ok(0_i32),
+        };
+        let check = |descriptor: AttachmentDescriptor<i32>| {
+            let key = crate::parts::install_attachment_fixture(descriptor);
+            let current = crate::parts::installed().unwrap().attachment_types["test"].get("state");
+            PartStateDeclaration::of(&key).check(current)
+        };
+        let descriptor = || AttachmentDescriptor::new("test:state", || 0_i32);
+        assert_eq!(check(descriptor()), Ok(()));
+        assert_eq!(check(descriptor().serialize(CODEC)), Ok(()));
         assert_eq!(
-            check(&key(false, true, true)),
+            check(descriptor().serialize(CODEC).sync()),
+            Err(PartStateRefusal::Sync)
+        );
+        assert_eq!(
+            check(descriptor().serialize(CODEC).copy_on_death()),
             Err(PartStateRefusal::CopyOnDeath)
         );
     }

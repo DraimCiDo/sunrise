@@ -27,11 +27,11 @@ namespace. Both checks run once, when the mods register.
 
 Storage for a holder without a block entity (an entity, a player, a chunk, the level) comes stock, kept in an
 attachment the mod declares, as NeoForge mods keep a `ItemStacksResourceHandler` or `SimpleEnergyHandler` in one:
-`AttachedItems::new(&SLOTS, holder, size, capacity, valid)` (returns `None` for more than 4096
+`AttachedItems::new(slots.clone(), holder, size, capacity, valid)` (returns `None` for more than 4096
 indices) and `AttachedFluids` (`AttachedStacks<R>`, a
-`ResourceHandler<R>` over an `AttachmentType<StackList<R>>`, `single` for one index) and
-`AttachedEnergy::new(&ENERGY, holder, capacity, max_insert, max_extract)` over an `AttachmentType<u32>`. Give the
-item or fluid attachment the codec `ITEM_STACKS` or `FLUID_STACKS` to save it. Every write is an attachment write, so
+`ResourceHandler<R>` over an `AttachmentKey<StackList<R>>`, `single` for one index) and
+`AttachedEnergy::new(energy.clone(), holder, capacity, max_insert, max_extract)` over an `AttachmentKey<u32>`. The handler owns its issued key; clone the key if the provider also needs to keep it.
+Register the item or fluid descriptor with `.serialize(ITEM_STACKS)` or `.serialize(FLUID_STACKS)` to save it. Every write is an attachment write, so
 the transaction journal, which keeps each holder's attachment map, undoes it on an abort; sync follows the attachment
 type's `sync` flag. A mod's own resource type implements `StackedResource` to be held. `capacity` stays the physical
 limit of an in-range index while `valid` refuses only inserts (extraction never asks it), indices past the handler's

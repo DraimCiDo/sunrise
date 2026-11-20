@@ -132,7 +132,14 @@ impl RegisteredAttachment {
         self.sync
     }
 
-    fn typed<T: Send + Sync + 'static>(self) -> Result<AttachmentKey<T>, AttachmentError> {
+    pub(crate) fn matches(&self, identity: &(dyn Any + Send + Sync)) -> bool {
+        // The issuing key keeps its allocation alive, so a later record cannot reuse this address.
+        std::ptr::addr_eq(Arc::as_ptr(&self.record), identity)
+    }
+
+    pub(crate) fn typed<T: Send + Sync + 'static>(
+        self,
+    ) -> Result<AttachmentKey<T>, AttachmentError> {
         self.record
             .downcast::<AttachmentRegistration<T>>()
             .map(AttachmentKey)
@@ -157,19 +164,52 @@ impl<T> AttachmentKey<T> {
         self.0.id
     }
 
-    pub(crate) fn live(&self) -> Result<&CheckedAttachmentType<T>, AttachmentError> {
+    pub(crate) fn parts(&self) -> (&'static str, &'static str) {
+        (self.0.namespace, self.0.name)
+    }
+
+    pub(crate) fn descriptor(&self) -> &CheckedAttachmentType<T> {
+        &self.0.checked
+    }
+
+    pub(crate) fn live(&self) -> Result<&CheckedAttachmentType<T>, AttachmentError>
+    where
+        T: Send + Sync,
+    {
+        let (namespace, name) = self.parts();
         let current = installed()
-            .and_then(|parts| parts.attachment_types.get(self.0.namespace))
-            .and_then(|types| types.get(self.0.name));
-        // The key keeps its allocation alive, so no later record can reuse this address.
-        if !current.is_some_and(|current| {
-            std::ptr::addr_eq(Arc::as_ptr(&current.record), Arc::as_ptr(&self.0))
-        }) {
+            .and_then(|parts| parts.attachment_types.get(namespace))
+            .and_then(|types| types.get(name));
+        if !current.is_some_and(|current| current.matches(self.0.as_ref())) {
             return Err(AttachmentError::StaleKey);
         }
-        Ok(&self.0.checked)
+        Ok(self.descriptor())
     }
 }
+
+impl<T: Send + Sync + 'static> AttachmentKey<T> {
+    pub(crate) fn identity(&self) -> AttachmentIdentity {
+        AttachmentIdentity(self.0.clone())
+    }
+}
+
+// no wire: local identity of an allocation retained by the declaration.
+#[derive(Clone, Debug)]
+pub(crate) struct AttachmentIdentity(Arc<dyn Any + Send + Sync>);
+
+impl AttachmentIdentity {
+    pub(crate) fn matches(&self, registered: &RegisteredAttachment) -> bool {
+        registered.matches(self.0.as_ref())
+    }
+}
+
+impl PartialEq for AttachmentIdentity {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for AttachmentIdentity {}
 
 impl<T: Clone + Send + Sync + 'static> AttachmentKey<T> {
     /// Read the value, inserting the owner's default if absent (except on an original player).
@@ -293,4 +333,21 @@ pub fn validate_attachment_use(
         return Err(AttachmentError::InvalidSyncPolicy);
     }
     Ok(())
+}
+
+/// Install one checked attachment through the ordinary publication boundary in vocab tests.
+/// The vocabulary crate cannot depend on the concrete Part registrar.
+#[cfg(test)]
+pub(crate) fn install_attachment_fixture<T: Send + Sync + 'static>(
+    descriptor: AttachmentDescriptor<T>,
+) -> AttachmentKey<T> {
+    let (namespace, name) = descriptor.id.split_once(':').unwrap();
+    crate::Identifier::from_parts(namespace, name).unwrap();
+    let record = check_attachment_descriptor(descriptor.into(), namespace, name).unwrap();
+    let key = record.clone().typed().unwrap();
+    super::install_input(super::installation::InstalledInput {
+        attachment_types: HashMap::from([(namespace, HashMap::from([(name, record)]))]),
+        ..Default::default()
+    });
+    key
 }

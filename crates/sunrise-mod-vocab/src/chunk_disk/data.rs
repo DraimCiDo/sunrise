@@ -1,8 +1,10 @@
 //! The callback's typed store: only encoded values cross the worker boundary.
 use super::*;
+use sunrise_mod_runtime::attachments::CheckedAttachmentType;
 
 /// A job-local attachment transaction. No decoded value is shared with live state.
-/// Use [`Self::get`] and [`Self::set`] with the ordinary typed attachment key.
+/// Use [`Self::get`] and [`Self::set`] with a registered attachment key that has a
+/// persistence codec. A stale key is refused without consulting a live world.
 /// Any refused operation poisons the job even if the listener ignores its error.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
@@ -27,7 +29,9 @@ impl ChunkDiskData {
         &mut self,
         key: &AttachmentKey<T>,
     ) -> Result<T, ChunkDiskFailure> {
-        self.edit(key, |store| key.get(store, Holder::Level))
+        self.edit(key, |descriptor, store| {
+            descriptor.get(store, Holder::Level)
+        })
     }
 
     /// Replace only the snapshot's value. Failed encoding leaves the original
@@ -37,7 +41,9 @@ impl ChunkDiskData {
         key: &AttachmentKey<T>,
         value: T,
     ) -> Result<(), ChunkDiskFailure> {
-        self.edit(key, |store| key.set(store, Holder::Level, value))
+        self.edit(key, |descriptor, store| {
+            descriptor.set(store, Holder::Level, value)
+        })
     }
 
     /// Remove a snapshot binding through its typed codec.
@@ -45,25 +51,29 @@ impl ChunkDiskData {
         &mut self,
         key: &AttachmentKey<T>,
     ) -> Result<Option<T>, ChunkDiskFailure> {
-        self.edit(key, |store| key.remove(store, Holder::Level))
+        self.edit(key, |descriptor, store| {
+            descriptor.remove(store, Holder::Level)
+        })
     }
 
-    fn edit<T, R>(
+    fn edit<T: Send + Sync + 'static, R>(
         &mut self,
         key: &AttachmentKey<T>,
-        apply: impl FnOnce(&mut Attachments) -> Result<R, AttachmentError>,
+        apply: impl FnOnce(&CheckedAttachmentType<T>, &mut Attachments) -> Result<R, AttachmentError>,
     ) -> Result<R, ChunkDiskFailure> {
         if let Some(failure) = &self.failure {
             return Err(failure.clone());
         }
-        let key_name = format!("{}:{}", key.namespace, key.name);
         let result = (|| {
-            if key.codec.is_none() {
-                return Err(failure(&key_name, "missing persistence codec"));
+            let descriptor = key
+                .live()
+                .map_err(|error| failure(key.id(), &format!("{error:?}")))?;
+            if !descriptor.is_persistent() {
+                return Err(failure(key.id(), "missing persistence codec"));
             }
             let mut store = Attachments::from_nbt(self.entries.clone());
-            let value =
-                apply(&mut store).map_err(|error| failure(&key_name, &format!("{error:?}")))?;
+            let value = apply(descriptor, &mut store)
+                .map_err(|error| failure(key.id(), &format!("{error:?}")))?;
             let encoded = store.to_nbt();
             validate(&encoded)?;
             self.entries = encoded;

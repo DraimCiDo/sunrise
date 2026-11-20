@@ -94,25 +94,20 @@ key; keep it unchanged after registration.
 
 ```rust,ignore
 struct Press {
-    progress: AttachmentType<u32>,
+    progress: AttachmentKey<u32>,
 }
 
-const PROGRESS: AttachmentType<u32> = AttachmentType {
-    namespace: "mymod", name: "press_progress", default: || 0,
-    codec: Some(PROGRESS_CODEC), copy_on_death: false, sync: false,
-};
 impl BlockEntityPartState for Press {
     type Data = u32;
 
-    fn state_key(&self) -> &AttachmentType<Self::Data> {
+    fn state_key(&self) -> &AttachmentKey<Self::Data> {
         &self.progress
     }
 }
-r.register_attachment_type(
-    AttachmentDescriptor::new("mymod:press_progress", PROGRESS.default)
-        .serialize(PROGRESS_CODEC),
+let progress = r.register_attachment_type(
+    AttachmentDescriptor::new("mymod:press_progress", || 0_u32).serialize(PROGRESS_CODEC),
 )?;
-r.block_entity_part_with_state(&press, Press { progress: PROGRESS })?;
+r.block_entity_part_with_state(&press, Press { progress })?;
 
 // In its tick, where the block entity is out of the world and `block_entity` finds nothing:
 let level = host.level(host.dimension()).unwrap();
@@ -128,7 +123,7 @@ let done = self.edit_state(host, entity, |_, progress| {
   `&mut dyn ServerHost` and runs in a nested transaction
   of its own. The closure gets a copy and the host, and no store borrow is held while it runs. The
   result is stored when the closure returns.
-- Every call checks the handle first. A handle from another level gives `PartStateError::OtherLevel`.
+- Every call checks that the key and holder are still current. A handle from another level gives `PartStateError::OtherLevel`.
   A removed, replaced or unloaded block entity gives `Stale`. After a reload the saved value is read
   under the new handle.
 - An edit stores nothing, and its transaction aborts with everything the closure wrote, in these
@@ -149,8 +144,9 @@ let done = self.edit_state(host, entity, |_, progress| {
   vanilla 26.3 reads region files with `NbtAccounter.unlimitedHeap`, an unbounded byte budget and
   depth 512. The 2 MiB quota of a chunk packet's block entity data is a network limit and does not
   cap saved state.
-- Registration refuses a Part state key that syncs, copies on death or reuses a name declared with
-  a different Rust type. A key can come from another package, but its owner must declare it.
+- Registration refuses a Part state key that syncs, copies on death or belongs to a previous
+  registration pass. A key can come from another package: declare a dependency and look it up with
+  `r.attachment_key::<T>("owner:name")` after the owner registers it.
 - Values without a codec last for the session. Part state is server-side for now. A client reads the
   default, because nothing is sent to it yet.
 

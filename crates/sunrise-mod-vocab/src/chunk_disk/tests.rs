@@ -16,6 +16,13 @@ const VALUE: AttachmentType<i32> = AttachmentType {
     sync: false,
 };
 
+fn value_key() -> AttachmentKey<i32> {
+    parts::install_attachment_fixture(
+        AttachmentDescriptor::new("disk_fixture:value", VALUE.default)
+            .serialize(VALUE.codec.unwrap()),
+    )
+}
+
 fn store(value: i32) -> Attachments {
     let mut store = Attachments::default();
     VALUE.set(&mut store, Holder::Level, value).unwrap();
@@ -44,22 +51,23 @@ fn run(job: &ChunkDiskJob) -> Result<Compound, ChunkDiskFailure> {
 struct Listener {
     calls: Arc<AtomicUsize>,
     mode: u8,
+    key: AttachmentKey<i32>,
 }
 #[crate::__subscriptions]
 impl Hooks for Listener {
     fn chunk_data_save(&self, host: &dyn ChunkDiskHost, event: &mut ChunkDataSaveEvent<'_>) {
         self.calls.fetch_add(1, Ordering::Relaxed);
         assert!(host.backend().is_none());
-        assert_eq!(event.data.get(&VALUE).unwrap(), 7);
-        event.data.set(&VALUE, 8).unwrap();
+        assert_eq!(event.data.get(&self.key).unwrap(), 7);
+        event.data.set(&self.key, 8).unwrap();
         if self.mode == 1 {
             panic!("fixture unwind after tentative write");
         }
     }
     fn chunk_data_load(&self, _: &dyn ChunkDiskHost, event: &mut ChunkDataLoadEvent<'_>) {
         self.calls.fetch_add(1, Ordering::Relaxed);
-        let value = event.data.get(&VALUE).unwrap();
-        event.data.set(&VALUE, value + 1).unwrap();
+        let value = event.data.get(&self.key).unwrap();
+        event.data.set(&self.key, value + 1).unwrap();
     }
 }
 fn with_listener(mode: u8, apply: impl FnOnce(Arc<AtomicUsize>)) {
@@ -70,6 +78,7 @@ fn with_listener(mode: u8, apply: impl FnOnce(Arc<AtomicUsize>)) {
             Box::new(Listener {
                 calls: calls.clone(),
                 mode,
+                key: value_key(),
             }),
         )]
         .into(),
@@ -112,13 +121,12 @@ fn codec_error_or_unwind_after_setting_8_refuses_partial_publication() {
         assert_eq!(run(&job).unwrap_err(), refusal);
         assert_eq!(calls.load(Ordering::Relaxed), 1);
     });
-    let broken = AttachmentType {
-        codec: Some(sunrise_mod_runtime::attachments::AttachmentCodec {
+    let broken = parts::install_attachment_fixture(
+        AttachmentDescriptor::new("disk_fixture:value", VALUE.default).serialize(AttachmentCodec {
             encode: |_| Err(AttachmentError::Encode),
             decode: |_| Ok(7),
         }),
-        ..VALUE
-    };
+    );
     let mut data = ChunkDiskData::from_nbt(store(7).to_nbt()).unwrap();
     assert!(data.set(&broken, 8).is_err());
     assert!(data.finish().is_err());
@@ -164,8 +172,9 @@ fn value_65537_depth_65_total_1048577_refused_without_truncation() {
         ChunkDiskData::from_nbt(total).unwrap_err().reason,
         "chunk attachments exceed 1048576 bytes"
     );
+    let key = value_key();
     let mut data = ChunkDiskData::from_nbt(opaque(Tag::Int(7))).unwrap();
-    data.set(&VALUE, 8).unwrap();
+    data.set(&key, 8).unwrap();
     let result = data.finish().unwrap();
     assert_eq!(
         result.get(&"unknown".into()),
@@ -186,9 +195,10 @@ fn zero_subscribers_over_100_saves_creates_no_jobs_or_callbacks() {
 
 #[test]
 fn local_transaction_abort_preserves_prior_snapshot() {
+    let key = value_key();
     let mut data = ChunkDiskData::from_nbt(store(7).to_nbt()).unwrap();
     let result: Result<(), ()> = data.transaction(|data| {
-        data.set(&VALUE, 8).unwrap();
+        data.set(&key, 8).unwrap();
         Err(())
     });
     assert_eq!(result, Err(()));
@@ -197,10 +207,10 @@ fn local_transaction_abort_preserves_prior_snapshot() {
 
 #[test]
 fn type_without_persistence_codec_refuses_naming_type_and_capability() {
-    let unsaved = AttachmentType {
-        codec: None,
-        ..VALUE
-    };
+    let unsaved = parts::install_attachment_fixture(AttachmentDescriptor::new(
+        "disk_fixture:value",
+        VALUE.default,
+    ));
     let mut data = ChunkDiskData::from_nbt(store(7).to_nbt()).unwrap();
     let refusal = data.get(&unsaved).unwrap_err();
     assert_eq!(refusal.key, "disk_fixture:value");

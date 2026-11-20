@@ -440,6 +440,21 @@ impl<T> CheckedAttachmentType<T> {
         Ok(Self { key })
     }
 
+    /// Build the default without writing it to any holder.
+    pub fn default_value(&self) -> T {
+        (self.key.default)()
+    }
+
+    /// Whether the checked descriptor has a persistence codec.
+    pub fn is_persistent(&self) -> bool {
+        self.key.codec.is_some()
+    }
+
+    /// How this descriptor syncs and copies its stored value.
+    pub fn policy(&self) -> AttachmentPolicy {
+        self.key.policy()
+    }
+
     /// Borrow a captured value without inserting a default or modifying the holder.
     pub fn read<'entry>(&self, entry: &'entry AttachmentEntry) -> Result<&'entry T, AttachmentError>
     where
