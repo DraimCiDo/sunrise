@@ -48,7 +48,5 @@ pub fn quick_move(host: &mut dyn mod_api::ClientHost, slot: usize) -> bool {
 }
 // ANCHOR_END: menu_quick_move
 
-/// The same counter as a crate-root `with = "tick"` function at `Game::tick`.
-
 // Every standalone snippet module under src is compiled.
 include!(concat!(env!("OUT_DIR"), "/example_modules.rs"));
