@@ -472,7 +472,7 @@ fn stock_hides_are_draw_local_and_refused_callbacks_cannot_erase_them() {
             let uv = std::array::from_fn(|k| quad.iter().map(|v| v.uv[k]).sum::<f32>() / 4.0);
             inside(uv, sprite)
         };
-        let quads = stock.chunks_exact(4);
+        let quads = stock.as_chunks::<4>().0.iter();
         assert!(quads.clone().any(|q| quad_uses(q, local)));
         let first_base = quads
             .clone()
@@ -538,7 +538,9 @@ fn stock_hides_are_draw_local_and_refused_callbacks_cannot_erase_them() {
                     bytemuck::cast_slice::<_, u8>(&expected)
                 );
                 let heights: Vec<_> = markers
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .map(|q| q.iter().map(|v| v.pos[1]).reduce(f32::min).unwrap())
                     .collect();
                 assert_eq!(markers.len(), 12);
