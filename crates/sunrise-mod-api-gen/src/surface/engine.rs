@@ -2,7 +2,8 @@
 use mod_surface::{EngineContract, EngineItem};
 use std::path::Path;
 
-pub(super) fn collect(root: &Path, with_internals: bool) -> Result<Vec<EngineItem>, String> {
+/// Reads the published loops and, for a full audit, the advisory internals of a source tree.
+pub fn collect(root: &Path, with_internals: bool) -> Result<Vec<EngineItem>, String> {
     let mut items = Vec::new();
     for published in crate::loops::collect(root)? {
         items.push(EngineItem::new(

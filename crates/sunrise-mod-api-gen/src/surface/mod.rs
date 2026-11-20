@@ -5,6 +5,7 @@
 //! same loop and internal collectors as SDK source staging.
 pub mod behaviours;
 mod engine;
+pub use engine::collect as engine_catalogs;
 mod expand;
 pub mod extension_tags;
 pub mod notes;
@@ -323,7 +324,7 @@ fn export_here(root: &Path, options: ExportOptions) -> Result<Export, String> {
     let mut index = crate::index::game(root, &with_providers);
     let boundary = Boundary::read(root, &mut index)?;
     let engine = if options.with_loops || options.with_internals {
-        Some(engine::collect(root, options.with_internals)?)
+        Some(engine_catalogs(root, options.with_internals)?)
     } else {
         None
     };

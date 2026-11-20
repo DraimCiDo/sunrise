@@ -103,6 +103,7 @@ if [ "$1" = surface ]; then
   case "$2" in *head) [ {head_export} = 0 ] || {{ echo 'sunrise-stage surface: a.rs: parse error' >&2; exit 1; }};; esac
   echo '{{}}' > "$3"; exit 0
 fi
+[ "$1" = surface-catalogs ] && exit 0
 echo "Surface: report"; [ -z "{diff_err}" ] && [ {diff_exit} != 0 ] && echo "breaking change without a change note: fn:a" >&2
 [ -n "{diff_err}" ] && echo "sunrise-stage: $2: {diff_err}" >&2
 exit {diff_exit}
@@ -114,6 +115,7 @@ exit {diff_exit}
                 own_tool = work / "own-stage"
                 own_tool.write_text(f"""#!/bin/bash
 echo "own $@" >> {work}/calls
+[ "$#" = 3 ] || exit 2
 [ {own_export} = 0 ] || {{ echo 'sunrise-stage surface: base.rs: older form' >&2; exit 1; }}
 echo '{{}}' > "$3"
 """)
@@ -131,9 +133,11 @@ echo '{{}}' > "$3"
                                         "cannot read the base tree (sunrise-stage surface: unknown key `access`).\n"),
                         text)
         self.assertIn("Surface: report\n", text)
-        own = [call for call in calls.splitlines() if call.startswith("own ")]
-        self.assertEqual(len(own), 1)
-        self.assertIn("surface-diff", calls)
+        own, catalogs = (next(call.split() for call in calls.splitlines() if call.startswith(prefix))
+                         for prefix in ("own ", "surface-catalogs "))
+        self.assertEqual(own[:2], ["own", "surface"])
+        self.assertEqual(own[2:], catalogs[1:])
+        self.assertLess(calls.index("surface-catalogs "), calls.index("surface-diff "))
 
     def test_a_base_neither_tool_can_read_fails_naming_both(self):
         code, text, calls = self.run_report(base_export=1, own_export=1)
@@ -348,6 +352,7 @@ class MainTests(unittest.TestCase):
 if [ "$1" = surface ]; then {refuse}
   echo "{{\\"by\\": \\"head:$(cat "$2/marker")\\"}}" > "$3"; exit 0
 fi
+[ "$1" = surface-catalogs ] && exit 0
 cat "$2" "$3" > {folder}/compared
 """)
             own_tool.write_text("""#!/bin/bash
@@ -393,6 +398,7 @@ if [ "$1" = surface ]; then
   [ -f "$2/marker" ] && exit 1
   echo '{{"by": "checkout"}}' > "$3"; exit 0
 fi
+[ "$1" = surface-catalogs ] && exit 0
 cat "$2" "$3" >> {folder}/compared
 """)
             own_tool.write_text("""#!/bin/bash
@@ -453,7 +459,7 @@ class LandedTests(unittest.TestCase):
                 notes = work / side / surface_report.NOTES
                 notes.mkdir(parents=True)
             (work / "head" / surface_report.NOTES / "r61.toml").write_text(
-                f'ids = ["point:a"]\nwhy = "w"\nlanded = "{self.SHA}"\n')
+                f'ids = ["loop:a"]\nwhy = "w"\nlanded = "{self.SHA}"\n')
             (work / "head" / surface_report.NOTES / "own.toml").write_text('ids = ["hook:b"]\nwhy = "w"\n')
             tool = work / "sunrise-stage"
             tool.write_text(f"""#!/bin/bash
@@ -462,8 +468,9 @@ if [ "$1" = surface ]; then
   case "$2" in */landed-*) [ {int(refuse_landed)} = 0 ] || {{ echo 'sunrise-stage surface: trait T has no marks' >&2; exit 1; }};; esac
   echo '{{"by": "head"}}' > "$3"; exit 0
 fi
+[ "$1" = surface-catalogs ] && exit 0
 cat "$2" "$3" > {work}/compared
-if [ {diff_exit} != 0 ]; then echo "change note r61.toml names point:a, which did not change" >&2; fi
+if [ {diff_exit} != 0 ]; then echo "change note r61.toml names loop:a, which did not change" >&2; fi
 exit {diff_exit}
 """)
             tool.chmod(0o755)

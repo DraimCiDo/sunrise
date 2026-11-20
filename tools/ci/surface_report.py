@@ -178,11 +178,20 @@ def report(tool: str, base: Path, head: Path, work: Path, gate_on: bool, *,
         if own_tool is None:
             return 1, f"No surface report: {why}.\n"
         try:
-            own = export(name, own_tool(), tree)
+            output = work / f"{name}.json"
+            # The plain SDK export is shared across tool versions. Use the current catalog reader
+            # for both trees so an older generator does not have to know the current audit options.
+            own = subprocess.run([own_tool(), "surface", str(tree), str(output)], capture_output=True, text=True)
+            if own.returncode != 0:
+                return 1, f"No surface report: {why}, nor can the {name}'s own ({last_line(own.stderr)}).\n"
+            catalogs_command = [tool, "surface-catalogs", str(tree), str(output)]
+            if with_internals:
+                catalogs_command.append("--with-internals")
+            audited = subprocess.run(catalogs_command, capture_output=True, text=True)
         except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
             return 1, f"No surface report: {why}, and the {name}'s own could not be used: {error}.\n"
-        if own.returncode != 0:
-            return 1, f"No surface report: {why}, nor can the {name}'s own ({last_line(own.stderr)}).\n"
+        if audited.returncode != 0:
+            return 1, f"No surface report: could not audit the {name} catalogs ({last_line(audited.stderr)}).\n"
         note += f"The {name} was exported by its own sunrise-stage: {why}.\n"
     code, text = compare(tool, base, head, work, gate_on, with_internals=with_internals, notes=notes, landed=landed)
     return code, note + text

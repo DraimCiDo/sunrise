@@ -7,6 +7,9 @@
 //! only reads the tree, so a working tree is fine. The engine options are for comparisons: choose
 //! the same options for both exports. `--with-internals` also includes loops.
 //!
+//! `sunrise-stage surface-catalogs ROOT SURFACE [--with-internals]`: add the source tree's
+//! engine catalogs to an existing SDK export, without regenerating its typed API records.
+//!
 //! `sunrise-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]`: list
 //! what the mod in MOD_DIR uses of SURFACE, each item with the place that brought it in, then
 //! how it builds each struct it builds with a literal; with `--json`, write the table a package
@@ -27,13 +30,11 @@ use mod_surface::Surface;
 use mod_surface::uses::{Fit, ManifestFacts, Origin, UsesTable, uses_contained};
 use std::path::PathBuf;
 use sunrise_mod_api_gen::staging::{self, Mode};
-use sunrise_mod_api_gen::surface::{ExportOptions, export_with};
+use sunrise_mod_api_gen::surface::{ExportOptions, engine_catalogs, export_with};
 
 fn surface(args: &[PathBuf]) {
     let [root, out, flags @ ..] = args else {
-        fail(
-            "usage: sunrise-stage surface ROOT OUT [--with-loops] [--with-internals]",
-        )
+        fail("usage: sunrise-stage surface ROOT OUT [--with-loops] [--with-internals]")
     };
     let mut options = ExportOptions::default();
     for flag in flags {
@@ -92,6 +93,21 @@ fn fail(message: impl std::fmt::Display) -> ! {
 fn read_surface(path: &std::path::Path) -> Surface {
     let bytes = std::fs::read(path).unwrap_or_else(|e| fail(format!("{}: {e}", path.display())));
     Surface::read(&bytes).unwrap_or_else(|e| fail(format!("{}: {e}", path.display())))
+}
+
+fn surface_catalogs(args: &[PathBuf]) {
+    let [root, path, flags @ ..] = args else {
+        fail("usage: sunrise-stage surface-catalogs ROOT SURFACE [--with-internals]");
+    };
+    let with_internals = match flags {
+        [] => false,
+        [flag] if flag == "--with-internals" => true,
+        _ => fail("usage: sunrise-stage surface-catalogs ROOT SURFACE [--with-internals]"),
+    };
+    let surface = read_surface(path);
+    let items = engine_catalogs(root, with_internals).unwrap_or_else(|error| fail(error));
+    std::fs::write(path, surface.with_engine_items(items).to_json())
+        .unwrap_or_else(|error| fail(format!("{}: {error}", path.display())));
 }
 
 fn uses_command(entry: mod_surface::child::ChildEntry, args: &[PathBuf]) {
@@ -286,6 +302,7 @@ fn main() {
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
     match args.first().and_then(|c| c.to_str()) {
         Some("surface") => return surface(&args[1..]),
+        Some("surface-catalogs") => return surface_catalogs(&args[1..]),
         Some("uses") => return uses_command(entry, &args[1..]),
         Some("fits") => fits_command(&args[1..]),
         Some("surface-diff") => surface_diff(&args[1..]),
@@ -293,7 +310,7 @@ fn main() {
     }
     let usage = || {
         eprintln!(
-            "usage: sunrise-stage ROOT INTERNALS_JSON COMMIT [--sync-internals]\n       sunrise-stage surface ROOT OUT [--with-loops] [--with-internals]\n       sunrise-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--api-notes-only] [--landed SHA] [--json OUT] [--gate]\n       sunrise-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]\n       sunrise-stage fits USES_JSON TARGET_SURFACE"
+            "usage: sunrise-stage ROOT INTERNALS_JSON COMMIT [--sync-internals]\n       sunrise-stage surface ROOT OUT [--with-loops] [--with-internals]\n       sunrise-stage surface-catalogs ROOT SURFACE [--with-internals]\n       sunrise-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--api-notes-only] [--landed SHA] [--json OUT] [--gate]\n       sunrise-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]\n       sunrise-stage fits USES_JSON TARGET_SURFACE"
         );
         std::process::exit(2)
     };
