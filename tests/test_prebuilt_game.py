@@ -768,19 +768,19 @@ class PrebuiltContentsTests(unittest.TestCase):
 
         metadata = {
             "packages": [package("sunrise-mod-host", "dylib"), package("sunrise-client"),
-                         package("sunrise-items", "rlib"), package("point_shape"), package("sunrise_core"),
+                         package("sunrise-items", "rlib"), package("mod_vocab"), package("sunrise_core"),
                          package("build_tool"), package("derive", "proc-macro"), package("macro_helper")],
             "resolve": {"nodes": [
                 node("sunrise-mod-host", ("sunrise-client", None), ("sunrise-items", None),
                      ("build_tool", "build")), node("sunrise-items"),
-                node("sunrise-client", ("point_shape", None), ("sunrise_core", None), ("derive", None)),
-                node("point_shape"), node("sunrise_core"), node("build_tool"),
+                node("sunrise-client", ("mod_vocab", None), ("sunrise_core", None), ("derive", None)),
+                node("mod_vocab"), node("sunrise_core"), node("build_tool"),
                 node("derive", ("macro_helper", None)), node("macro_helper"),
             ]},
         }
         runtime = prebuilt_game.runtime_crates(metadata, "sunrise-mod-host")
-        self.assertEqual(runtime, {"sunrise_mod_host", "sunrise_items", "sunrise_client", "point_shape", "sunrise_core"})
-        deps = self.folder("libpoint_shape-host.rmeta", "libpoint_shape-target.rmeta",
+        self.assertEqual(runtime, {"sunrise_mod_host", "sunrise_items", "sunrise_client", "mod_vocab", "sunrise_core"})
+        deps = self.folder("libmod_vocab-host.rmeta", "libmod_vocab-target.rmeta",
                            "libsunrise_core-one.rmeta", "libbuild_tool-one.rmeta", "libmacro_helper-one.rmeta",
                            "libsunrise_mod_host.so", "libsunrise_items-one.rmeta", "libsunrise_client-one.rmeta")
         eligible = prebuilt_game.facade_crates(deps, runtime)
