@@ -688,7 +688,11 @@ impl Game<'_> {
                 self.audio.play_button_click();
                 self.activate_mod_list_action(id);
             }
-        } else {
+        } else if self.screen != Screen::Options
+            || self.ui.options.page() != Page::Mods
+            || key_focus::refind(focus, &self.pad_visible_targets()).is_some()
+        {
+            // On the Mods page a stock control's old rectangle can now hold a mod action.
             self.pad_click_at(event_loop, focus.center(), false);
         }
     }
@@ -1768,7 +1772,8 @@ impl Game<'_> {
                     .and_then(|name| named_target(&name, &widgets::last_labelled(), &rects));
                 self.pad.menu.focus = named
                     .or_else(|| self.pad.menu.focus.and_then(|focus| found(focus.rect)))
-                    .map(|i| targets[i]);
+                    .map(|i| targets[i])
+                    .filter(|t| !matches!(t.kind, Kind::ModListAction(_)));
             }
         } else if self.pad.menu.pos.is_some() && self.pad.menu.held == [false; 2] {
             let at = self.cursor;
@@ -1950,7 +1955,8 @@ impl Game<'_> {
                 self.pad.menu.focus = named
                     .or(followed)
                     .or_else(|| gamepad::refind(focus.rect, &rects, 12.0))
-                    .map(|i| targets[i]);
+                    .map(|i| targets[i])
+                    .filter(|t| !matches!(t.kind, Kind::ModListAction(_)));
                 if self.pad.menu.focus.is_none() && self.pad.menu.pos.is_some() {
                     // The widget went away on this screen (a Reset or an Undo took itself away
                     // when pressed): what's beside it. Two frames on, as the first may have been
@@ -1960,10 +1966,10 @@ impl Game<'_> {
                         .then(|| beside(focus.rect, &rects))
                         .flatten();
                     // Else a page changed: start again.
-                    let first = match next_to {
-                        Some(i) => Some(targets[i]),
-                        None => self.pad_first_target(targets),
-                    };
+                    let first = next_to
+                        .map(|i| targets[i])
+                        .filter(|t| !matches!(t.kind, Kind::ModListAction(_)))
+                        .or_else(|| self.pad_first_target(targets));
                     if self.pad.menu.keyboard
                         && let Some(first) = first
                     {
