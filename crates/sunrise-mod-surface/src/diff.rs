@@ -902,7 +902,7 @@ fn pair<T>(
     lines
 }
 
-const ENGINE_KINDS: [(&str, &str); 3] = [
+const ENGINE_KINDS: [(&str, &str); 2] = [
     ("loop", "Published loops"),
     ("internal", "Listed internals (advisory)"),
 ];
