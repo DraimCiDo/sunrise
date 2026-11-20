@@ -183,7 +183,7 @@ fn only_can_equip_changes_when_prepared_marker_is_removed() {
             let isolated = catalog
                 .hooks
                 .iter()
-                .filter(|hook| hook.isolate)
+                .filter(|hook| hook.isolate.is_some())
                 .map(|hook| hook.name.clone())
                 .collect::<std::collections::HashSet<_>>();
             let mut surface = super::surface(&root, &included).unwrap();

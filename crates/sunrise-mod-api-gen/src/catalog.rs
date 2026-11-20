@@ -124,10 +124,8 @@ pub struct Hook {
     /// The inert answer for a disabled content owner's subscribed block Part: Rust statements
     /// setting the answer, or `signal` to report engine inactivity separately from listener output.
     pub inert: Option<String>,
-    /// A global cancel hook whose dispatch runs every listener inside `catch_unwind`: one that
-    /// unwinds is switched off for this hook for the session, and the outputs it had written roll
-    /// back to what the game requested (#2414 ruling).
-    pub isolate: bool,
+    /// How this global cancel hook rolls back output when it disables a failed listener.
+    pub isolate: Option<Isolation>,
     pub scope: Option<PartScope>,
     pub host: Option<HostAccess>,
     pub context: Option<PhaseContext>,
@@ -147,6 +145,8 @@ pub struct Hook {
     pub stack_count: Option<StackCount>,
     /// Keep construction and exhaustive patterns of the event inside the vocabulary crate.
     pub non_exhaustive: bool,
+    /// A copied event input that is exposed by a getter, not a mutable field.
+    pub read_only: Option<String>,
     /// Rebuild a listener event from its original inputs for every subscriber.
     pub event_per_listener: bool,
 }
@@ -276,6 +276,7 @@ struct HookEntry {
     stack_count: Option<StackCount>,
     #[serde(default)]
     non_exhaustive: bool,
+    read_only: Option<String>,
     #[serde(default)]
     event_per_listener: bool,
     inert: Option<String>,
@@ -294,7 +295,14 @@ struct ModApiEntry {
     answered_by: Option<AnsweredBy>,
     owner: Option<String>,
     collect_validator: Option<String>,
-    isolate: Option<bool>,
+    isolate: Option<Isolation>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Isolation {
+    Requested,
+    Listener,
 }
 
 #[derive(Deserialize)]
@@ -395,10 +403,7 @@ impl Hook {
         {
             return Err(CatalogError::InvalidContract(name));
         }
-        // Isolation is the cancel loop's own: a listener that unwinds rolls the outputs back
-        // to the requested ones and is skipped for the hook for the session (#2414 ruling).
-        let isolate = api.isolate.unwrap_or(false);
-        if isolate && (api.contract != Contract::Cancel || scope.is_some()) {
+        if api.isolate.is_some() && (api.contract != Contract::Cancel || scope.is_some()) {
             return Err(CatalogError::InvalidHook {
                 hook: name.clone(),
                 error: "isolate is for a global cancel hook".into(),
@@ -421,7 +426,7 @@ impl Hook {
             owner: api.owner,
             collect_validator: api.collect_validator,
             inert: entry.inert,
-            isolate,
+            isolate: api.isolate,
             scope,
             host: entry.host,
             context: entry.context,
@@ -432,6 +437,7 @@ impl Hook {
             prepared: entry.prepared,
             stack_count: entry.stack_count,
             non_exhaustive: entry.non_exhaustive,
+            read_only: entry.read_only,
             event_per_listener: entry.event_per_listener,
         })
     }
@@ -866,7 +872,7 @@ impl Hook {
             owner: None,
             collect_validator: None,
             inert: None,
-            isolate: false,
+            isolate: None,
             scope: None,
             host: None,
             context: None,
@@ -877,6 +883,7 @@ impl Hook {
             prepared: None,
             stack_count: None,
             non_exhaustive: false,
+            read_only: None,
             event_per_listener: false,
         }
     }

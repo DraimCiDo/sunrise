@@ -329,6 +329,8 @@ pub(super) enum After {
         sunrise_client::net::PreparedPacket,
         mod_api::ServerboundPlayPacket,
     ),
+    /// A local chat insertion after visibility, listeners and text validation.
+    LocalChat(sunrise_client::text::Text, sunrise_client::chat::ChatSource),
     Cauldron(super::cauldron_interactions::Effects),
     Composter(super::composter::Effects),
     /// A mod's world pickup or placement of fluid, its block already set: what is left of it
@@ -1116,6 +1118,9 @@ impl Game<'_> {
         match after {
             After::Payload(payload) => payload.publish(),
             After::Packet(packet, body) => self.publish_mod_held(packet, body),
+            After::LocalChat(text, source) => {
+                self.add_chat_line(text, source);
+            }
             After::Cauldron(effects) => self.commit_cauldron_effects(effects),
             After::Composter(effects) => self.commit_composter_effects(effects),
             After::FluidWrite(written) => self.commit_fluid_write(*written),

@@ -1234,7 +1234,7 @@ fn host_and_coverage(root: &std::path::Path) -> Result<(String, String), String>
     let isolated_hooks = catalog
         .hooks
         .iter()
-        .filter(|hook| hook.isolate)
+        .filter(|hook| hook.isolate.is_some())
         .map(|hook| hook.name.clone())
         .collect::<std::collections::HashSet<_>>();
     let mut code = generate(&mut surface, &prepared_hooks, &isolated_hooks, &names)?;
