@@ -498,7 +498,6 @@ dependencies = [
  "sha2",
  "sunrise-addresses",
  "sunrise-mod-package",
- "sunrise-mod-point-emit",
  "sunrise-mod-source",
  "sunrise-mod-surface",
  "sunrise-native-build",
@@ -4207,7 +4206,6 @@ dependencies = [
  "sunrise-command",
  "sunrise-core",
  "sunrise-dualsense",
- "sunrise-engine-slots",
  "sunrise-friends",
  "sunrise-game-discovery",
  "sunrise-gameplay",
@@ -4270,7 +4268,6 @@ dependencies = [
  "png",
  "sunrise-client-core",
  "sunrise-core",
- "sunrise-engine-slots",
  "sunrise-mod-api-macros",
  "sunrise-theme",
  "winit",
@@ -4310,7 +4307,6 @@ dependencies = [
  "sunrise-command",
  "sunrise-core",
  "sunrise-dualsense",
- "sunrise-engine-slots",
  "sunrise-game-discovery",
  "sunrise-guest-stack",
  "sunrise-hooks",
@@ -4374,7 +4370,6 @@ dependencies = [
  "sunrise-command",
  "sunrise-connected",
  "sunrise-core",
- "sunrise-engine-slots",
  "sunrise-guest-stack",
  "sunrise-hdr",
  "sunrise-hooks",
@@ -4462,14 +4457,6 @@ dependencies = [
  "cpal",
  "hidapi",
  "log",
-]
-
-[[package]]
-name = "sunrise-engine-slots"
-version = "0.1.0"
-dependencies = [
- "sunrise-mod-api-gen",
- "sunrise-mod-vocab",
 ]
 
 [[package]]
@@ -4620,7 +4607,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "sunrise-game-discovery",
- "sunrise-mod-point-shape",
  "sunrise-mod-source",
  "sunrise-mod-surface",
  "syn 2.0.119",
@@ -4646,7 +4632,6 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "sunrise-mod-point-shape",
  "syn 2.0.119",
 ]
 
@@ -4687,12 +4672,10 @@ dependencies = [
  "serde_json",
  "sha2",
  "sunrise-client",
- "sunrise-engine-slots",
  "sunrise-guest-stack",
  "sunrise-hooks",
  "sunrise-mod-api",
  "sunrise-mod-package",
- "sunrise-mod-points",
  "sunrise-mod-render",
 ]
 
@@ -4718,7 +4701,6 @@ dependencies = [
  "sunrise-assets",
  "sunrise-core",
  "sunrise-mod-api-macros",
- "sunrise-mod-point-shape",
  "sunrise-mod-surface",
  "sunrise-mod-vocab",
  "sunrise-shader-api",
@@ -4731,42 +4713,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "sunrise-mod-point-emit"
-version = "0.1.0"
-dependencies = [
- "serde",
- "sunrise-mod-package",
-]
-
-[[package]]
-name = "sunrise-mod-point-shape"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "serde",
- "serde_json",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "sunrise-mod-points"
-version = "0.1.0"
-dependencies = [
- "sunrise-engine-slots",
- "sunrise-mod-api",
- "sunrise-mod-api-gen",
- "sunrise-mod-api-macros",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "sunrise-mod-render"
 version = "0.1.0"
 dependencies = [
  "glam",
  "sunrise-client-render",
- "sunrise-engine-slots",
  "sunrise-mod-api",
  "sunrise-mod-api-gen",
  "sunrise-mod-api-macros",
@@ -4826,7 +4777,6 @@ name = "sunrise-modding-examples"
 version = "0.0.0"
 dependencies = [
  "sunrise-mod-api",
- "sunrise-mod-points",
 ]
 
 [[package]]
@@ -4855,7 +4805,6 @@ dependencies = [
  "sha2",
  "sunrise-addresses",
  "sunrise-mod-package",
- "sunrise-mod-point-emit",
  "sunrise-mod-vocab",
  "sunrise-platform",
  "syn 2.0.119",
@@ -4950,7 +4899,6 @@ dependencies = [
  "sunrise-hooks",
  "sunrise-java-properties",
  "sunrise-mod-api-gen",
- "sunrise-mod-point-shape",
  "sunrise-perf-format",
  "sunrise-server-files",
  "sunrise-system",
@@ -5182,7 +5130,6 @@ dependencies = [
  "sunrise-assets",
  "sunrise-core",
  "sunrise-deflate",
- "sunrise-engine-slots",
  "sunrise-mod-api-macros",
  "sunrise-threads",
  "xxhash-rust",
