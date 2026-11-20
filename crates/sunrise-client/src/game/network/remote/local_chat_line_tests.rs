@@ -90,6 +90,29 @@ fn intercepts_another_mods_notice_once_while_connected() {
     );
 }
 
+#[test]
+#[ignore = "daily"]
+fn hud_only_notices_keep_their_local_accounting() {
+    with_chat_mods(
+        vec![ModEntry::new(
+            "decorate",
+            Box::new(Decorate(LocalChatSource::Client)),
+        )],
+        |game| {
+            let _server = connect(game);
+            game.ui.screenshot_messages.push("capture.png".into());
+            game.finish_screenshot(&Ok([1, 1]), Some(Text::literal("screenshot saved")));
+            game.native_chat("native notice");
+            assert_eq!(
+                game.ui.chat.recent_lines(3),
+                ["native notice!", "screenshot saved!"],
+            );
+            assert_eq!(game.ui.chat.received, 2);
+            assert_eq!(game.remote.as_ref().unwrap().chat_received, 0);
+        },
+    );
+}
+
 struct First;
 
 #[mod_api::__subscriptions]

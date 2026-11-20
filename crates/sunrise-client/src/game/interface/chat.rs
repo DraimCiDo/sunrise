@@ -24,6 +24,13 @@ use sunrise_client::{
 };
 use sunrise_world::registry::{BlockRegistry, BlockStateId};
 
+pub(super) enum LocalChatPresentation {
+    /// The usual system marker and connection accounting.
+    System,
+    /// A plain HUD notice, not counted by the connection.
+    HudOnly,
+}
+
 /// The tree the chat parses and completes with: `Remote::chat_tree`, which is
 /// a server's, once it has sent one (ClientPacketListener.commands), else the
 /// game's own, plus the commands native mods own (`chat_tree_for`).
@@ -1170,16 +1177,30 @@ impl Game<'_> {
             capture.push(text);
             return;
         }
-        self.stage_local_chat_line(text, LocalChatSource::Server);
+        self.stage_local_chat_line(text, LocalChatSource::Server, LocalChatPresentation::System);
     }
 
     /// `ChatComponent.addClientSystemMessage`: the client inserts its own
     /// line, without the Chat option's server-message filter.
     pub(super) fn chat_line(&mut self, text: Text) {
-        self.stage_local_chat_line(text, LocalChatSource::Client);
+        self.stage_local_chat_line(text, LocalChatSource::Client, LocalChatPresentation::System);
     }
 
-    fn stage_local_chat_line(&mut self, mut text: Text, source: LocalChatSource) {
+    /// Insert a local notice that has no marker or connection accounting.
+    pub(super) fn hud_chat_notice(&mut self, text: Text) {
+        self.stage_local_chat_line(
+            text,
+            LocalChatSource::Client,
+            LocalChatPresentation::HudOnly,
+        );
+    }
+
+    fn stage_local_chat_line(
+        &mut self,
+        mut text: Text,
+        source: LocalChatSource,
+        presentation: LocalChatPresentation,
+    ) {
         let category = match source {
             LocalChatSource::Client => ChatSource::Client,
             LocalChatSource::Server => ChatSource::Server,
@@ -1210,7 +1231,7 @@ impl Game<'_> {
                 text = replacement;
             }
         }
-        self.after_commit(After::LocalChat(text, category));
+        self.after_commit(After::LocalChat(text, category, presentation));
     }
     /// A player's chat line on the window's own chat: a guest's message on
     /// the server's own chat (`HostEvent::Chat`). `ChatListener`
@@ -2365,7 +2386,7 @@ impl Game<'_> {
         );
         if cancel {
             self.ui.screenshot_messages.remove(at);
-            self.post_screenshot_chat(screenshot_cancel_line(message));
+            self.hud_chat_notice(screenshot_cancel_line(message));
             return None;
         }
         let root = sunrise_client::logging::player_dir().join("screenshots");
@@ -2405,19 +2426,7 @@ impl Game<'_> {
             }
             Err(e) => Text::translate("screenshot.failure", &[Text::literal(e.clone())]),
         };
-        self.post_screenshot_chat(message);
-    }
-
-    fn post_screenshot_chat(&mut self, message: Text) {
-        let focused = self.screen == Screen::Chat;
-        self.ui.chat.add(
-            &self.gui.atlas,
-            message,
-            None,
-            ChatSource::Client,
-            self.visual_ticks(),
-            focused,
-        );
+        self.hud_chat_notice(message);
     }
 }
 
