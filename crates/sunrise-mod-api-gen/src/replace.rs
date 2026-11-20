@@ -1120,14 +1120,19 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
         root_text.push_str(&format!(
             "\n/// The replacement of each replaceable function of this crate, or null: see `sunrise_mod_api_gen::replace`.\n#[doc(hidden)]\npub static __REPLACE: [::std::sync::atomic::AtomicPtr<()>; {cells}] = [const {{ ::std::sync::atomic::AtomicPtr::new(::std::ptr::null_mut()) }}; {cells}];\n"
         ));
-        // Keep the staged lower crates linked, including ones the unstaged game
-        // only reaches indirectly. Their replacement installers are called by patches.
-        for name in crates
+        // The host must export lower-crate replacement slots even if the game never calls
+        // them directly. An exported reference keeps them linked without work at startup.
+        let linked: Vec<_> = crates
             .iter()
             .filter(|other| !krate.marked_only && other.marked_only)
-            .map(|other| &other.name)
-        {
-            root_text.push_str(&format!("use ::{name} as _;\n"));
+            .map(|other| format!("&::{}::__REPLACE", other.name))
+            .collect();
+        if !linked.is_empty() {
+            root_text.push_str(&format!(
+                "#[doc(hidden)]\npub static __FNR_LOWER_SLOTS: [&[::std::sync::atomic::AtomicPtr<()>]; {}] = [{}];\n",
+                linked.len(),
+                linked.join(", ")
+            ));
         }
         texts.insert(&krate.lib, root_text);
         for (path, text) in texts {
@@ -2065,7 +2070,7 @@ mod tests {
         assert!(low.contains("pub static __REPLACE: [::std::sync::atomic::AtomicPtr<()>; 1]"));
         syn::parse_file(&low).unwrap();
         // The staged game links the marked crate, so it must declare the dependency.
-        assert!(lib.contains("use ::sunrise_low as _;"), "{lib}");
+        assert!(lib.contains("= [&::sunrise_low::__REPLACE];"), "{lib}");
         let client: toml::Table = toml::from_str(
             &fs::read_to_string(root.path().join("crates/sunrise-client/Cargo.toml")).unwrap(),
         )
