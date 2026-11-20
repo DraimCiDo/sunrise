@@ -1030,7 +1030,7 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
             ));
         }
         let (package, lib) = source::crate_root(root, name)?;
-        // The game crate arms every marked crate: one built on the game crate would be a cycle.
+        // The game crate links every marked crate; a dependency back on the game would cycle.
         if built_on(&package, &game)? {
             return Err(format!(
                 "{name}: it is built on sunrise-client, so the game crate can't link its replacement slots; a crate with #[sunrise_mod_api_macros::replaceable] must sit below the game crate"
@@ -2064,7 +2064,7 @@ mod tests {
         );
         assert!(low.contains("pub static __REPLACE: [::std::sync::atomic::AtomicPtr<()>; 1]"));
         syn::parse_file(&low).unwrap();
-        // The game crate arms the marked crate, so the staged copy depends on it.
+        // The staged game links the marked crate, so it must declare the dependency.
         assert!(lib.contains("use ::sunrise_low as _;"), "{lib}");
         let client: toml::Table = toml::from_str(
             &fs::read_to_string(root.path().join("crates/sunrise-client/Cargo.toml")).unwrap(),

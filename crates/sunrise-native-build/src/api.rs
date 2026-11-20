@@ -72,10 +72,8 @@ pub const API_PACKAGE: &str = "sunrise-mod-api";
 /// The per-mod facade's package, rewritten to its generated crate.
 pub const INTERNALS_PACKAGE: &str = "sunrise-internals";
 /// Each game package a mod may depend on, with its library's name.
-pub const PACKAGES: [(&str, &str); 3] = [
-    (API_PACKAGE, "mod_api"),
-    (INTERNALS_PACKAGE, "internals"),
-];
+pub const PACKAGES: [(&str, &str); 2] =
+    [(API_PACKAGE, "mod_api"), (INTERNALS_PACKAGE, "internals")];
 
 /// Where a mod's `Cargo.toml` names the SDK package `package`: the copy of its pinned build that
 /// `cargo sunrise-mod` fetches into the project (`.sunrise/sdk/`).
