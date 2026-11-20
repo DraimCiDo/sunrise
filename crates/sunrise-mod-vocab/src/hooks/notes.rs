@@ -1080,8 +1080,6 @@ more of it draws this frame: model, layers, name tag, shadow, flames, leash, out
   living pre, and `render_player_post(player, who, parts, draw)` after the living post, once a frame for each other player in
   view and for this window's player in third person, with the same frame and `who` (the profile name, and `local`). A
   canceled player pre skips all four; canceling only the living pre still asks `render_player_post`.
-- `hidden_layers.hide` suppresses a typed stock layer for this world draw; it preserves the base model,
-  registered layers, equipment and previews. Hides from the two pre hooks accumulate.
 - `render_living_post(entity, parts, draw)` (`RenderLivingEvent.Post`; a type's own layers are `register_entity_layers`)
   adds after the entity's model and layers, in the same frame. The geometry hangs from the entity's frame, not from a model
   bone: place a hat from `head_yaw`, `pitch` and the entity type's eye height.
