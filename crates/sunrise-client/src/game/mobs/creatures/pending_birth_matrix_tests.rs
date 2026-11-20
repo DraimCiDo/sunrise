@@ -1,15 +1,11 @@
-//! The pending-children matrix crosses native and real wasm dispatch: the same listener source
-//! (`sunrise-mod-wasm/tests/fixture/src/pending_children.rs`) runs as a native mod and inside the
-//! wasm fixture, and the same rows check what spawns. The listener's mode is the last digit of the
-//! parent id; what a guest learns from a refused call comes back as decimal digits in the first
-//! child's yaw (see the fixture's header).
+//! Test pending children through real splitting and breeding with a native listener.
 
 use super::pending_birth_tests::{SEED, YAWS, breed_pair, cube, find, near};
 use super::*;
 use crate::game::native_entity_refs::tests::with_game;
 use mod_api::{BabyEntitySpawnEvent, Flow, Hooks, MobSplitEvent, ServerHost};
 
-#[path = "../../../../../sunrise-mod-wasm/tests/fixture/src/pending_children.rs"]
+#[path = "pending_birth_matrix_tests/fixture.rs"]
 mod fixture;
 
 struct Native;
@@ -106,73 +102,14 @@ fn matrix(mods: mod_api::Mods) {
     });
 }
 
-/// A guest that edits and then traps: the failed call commits nothing, whatever it changed
-/// first. A trapped guest is stopped, so each trap runs against a freshly loaded module.
-fn trap(mods: mod_api::Mods, baby: bool) {
-    mod_platform::testing::with_mods(mods, || {
-        with_game(|game| {
-            if baby {
-                let (mobs, child) = breed(game, 6);
-                assert_eq!(child, None, "a trapped baby listener's edit never commits");
-                assert!(
-                    mobs.iter().all(|m| m.extra.age >= 0),
-                    "no baby after a trap"
-                );
-            } else {
-                assert!(split(game, 6).is_empty(), "a trapped split spawns nothing");
-            }
-        });
-    });
-}
-
 #[test]
 #[ignore = "daily"]
 fn native_pending_children_shared_matrix() {
-    matrix(vec![mod_api::ModEntry::new("wasm_fixture", Box::new(Native))].into());
-}
-
-/// The fixture module, loaded and initialized as the game does.
-fn load_wasm() -> mod_api::Mods {
-    use sunrise_mod_package::manifest::Package;
-    use sunrise_mod_wasm::{WasmPackage, load};
-    let path = std::path::PathBuf::from(std::env::var_os("SUNRISE_WASM_FIXTURE").unwrap());
-    let manifest = Package::read(&path).unwrap().manifest;
-    let info = mod_api::PackageInfo::new(
-        manifest.id.clone(),
-        manifest.version.to_string(),
-        mod_api::PackageKind::Code,
-        mod_api::Side::Both,
-        vec![manifest.id.clone()],
-        vec![],
+    matrix(
+        vec![mod_api::ModEntry::new(
+            "pending_children_fixture",
+            Box::new(Native),
+        )]
+        .into(),
     );
-    let loaded = load(
-        &std::fs::read(std::env::var_os("SUNRISE_WASM_STD").unwrap()).unwrap(),
-        vec![WasmPackage {
-            manifest,
-            module: Package::read_wasm(&path).unwrap(),
-        }],
-    );
-    assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
-    assert_eq!(loaded.mods.len(), 1);
-    loaded.initialize(&[info]).unwrap();
-    loaded.mods.into()
-}
-
-#[test]
-#[ignore = "daily"]
-fn wasm_pending_children_shared_matrix() {
-    // Enters the guest: libtest's thread is smaller than the guest stack policy requires.
-    sunrise_guest_stack::run_on_guest_stack(|| matrix(load_wasm()));
-}
-
-#[test]
-#[ignore = "daily"]
-fn wasm_trapped_split_listener_commits_nothing() {
-    sunrise_guest_stack::run_on_guest_stack(|| trap(load_wasm(), false));
-}
-
-#[test]
-#[ignore = "daily"]
-fn wasm_trapped_baby_listener_commits_nothing() {
-    sunrise_guest_stack::run_on_guest_stack(|| trap(load_wasm(), true));
 }

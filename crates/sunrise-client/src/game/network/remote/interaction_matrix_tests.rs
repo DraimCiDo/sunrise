@@ -1,6 +1,6 @@
-//! The same independently specified matrix crosses native and real wasm dispatch.
+//! Independently specified outcomes for the interaction hooks.
 use super::*;
-#[path = "../../../../../sunrise-mod-wasm/tests/fixture/src/interaction.rs"]
+#[path = "interaction_matrix_tests/fixture.rs"]
 mod fixture;
 
 struct Native;
@@ -282,7 +282,7 @@ fn matrix(mods: mod_api::Mods) {
                         game.use_failed = false;
                         advancement_tree(game);
                         let mut control = mod_api::ModBlockEntity::new(
-                            "wasm_fixture:interaction_control".into(),
+                            "interaction_fixture:interaction_control".into(),
                             Default::default(),
                         );
                         control.data = case.controls.iter().map(|&b| i32::from(b)).collect();
@@ -360,43 +360,11 @@ fn matrix(mods: mod_api::Mods) {
 #[test]
 #[ignore = "daily"]
 fn native_interaction_shared_matrix() {
-    matrix(vec![mod_api::ModEntry::new("wasm_fixture", Box::new(Native))].into());
-}
-
-#[test]
-#[ignore = "needs SUNRISE_TEST_RESOURCES, SUNRISE_WASM_FIXTURE and SUNRISE_WASM_STD; build with sunrise-mod-wasm/listener-fixture"]
-fn wasm_interaction_shared_matrix() {
-    // Enters the guest: libtest's thread is smaller than the guest stack policy requires. The
-    // load budget: this checks behaviour, not speed, and a loaded runner can pass 100 ms.
-    sunrise_guest_stack::run_on_guest_stack(|| {
-        sunrise_mod_wasm::copy_probe::with_load_budget(
-            wasm_interaction_shared_matrix_on_guest_stack,
-        )
-    });
-}
-
-fn wasm_interaction_shared_matrix_on_guest_stack() {
-    use sunrise_mod_package::manifest::Package;
-    use sunrise_mod_wasm::{WasmPackage, load};
-    let path = std::path::PathBuf::from(std::env::var_os("SUNRISE_WASM_FIXTURE").unwrap());
-    let manifest = Package::read(&path).unwrap().manifest;
-    let info = mod_api::PackageInfo::new(
-        manifest.id.clone(),
-        manifest.version.to_string(),
-        mod_api::PackageKind::Code,
-        mod_api::Side::Both,
-        vec![manifest.id.clone()],
-        vec![],
+    matrix(
+        vec![mod_api::ModEntry::new(
+            "interaction_fixture",
+            Box::new(Native),
+        )]
+        .into(),
     );
-    let loaded = load(
-        &std::fs::read(std::env::var_os("SUNRISE_WASM_STD").unwrap()).unwrap(),
-        vec![WasmPackage {
-            manifest,
-            module: Package::read_wasm(&path).unwrap(),
-        }],
-    );
-    assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
-    assert_eq!(loaded.mods.len(), 1);
-    loaded.initialize(&[info]).unwrap();
-    matrix(loaded.mods.into());
 }
