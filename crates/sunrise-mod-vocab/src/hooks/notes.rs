@@ -684,12 +684,12 @@ handle, an entity the client doesn't track and a level it doesn't show:
   world. `level.enabled_features(host)` is the world's `FeatureFlags` (`LevelReader.enabledFeatures`:
   `contains("minecraft:redstone_experiments")`, `iter()`); every level of a world shares them. If the save
   omits its flag list, the world enables `minecraft:vanilla`.
-- `level.chunk_ref(host, [x, z])` makes a `ChunkRef` for any chunk of an open level, loaded or not (None past 30 million
-  blocks). `chunk.forced(host)` and `level.forced_chunks(host)` read the chunks `/forceload` holds (`/forceload query`);
-  `chunk.set_forced(host, bool)` is `/forceload add` or `remove` of one chunk and returns whether the set changed. That
-  is the world's own state: it is saved with the level and stays until `/forceload remove`.
-  A newly added forced chunk is loaded before the call returns, including in a parked server level. Repeated adds
-  and removals do not load chunks.
+- `level.chunk_ref(host, [x, z])` makes a `ChunkRef` for any chunk of an open level (None past 30 million blocks).
+  `chunk.forced(host)` and `level.forced_chunks(host)` query `/forceload` tickets. `chunk.set_forced(host, bool)` adds
+  or removes one and returns whether the saved set changed. A successful add waits for the chunk to load, even in a
+  parked level. A paused add loads the chunk when streaming starts; if generation stops during the wait, the ticket
+  is kept for the next startup. Both return true. Adds after generation stops return false; repeated adds and
+  removals do not load chunks.
 - Ticket controllers (NeoForge's `TicketController`, registered in `RegisterTicketControllersEvent`): a mod registers
   each one once at startup, from `Hooks::register`, with `r.register_ticket_controller("quarry", validates)` and keeps the
   `TicketController` it returns (it is `Copy`; `Hooks` methods take `&self`, so a `OnceLock` holds it). The id is the

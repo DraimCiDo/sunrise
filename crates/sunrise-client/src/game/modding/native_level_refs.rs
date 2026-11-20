@@ -395,12 +395,12 @@ impl Game<'_> {
     /// without a player. This is the world's own `/forceload` state, not a
     /// ticket the mod owns: the chunk stays forced across restarts, and after
     /// the mod is unloaded or removed, until `set_forced(false)` or
-    /// `/forceload remove` clears it. Adding a newly forced chunk loads it
-    /// before returning, as vanilla does.
-    /// False for a stale handle, on a client, and for a level the server
-    /// has not opened.
+    /// `/forceload remove` clears it. A newly forced chunk loads before
+    /// returning, or when streaming starts if it is still paused.
+    /// False for a stale handle, on a client, outside the world, or when
+    /// adding after generation has stopped.
     pub(super) fn chunk_set_forced(&mut self, chunk: ChunkRef, forced: bool) -> bool {
-        if self.native_level_streaming(chunk.level()).is_none() {
+        if self.native_level_streaming(chunk.level()).is_none() || !chunk_in_world(chunk.pos()) {
             return false;
         }
         let [x, z] = chunk.pos();
@@ -1784,7 +1784,12 @@ mod tests {
             game.world.modified.insert((-40, 40));
             assert!(!game.chunk_loaded(far));
             assert!(game.chunk_set_forced(far, true));
-            assert!(game.chunk_loaded(far), "loaded before returning");
+            for x in 39..=41 {
+                for z in -8..=-6 {
+                    assert!(game.world.chunks.contains_key(&(x, z)), "missing {x},{z}");
+                }
+            }
+            assert!(game.world.chunks[&(40, -7)].lit);
             assert!(std::sync::Arc::ptr_eq(&old, &game.world.chunks[&(-40, 40)]));
             assert!(game.world.modified.contains(&(-40, 40)));
             assert!(!game.chunk_set_forced(far, true), "already forced");
@@ -1799,7 +1804,6 @@ mod tests {
             assert!(!game.chunk_set_forced(far, false), "already clear");
             assert_eq!(game.level_forced_chunks(level), Some(vec![[-3, 2]]));
             assert!(!game.streaming.forced.contains(&(40, -7)));
-            // Outside the world.
             // Unchanged adds and removals do not load a missing column.
             let pending = game.level_chunk_ref(level, [200, 200]).unwrap();
             assert!(game.streaming.set_forced(200, 200, true));
@@ -1810,6 +1814,41 @@ mod tests {
             assert!(!game.chunk_loaded(pending));
             assert!(game.level_chunk_ref(level, [1_875_000, 0]).is_none());
             assert!(game.level_chunk_ref(level, [0, -1_875_001]).is_none());
+            assert!(!game.chunk_set_forced(ChunkRef::new(level, [i32::MAX, 0]), true));
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn paused_forced_loads_are_queued_and_stopped_generation_refuses_adds() {
+        with_game(|game| {
+            game.options.headless = true;
+            game.streaming.mesh = false;
+            game.streaming.radius = 0;
+            let level = game.level(game.dim.id()).unwrap();
+            let queued = game.level_chunk_ref(level, [40, -7]).unwrap();
+            assert!(!game.chunk_loaded(queued));
+            assert!(game.chunk_set_forced(queued, true));
+            assert!(!game.chunk_set_forced(queued, true));
+            assert_eq!(game.level_forced_chunks(level), Some(vec![[40, -7]]));
+            assert!(!game.chunk_loaded(queued), "paused streaming does no work");
+
+            game.streaming.paused = false;
+            game.prepare_levels().unwrap();
+            assert!(game.world.chunks[&(40, -7)].lit);
+            for x in 39..=41 {
+                for z in -8..=-6 {
+                    assert!(game.world.chunks.contains_key(&(x, z)), "missing {x},{z}");
+                }
+            }
+
+            game.streaming.abort_generation();
+            let missing = game.level_chunk_ref(level, [60, -7]).unwrap();
+            assert!(!game.chunk_set_forced(missing, true));
+            assert_eq!(game.level_forced_chunks(level), Some(vec![[40, -7]]));
+            assert!(game.chunk_set_forced(queued, false));
+            assert!(!game.chunk_set_forced(queued, true));
+            assert_eq!(game.level_forced_chunks(level), Some(vec![]));
         });
     }
 
