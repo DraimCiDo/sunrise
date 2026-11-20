@@ -91,7 +91,7 @@ shape, in blocks; a state with no shape has none. A neighbour joins when any cla
 | `side` | a neighbour on an edge of the face also joins when `higher` or `above` holds for either cell beside this block along the face's other axis. It needs `higher` or `above`. |
 
 Heights are compared exactly: they come from the published collision shapes, read once when the resources load
-(and only when a rule joins by height), and a shape that depends on the world reads as the shape of its state.
+(and only when a rule joins by height), and a state whose shape depends on the world has no cached shape, so it counts as having none, like air.
 
 One rule per case, in order. Create's copper roofs, for example, are a rule for the bottom slab
 (a `blocks` entry with `"state": {"type": ["bottom"]}`) that joins with `higher`, and a rule for the other roof blocks that joins with
@@ -103,6 +103,8 @@ One rule per case, in order. Create's copper roofs, for example, are a rule for 
 - The neighbours read are the ones within one block, on the face's plane, the cell in front of each for `cover` and the cell above each for `above`.
   The game re-meshes a section when a block within one block of it changes, and the one below when a block on
   its bottom two layers changes (the cell above a neighbour is two up), so a joined texture follows its neighbours.
+  That holds in every world, with or without such rules: a block-state change on a section's second layer also
+  marks the section below for remeshing if that section exists.
 - A rule that also names a block the pack formats (OptiFine's connected textures) name is ordered with them:
   by weight, then by path. Tile rules (a rule with `sprites`) come before block rules.
 - There is no hook that decides a connection with code, and a block cannot present another block's look to its

@@ -42,7 +42,6 @@ pub struct PartRegistrar {
     pub(crate) biome_regions: Vec<BiomeRegionDeclaration>,
     pub(crate) datapack_registries: Vec<crate::DatapackRegistryDeclaration>,
     pub(crate) menu_recipe_books: HashMap<String, MenuBookDeclaration>,
-    pub(crate) self_refusal: Option<String>,
     /// Loading warnings, by owning mod id, in registration order.
     pub(crate) warnings: Vec<(String, crate::LoadingMessage)>,
     pub(crate) recipe_book_types: HashMap<String, String>,
@@ -101,7 +100,6 @@ impl PartRegistrar {
         let _ = crate::__private::initialize();
         Self {
             menu_recipe_books: HashMap::new(),
-            self_refusal: None,
             warnings: Vec::new(),
             biome_modifiers: Vec::new(),
             biome_regions: Vec::new(),
@@ -251,12 +249,12 @@ pub(crate) fn register_all(
         registrar.config_screen_client = mod_vocab::__private::client_registration(&context);
         let rollback = registrar.registration_checkpoint();
         hooks.register(&mut registrar, &context);
-        for warning in mod_vocab::__private::take_registration_warnings(&context) {
-            RegistrationRefusalRegistrar::registration_warning(&mut registrar, warning);
-        }
-        let reason = mod_vocab::__private::take_registration_refusal(&context)
-            .or_else(|| registrar.self_refusal.take());
-        if let Some(reason) = reason {
+        registrar.warnings.extend(
+            mod_vocab::__private::take_registration_warnings(&context)
+                .into_iter()
+                .map(|warning| (registrar.mod_id.to_owned(), warning)),
+        );
+        if let Some(reason) = mod_vocab::__private::take_registration_refusal(&context) {
             rollback(&mut registrar);
             registrar.refused.push(format!(
                 "mod {} refused registration: {reason}",

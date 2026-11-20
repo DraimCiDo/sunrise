@@ -8,7 +8,6 @@ use super::*;
 /// active check. The report asks it once, on a thread of its own, while the game may have stopped
 /// mid-tick: read the mod's own state, and don't wait on anything the game holds.
 pub trait CrashSection: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// The line's text, or `None` to leave it out of this report. The report keeps it on one
     /// line (control characters become spaces) and cuts it to 4096 bytes.
     fn value(&self) -> Option<String>;

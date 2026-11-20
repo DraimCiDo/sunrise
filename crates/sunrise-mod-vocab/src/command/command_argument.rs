@@ -163,7 +163,6 @@ impl Default for CommandSender {
 /// The game keeps one value per registered id and asks it from the server thread and, for a
 /// client command, from the window's thread: implement it to be shared, without mutable state.
 pub trait CommandArgumentType: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// The part of the line the argument takes. The same on every client.
     fn kind(&self) -> CommandArgumentKind;
 

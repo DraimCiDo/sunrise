@@ -50,6 +50,7 @@ To play, use [the launcher](https://github.com/sunrise-org/sunrise-launcher/blob
 
 - [The launcher's mod browser](mod-browser.md): searching Modrinth and the Sunrise registry for mods, modpacks, resource packs and shader packs, compatibility checks before install, and checksum verification.
 - [Launcher commands](https://github.com/sunrise-org/sunrise-launcher/blob/main/docs/launcher-commands.md): every command of `sunrise-launcher`, CLI arguments, and the tools `sunrise-launcher mcp` offers for driving launcher actions.
+- [Install a local unsigned game build](developer-install.md): package a checkout as a developer base.
 - [Launcher resource preparation](launcher-preparation.md): compiling Java exporter classes into release bundles, verifying local Minecraft assets against `research-lock.json`, and multi-lane export workflows.
 - [Microsoft account sign-in](microsoft-account.md): signing players in with their Microsoft account in the launcher, joining online-mode servers, the owner gate, and the OAuth device-code flow.
 - [Windows allocators](windows-allocators.md): mimalloc defaults, the optional `windows-segment-heap` Cargo feature for Win32 heap APIs, and how to validate the executable manifest.

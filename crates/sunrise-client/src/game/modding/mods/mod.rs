@@ -229,7 +229,7 @@ pub(super) fn install_registration_data(
     let directory = Game::game_dir();
     let directory = mod_api::InstanceDirectory::from_path(&directory)
         .expect("the host's paths have an encoding the mod API carries");
-    (sunrise_engine_slots::platform()?.install_registration_data)(
+    (mod_api::__private::platform::platform()?.install_registration_data)(
         mod_api::__private::RegistrationData::new(
             builtin_registry_names(root)?,
             sunrise_world::native_load_context::capture_settings(

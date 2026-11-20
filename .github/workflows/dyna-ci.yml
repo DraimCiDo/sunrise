@@ -638,11 +638,6 @@ jobs:
         continue-on-error: true
         run: |
           python3 tools/ci/cargo_timings.py target/cargo-timings/cargo-timing.html | tee -a "$GITHUB_STEP_SUMMARY"
-          # The points build script's phases (seconds since it started), from the file it writes beside its output.
-          for timing in target/debug/build/sunrise-mod-points-*/out/points-timing.txt; do
-            [ -f "$timing" ] || continue
-            { echo "points build script phases:"; cat "$timing"; } | tee -a "$GITHUB_STEP_SUMMARY"
-          done
       # Binaries run normally, three at a time, under the inet/resolver preload guard. Only a binary
       # recording a violation is rerun per test to name culprits, even if they swallow the refusal.
       # The guard library is built here only; the daily run does not preload it. Unix sockets remain available.
@@ -791,9 +786,9 @@ jobs:
           FETCH_STEP: Fetch this commit's history
           # A pull request's checks read commits and trees (the range's paths, merge bases, ancestry) and only a few
           # files' contents, which Git then fetches one by one: a pull request off our pool takes the history without
-          # file contents. Main's pushes (--history), and our pool with its slot's mirror, take all of it.
+          # file contents. Main's pushes (--history), and our pool with the host's history mirror, take all of it.
           HISTORY_FILTER: ${{ github.event_name == 'pull_request' && env.RUNNER_KIND != 'dyna' && 'blob:none' || '' }}
-        # On our runners the slot's history mirror makes this a short fetch (tools/ci/history_fetch.sh).
+        # On our runners the host's shared history mirror makes this a short fetch (tools/ci/history_fetch.sh).
         run: bash tools/ci/history_fetch.sh
       - uses: actions/setup-python@v5
         if: needs.changes.outputs.tooling_required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')

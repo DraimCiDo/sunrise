@@ -268,10 +268,8 @@ fill 0 100 0 9 100 9 minecraft:hopper[facing=east]{Items:[{Slot:0b,id:"minecraft
     grep -F 'fnr: loop count own #1: fnr_loop:counter' "$scratch/server.log"
     grep -F 'fnr: loop throttle skips #1:' "$scratch/server.log"
     grep -F 'fnr: loop HEAD tick_block_entities' "$scratch/server.log"
-    # A call-site row inside the loop body ran in the loop's copy, and an API listener at the entry
-    # fired through the same cell as the loop.
+    # A call-site row inside the loop body ran in the loop's copy.
     grep -F 'fnr: loop MODIFY_EXPRESSION_VALUE chunk check inside the loop' "$scratch/server.log"
-    grep -F 'fnr: loop api head listener at tick_block_entities' "$scratch/server.log"
     grep -F "Published loops: 1 filled by $slots mod slots" "$log"
     # The slot ran the loop again from inside it: the nested run was the game's own, logged once.
     grep -F 'fnr: loop count ran the loop again inside it: true' "$scratch/server.log"
@@ -284,7 +282,6 @@ fill 0 100 0 9 100 9 minecraft:hopper[facing=east]{Items:[{Slot:0b,id:"minecraft
   fi
   if [[ " ${FNR_MODS:-alpha beta} " == *" api_only "* ]]; then
     grep -F 'fnr: api_only server_started, sin 0.479' "$scratch/server.log"
-    grep -F 'fnr: api_only listener at tick_block_entities' "$scratch/server.log"
   fi
   if [[ " ${FNR_MODS:-alpha beta} " == *" shared_tip "* ]]; then
     # A mod depending on two mods that use the same crates.io crate linked, and runs (#1379).

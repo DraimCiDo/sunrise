@@ -69,7 +69,7 @@ impl Group {
 mod tests {
     use super::super::{native::tests::Scene, *};
     use super::{Group, ParticleGroup, checked};
-    use mod_api::{ModParticle, ParticleProvider};
+    use mod_api::{ParticleBatch, ParticleLevelView, ParticleProvider};
 
     fn group(id: &str, blend: ParticleBlend, particles: &[&str]) -> ParticleGroup {
         ParticleGroup {
@@ -105,8 +105,10 @@ mod tests {
     /// Moves a particle to a fixed spot on each tick, so a drawn quad says where it is.
     struct Stay;
     impl ParticleProvider for Stay {
-        fn tick(&self, particle: &mut ModParticle) {
-            particle.position = particle.previous;
+        fn tick(&self, particles: &mut ParticleBatch, _: &dyn ParticleLevelView) {
+            for particle in particles {
+                particle.position = particle.previous;
+            }
         }
     }
 

@@ -58,16 +58,13 @@
       "bin/@program:sunrise-client",
       "deps/@dylib:sunrise_mod_host",
       "deps/@dylib:mod_api",
-      "deps/@dylib:mod_vocab",
-      "deps/@dylib:mod_points"
+      "deps/@dylib:mod_vocab"
     ],
     "api": [
       "native_mod_entry.rs.template",
-      "points.json",
       "internals.json",
       "loops.json",
-      "deps/@rmeta:mod_api",
-      "deps/@rmeta:mod_points"
+      "deps/@rmeta:mod_api"
     ]
   }
 }

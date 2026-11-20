@@ -29,7 +29,7 @@
 //! | `host`, `context` | `"read"` or `"level"`; `"registration"`, `"data_load"`, `"loop"` or `"worldgen"` |
 //! | `neoforge`, `fabric`, `paper` | the counterpart's name, or a list of them, for the rustdoc and the gap lists |
 //! | `cancellable` | whether the NeoForge counterpart event is cancellable (documentation, not the contract) |
-//! | `version` | the contract version an injection's `hook_version` names; left out when it is 1 |
+//! | `version` | the hook's contract version; left out when it is 1 |
 //! | `target` | the game function that fires it; left out when it is `Game::native_<name>` in `native_hooks/<area>.rs` |
 //!
 //! Every hook needs `///` lines: they are the rustdoc of its trait method, and a hook without them

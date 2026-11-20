@@ -181,11 +181,10 @@ A feature often splits along this rule: the part others build on is platform, an
 is Sunrise (PvP & HUD and replays, [above](#controllers-replays-and-ui-pages)).
 
 The mod interface follows that split too: `sunrise-mod-vocab` is an engine crate, while
-`sunrise-mod-api` preserves the mod-facing paths through re-exports. The build-time generator,
-procedural macros and point-shape parser are engine dependencies of that interface. Sunrise's launcher
-reaches the generator and point-shape parser through `sunrise-platform`'s optional `mod-build` feature.
-The initial extraction also carries dispatch's crash markers, profiling, resource codec, phase access,
-and Parts registration state; it is not yet a stateless or unsafe-free interface ([#2587](https://github.com/arismoko/horizon/issues/2587)).
+`sunrise-mod-api` preserves the mod-facing paths through re-exports. The build-time generator
+and procedural macros are engine dependencies of that interface. The vocabulary holds dispatch and installed
+lookups; the platform owns profiling, resource access and Parts authoring. See the
+[checked state inventory](layering/mod-vocab-state.md).
 
 | I add... | Layer | Where |
 |---|---|---|
@@ -746,15 +745,6 @@ by default), so the pipeline moves once. HDR off stays bit-exact.
 The mod API work on arismoko/horizon lands upstream as part of the platform. The API owns its types,
 `sunrise-mod-runtime` gets no game dependency, and its CI property check stays as a stricter check inside the
 platform.
-
-The portable engine crate `sunrise-engine-slots` owns the final registration seal socket
-and the generated point records, their copy-in constructors, typed dispatchers and activity table.
-The host installs its seal provider before engine startup and registers native API listeners
-after dependency ordering and installation. At sealing, `sunrise-mod-points` installs the
-set-once dispatch provider before publishing activity flags. Ordering, owner guards,
-replacement authority and listener dispatch remain in the platform registry. Staged point
-sites name only engine-owned paths; staging does not inject point dependencies into engine manifests.
-The seal refuses repeat or re-entrant sealing and late provider installation.
 
 Engine crates import `sunrise-mod-vocab` as `mod_api`. Their test-only
 `mod_platform` dependency reaches `sunrise-mod-api`; dev-dependencies are exempt

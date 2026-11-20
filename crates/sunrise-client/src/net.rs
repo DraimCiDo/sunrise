@@ -117,7 +117,10 @@ pub enum Event {
     /// ClientboundResourcePackPopPacket: one pack, or every pack.
     PackPop(Option<u128>),
     /// `show_dialog` in configuration: the dialog itself.
-    ShowDialog(sunrise_core::nbt::Tag),
+    ShowDialog {
+        dialog: sunrise_core::nbt::Tag,
+        registries: Arc<Dynamic>,
+    },
     /// `clear_dialog` in configuration.
     ClearDialog,
     /// ClientboundCodeOfConductPacket: the game shows it and answers with
@@ -184,7 +187,9 @@ impl Event {
             Self::RawPayload(incoming) => size_of::<crate::raw_payloads::Incoming>()
                 .saturating_add(incoming.owned_heap_bytes()),
             Self::PackPush(packet) => packet.owned_heap_bytes(),
-            Self::ShowDialog(tag) => tag.owned_heap_bytes(),
+            Self::ShowDialog { dialog, registries } => dialog
+                .owned_heap_bytes()
+                .saturating_add(dynamic(registries)),
             Self::Transfer { host, port: _ } => host.capacity(),
             Self::ServerLinks(links) => links.owned_heap_bytes(),
             Self::Disconnected {
@@ -1287,6 +1292,7 @@ fn configure(
     payloads: &Arc<crate::raw_payloads::Transport>,
 ) -> Result<Dynamic, Reason> {
     let mut registries = Dynamic::default();
+    let mut dialog_snapshot = None;
     let mut content_verified = false;
     payloads.begin_configuration();
     let mut negotiation =
@@ -1424,9 +1430,20 @@ fn configure(
             }
             cfg::Clientbound::RegistryData(mut r) => {
                 fill_known_entries(&mut r, resources.root());
+                if r.registry == "minecraft:dialog" {
+                    dialog_snapshot = None;
+                }
                 registries.add(r);
             }
-            cfg::Clientbound::UpdateTags(t) => registries.add_tags(&t),
+            cfg::Clientbound::UpdateTags(t) => {
+                if t.registries
+                    .iter()
+                    .any(|row| row.registry == "minecraft:dialog")
+                {
+                    dialog_snapshot = None;
+                }
+                registries.add_tags(&t);
+            }
             cfg::Clientbound::CodeOfConduct(c) => {
                 let _ = send.send(Event::CodeOfConduct(c.text));
             }
@@ -1437,9 +1454,25 @@ fn configure(
             cfg::Clientbound::ResourcePackPop(p) => {
                 let _ = send.send(Event::PackPop(p.id));
             }
-            // The game shows it; the answer goes back from there.
+            // The game shows it immediately, before Joined/Reconfigured installs
+            // the play registries. Only the dialog entries and tags are dynamic
+            // lookups here; keep the snapshot for clicks from this screen too.
             cfg::Clientbound::ShowDialog(d) => {
-                let _ = send.send(Event::ShowDialog(d.dialog));
+                let snapshot = dialog_snapshot.get_or_insert_with(|| {
+                    let mut snapshot = Dynamic::default();
+                    let key = "minecraft:dialog";
+                    if let Some(entries) = registries.registries.get(key) {
+                        snapshot.registries.insert(key.into(), entries.clone());
+                    }
+                    if let Some(tags) = registries.tags.get(key) {
+                        snapshot.tags.insert(key.into(), tags.clone());
+                    }
+                    Arc::new(snapshot)
+                });
+                let _ = send.send(Event::ShowDialog {
+                    dialog: d.dialog,
+                    registries: snapshot.clone(),
+                });
             }
             cfg::Clientbound::ClearDialog(_) => {
                 let _ = send.send(Event::ClearDialog);
@@ -2508,6 +2541,84 @@ mod tests {
         }
         assert!(thread.join().unwrap().is_ok());
         drop(writer);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn configuration_dialog_binds_holders_from_its_own_packets() {
+        use crate::dialog::Dialog;
+        use sunrise_core::nbt::parse_snbt;
+
+        let (root, data) = empty_item_data("dialog-registry");
+        let (client, server) = sunrise_protocol::connection::Pipe::pair();
+        let (mut reader, writer) = Connection::local(client).split();
+        let writer = Arc::new(Mutex::new(Some(QueuedWriter::new(writer).unwrap())));
+        let (send, events) = event_channel();
+        let mut server = Connection::local(server);
+        let (leaf, _) = parse_snbt("{type:notice,title:Leaf}").unwrap();
+        let (dialog, _) = parse_snbt(
+            r##"{type:dialog_list,title:{text:Open,click_event:{action:show_dialog,dialog:"test:leaf"}},dialogs:"#test:list"}"##,
+        )
+        .unwrap();
+        let tags = |tags| {
+            cfg::Clientbound::UpdateTags(cfg::UpdateTags {
+                registries: vec![cfg::RegistryTags {
+                    registry: "minecraft:dialog".into(),
+                    tags,
+                }],
+            })
+        };
+        for packet in [
+            cfg::Clientbound::RegistryData(cfg::RegistryData {
+                registry: "minecraft:dialog".into(),
+                entries: vec![cfg::RegistryEntry {
+                    id: "test:leaf".into(),
+                    data: Some(leaf.clone()),
+                }],
+            }),
+            tags(vec![cfg::TagEntry {
+                name: "test:list".into(),
+                ids: vec![0],
+            }]),
+            cfg::Clientbound::ShowDialog(cfg::ShowDialog {
+                dialog: dialog.clone(),
+            }),
+            tags(vec![]),
+            cfg::Clientbound::ShowDialog(cfg::ShowDialog { dialog }),
+            cfg::Clientbound::FinishConfiguration(Empty),
+        ] {
+            server.send(&packet.encode()).unwrap();
+        }
+        assert!(
+            configure(
+                &mut reader,
+                &writer,
+                &Arc::new(AtomicBool::new(true)),
+                &Language::new(),
+                &send,
+                &Cookies::default(),
+                &data,
+                &crate::raw_payloads::Transport::empty(),
+            )
+            .is_ok()
+        );
+        for expected in [true, false] {
+            let (event, _credit) = events.try_recv_owned().unwrap().into_parts();
+            let Event::ShowDialog { dialog, registries } = event else {
+                panic!("expected a configuration dialog");
+            };
+            let parsed = Dialog::parse_in_registry(
+                &dialog,
+                &Default::default(),
+                &|_| false,
+                Some(&registries),
+            );
+            assert_eq!(parsed.is_some(), expected);
+            if expected {
+                let id = registries.tag("minecraft:dialog", "test:list").unwrap()[0];
+                assert_eq!(registries.data("minecraft:dialog", id), Some(&leaf));
+            }
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
 

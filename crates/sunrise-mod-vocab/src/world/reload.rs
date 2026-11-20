@@ -58,7 +58,6 @@ impl std::error::Error for ReloadResourceError {
 /// generation in place, but cannot undo this callback's own effects. One per listener per reload, never per tick;
 /// `<dyn ReloadApply>::new(move || ...)` makes one from a closure.
 pub trait ReloadApply: Send + Sync {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// Publish the prepared state.
     fn apply(&self);
 }

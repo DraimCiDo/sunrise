@@ -27,7 +27,6 @@ pub trait CriterionContext {
 /// The game calls it synchronously for each open criterion, before testing the criterion's
 /// `player` predicate. It keeps neither the test nor its context after the trigger returns.
 pub trait CriterionTest: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// Whether the mod's part of this criterion passes. A callback that cannot run refuses
     /// with a typed error, rather than silently answering that the criterion did not match.
     fn test(&self, criterion: &dyn CriterionContext) -> Result<bool, CriterionTestError>;

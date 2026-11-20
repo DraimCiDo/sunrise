@@ -247,7 +247,7 @@ impl Area {
 }
 
 /// The traits of one area file by tier. Only `<Camel><Tier>` and the explicitly listed draw
-/// contexts and services are accepted: an unknown trait would reach neither a union nor the WIT.
+/// contexts and services are accepted: an unknown trait cannot be reached through the Host.
 /// Imports and file/item attributes are allowed, but modules, macros and other items are refused
 /// rather than hiding declarations from this scan.
 fn area_tiers(camel: &str, file: syn::File) -> Result<BTreeMap<Tier, Vec<Entry>>, String> {

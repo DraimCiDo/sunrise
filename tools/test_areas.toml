@@ -289,7 +289,7 @@ harnesses = [
   "named_predicate_reference", "predicate_reference_startup", "run_coordinate_feedback", "terminal_execute_fork",
   "fork_function_feedback", "loaded_command", "storage_alias", "seed_sync", "team_rules", "local_coordinate_rotation",
   "folder_datapack_metadata", "world_pack_enchantment_loader", "world_test_def*", "vehicle_command_damage",
-  "stand_command_hurt", "clone_dimensions", "inline_object", "entity_lookup_order",
+  "stand_command_hurt", "dialog_codec", "clone_dimensions", "inline_object", "entity_lookup_order",
 ]
 lan = [
   "commands", "feedback", "styles", "tag-query", "selector-tags", "entity-tags", "data_uuid", "command-block-chat",
@@ -374,7 +374,7 @@ harnesses = ["wire_stream", "protocol_*", "item_wire", "stop_sound_wire", "playe
 name = "mod-api"
 about = "the native mod API: hooks, the Host, handles and parts"
 paths = [
-  "crates/sunrise-mod-*", "crates/cargo-sunrise-mod/*", "crates/sunrise-native-build/*", "crates/sunrise-engine-slots/*",
+  "crates/sunrise-mod-*", "crates/cargo-sunrise-mod/*", "crates/sunrise-native-build/*",
   "crates/sunrise-guest-stack/*", "crates/sunrise-hooks/*", "crates/sunrise-client/src/game/native_hooks/*",
   "crates/sunrise-client/src/game/modding/*",
 ]

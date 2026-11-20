@@ -57,22 +57,13 @@ manifest, naming the nearest valid key when one is close. Native mods may declar
 | `mixins` | string, optional | a horizon-mixins commit, 40 lowercase hex characters; when mixins are used it must match the pinned SDK. If omitted, `build` writes the SDK's revision into the package. See [The pin](sdk/03-in-a-project.md#the-pin). |
 | `module` | array of tables | optional support modules, written as `[[native.module]]` |
 
-API points use top-level declarations.
-API function listeners use top-level `[[inject]]`: `id`, `at`, lowercase `kind`, `with`, and optional `hash`,
-with optional `priority` (default 0). `head`, `return` and `replace` are supported.
-The `access` key is refused by name. Use `[[native.mixin]]` for game internals.
-Unknown fields are refused by the schema. API function declarations use only `[[inject]]`.
-See [Injections](../concepts/injections.md) for the fields and point injections, and
-[Named hook points](../how-to/entities/named-hook-points.md) for the named hook contracts.
-
-A module has a unique, nonempty `id` (one id space with the injections), a `file` naming the game source
+A module has a unique, nonempty `id` (shared across `[[native.*]]` rows), a `file` naming the game source
 file that receives it, a `name` that is a Rust module identifier, and a `source` payload file under
 `src/`, holding the module's items without an outer wrapper. An optional `visibility` is exactly
 `"pub"` or `"pub(crate)"`, the default. See [Support modules](../concepts/native-route/5-support-modules.md).
 
-`[[inject]]` only fills compiled slots and never compiles game code. Native source edits
-use `[[native.mixin]]` with `id`, `target`, uppercase `kind`, `helper` and the other
-horizon-mixins options ([Mixins](../concepts/native-route/2-mixins.md)). This package reads only `id`, `target`, `kind` and `helper` of a row (and refuses `hook` and `hook_version`) and forwards every other key to the tool as written; the tool then refuses a key it does not know, so an unknown key on a mixin row fails at build time, not when the manifest is read. The same holds for the keys of `[[native.bridge]]` and `[[native.state]]` rows. An `OVERWRITE` row must carry the tool's `fingerprint`. `[[native.loop]]`, `[[native.bridge]]` and `[[native.module]]` complete the route; `[[native.state]]` is refused. See [The native route](../concepts/native-route.md) for every table, its fields and its refusals.
+Native source edits use `[[native.mixin]]` with `id`, `target`, uppercase `kind`, `helper` and the
+other horizon-mixins options ([Mixins](../concepts/native-route/2-mixins.md)). This package reads only `id`, `target`, `kind` and `helper` of a row (and refuses `hook` and `hook_version`) and forwards every other key to the tool as written; the tool then refuses a key it does not know, so an unknown key on a mixin row fails at build time, not when the manifest is read. The same holds for the keys of `[[native.bridge]]` and `[[native.state]]` rows. An `OVERWRITE` row must carry the tool's `fingerprint`. `[[native.loop]]`, `[[native.bridge]]` and `[[native.module]]` complete the route; `[[native.state]]` is refused. See [The native route](../concepts/native-route.md) for every table, its fields and its refusals.
 
 ### `[runtime]`: data files beside the code
 

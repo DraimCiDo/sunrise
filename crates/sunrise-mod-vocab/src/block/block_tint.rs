@@ -67,7 +67,6 @@ pub struct ResolverBiome {
 /// radius) and caches per section while it meshes. Held by the game and asked on the meshing
 /// workers, so it keeps no mutable state and gets no `Host`.
 pub trait BiomeColorResolver: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// `getColor(biome, x, z)`: the colour of `biome` (`minecraft:plains`) at block column
     /// `(x, z)`, 0xRRGGBB.
     fn color(&self, biome: &str, info: &ResolverBiome, x: f64, z: f64) -> u32;
@@ -138,7 +137,6 @@ pub trait BlockAndTintGetter {
 /// is multiplied by their RGB, as vanilla's block renderer does. Implemented once, held by the game, asked on the meshing workers, so it
 /// keeps no mutable state.
 pub trait BlockTintSource: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// `color(state)`: the colour without a world, where the block is drawn away from a level (a
     /// block in a minecart, a mod's drawn block). Also the default of the two below.
     fn color(&self, state: &BlockState, metadata: &dyn BlockMetadata) -> u32;

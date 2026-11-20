@@ -1,9 +1,8 @@
 //! `sunrise-mod.toml`, a mod's manifest, and the `.smod` file around it.
 //!
-//! Raw injection schema adapted from horizon-mixins (Copyright (c) 2026 levzzz),
+//! Native mixin schema adapted from horizon-mixins (Copyright (c) 2026 levzzz),
 //! MIT licensed; see `HORIZON_MIXINS_LICENSE` and `THIRD_PARTY_NOTICES.md`.
 mod hash;
-pub mod inject;
 mod jar;
 pub mod loops;
 pub mod mixin;
@@ -171,8 +170,6 @@ pub struct Manifest {
     /// Game internals used by this mod, fingerprinted against its pinned build.
     #[serde(default)]
     pub internals: Vec<Internal>,
-    #[serde(default, deserialize_with = "inject::rows")]
-    pub inject: Vec<inject::Inject>,
     /// Free-form values other mods read through `PackageInfo::property`.
     #[serde(default)]
     pub properties: std::collections::BTreeMap<String, Property>,
@@ -488,38 +485,7 @@ fn edit_distance(a: &str, b: &str) -> usize {
 
 impl Manifest {
     pub fn parse(text: &str) -> Result<Self, String> {
-        let m: Manifest = toml::from_str(text).map_err(|e| {
-            // Serde knows the rejected field; this owning boundary supplies its provenance.
-            if let Ok(table) = toml::from_str::<toml::Table>(text)
-                && let Some(rows) = table.get("inject").and_then(toml::Value::as_array)
-            {
-                for row in rows {
-                    if let Some(Err(error)) = row.as_table().cloned().map(inject::row) {
-                        let field = |key| row.get(key).and_then(toml::Value::as_str).unwrap_or("?");
-                        let id = table.get("id").and_then(toml::Value::as_str).unwrap_or("?");
-                        return format!(
-                            "{MANIFEST}: {id}:{}: {}: {error}",
-                            field("id"),
-                            field("at")
-                        );
-                    }
-                }
-            }
-            toml_error(text, &e)
-        })?;
-        inject::Inject::check_all(&m.inject, &m.id, m.native.is_some())
-            .map_err(|e| e.to_string())?;
-        for entry in &m.inject {
-            if m.dependencies
-                .keys()
-                .any(|id| entry.at.split("::").next() == Some(id.replace('-', "_").as_str()))
-            {
-                return Err(format!(
-                    "{}: target {} is another mod's function; use the library mod's own hooks and functions",
-                    entry.id, entry.at
-                ));
-            }
-        }
+        let m: Manifest = toml::from_str(text).map_err(|e| toml_error(text, &e))?;
         Internal::check_all(&m.internals)?;
         if !m.internals.is_empty() && m.native.is_none() {
             return Err(format!("{MANIFEST}: internals need a [native] mod"));
@@ -619,8 +585,7 @@ impl Manifest {
         }
         if let Some(native) = &m.native {
             // Native source edits share one id space.
-            let mut ids: std::collections::HashSet<_> =
-                m.inject.iter().map(|entry| &entry.id).collect();
+            let mut ids = std::collections::HashSet::new();
             for id in native
                 .mixin
                 .iter()
@@ -1322,7 +1287,7 @@ pub(crate) fn check_file<R: Read>(
         .and_then(|n| n.rsplit_once('.'));
     let executable = extension.is_some_and(|(_, ext)| {
         [
-            "exe", "dll", "so", "dylib", "class", "jar", "com", "bat", "cmd", "ps1",
+            "exe", "dll", "so", "dylib", "class", "jar", "com", "bat", "cmd", "ps1", "wasm",
         ]
         .iter()
         .any(|kind| ext.eq_ignore_ascii_case(kind))
@@ -1347,6 +1312,7 @@ pub(crate) fn check_file<R: Read>(
     let executable = matches!(
         &header,
         b"\x7fELF"
+            | b"\0asm"
             | b"\xfe\xed\xfa\xce"
             | b"\xce\xfa\xed\xfe"
             | b"\xfe\xed\xfa\xcf"
@@ -1425,18 +1391,6 @@ mod tests {
     }
 
     use super::*;
-
-    #[test]
-    fn injections_at_dependency_functions_are_refused_by_name() {
-        let text = format!(
-            "{EXAMPLE}[native]\ngame='26.3'\nmixins='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'\nsunrise='0123456789012345678901234567890123456789'\n[dependencies]\nchemlib='1'\n[[inject]]\nid='listen'\nat='chemlib::transfer'\nkind='head'\nwith='listen'\n"
-        );
-        let error = Manifest::parse(&text).unwrap_err();
-        assert!(
-            error.contains("chemlib::transfer") && error.contains("own hooks and functions"),
-            "{error}"
-        );
-    }
 
     #[test]
     fn a_version_that_is_not_semver_refuses_the_manifest_when_read() {
@@ -1525,6 +1479,15 @@ capabilities = ["registries"]
         assert!(typo.contains("did you mean `version`?"), "{typo}");
         let far = Manifest::parse(&format!("{EXAMPLE}zzzzzzzz = 1\n")).unwrap_err();
         assert!(!far.contains("did you mean"), "{far}");
+    }
+
+    #[test]
+    fn unknown_top_level_array_of_tables_is_refused() {
+        let error = Manifest::parse(&format!(
+            "{EXAMPLE}\n[[inject]]\nhook = 'player_logged_in'\n"
+        ))
+        .unwrap_err();
+        assert!(error.contains("unknown field `inject`"), "{error}");
     }
 
     #[test]
@@ -2033,6 +1996,8 @@ issues = \"http://example.org/issues\"
             ("MOD.EXE", b""),
             ("sub/mod.exe", b""),
             ("assets/ruby/CODE.ExE", b""),
+            ("assets/ruby/CODE.WaSm", b""),
+            ("assets/ruby/model.bin", b"\0asm"),
             ("assets/ruby/native.bin", b"\x7fELF"),
             ("assets/ruby/windows.bin", b"MZ"),
             ("assets/ruby/mac.bin", b"\xcf\xfa\xed\xfe"),
@@ -2066,7 +2031,12 @@ issues = \"http://example.org/issues\"
             }
             std::fs::remove_file(file).unwrap();
         }
-        assert!(Package::write_files(EXAMPLE, &[("assets/ruby/model.bin", b"MZ")]).is_err());
+        for (name, bytes) in cases.iter().filter(|(name, _)| name.starts_with("assets/")) {
+            assert!(
+                Package::write_files(EXAMPLE, &[(name, bytes)]).is_err(),
+                "{name}"
+            );
+        }
         // Native bundle sources can start with Rust inner attributes, not a script shebang.
         assert!(
             Package::write_files(

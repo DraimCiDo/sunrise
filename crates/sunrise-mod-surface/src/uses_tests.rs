@@ -628,7 +628,14 @@ fn a_used_hook_whose_version_changed_is_named() {
             entry.version = None;
         }
         if pinned {
-            table.pin_hook_versions(&base().build());
+            let mut surface = base().build();
+            surface.schema = 2;
+            let old_surface = surface.to_json();
+            assert!(matches!(
+                Surface::read(old_surface.as_bytes()),
+                Err(crate::ReadError::Schema(2))
+            ));
+            table.pin_hook_versions(old_surface.as_bytes()).unwrap();
         }
         table
     };
@@ -2428,16 +2435,14 @@ fn legacy_tables_match_either_hash_of_an_unchanged_method_and_function() {
     };
     let intact = assemble(act.clone(), vec![get.clone()]);
     let changed = assemble(method(METHOD, "fn act(&self)", &["trait:Api"]), vec![]);
-    let expected = Fit::DoesNotFit(vec![
-        Misfit {
-            id: FUNCTION.into(),
-            change: Change::Removed,
-        },
-        Misfit {
-            id: METHOD.into(),
-            change: Change::Changed,
-        },
-    ]);
+    let removed = Misfit {
+        id: FUNCTION.into(),
+        change: Change::Removed,
+    };
+    let signature = Misfit {
+        id: METHOD.into(),
+        change: Change::Changed,
+    };
     // The first two rows use the published v1/v2 recipe with each former bit value.
     // The last uses the v3 recipe. Values are independently hashed compact JSON.
     for (old_method, old_function, schemas) in [
@@ -2467,16 +2472,116 @@ fn legacy_tables_match_either_hash_of_an_unchanged_method_and_function() {
                 ],
             };
             let table = UsesTable::read(&serde_json::to_vec(&table).unwrap()).unwrap();
-            assert_eq!(table.fits(&table.entries, &intact), Fit::Fits);
-            assert_eq!(table.fits(&table.entries, &changed), expected);
+            let report = table.fits(&table.entries, &intact);
+            assert_eq!(report.verdict, Fit::Fits);
+            assert_eq!(report.deferred, None);
+            let missing = assemble(act.clone(), vec![]);
+            let report = table.fits(&table.entries, &missing);
+            if *schema == 3 {
+                assert_eq!(report.verdict, Fit::DoesNotFit(vec![removed.clone()]));
+                assert_eq!(report.deferred, None);
+            } else {
+                assert_eq!(report.verdict, Fit::Fits);
+                assert_eq!(
+                    report.deferred.as_deref(),
+                    Some(
+                        "not checked: `fn:get`; list written for test before schema 3; the compile decides"
+                    )
+                );
+            }
+            let expected = if *schema == 3 {
+                vec![removed.clone(), signature.clone()]
+            } else {
+                vec![signature.clone()]
+            };
+            assert_eq!(
+                table.fits(&table.entries, &changed).verdict,
+                Fit::DoesNotFit(expected)
+            );
             assert_ne!(
                 UsesTable {
                     schema: if *schema == 3 { 2 } else { 3 },
                     ..table.clone()
                 }
-                .fits(&table.entries, &intact),
+                .fits(&table.entries, &intact)
+                .verdict,
                 Fit::Fits
             );
         }
     }
+}
+
+#[test]
+fn only_legacy_tables_defer_a_tuple_field_that_became_private() {
+    let mut uses = scan_on(wider(), "fn read(p: Pos) -> i32 { p.0 }").table("baseline");
+    let mut target = wider();
+    let mut private = api_tuple("type:Pos", &[]);
+    private.contract.constructible = false;
+    target.replace_type(private);
+    let target = target.build();
+
+    let current = uses.fits(&uses.entries, &target);
+    assert_eq!(words(current.verdict), ["the field `Pos.0` (removed)"]);
+    assert_eq!(current.deferred, None);
+
+    uses.schema = 2;
+    let legacy = uses.fits(&uses.entries, &target);
+    assert_eq!(legacy.verdict, Fit::Fits);
+    assert_eq!(
+        legacy.deferred.as_deref(),
+        Some(
+            "not checked: `type:Pos.0`; list written for baseline before schema 3; the compile decides"
+        )
+    );
+}
+
+#[test]
+fn only_legacy_tables_defer_lost_impls_with_vanished_api_types_to_the_compile() {
+    let owner = api_type("type:Handle", "", false, vec![]);
+    let still_here = api_type("type:widgets::Visible", "", false, vec![]);
+    let uses = UsesTable {
+        schema: 2,
+        made_for: "baseline".into(),
+        entries: vec![Entry {
+            impls: strings(&["From<widgets::Old>", "From<widgets::Visible>", "Clone"]),
+            ..Entry::plain(owner.id.clone(), owner.hash.clone())
+        }],
+    };
+    let target = Pieces {
+        types: vec![owner, still_here],
+        ..base()
+    }
+    .build();
+    let expected = |names: &[&str]| {
+        Fit::DoesNotFit(
+            names
+                .iter()
+                .map(|name| Misfit {
+                    id: "type:Handle".into(),
+                    change: Change::LostImpl((*name).into()),
+                })
+                .collect(),
+        )
+    };
+    let report = uses.fits(&uses.entries, &target);
+    assert_eq!(
+        report.verdict,
+        expected(&["Clone", "From<widgets::Visible>"])
+    );
+    assert_eq!(
+        report.deferred.as_deref(),
+        Some(
+            "not checked: `type:Handle`; list written for baseline before schema 3; the compile decides"
+        )
+    );
+    let uses = UsesTable {
+        schema: USES_SCHEMA,
+        ..uses
+    };
+    let report = uses.fits(&uses.entries, &target);
+    assert_eq!(
+        report.verdict,
+        expected(&["Clone", "From<widgets::Old>", "From<widgets::Visible>"])
+    );
+    assert_eq!(report.deferred, None);
 }

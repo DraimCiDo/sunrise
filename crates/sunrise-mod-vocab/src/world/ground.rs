@@ -15,7 +15,6 @@ use std::sync::Arc;
 /// A mod's ground provider: NeoForge's `AlterGroundEvent.StateProvider`.
 /// Implemented once, kept by the game, deterministic and stateless.
 pub trait GroundStateProvider: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// `StateProvider.getState`: the state to place at `pos`, or None to try
     /// the next position down the column, as the decorator's own provider
     /// answers where it finds no ground it replaces. Draw only from

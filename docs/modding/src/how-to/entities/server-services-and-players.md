@@ -134,7 +134,9 @@ absent), `selector` a selector and `nbt` an NBT path that parse, and a style
 field that is present and wrong (`color`, `shadow_color`, the format flags,
 `click_event`, `hover_event`, `insertion`, `font`) refuses the whole component.
 Command, URL and page click actions use `command`, `url` and `page`, respectively;
-a legacy `value`-only click for those actions is refused.
+a legacy `value`-only click for those actions is refused. `open_url` requires a
+well-formed HTTP(S) URI; a malformed URI or another scheme refuses the component
+(`Ok(None)`).
 `show_item` refuses `minecraft:air`; a component removal (`!id`) requires an object value.
 A translation's `fallback` and an `nbt` component's `interpret`, `plain` and
 `separator` of the wrong kind are dropped instead. An object whose only content

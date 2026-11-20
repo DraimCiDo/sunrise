@@ -156,7 +156,6 @@ pub const MAX_SPECIAL_MODEL_PARTS: usize = 256;
 /// drawn unchanged stack, and answers drop after all views stop drawing the stack or resources
 /// reload. Under `Frame` an answer is kept for one frame of one view only.
 pub trait SpecialModelRenderer: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// `extractArgument` and `submit` in one: the models to draw for `stack`, in order, from the
     /// special model's `model` object (`config`, its JSON as NBT, converted once at load). Asked
     /// on the client's main thread when an item of such a model is drawn. Under

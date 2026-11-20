@@ -112,9 +112,8 @@ state behind when removed. This server-only replacement receives the dimension,
 position, removed state, `moved_by_piston` and `replacement`: the exact state
 written if the listener leaves `answer` unanswered, the fluid's legacy block
 (air when dry, water for a waterlogged block). Answer `Some(state)` to choose a
-different state, or `None` to keep `replacement`. Named injections request
-`hook_version = 2`. Only the
-removed block's own Part is called, not the replacement block's Part.
+different state, or `None` to keep `replacement`. Only the removed block's own Part is called, not the
+replacement block's Part.
 
 The chosen state goes through the normal `setBlock` effects with flags 3, plus
 64 for piston movement. An unknown or unregistered state is refused with a
@@ -149,8 +148,8 @@ characters; the others are plain text. The screen has no switch: a mod runs or n
 
 Unknown keys are refused, so a typo is an error that names the nearest valid key. `side` is `"client"` (the default), `"both"` or `"server"`.
 `api` and `capabilities` are not written: `cargo sunrise-mod build` puts `api = "0.2"` and `capabilities = ["registries"]` into the package. A manifest that does write them must write exactly those values, and is refused with both values otherwise.
-Code mods add `[native]` for exact build pins and optional raw injections ([Injections](../concepts/injections.md)); their id and version come only
-from this manifest, not Cargo metadata ([Native mods](native-mods/02-the-package.md)). Both content and code mods support `[dependencies]`: use `base = "^1.2"` for a required dependency or
+Native code mods add `[native]` for exact build pins. Their id and version come only from this manifest,
+not Cargo metadata ([Native mods](native-mods/02-the-package.md)). Both content and code mods support `[dependencies]`: use `base = "^1.2"` for a required dependency or
 `extra = { version = "^2", optional = true }` for an optional one. Missing required dependencies, incompatible installed versions and cycles refuse startup. Content layers load after their dependencies; an absent optional dependency is ignored. Both kinds may include a fixed-name `icon.png` at the top level, with no
 manifest key: a valid square PNG, at most 512 × 512 pixels and 256 KiB encoded ([Mod files](../reference/manifest.md)).
 
@@ -756,8 +755,7 @@ lang file's `itemGroup.<mod id>.<file name>` (`creative_tab/gems.json` →
 under their names.
 
 A file only makes new tabs. To edit a registered tab's contents, listen to
-`build_creative_mode_tab_contents` (NeoForge's `BuildCreativeModeTabContentsEvent`,
-`hook_version = 2` for named injections). It fires for every tab on the
+`build_creative_mode_tab_contents` (NeoForge's `BuildCreativeModeTabContentsEvent`). It fires for every tab on the
 logical side building its catalog. Match the tab id (for example,
 `minecraft:ingredients`) and use the event's `edit` handle with that side's
 Host. To append a count-one stack to both lists, pass

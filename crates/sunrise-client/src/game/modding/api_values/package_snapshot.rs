@@ -15,8 +15,6 @@ fn package_snapshot(
     details.homepage.clone_from(&manifest.homepage);
     details.issues.clone_from(&manifest.issues);
     details.icon_path = has_icon.then(|| "icon.png".to_owned());
-    details.runtime =
-        (kind == mod_api::PackageKind::Code).then_some(mod_api::PackageRuntime::Native);
     details.properties = manifest
         .properties
         .iter()
@@ -124,13 +122,13 @@ impl TryIntoApi for sunrise_mod_package::packages::AdjacentManifest {
 pub(in crate::game) fn install_packages(
     native: &[sunrise_mod_package::packages::AdjacentManifest],
     content: &[sunrise_mod_package::selection::SelectedPackage],
-) -> Result<(), sunrise_engine_slots::PlatformRefusal> {
+) -> Result<(), mod_api::__private::platform::PlatformRefusal> {
     let native: Vec<_> = native.iter().map(|p| p.try_into_api().unwrap()).collect();
     let content: Vec<_> = content
         .iter()
         .map(|p| p.package.try_into_api().unwrap())
         .collect();
-    (sunrise_engine_slots::platform()?.install_packages)(&native, &content);
+    (mod_api::__private::platform::platform()?.install_packages)(&native, &content);
     Ok(())
 }
 
@@ -227,7 +225,7 @@ mod tests {
         assert_eq!(info.homepage(), Some("https://example.org"));
         assert_eq!(info.issues(), None);
         assert_eq!(info.icon_path(), Some("icon.png"));
-        assert_eq!(info.runtime(), Some(mod_api::PackageRuntime::Native));
+        assert_eq!(info.kind(), mod_api::PackageKind::Code);
         let [dependency] = info.dependencies() else {
             panic!("one dependency")
         };
@@ -253,7 +251,6 @@ mod tests {
         let info = native.try_into_api().unwrap();
         assert_eq!(info.kind(), mod_api::PackageKind::Code);
         assert_eq!(info.icon_path(), Some("icon.png"));
-        assert_eq!(info.runtime(), Some(mod_api::PackageRuntime::Native));
         assert_eq!(
             info.property("tier"),
             Some(&mod_api::PropertyValue::Integer(3))

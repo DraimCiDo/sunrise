@@ -103,7 +103,6 @@ impl EquipmentLayer {
 /// If the callback panics, the game discards every layer of the piece, draws it with vanilla
 /// behaviour, and disables the provider until reload.
 pub trait ClientItemExtensions: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// Choose the tree for one material layer, after its nonzero tint and texture resolve.
     /// Humanoid pose and slot visibility are copied onto the registered tree.
     /// This per-layer selection deliberately differs from NeoForge's one model per piece:

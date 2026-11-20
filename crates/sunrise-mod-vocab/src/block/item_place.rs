@@ -308,7 +308,6 @@ impl crate::NoBackend for ItemPlaceEditError {
 /// attachments). While its mod is disabled, lookups refuse both reads and writes through its
 /// places; re-enabling the mod makes the same registrations available again.
 pub trait PlaceProvider: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// The stack at `key`, if any.
     fn stack(&self, host: &mut dyn ServerHost, key: u64) -> Option<ItemStack>;
     /// Puts up to `amount` of `resource` at `key`, in transaction `tx`: how much went. What

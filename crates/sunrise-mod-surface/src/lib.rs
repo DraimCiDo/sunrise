@@ -29,7 +29,6 @@
 //! | Part kind | `part:<kind>` |
 //! | capability | `capability:<key>` (`registries`, `sunrise:fluids`) |
 //! | behaviour | `behaviour:<name>` (`add_to_merging`) |
-//! | injection point | `point:<target>` |
 //! | published loop | `loop:<name>` |
 //! | listed internal | `internal:<kind>:<path>` (with ` [<cfg>]` for a guarded row) |
 //!
@@ -71,6 +70,7 @@
 //! typed [`ReadError`], and ignores fields it does not know. It does not recompute record
 //! hashes: a newer writer may hash contract fields this reader does not know, and the file's
 //! integrity is the signature's job.
+pub mod build_data;
 pub mod child;
 pub mod diff;
 mod legacy_hash;
@@ -119,7 +119,7 @@ pub struct Surface {
     /// Older readers ignore this additive collection without a schema change.
     #[serde(default)]
     pub extension_tags: Vec<ExtensionTag>,
-    /// Injection points, native loops and listed internals for CI and local audits. Omitted
+    /// Native loops and listed internals for CI and local audits. Omitted
     /// from SDK exports and not inferred by the API source-use scanner.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub engine_items: Vec<EngineItem>,
@@ -140,11 +140,7 @@ impl std::fmt::Display for ReadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Json(error) => write!(f, "surface.json is not a valid surface: {error}"),
-            Self::Schema(schema) => write!(
-                f,
-                "surface schema {schema}, this tool reads {} and {SCHEMA}",
-                legacy_hash::LEGACY_SURFACE_SCHEMA
-            ),
+            Self::Schema(schema) => write!(f, "surface schema {schema}, this tool reads {SCHEMA}"),
             Self::DuplicateId(id) => write!(f, "surface.json lists {id} twice"),
         }
     }
@@ -720,7 +716,7 @@ impl Surface {
         }
         let header: Header =
             serde_json::from_slice(bytes).map_err(|e| ReadError::Json(e.to_string()))?;
-        if ![legacy_hash::LEGACY_SURFACE_SCHEMA, SCHEMA].contains(&header.schema) {
+        if header.schema != SCHEMA {
             return Err(ReadError::Schema(header.schema));
         }
         let surface: Self =

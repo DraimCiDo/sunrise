@@ -103,6 +103,7 @@ if [ "$1" = surface ]; then
   case "$2" in *head) [ {head_export} = 0 ] || {{ echo 'sunrise-stage surface: a.rs: parse error' >&2; exit 1; }};; esac
   echo '{{}}' > "$3"; exit 0
 fi
+[ "$1" = surface-catalogs ] && exit 0
 echo "Surface: report"; [ -z "{diff_err}" ] && [ {diff_exit} != 0 ] && echo "breaking change without a change note: fn:a" >&2
 [ -n "{diff_err}" ] && echo "sunrise-stage: $2: {diff_err}" >&2
 exit {diff_exit}
@@ -114,6 +115,7 @@ exit {diff_exit}
                 own_tool = work / "own-stage"
                 own_tool.write_text(f"""#!/bin/bash
 echo "own $@" >> {work}/calls
+[ "$#" = 3 ] || exit 2
 [ {own_export} = 0 ] || {{ echo 'sunrise-stage surface: base.rs: older form' >&2; exit 1; }}
 echo '{{}}' > "$3"
 """)
@@ -131,9 +133,11 @@ echo '{{}}' > "$3"
                                         "cannot read the base tree (sunrise-stage surface: unknown key `access`).\n"),
                         text)
         self.assertIn("Surface: report\n", text)
-        own = [call for call in calls.splitlines() if call.startswith("own ")]
-        self.assertEqual(len(own), 1)
-        self.assertIn("surface-diff", calls)
+        own, catalogs = (next(call.split() for call in calls.splitlines() if call.startswith(prefix))
+                         for prefix in ("own ", "surface-catalogs "))
+        self.assertEqual(own[:2], ["own", "surface"])
+        self.assertEqual(own[2:], catalogs[1:])
+        self.assertLess(calls.index("surface-catalogs "), calls.index("surface-diff "))
 
     def test_a_base_neither_tool_can_read_fails_naming_both(self):
         code, text, calls = self.run_report(base_export=1, own_export=1)
@@ -153,6 +157,58 @@ echo '{{}}' > "$3"
         self.assertTrue(text.startswith("No surface report: the head's sunrise-stage cannot read the base surface "), text)
         self.assertIn("surface schema 1, this tool reads 2", text)
 
+    def test_the_schema_reset_checks_only_the_audited_base_and_still_gates_later_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            base, head = work / "old", work / "new"
+            reset = head / surface_report.SCHEMA_RESET
+            reset.parent.mkdir(parents=True)
+            audit = {
+                "checkpoint": "checked",
+                "plain": {"old": "old-hash", "new": "checkpoint-hash"},
+                "diff": {"old": "old-with-catalogs", "new": "checkpoint-with-catalogs",
+                         "changes": [{"id": "fn:removed", "class": "breaking", "notes": ["native-only.toml"]}]},
+            }
+            reset.write_text(json.dumps(audit))
+
+            def export(command, **_kwargs):
+                tool, action, root, path, *flags = command
+                if root == str(base) and tool != "old-tool":
+                    return subprocess.CompletedProcess(command, 1, "", "unsupported old source")
+                if action == "surface-catalogs":
+                    self.assertEqual(Path(root), work / "schema-reset")
+                    self.assertEqual(json.loads(Path(path).read_text())["hash"], "checkpoint-hash")
+                    self.assertEqual(flags, [])
+                    Path(path).write_text(json.dumps({"schema": 3, "hash": "checkpoint-with-loops"}))
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                self.assertEqual(flags, ["--with-loops"] if root == str(head) else [])
+                schema, digest = {
+                    "old": (2, "old-hash"),
+                    "new": (3, "some-new-change"),
+                    "schema-reset": (3, "checkpoint-hash"),
+                }[Path(root).name]
+                Path(path).write_text(json.dumps({"schema": schema, "hash": digest}))
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            with (mock.patch.object(surface_report.subprocess, "run", side_effect=export),
+                  mock.patch.object(surface_report, "unpack") as unpack,
+                  mock.patch.object(surface_report, "compare", return_value=(1, "later change refused")) as compare):
+                code, text = surface_report.report("stage", base, head, work, True, own_base_tool=lambda: "old-tool")
+                self.assertEqual(code, 1)
+                self.assertIn("Audited schema 2 → 3 reset", text)
+                self.assertIn("later change refused", text)
+                unpack.assert_called_once_with("checked", work / "schema-reset")
+                self.assertEqual(compare.call_args.args[1:5], (work / "schema-reset", head, work, True))
+                self.assertEqual(json.loads((work / "base.json").read_text())["hash"], "checkpoint-with-loops")
+
+                audit["plain"]["old"] = "unrelated-base"
+                reset.write_text(json.dumps(audit))
+                compare.reset_mock()
+                code, text = surface_report.report("stage", base, head, work, True, own_base_tool=lambda: "old-tool")
+                self.assertEqual(code, 1)
+                self.assertIn("is not the audited schema-reset base", text)
+                compare.assert_not_called()
+
     def test_this_tree_failing_to_export_fails_the_step(self):
         for base_export in (0, 1):
             code, text, calls = self.run_report(head_export=1, base_export=base_export)
@@ -171,7 +227,7 @@ echo '{{}}' > "$3"
         exports = [call.split() for call in calls.splitlines() if call.startswith("surface ")]
         self.assertEqual(len(exports), 2)
         for call in exports:
-            self.assertIn("--with-points-and-loops", call)
+            self.assertIn("--with-loops", call)
         self.assertIn("--notes ", calls)
         code, text, calls = self.run_report(diff_exit=1, gate_on=True)
         self.assertEqual(code, 1)
@@ -193,8 +249,6 @@ echo '{{}}' > "$3"
 @unittest.skipUnless(os.environ.get("SUNRISE_STAGE_TOOL"), "set SUNRISE_STAGE_TOOL to test the real gate")
 class EngineCatalogGateTests(unittest.TestCase):
     ITEMS = [
-        {"id": "point:sunrise_client::game::Game::tick", "kind": "point", "hash": "point-1",
-         "name": "tick", "signature_hash": "old-point"},
         {"id": "loop:entities.tick", "kind": "loop", "hash": "loop-1", "entry": "Game::tick_entities",
          "generic": "tick_entities_with", "slot": "TickSlot", "side": "server"},
         {"id": "internal:fn:sunrise_client::game::Game::tick [feature = \"fixture\"]",
@@ -206,7 +260,7 @@ class EngineCatalogGateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
             for name, records in (("base", old), ("head", new)):
-                (work / f"{name}.json").write_text(json.dumps({"schema": 2, "hash": name, "engine_items": records}))
+                (work / f"{name}.json").write_text(json.dumps({"schema": 3, "hash": name, "engine_items": records}))
             if notes:
                 changes = work / "head" / surface_report.NOTES
                 changes.mkdir(parents=True)
@@ -214,19 +268,19 @@ class EngineCatalogGateTests(unittest.TestCase):
             return surface_report.compare(os.environ["SUNRISE_STAGE_TOOL"], work / "base", work / "head", work, True,
                                           with_internals=True)
 
-    def test_undeclared_point_and_loop_removals_fail_and_declared_removals_pass(self):
-        code, text = self.compare(self.ITEMS, [])
+    def test_undeclared_loop_removal_fails_and_declared_removal_passes(self):
+        loop = self.ITEMS[0]
+        record = loop["id"]
+        code, text = self.compare([loop], [])
         self.assertEqual(code, 1, text)
-        ids = [item["id"] for item in self.ITEMS[:2]]
-        for record in ids:
-            self.assertIn(f"- {record} (removed)", text)
-            self.assertIn(f"breaking change without a change note: {record}", text)
-        code, text = self.compare(self.ITEMS, [], notes=ids)
+        self.assertIn(f"- {record} (removed)", text)
+        self.assertIn(f"breaking change without a change note: {record}", text)
+        code, text = self.compare([loop], [], notes=[record])
         self.assertEqual(code, 0, text)
         self.assertNotIn("breaking change without a change note:", text)
 
     def test_undeclared_internal_removal_is_advisory_and_listed(self):
-        internal = self.ITEMS[2]
+        internal = self.ITEMS[1]
         code, text = self.compare([internal], [])
         self.assertEqual(code, 0, text)
         self.assertIn("Surface: advisory (0 breaking, 0 conditional, 0 additive, 1 advisory;", text)
@@ -237,21 +291,19 @@ class EngineCatalogGateTests(unittest.TestCase):
     def test_additions_pass_and_each_kind_has_a_count(self):
         code, text = self.compare([], self.ITEMS)
         self.assertEqual(code, 0, text)
-        self.assertIn("0 breaking, 0 conditional, 2 additive, 1 advisory", text)
-        for kind in ("Injection points", "Published loops", "Listed internals (advisory)"):
+        self.assertIn("0 breaking, 0 conditional, 1 additive, 1 advisory", text)
+        for kind in ("Published loops", "Listed internals (advisory)"):
             self.assertIn(f"{kind}: 1 added, 0 removed, 0 changed", text)
 
     def test_changed_contracts_keep_their_ids(self):
-        point, loop, internal = self.ITEMS
+        loop, internal = self.ITEMS
         code, text = self.compare(self.ITEMS, [
-            dict(point, hash="point-2", signature_hash="new-point"),
             dict(loop, hash="loop-2", slot="NewTickSlot"),
             dict(internal, hash="internal-2", signature="fn tick(&mut self)", signature_hash="new-internal"),
         ])
         self.assertEqual(code, 1, text)
-        self.assertIn("2 breaking, 0 conditional, 0 additive, 1 advisory", text)
-        for item, detail in zip(self.ITEMS, ("`old-point` → `new-point`", "`TickSlot` → `NewTickSlot`",
-                                            "`fn tick(&self)` → `fn tick(&mut self)`")):
+        self.assertIn("1 breaking, 0 conditional, 0 additive, 1 advisory", text)
+        for item, detail in zip(self.ITEMS, ("`TickSlot` → `NewTickSlot`", "`fn tick(&self)` → `fn tick(&mut self)`")):
             self.assertIn(f"- {item['id']} (changed)", text)
             self.assertIn(detail, text)
         self.assertNotIn("(removed)", text)
@@ -352,6 +404,7 @@ class MainTests(unittest.TestCase):
 if [ "$1" = surface ]; then {refuse}
   echo "{{\\"by\\": \\"head:$(cat "$2/marker")\\"}}" > "$3"; exit 0
 fi
+[ "$1" = surface-catalogs ] && exit 0
 cat "$2" "$3" > {folder}/compared
 """)
             own_tool.write_text("""#!/bin/bash
@@ -397,10 +450,11 @@ if [ "$1" = surface ]; then
   [ -f "$2/marker" ] && exit 1
   echo '{{"by": "checkout"}}' > "$3"; exit 0
 fi
+[ "$1" = surface-catalogs ] && exit 0
 cat "$2" "$3" >> {folder}/compared
 """)
             own_tool.write_text("""#!/bin/bash
-echo "{\\"by\\": \\"$(cat "$2/marker")\\"}" > "$3"
+echo "{\\"schema\\": 3, \\"by\\": \\"$(cat "$2/marker")\\"}" > "$3"
 """)
             head_tool.chmod(0o755)
             own_tool.chmod(0o755)
@@ -450,24 +504,23 @@ echo "{\\"by\\": \\"$(cat "$2/marker")\\"}" > "$3"
 class LandedTests(unittest.TestCase):
     SHA = "6" * 40
 
-    def check(self, diff_exit, trees=None, git_text=None, refuse_landed=False, own_tool=None):
+    def check(self, diff_exit, git_text=None, without_own_tool=False, own_tool=None, parent_schema=3):
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
             for side in ("head", "base"):
                 notes = work / side / surface_report.NOTES
                 notes.mkdir(parents=True)
             (work / "head" / surface_report.NOTES / "r61.toml").write_text(
-                f'ids = ["point:a"]\nwhy = "w"\nlanded = "{self.SHA}"\n')
+                f'ids = ["loop:a"]\nwhy = "w"\nlanded = "{self.SHA}"\n')
             (work / "head" / surface_report.NOTES / "own.toml").write_text('ids = ["hook:b"]\nwhy = "w"\n')
             tool = work / "sunrise-stage"
             tool.write_text(f"""#!/bin/bash
 echo "$@" >> {work}/calls
-if [ "$1" = surface ]; then
-  case "$2" in */landed-*) [ {int(refuse_landed)} = 0 ] || {{ echo 'sunrise-stage surface: trait T has no marks' >&2; exit 1; }};; esac
-  echo '{{"by": "head"}}' > "$3"; exit 0
-fi
+[ "$1" = surface ] && exit 1 # landed must not ask the current exporter to read a historical tree.
+[ "$1" = surface-catalogs ] && exit 0
 cat "$2" "$3" > {work}/compared
-if [ {diff_exit} != 0 ]; then echo "change note r61.toml names point:a, which did not change" >&2; fi
+while [ $# -gt 0 ]; do case "$1" in --notes|--base-notes|--covered-by|--covered-base) ls "$2" > {work}/given${{1#--}};; esac; shift; done
+if [ {diff_exit} != 0 ]; then echo "change note r61.toml names loop:a, which did not change" >&2; fi
 exit {diff_exit}
 """)
             tool.chmod(0o755)
@@ -475,15 +528,30 @@ exit {diff_exit}
             fetched = []
 
             def fetch(sha, into):
-                # Each fetched tree names its commit, for the exporters to read.
+                # Each fetched tree names its commit, for the exporters to read; the merge brings a note of its own.
                 fetched.append(sha)
                 (into / "marker").write_text(sha)
+                if sha == self.SHA:
+                    (into / surface_report.NOTES).mkdir(parents=True)
+                    (into / surface_report.NOTES / "then.toml").write_text('ids = ["loop:b"]\nwhy = "w"\n')
 
             git_text = git_text or (lambda *a: MERGE if a[0] == "cat-file" else "")
+            if own_tool is None and not without_own_tool:
+                exporter = work / "historical-stage"
+                exporter.write_text(f"""#!/bin/bash
+schema=3
+[ "$(cat "$2/marker")" != aaaa ] || schema={parent_schema}
+printf '{{"schema": %s, "hash": "from-historical-stage"}}\\n' "$schema" > "$3"
+""")
+                exporter.chmod(0o755)
+                own_tool = lambda _sha, _work: str(exporter)
             code, text = surface_report.landed_check(
                 str(tool), work / "head", work / "base", work, shas, git_text=git_text, fetch=fetch,
-                own_tool=own_tool and (lambda sha: own_tool(sha, work)))
+                own_tool=(lambda sha: own_tool(sha, work)) if own_tool else None)
             calls = (work / "calls").read_text() if (work / "calls").exists() else ""
+            for given in ("notes", "base-notes", "covered-by", "covered-base"):
+                if (work / f"given{given}").exists():
+                    calls += f"{given}: " + (work / f"given{given}").read_text().replace("\n", " ") + "; "
             if (work / "compared").exists():
                 calls += "compared " + (work / "compared").read_text().replace("\n", " ")
             return shas, code, text, calls, fetched
@@ -498,13 +566,26 @@ exit {diff_exit}
         self.assertEqual(fetched, ["aaaa", self.SHA])
         self.assertIn(f"--landed {self.SHA}", calls)
         self.assertNotIn("--gate", calls)
+        # The diff checks this pull request's notes (the late one for this merge among them), and reads the merge's
+        # own notes against its first parent's apart from them, as coverage.
+        self.assertIn("notes: own.toml r61.toml ;", calls)
+        self.assertIn("covered-by: then.toml ;", calls)
+        self.assertIn("covered-base: ;", calls)
 
     def test_a_note_whose_ids_did_not_change_there_fails_naming_it(self):
         _, code, text, _, _ = self.check(1)
         self.assertEqual(code, 1)
         self.assertIn(f"r61.toml (landed {self.SHA})", text)
 
-    def test_old_trees_this_tool_refuses_are_exported_by_their_own_commits_tools(self):
+    def test_a_landed_note_does_not_compare_a_schema_two_first_parent(self):
+        _, code, text, calls, _ = self.check(0, parent_schema=2)
+        self.assertEqual(code, 1)
+        self.assertIn(f"r61.toml (landed {self.SHA})", text)
+        self.assertIn("The first parent uses surface schema 2", text)
+        self.assertNotIn("surface-catalogs", calls)
+        self.assertNotIn("surface-diff", calls)
+
+    def test_old_trees_are_exported_by_their_own_commits_tools(self):
         built = []
 
         def own_tool(sha, work):
@@ -512,22 +593,22 @@ exit {diff_exit}
             tool = work / f"own-{sha}"
             # Says which commit's tool exported which tree.
             tool.write_text(f"""#!/bin/bash
-echo "{{\\"by\\": \\"{sha} tool, $(cat "$2/marker") tree\\"}}" > "$3"
+echo "{{\\"schema\\": 3, \\"by\\": \\"{sha} tool, $(cat "$2/marker") tree\\"}}" > "$3"
 """)
             tool.chmod(0o755)
             return str(tool)
 
-        _, code, text, calls, _ = self.check(0, refuse_landed=True, own_tool=own_tool)
+        _, code, text, calls, _ = self.check(0, own_tool=own_tool)
         self.assertEqual(code, 0, text)
-        self.assertEqual(built, [self.SHA, "aaaa"])
+        self.assertEqual(built, ["aaaa", self.SHA])
         # The diff compares the first parent, exported by its own tool, with the merge, exported by its own.
-        self.assertIn('compared {"by": "aaaa tool, aaaa tree"} {"by": "%s tool, %s tree"}' % (self.SHA, self.SHA),
-                      calls)
+        self.assertIn('compared {"schema": 3, "by": "aaaa tool, aaaa tree"} '
+                      '{"schema": 3, "by": "%s tool, %s tree"}' % (self.SHA, self.SHA), calls)
         self.assertIn(f"--landed {self.SHA}", calls)
-        # With no tool to build, a refused tree fails the check, naming why.
-        _, code, text, calls, _ = self.check(0, refuse_landed=True)
+        # Without the commit's exporter the check cannot verify the historical surface.
+        _, code, text, calls, _ = self.check(0, without_own_tool=True)
         self.assertEqual(code, 1)
-        self.assertIn("sunrise-stage surface: trait T has no marks", text)
+        self.assertIn("the landed base must be exported in its original schema", text)
         self.assertNotIn("surface-diff", calls)
 
     def test_a_landed_that_is_not_a_full_sha_is_not_returned(self):

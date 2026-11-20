@@ -12,7 +12,6 @@ listener-fixture = []
 
 [dependencies]
 sunrise-game-discovery = { path = "../sunrise-game-discovery" }
-sunrise-mod-point-shape = { path = "../sunrise-mod-point-shape" }
 sunrise-mod-surface = { path = "../sunrise-mod-surface" }
 sunrise-mod-source = { path = "../sunrise-mod-source" }
 heck = "0.5"

@@ -56,7 +56,6 @@ impl From<(crate::Identifier, String)> for TransformRefusal {
 /// (64 MiB, one million nodes, depth 512); invalid output keeps the original.
 /// Do not panic: unwinds are caught and refuse the call.
 pub trait BlockEntityTransform: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// Transform saved data; no Host or world handle is supplied.
     fn transform(
         &self,

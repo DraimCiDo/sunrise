@@ -27,8 +27,8 @@ def write_build_data(root: Path, identity: dict | None = None, commit: str = COM
     lib = prebuilt_game.dylib_prefix()
     members = {"runtime": [f"bin/sunrise-client{exe}",
                            f"deps/{lib}sunrise_mod_host{so}",
-                           *[f"deps/{lib}{crate}{so}" for crate in ("mod_api", "mod_vocab", "mod_points")]],
-               "api": [prebuilt_game.NATIVE_MODS_TEMPLATE, "deps/libmod_api-1.rmeta", "deps/libmod_points-1.rmeta"]}
+                           *[f"deps/{lib}{crate}{so}" for crate in ("mod_api", "mod_vocab")]],
+               "api": [prebuilt_game.NATIVE_MODS_TEMPLATE, "deps/libmod_api-1.rmeta"]}
     for name in members["runtime"] + members["api"]:
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_bytes(b"")
@@ -165,8 +165,7 @@ class StageToolTests(unittest.TestCase):
                                            {"pkg": "core", "dep_kinds": [{"kind": None}]}]},
                                            {"id": "core", "deps": []}]}})
                 calls.append(scratch)
-                self.assertEqual(command, [str(tool.resolve()), str(scratch), str(scratch / "points.json"),
-                                          str(scratch / "internals.json"), commit])
+                self.assertEqual(command, [str(tool.resolve()), str(scratch), str(scratch / "internals.json"), commit])
                 self.assertIsNone(kwargs["env"])
                 self.assertEqual((scratch / "tracked.rs").read_bytes(), committed)
                 if os.name == "posix":
@@ -215,15 +214,14 @@ class RegistryPatchTests(unittest.TestCase):
                     {"id": name, "deps": [{"pkg": dependency, "dep_kinds": [{"kind": None}]}
                                           for dependency in dependencies]})
         packages, nodes = zip(
-            package("sunrise-mod-api", "sunrise-core", "vocab"),
-            package("sunrise-mod-points", "sunrise-mod-api", "call"),
+            package("sunrise-mod-api", "sunrise-core", "vocab", "call"),
             package("vocab", "sunrise-core"), package("call", "sha2", "derive"), package("sha2", "digest"),
             package("sunrise-core", "md-5", "derive"), package("md-5", "digest"), package("digest"),
             package("derive", "syn", kind="proc-macro"), package("syn"),
-            package("sunrise-mod-host", "sunrise-mod-points", "sunrise-mod-api", "sha2"))
+            package("sunrise-mod-host", "sunrise-mod-api", "sha2"))
         metadata = {"packages": list(packages), "resolve": {"nodes": list(nodes)}}
         split = prebuilt_game.sdk_dylibs(metadata)
-        self.assertEqual(split, {"sunrise-core", "vocab", "sunrise-mod-api", "sunrise-mod-points"})
+        self.assertEqual(split, {"sunrise-core", "vocab", "sunrise-mod-api"})
         self.assertIsNone(prebuilt_game.shared_twice(metadata, split | {"sunrise-mod-host"}))
         clash = prebuilt_game.shared_twice(metadata, split | {"sunrise-mod-host", "call"})
         for crate in ("call", "sunrise-core", "digest"):
@@ -293,8 +291,8 @@ class RegistryPatchTests(unittest.TestCase):
 
 class SdkAssetTests(unittest.TestCase):
     RUNTIME = ["deps/libsunrise_mod_host.so", "bin/sunrise-client",
-               "deps/libmod_api.so", "deps/libmod_vocab.so", "deps/libmod_points.so"]
-    API = ["deps/libmod_api-1.rmeta", "deps/libmod_points-1.rmeta", "host/libserde_derive.so"]
+               "deps/libmod_api.so", "deps/libmod_vocab.so"]
+    API = ["deps/libmod_api-1.rmeta", "host/libserde_derive.so"]
     ENGINE = ["deps/libsunrise_client-1.rmeta", "native/libwindows.a"]
 
     def out(self, root: Path, mtime: int) -> Path:
@@ -338,8 +336,7 @@ class SdkAssetTests(unittest.TestCase):
                                          "engine-x86_64-unknown-linux-gnu-server.tar.xz",
                                          "runtime-x86_64-unknown-linux-gnu-server.tar.xz", "surface.json"])
                 with tarfile.open(dist / "build-data.tar.xz") as tar:
-                    self.assertEqual(tar.getnames(), [".", "./functions.json", "./internals.json", "./loops.json",
-                                                      "./points.json"])
+                    self.assertEqual(tar.getnames(), [".", "./functions.json", "./internals.json", "./loops.json"])
                 files = {}
                 for kind in ("runtime", "api", "engine"):
                     with lzma.open(dist / f"{kind}-x86_64-unknown-linux-gnu-server.tar.xz") as xz, \
@@ -416,7 +413,6 @@ class SdkAssetTests(unittest.TestCase):
                     {"id": name, "deps": [{"pkg": dep, "dep_kinds": [{"kind": dep_kind}]} for dep, dep_kind in deps]})
         packages, nodes = zip(
             package("sunrise-mod-api", deps=[("vocab", None), ("macros", None), ("tool", "build")]),
-            package("sunrise-mod-points", deps=[("vocab", None)]),
             package("vocab", deps=[("serde", None)]),
             package("serde"),
             package("macros", "proc-macro", deps=[("syn", None)]),
@@ -428,9 +424,9 @@ class SdkAssetTests(unittest.TestCase):
         )
         metadata = {"packages": list(packages), "resolve": {"nodes": list(nodes)}}
         self.assertEqual(prebuilt_game.api_closure(metadata),
-                         {"sunrise-mod-api", "sunrise-mod-points", "vocab", "serde", "macros"})
-        copied = {name: [f"deps/lib{name}-1.rmeta"] for name in ("sunrise-mod-api", "sunrise-mod-points", "vocab",
-                                                                  "serde", "syn", "tool", "engine")}
+                         {"sunrise-mod-api", "vocab", "serde", "macros"})
+        copied = {name: [f"deps/lib{name}-1.rmeta"] for name in ("sunrise-mod-api", "vocab", "serde",
+                                                                  "syn", "tool", "engine")}
         copied["macros"] = ["host/libmacros-1.so"]
         copied["sunrise-mod-host"] = ["deps/libsunrise_mod_host.so"]
         copied["sunrise-official"] = ["deps/libsunrise_official.so"]
@@ -438,7 +434,7 @@ class SdkAssetTests(unittest.TestCase):
         self.assertEqual(sliced["runtime"], sorted([prebuilt_game.IDENTITY, "bin/sunrise-client",
                                                     "deps/libsunrise_mod_host.so", "deps/libsunrise_official.so"]))
         self.assertEqual(sliced["api"], sorted([
-            "deps/libsunrise-mod-api-1.rmeta", "deps/libsunrise-mod-points-1.rmeta", "deps/libvocab-1.rmeta",
+            "deps/libsunrise-mod-api-1.rmeta", "deps/libvocab-1.rmeta",
             "deps/libserde-1.rmeta", "host/libmacros-1.so", *prebuilt_game.API_BUILD_DATA,
             prebuilt_game.NATIVE_MODS_TEMPLATE]))
         # Each slice unpacks to its own folder, so a game library inside the API closure is refused.
@@ -518,8 +514,8 @@ class SdkAssetTests(unittest.TestCase):
                 prebuilt_game.tar_xz(folder, prebuilt_game.tree(folder), leg / archive)
 
             refused("surface.json differs", lambda leg: (leg / "surface.json").write_text('{"hash": "cd"}'))
-            refused("points.json differ",
-                    lambda leg: repack(leg, "build-data.tar.xz", prebuilt_game.POINTS, "{}"))
+            refused("internals.json differ",
+                    lambda leg: repack(leg, "build-data.tar.xz", prebuilt_game.INTERNALS, "{}"))
             # The package's own copy, in the api slice, is checked too.
             refused("api-x86_64-unknown-linux-gnu-server.tar.xz: loops.json differ",
                     lambda leg: repack(leg, "api-x86_64-unknown-linux-gnu-server.tar.xz", prebuilt_game.LOOPS, "{}"))
@@ -772,19 +768,19 @@ class PrebuiltContentsTests(unittest.TestCase):
 
         metadata = {
             "packages": [package("sunrise-mod-host", "dylib"), package("sunrise-client"),
-                         package("sunrise-items", "rlib"), package("point_shape"), package("sunrise_core"),
+                         package("sunrise-items", "rlib"), package("mod_vocab"), package("sunrise_core"),
                          package("build_tool"), package("derive", "proc-macro"), package("macro_helper")],
             "resolve": {"nodes": [
                 node("sunrise-mod-host", ("sunrise-client", None), ("sunrise-items", None),
                      ("build_tool", "build")), node("sunrise-items"),
-                node("sunrise-client", ("point_shape", None), ("sunrise_core", None), ("derive", None)),
-                node("point_shape"), node("sunrise_core"), node("build_tool"),
+                node("sunrise-client", ("mod_vocab", None), ("sunrise_core", None), ("derive", None)),
+                node("mod_vocab"), node("sunrise_core"), node("build_tool"),
                 node("derive", ("macro_helper", None)), node("macro_helper"),
             ]},
         }
         runtime = prebuilt_game.runtime_crates(metadata, "sunrise-mod-host")
-        self.assertEqual(runtime, {"sunrise_mod_host", "sunrise_items", "sunrise_client", "point_shape", "sunrise_core"})
-        deps = self.folder("libpoint_shape-host.rmeta", "libpoint_shape-target.rmeta",
+        self.assertEqual(runtime, {"sunrise_mod_host", "sunrise_items", "sunrise_client", "mod_vocab", "sunrise_core"})
+        deps = self.folder("libmod_vocab-host.rmeta", "libmod_vocab-target.rmeta",
                            "libsunrise_core-one.rmeta", "libbuild_tool-one.rmeta", "libmacro_helper-one.rmeta",
                            "libsunrise_mod_host.so", "libsunrise_items-one.rmeta", "libsunrise_client-one.rmeta")
         eligible = prebuilt_game.facade_crates(deps, runtime)

@@ -38,7 +38,6 @@ pub enum LayerTarget {
 /// A frame has no `Host`: drawing reads nothing of the world but what the state, the parts and
 /// `draw` give. A layer that needs more reads it in a hook and keeps what it read.
 pub trait EntityRenderLayer: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// `RenderLayer.submit`: draw over `entity` with `draw`'s helpers (`quad`, `cube`, `block`,
     /// `item`, `model_part`), after its model and the layers before this one. The pose stack starts
     /// in the entity's frame: at its feet, turned with its body, +z the way it faces, +x its left,

@@ -2,9 +2,10 @@
 //! come from the catalog, with their arguments from the generated event types; trait roles,
 //! sides from the native trait roles; everything else from a walk of the public items
 //! of `sunrise-mod-api` and the vocabulary it re-exports. The optional engine audit uses the
-//! same point, loop and internal collectors as SDK source staging.
+//! same loop and internal collectors as SDK source staging.
 pub mod behaviours;
 mod engine;
+pub use engine::collect as engine_catalogs;
 mod expand;
 pub mod extension_tags;
 pub mod notes;
@@ -285,8 +286,8 @@ impl Export {
 /// Optional work for the source-tree export.
 #[derive(Default)]
 pub struct ExportOptions {
-    /// Collect injection points and published loops in addition to the stable API.
-    pub with_points_and_loops: bool,
+    /// Collect published loops in addition to the stable API.
+    pub with_loops: bool,
     /// Audit the full engine catalogs, including listed internals.
     pub with_internals: bool,
 }
@@ -322,11 +323,8 @@ fn export_here(root: &Path, options: ExportOptions) -> Result<Export, String> {
     with_providers.push(("capability_providers_generated.rs", providers.as_str()));
     let mut index = crate::index::game(root, &with_providers);
     let boundary = Boundary::read(root, &mut index)?;
-    let engine = if options.with_points_and_loops || options.with_internals {
-        let point_types = crate::build::point_types(root)?;
-        Some(crate::source::with_walk_cache(|| {
-            engine::collect(root, &point_types, options.with_internals)
-        })?)
+    let engine = if options.with_loops || options.with_internals {
+        Some(engine_catalogs(root, options.with_internals)?)
     } else {
         None
     };

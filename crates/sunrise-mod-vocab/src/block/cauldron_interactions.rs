@@ -82,7 +82,6 @@ pub enum CauldronRegistrationError {
 /// Vanilla handlers still predict locally. Matching custom builds and resource generations
 /// are not established by the current handshake.
 pub trait Interaction: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// Decide through read-only host access on either side, without authoritative writes.
     fn decide(&self, host: &dyn Host, input: &CauldronUse) -> CauldronDecision;
     /// Additional server writes run inside the existing action savepoint.

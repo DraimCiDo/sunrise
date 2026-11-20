@@ -304,7 +304,6 @@ pub enum PayloadHandleError {
 /// `Busy` returns unconsumed bytes to the transport under [`PayloadHandleError`]'s
 /// ordering and deadline contract; this callback does not itself queue a retry.
 pub trait IPayloadHandler: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// Handle exact application bytes using connection-derived context.
     fn handle(
         &self,
@@ -315,7 +314,6 @@ pub trait IPayloadHandler: Send + Sync + 'static {
 
 /// Work scheduled on the logical receiving main thread.
 pub trait PayloadWork: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// Execute with the same connection-derived context and transaction rules.
     fn run(&self, context: &mut dyn IPayloadContext) -> Result<(), String>;
 }

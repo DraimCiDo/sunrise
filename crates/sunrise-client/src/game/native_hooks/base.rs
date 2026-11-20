@@ -3707,7 +3707,7 @@ impl Game<'_> {
     /// tracking the other entities the same pass paired. The engine is still
     /// walking its tracker: read the game and send payloads, but don't spawn,
     /// remove or teleport entities from here. No player's state is swapped in.
-    /// Server-side. Named injections request `hook_version = 2`.
+    /// Server-side.
     pub(in crate::game) fn native_player_start_tracking(
         &mut self,
         player: u128,
@@ -3731,8 +3731,7 @@ impl Game<'_> {
     /// next tracking pass. The entity is not necessarily still there, and a
     /// player who left is gone. As in `player_start_tracking`, the engine is
     /// walking its tracker: don't spawn, remove or teleport entities from
-    /// here. No player's state is swapped in. Server-side. Named injections
-    /// request `hook_version = 2`.
+    /// here. No player's state is swapped in. Server-side.
     pub(in crate::game) fn native_player_stop_tracking(
         &mut self,
         player: u128,

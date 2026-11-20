@@ -42,7 +42,6 @@ disconnecting discards it. Reads allocate nothing and do not rescan recipes or r
 A client without this mod predicts vanilla here; the server corrects it.
 
 Parts that read `context.setting(..)` or `side()` have no counterpart on the Host.
-Named injections for `menu_slot_rules` request `hook_version = 5`.
 
 ### Who and where: the slot's context
 

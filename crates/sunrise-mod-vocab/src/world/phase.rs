@@ -408,10 +408,6 @@ impl PackageInfo {
     pub fn icon_path(&self) -> Option<&str> {
         self.details.icon_path.as_deref()
     }
-    /// How its code runs; `None` for a content package.
-    pub fn runtime(&self) -> Option<crate::PackageRuntime> {
-        self.details.runtime
-    }
     /// One value of its manifest's `[properties]` table.
     pub fn property(&self, key: &str) -> Option<&crate::PropertyValue> {
         self.details.properties.get(key)
@@ -1094,7 +1090,6 @@ fn phase_authority_advances_without_a_platform_backend() {
 fn the_registration_context_lists_installed_packages_with_their_details() {
     let details = crate::PackageDetails {
         name: "Machines".to_owned(),
-        runtime: Some(crate::PackageRuntime::Native),
         ..Default::default()
     };
     let packages = vec![
@@ -1132,10 +1127,10 @@ fn the_registration_context_lists_installed_packages_with_their_details() {
         );
         let machines = context.mods().get("machines").unwrap();
         assert_eq!(machines.name(), "Machines");
-        assert_eq!(machines.runtime(), Some(crate::PackageRuntime::Native));
+        assert_eq!(machines.kind(), PackageKind::Code);
         assert!(machines.depends_on("base"));
         let base = context.mods().get("base").unwrap();
-        assert_eq!(base.runtime(), None);
+        assert_eq!(base.kind(), PackageKind::Content);
         assert!(context.mods().get("missing").is_none());
     });
 }

@@ -4,7 +4,6 @@ use super::*;
 /// A registered item's dynamic slot count. The item type is bound at registration; this
 /// callback runs only for an actual runtime lookup, never to infer whether it is registered.
 pub trait ItemContainerProvider: Send + Sync {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// The item's slot count now, or none to let the next registration answer.
     fn slots(&self, host: &dyn Host) -> Option<u32>;
 }

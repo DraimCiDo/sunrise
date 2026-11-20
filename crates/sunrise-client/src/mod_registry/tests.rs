@@ -337,7 +337,7 @@ fn code_packages_never_reach_the_content_browser_install_path() {
     let index = registry("1.0", &bytes, "file:///ruby.smod");
     let home = scratch("code");
     let error = install(&index, &home, "ruby", &serve(bytes.clone())).unwrap_err();
-    assert!(error.contains("code mods"), "{error}");
+    assert!(error.contains("it is a native-mod"), "{error}");
     assert!(!home.join("sunrise-mods/ruby.smod").exists());
     assert!(!home.join("mod-browser/downloads/ruby.smod.part").exists());
     assert!(!home.join(MANIFEST).exists());

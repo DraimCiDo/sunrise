@@ -127,11 +127,9 @@ pub mod look {
     pub use sunrise_hooks::look::{Chat, Look, update};
 }
 
-/// Build-time mod source generation and point signature inspection.
+/// Build-time mod source generation.
 #[cfg(feature = "mod-build")]
 pub mod mod_build {
-    /// Parsing and validation of injection point signatures.
-    pub use point_shape;
     /// The shared mod API and source generator.
     pub use sunrise_mod_api_gen as api_gen;
 }

@@ -10,7 +10,6 @@ use std::sync::Arc;
 /// [`RegistrationContext::runtime_files`](crate::RegistrationContext::runtime_files), not
 /// directly.
 pub trait RuntimeFileSource: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// The names of the files the manifest lists, in order.
     fn names(&self) -> Vec<String>;
     /// The checked bytes of `name`; `None` for a name the manifest does not list.

@@ -1,6 +1,6 @@
 //! The API vocabulary re-exported by `sunrise-mod-api`.
 #![deny(missing_docs)]
-#![deny(unsafe_code)]
+#![forbid(unsafe_code)]
 #![deny(ambiguous_glob_reexports)]
 extern crate self as mod_api;
 

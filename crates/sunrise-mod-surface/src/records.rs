@@ -499,10 +499,6 @@ impl EngineItem {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EngineContract {
-    Point {
-        name: String,
-        signature_hash: String,
-    },
     Loop {
         entry: String,
         generic: String,

@@ -132,7 +132,7 @@ pub struct Hook {
     pub host: Option<HostAccess>,
     pub context: Option<PhaseContext>,
     pub counterparts: Counterparts,
-    /// The contract version an injection's `hook_version` names.
+    /// The hook's contract version.
     pub version: u64,
     /// Whether the NeoForge counterpart event is cancellable, written by the
     /// stamper from the counterpart's javadoc; documentation metadata, not the

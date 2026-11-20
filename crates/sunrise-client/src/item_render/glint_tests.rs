@@ -729,3 +729,65 @@ fn external_item_atlas_oracle() {
         assert!(seen.into_iter().all(|v| v));
     }
 }
+
+/// A posed item has a depth of its own, as a GUI model does: its vertices carry a depth from the
+/// turn (nearest 0, farthest 1) and one run takes the depth test within the item's own bounds.
+#[test]
+fn a_posed_item_has_a_depth_of_its_own() {
+    let root = fixture("posed");
+    let data = crate::test_resources::item_data(
+        &root,
+        sunrise_world::native_load_context::DataLoadOrigin::ClientPreload,
+    )
+    .unwrap();
+    let renderer = ItemRenderer::load(
+        &sunrise_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        &data,
+    )
+    .unwrap();
+    let sprite = Rect {
+        u0: 0.2,
+        v0: 0.3,
+        u1: 0.4,
+        v1: 0.5,
+        w: 16,
+        h: 16,
+    };
+    let sprites = HashMap::from([("item/enchanted_book".to_owned(), sprite)]);
+    let mut batch = crate::hud::HudBatch::scratch([64, 64]);
+    // A flat face about its centre (40.75, 30.5), 16 pixels a block, turned 60 degrees about y:
+    // its corners land at x 40.75 +- 4 (16 * 0.5 * cos 60) and y 30.5 +- 8, one side nearer.
+    let pose = Mat4::from_translation(Vec3::new(40.75, 30.5, 0.0))
+        * Mat4::from_scale(Vec3::new(16.0, -16.0, 16.0))
+        * Mat4::from_rotation_y(60f32.to_radians());
+    assert!(gui::draw_posed(
+        &state(
+            "minecraft:item/enchanted_book",
+            FoilType::None,
+            DisplayContext::Gui
+        ),
+        &gui::GuiItemEnv {
+            renderer: &renderer,
+            sprites: &sprites,
+            host: &NoHost,
+        },
+        &mut batch,
+        pose,
+        GlintFrame::default(),
+    ));
+    assert_eq!(batch.vertices.len(), 6);
+    let depths: Vec<f32> = batch.vertices.iter().map(|v| v.depth).collect();
+    assert_eq!(depths.iter().copied().fold(f32::INFINITY, f32::min), 0.0);
+    assert_eq!(
+        depths.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+        1.0
+    );
+    // The scissor takes every pixel the bounds [36.75, 44.75] x [22.5, 38.5] touch, including
+    // the column centred at x = 44.5: rounding the edges out gives a width of 9 and a height of 17.
+    assert_eq!(batch.scale, 1.0);
+    assert_eq!(
+        batch.blends,
+        [(0..6, crate::hud::Blend::Depth([36, 22, 9, 17]))]
+    );
+    fs::remove_dir_all(root).ok();
+}

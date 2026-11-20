@@ -367,6 +367,19 @@ holds that clock; `/tick freeze` holds the level partial at 1 and stops texture 
 Camera motion during a freeze does not spin a part backwards. Server time updates do
 not reset animation. Held-arm, hand, mob and scene draws use this same level partial.
 
+Directional shading on `quad` and `cube` follows `spin`, but light stays fixed by default.
+To use the level's sky and block light, call `BlockEntityDrawContext::level_light` in a world
+block-entity or entity renderer. Each element uses one level-light sample. The centre is the
+unit-cell centre for `block`, `model` and `terrain_model`, the box midpoint for `cube`, or the
+mean of the corners for `quad`, transformed by the pose and any applied `spin`. Baked emission
+and other per-channel light floors still apply. Items and text keep the fixed light.
+
+After `keep`, spun elements sample the cell they turn into each frame without a new submit.
+Stationary elements keep their original sample until the draw is invalidated. If the centre
+falls outside representable cell coordinates, the element uses its fixed light instead.
+Level-less scenes, previews and mob model frames also stay fixed. `light()` always reports the
+fixed setting; `set_light` returns subsequent draws to fixed light.
+
 ## Copycat faces
 
 Ask `block_sprites` for the material's side faces, then use each face's `texture` and

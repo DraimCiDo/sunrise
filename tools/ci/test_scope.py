@@ -34,11 +34,11 @@ SUNRISE_CLIENT = [
     "packaging/executable_link.rs", "packaging/windows/exe.rs",
     "research-lock.json", "tests/fixture_support/item_resource_properties.rs", "tests/fixtures",
 ]
-# The generator scans these to write the mod API, the points and the host boundary: its own sources, the vocabulary, the
+# The generator scans these to write the mod API and the host boundary: its own sources, the vocabulary, the
 # engine crates holding hook targets and their manifests.
 MOD_API_GEN = [
     "Cargo.lock", "crates/sunrise-assets/src", "crates/sunrise-client", "crates/sunrise-client-core/src",
-    "crates/sunrise-client-render", "crates/sunrise-core/src", "crates/sunrise-engine-slots", "crates/sunrise-items",
+    "crates/sunrise-client-render", "crates/sunrise-core/src", "crates/sunrise-items",
     "crates/sunrise-mod-api", "crates/sunrise-mod-api-macros/src/lib.rs", "crates/sunrise-mod-package/src",
     "crates/sunrise-mod-render", "crates/sunrise-mod-runtime/src", "crates/sunrise-mod-vocab/behaviours",
     "crates/sunrise-mod-vocab/src", "crates/sunrise-world", "packaging/executable_link.rs",
@@ -61,8 +61,6 @@ READERS = {
     ],
     # The daily Character comparator reads the original public-JDK API helper.
     "sunrise-core": ["tools/JavaCharacterTables.java"],
-    # The build scripts hand the repository root to the generator.
-    "sunrise-engine-slots": MOD_API_GEN,
     "sunrise-game": ["packaging/windows/exe.rs"],
     # Shared source-only module discovery reads the game's declarations and vocabulary export fragments.
     "sunrise-game-discovery": ["crates/sunrise-client/src", "crates/sunrise-mod-vocab/src"],
@@ -72,10 +70,8 @@ READERS = {
     "sunrise-mod-api-gen": MOD_API_GEN,
     "sunrise-mod-api-gen-tests": MOD_API_GEN,
     "sunrise-mod-package": [
-        "Cargo.lock", "docs/modding/src/how-to/native-mods/07-local-developer-builds.md",
-        "tools/mixins/narrow-reference-rule.patch",
+        "Cargo.lock", "docs/developer-install.md", "tools/mixins/narrow-reference-rule.patch",
     ],
-    "sunrise-mod-points": MOD_API_GEN,
     "sunrise-mod-render": MOD_API_GEN,
     "sunrise-official": ["packaging/windows/exe.rs"],
     "sunrise-perf": ["crates/sunrise-perf-format/tests/fixtures", "tests/fixtures/pacing_slow_frames.hzperf"],
@@ -113,8 +109,7 @@ NOT_READS = {
         "crates/sunrise-official/Cargo.toml",
         # The discovery tests' scratch game source (`discover_tests.rs`).
         "crates/sunrise-client/src/entry.rs", "crates/sunrise-client/src/game.rs", "crates/sunrise-client/src/lib.rs",
-        "crates/sunrise-engine-slots/Cargo.toml", "crates/sunrise-engine-slots/src/lib.rs",
-        "crates/sunrise-mod-api-gen/internals.txt", "crates/sunrise-mod-points/Cargo.toml",
+        "crates/sunrise-mod-api-gen/internals.txt",
     },
 }
 

@@ -134,7 +134,6 @@ pub trait CraftingRecipeKind: Send + Sync + 'static {
 // hidden: type erasure for dispatch to the registered handler.
 #[doc(hidden)]
 pub trait CraftingRecipeHandler: Send + Sync {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// Decode one recipe object.
     fn decode(&self, json: &str) -> Result<CraftingRecipeValue, String>;
     /// Write one decoded value for sync.

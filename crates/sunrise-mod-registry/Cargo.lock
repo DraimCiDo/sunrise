@@ -1349,7 +1349,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "sunrise-game-discovery",
- "sunrise-mod-point-shape",
  "sunrise-mod-source",
  "sunrise-mod-surface",
  "syn 2.0.119",
@@ -1362,7 +1361,6 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "sunrise-mod-point-shape",
  "syn 2.0.119",
 ]
 
@@ -1380,23 +1378,11 @@ dependencies = [
  "sha2",
  "sunrise-core",
  "sunrise-mod-api-macros",
- "sunrise-mod-point-shape",
  "sunrise-mod-surface",
  "sunrise-mod-vocab",
  "sunrise-shader-api",
  "toml",
  "zip",
-]
-
-[[package]]
-name = "sunrise-mod-point-shape"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "serde",
- "serde_json",
- "syn 2.0.119",
 ]
 
 [[package]]

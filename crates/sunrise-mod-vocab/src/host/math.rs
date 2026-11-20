@@ -7,8 +7,8 @@ pub trait MathHost {
     /// Side: both.
     /// The native engine's fixed selection for the seven platform-dependent
     /// Java Math operations. This read allocates nothing on the native path.
-    /// It identifies behavior, not the machine, and does not implement guest
-    /// math. See [`MathProfile`] for the algorithms selected by each profile.
+    /// It identifies behavior, not the machine. See [`MathProfile`] for the algorithms
+    /// selected by each profile.
     #[access(Metadata)]
     fn math_profile(&self) -> MathProfile;
 }

@@ -52,7 +52,5 @@ Do not define these dependencies or features yourself in `Cargo.toml`.
 Public statics must use appropriate synchronization for shared and reentrant hooks; private state in
 another mod's hook object is not exposed.
 
-Hook listeners run in descending priority, then resolved dependency dispatch order, with dependency-order ties kept in bundle order. Mixin injection order remains
-horizon-mixins' priority, mod ID, then injection ID for source splices. Function-slot listeners
-instead use descending priority, dependency/registration order, then injection ID within a mod;
-call-site listeners retain mod-ID tie ordering.
+Hook listeners run in descending priority, then resolved dependency dispatch order, with dependency-order
+ties kept in bundle order. For source splices, horizon-mixins orders mixins by priority, mod ID, then row ID.

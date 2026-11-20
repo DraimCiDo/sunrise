@@ -59,7 +59,6 @@ fn judged_with(
         &project,
         build,
         &mut || Ok::<_, String>(target.clone()),
-        &mut || Err("no [[inject]] rows: never read".to_owned()),
         &mut || match data {
             Some(data) => game_uses::entries(&bundle.manifest, data, build),
             None => Err("no game code declared: never read".to_owned()),

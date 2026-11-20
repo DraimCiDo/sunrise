@@ -42,8 +42,7 @@ against this game.”
 
 A native hook panic stops the game. Its crash report and server-thread log identify
 `in native mod <id>, hook <hook>`, using the `sunrise-mod.toml` ID. Parts retain their registering
-mod's ID for startup errors and hook panics. A point listener's panic identifies its mod and method.
-See [Injections](injections.md) for injection declarations and their limits.
+mod's ID for startup errors and hook panics.
 
 ## Crash-report callbacks
 

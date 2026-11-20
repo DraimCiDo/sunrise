@@ -2,7 +2,7 @@
 //! and verified into a per-user cache, the Rust the SDK names, then the same compile the launcher's
 //! `native-build` runs (`sunrise_native_build::contract::run`, docs/modding/src/reference/sdk/08-native-build.md),
 //! and for `run` the result staged beside the SDK's game executable and started.
-use crate::sdk_fetch::{self, Base};
+use crate::sdk_fetch::{self, Base, CacheStamp};
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -176,6 +176,7 @@ pub(crate) struct NativeSdk {
     pub rust: Unpacked,
     base: Base,
     dir: PathBuf,
+    stamp: CacheStamp,
 }
 
 impl NativeSdk {
@@ -185,6 +186,7 @@ impl NativeSdk {
             &self.index,
             &self.rust.target,
             &self.dir,
+            &self.stamp,
             &|line| println!("{line}"),
         )
     }
@@ -194,7 +196,8 @@ pub(crate) fn native_sdk(cache: &Path, build: &str) -> Result<NativeSdk, String>
     let target = computer()?;
     let base = Base::from_env();
     let dir = cache.join("sdk").join(build);
-    sdk_fetch::fetch(&base, &sdk_fetch::keys(), build, &dir, false)?;
+    let keys = sdk_fetch::keys();
+    sdk_fetch::fetch(&base, &keys, build, &dir, false)?;
     let index = Index::read(
         &std::fs::read(dir.join(sunrise_mod_package::sdk::INDEX))
             .map_err(|e| format!("{}: {e}", dir.display()))?,
@@ -207,6 +210,7 @@ pub(crate) fn native_sdk(cache: &Path, build: &str) -> Result<NativeSdk, String>
         rust,
         base,
         dir,
+        stamp: CacheStamp::new(build, &keys),
     })
 }
 

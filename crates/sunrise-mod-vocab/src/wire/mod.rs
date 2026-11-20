@@ -358,13 +358,9 @@ impl<'a> Reader<'a> {
 pub trait Wire: Sized {
     /// Minimum encoded size, used to reject impossible collection lengths.
     const MIN: usize;
-    /// Whether the type's encoding holds a resource handle anywhere in it (an erased handler
-    /// such as `Arc<dyn BlockPart>`): such a value crosses only as a handle into one link
-    /// group's resource scope, so Part state refuses it.
-    // hidden: derived and forwarded by the codecs, read by the part-state declaration.
     /// Encodes this value, recording failures on the writer.
     fn put(&self, out: &mut Writer);
-    /// Consumes owned data when a resource's ownership must cross the boundary.
+    /// Encodes an owned value, using the same format as `put`.
     fn put_owned(self, out: &mut Writer) {
         self.put(out);
     }
@@ -928,7 +924,38 @@ mod tests {
             frame: 3,
             removed: true,
             state: [8.0, -9.0, 10.0, 11.0],
+            facing: crate::ParticleFacing::Fixed([0.5, -0.5, 0.5, 0.5]),
+            roll: 0.75,
         });
+    }
+
+    #[test]
+    fn a_particle_batch_survives_the_wire_in_order() {
+        let mut second = crate::ModParticle {
+            position: [9.0, 8.0, 7.0],
+            previous: [0.0; 3],
+            velocity: [0.0; 3],
+            age: 2,
+            lifetime: 4,
+            size: 1.5,
+            rgba: [1.0; 4],
+            frame: 1,
+            removed: false,
+            state: [0.0; 4],
+            facing: crate::ParticleFacing::AroundY,
+            roll: -1.0,
+        };
+        let first = crate::ModParticle {
+            facing: crate::ParticleFacing::Fixed([0.0, 0.0, 0.0, 1.0]),
+            ..second
+        };
+        second.age = 3;
+        round(crate::client::particle_providers::particle_batch_from_vec(
+            vec![first, second],
+        ));
+        round(crate::client::particle_providers::particle_batch_from_vec(
+            Vec::new(),
+        ));
     }
 
     #[test]

@@ -1,6 +1,5 @@
 //! Cargo-facing generation: the mod API's and the game's generated files.
 use super::{Catalog, Target, free_function_source, host, sources};
-use quote::ToTokens;
 use std::{fs, path::Path};
 mod vocab_boundary;
 
@@ -68,7 +67,6 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             // engine's `GoalCx` in `mobs/part_goals.rs`.
             ("mod_api_goal_view_generated.rs", generated.goal_view),
         ],
-        Target::Api => return generate_api_parts(root, out_dir),
         Target::Vocab => {
             write_vocab_output(
                 out_dir,
@@ -251,131 +249,6 @@ fn render_records_need_no_game_sources() {
     fs::remove_dir_all(root).unwrap();
 }
 
-#[test]
-#[ignore = "daily"]
-fn listed_render_slots_have_eligible_points() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    super::points::game_points(&root).unwrap();
-}
-
-/// The approved value types for existing native point records. Use the audited catalog
-/// from before the transport removal, not a fresh eligibility guess that changes point signatures.
-pub(crate) fn point_types(root: &Path) -> Result<crate::points::PointTypes, String> {
-    if !root.join("crates/sunrise-mod-vocab/src/hooks").is_dir() {
-        return Ok(Default::default());
-    }
-    let file = root.join("crates/sunrise-mod-api-gen/native-point-types.txt");
-    crate::rerun_if_changed(&file.display());
-    let text = fs::read_to_string(&file).map_err(|error| format!("{}: {error}", file.display()))?;
-    Ok(text
-        .lines()
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(str::to_owned)
-        .collect())
-}
-
-/// `sunrise-mod-points`' generated file: each point's record, `PointId` and typed function constructors,
-/// from the game's source, tracking the game module's files.
-pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
-    crate::interface_cache::with_cache(out_dir, || {
-        crate::source::with_walk_cache(|| generate_points_inner(root, out_dir))
-    })
-}
-
-/// Generate the engine-owned point vocabulary and typed dispatch.
-pub fn generate_engine_points(root: &Path, out_dir: &Path) -> Result<(), String> {
-    crate::interface_cache::with_cache(out_dir, || {
-        crate::source::with_walk_cache(|| {
-            for path in super::points::tracked(root)? {
-                crate::rerun_if_changed(&path.display());
-            }
-            crate::rerun_if_staged(root);
-            let points = super::points::game_points(root)?;
-            let code = super::points::engine_records(&points);
-            let generated = syn::parse_file(&code).map_err(|e| format!("engine points: {e}"))?;
-            let code = short_lines(generated);
-            write_if_changed(out_dir.join("engine_points.rs"), code).map_err(|e| e.to_string())
-        })
-    })
-}
-
-/// `file`'s tokens as text with a line break after every item and after every `,` or `;` inside
-/// braces and brackets (a `match`, a list, a block), and no other change: a single multi-megabyte
-/// line makes Clippy's source lookups, `clippy::four_forward_slashes` above all, prohibitively slow.
-fn short_lines(file: syn::File) -> String {
-    use proc_macro2::{Delimiter, Spacing, TokenTree};
-    fn push(code: &mut String, stream: proc_macro2::TokenStream, breaks: bool) {
-        for tree in stream {
-            match tree {
-                TokenTree::Group(group) => {
-                    let (open, close, inner) = match group.delimiter() {
-                        Delimiter::Parenthesis => ("( ", ") ", false),
-                        Delimiter::Brace => ("{ ", "} ", true),
-                        Delimiter::Bracket => ("[ ", "] ", true),
-                        Delimiter::None => ("", "", breaks),
-                    };
-                    code.push_str(open);
-                    push(code, group.stream(), inner);
-                    code.push_str(close);
-                }
-                TokenTree::Punct(punct) => {
-                    code.push(punct.as_char());
-                    match punct.spacing() {
-                        Spacing::Joint => {}
-                        Spacing::Alone if breaks && matches!(punct.as_char(), ',' | ';') => {
-                            code.push('\n')
-                        }
-                        Spacing::Alone => code.push(' '),
-                    }
-                }
-                tree => {
-                    code.push_str(&tree.to_string());
-                    code.push(' ');
-                }
-            }
-        }
-    }
-    let mut code = String::new();
-    for item in file.items {
-        push(&mut code, item.to_token_stream(), true);
-        code.push('\n');
-    }
-    code
-}
-
-pub(super) fn generate_points_inner(root: &Path, out_dir: &Path) -> Result<(), String> {
-    // Phase durations for CI's build report (points-timing.txt beside the output); never read back.
-    let started = std::time::Instant::now();
-    let mut timing = String::new();
-    let mut phase = |name: &str| {
-        timing.push_str(&format!("{name} {:.2}s\n", started.elapsed().as_secs_f64()));
-    };
-    let src = root.join("crates/sunrise-client/src");
-    crate::rerun_if_changed(&src.join("game.rs").display());
-    crate::rerun_if_changed(&src.join("game").display());
-    for path in super::points::tracked(root)? {
-        crate::rerun_if_changed(&path.display());
-    }
-    phase("tracked");
-    // Only a staged copy compiles the points' sites into the game.
-    crate::rerun_if_staged(root);
-    let staged =
-        root.join(".sunrise-source-staged").is_file() || cfg!(feature = "listener-fixture");
-    let points = super::points::game_points(root)?;
-    phase("game_points");
-    let code = super::points::records(&points)
-        + &format!(
-            "/// Whether this build compiled the points' sites into the game: only the prebuilt game, built from a staged copy of the source, has them. A build without them refuses every listener at load.\npub const STAGED: bool = {staged};\n"
-        );
-    phase("records");
-    let generated = syn::parse_file(&code).map_err(|e| format!("generated Rust: points: {e}"))?;
-    let code = short_lines(generated);
-    phase("format");
-    write_if_changed(out_dir.join("points_generated.rs"), code).map_err(|e| e.to_string())?;
-    phase("written");
-    fs::write(out_dir.join("points-timing.txt"), timing).map_err(|e| e.to_string())
-}
-
 pub(super) fn track(root: &Path, all_game: bool) -> Result<(), String> {
     fn directory(path: &Path, extension: &str, recursive: bool) -> Result<(), String> {
         // Track the directory as well: adding a helper source or fragment changes the inputs.
@@ -430,24 +303,22 @@ pub(super) fn track(root: &Path, all_game: bool) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The output differs from the token stream's own text only in whitespace, and no line holds
-    /// more than a list's element.
-    #[test]
-    fn short_lines_keep_the_tokens_and_break_lists() {
-        let source = "pub enum Id { A, B, C } impl Id { pub fn n(self) -> u8 { let t = [1, 2, 3]; match self { Id::A => { f(1, 2); 1 } _ => 2 } } } const S: &str = \"a, b; c\"; fn g<'a>(x: &'a u8) -> Vec<::std::string::String> { vec![] }";
-        let file = syn::parse_file(source).unwrap();
-        let text = short_lines(file.clone());
-        let original = file.to_token_stream().to_string();
-        let reparsed = syn::parse_file(&text)
-            .unwrap()
-            .to_token_stream()
-            .to_string();
-        assert_eq!(reparsed, original);
-        assert!(text.lines().count() > 10);
-        assert!(text.contains("\"a, b; c\""));
-    }
+#[test]
+fn unchanged_outputs_keep_their_timestamp_but_changed_outputs_replace_bytes() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
+    fs::create_dir_all(&root).unwrap();
+    let output = root.join(format!("write-if-changed-test-{}", std::process::id()));
+    write_if_changed(&output, b"first").unwrap();
+    let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1000);
+    fs::File::options()
+        .write(true)
+        .open(&output)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(old))
+        .unwrap();
+    write_if_changed(&output, b"first").unwrap();
+    assert_eq!(fs::metadata(&output).unwrap().modified().unwrap(), old);
+    write_if_changed(&output, b"second").unwrap();
+    assert_eq!(fs::read(&output).unwrap(), b"second");
+    fs::remove_file(output).unwrap();
 }

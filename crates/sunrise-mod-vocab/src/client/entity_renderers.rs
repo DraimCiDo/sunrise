@@ -129,7 +129,6 @@ pub struct ItemFrameRenderState {
 /// renderer (`declare_general_entity`) reads its synced fields from the snapshot in
 /// [`EntityRenderState::attachments`].
 pub trait EntityRenderer: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// `EntityRenderer.submit`: draw `entity` with `draw`'s helpers (`quad`, `cube`, `block`,
     /// `item`, `model_part`) under its pose stack, which starts at the entity's position, not
     /// turned: turn it by `entity.yaw` and `entity.pitch` as the model needs. `draw` also has

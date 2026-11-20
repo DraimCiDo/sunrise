@@ -1,15 +1,6 @@
 //! What a package's manifest says about it beyond its identity, read by other mods.
 use std::collections::BTreeMap;
 
-/// How a code package runs.
-#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum PackageRuntime {
-    /// Native code, built against the game build it was made for and loaded beside it, not
-    /// compiled into the game.
-    Native,
-}
-
 /// Dispatch ordering requested by a manifest dependency.
 ///
 /// This changes listener/content ordering only. `None` never removes a code
@@ -153,8 +144,6 @@ pub struct PackageDetails {
     pub issues: Option<String>,
     /// The icon's path inside the package.
     pub icon_path: Option<String>,
-    /// How its code runs; `None` for a content package.
-    pub runtime: Option<PackageRuntime>,
     /// The manifest's `[properties]` table.
     pub properties: BTreeMap<String, PropertyValue>,
 }

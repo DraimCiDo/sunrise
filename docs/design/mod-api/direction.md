@@ -196,12 +196,11 @@ mod publishes functions and statics its dependents call through Cargo, with one 
 Native code builds against the exact game build pinned by `[native]`. A typed API hook takes an API-owned
 value, never an engine type. See [Dependencies between mods](../../modding/src/concepts/dependencies.md).
 
-## Injections stay, and the API comes first
+## The API comes first
 
-`[[inject]]` fills a published slot for what the API does not yet reach. The rule is
-API first: a mod needing something the API lacks asks for the hook that replaces the injection, and the
-injection is the stopgap until it exists. The [injections chapter](../../modding/src/concepts/injections.md) holds the current forms,
-the decision ladder and the hook-request format.
+Use a typed hook or Part where possible. When a mod needs a hook the API doesn't expose, ask for it.
+The [native route](../../modding/src/concepts/native-route.md) serves mods that need game internals or
+source edits.
 
 ## The order of the build route
 
@@ -210,13 +209,11 @@ rests on the one before:
 
 1. **The prebuilt game.** The game as a dylib with its metadata, built daily and published as prerelease
    builds, so a native mod compiles against it instead of rebuilding the game.
-2. **Slots.** `[[inject]]` listeners fill compiled points without compiling game code.
-   A missing slot is refused.
-3. **The internals tier.** A per-mod declared list of game internals the prebuilt game exposes. Uses are
-   logged, and each internal a mod needs is a request for an API.
-
-A native mod that needs a supported source edit uses [mixins](../../modding/src/concepts/native-route/2-mixins.md),
-which compile game code. An inject never falls back to one.
+2. **The internals tier.** A per-mod declared list of game internals the prebuilt game exposes. Each
+   internal a mod needs is a request for an API.
+3. **Function replacement.** A native mod that needs a source edit uses
+   [mixins](../../modding/src/concepts/native-route/2-mixins.md), which compile patched functions
+   against the prebuilt game.
 
 ## No telemetry
 

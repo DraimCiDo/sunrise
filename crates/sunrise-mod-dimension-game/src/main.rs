@@ -133,7 +133,6 @@ fn main() {
     let startup = sunrise_client::entry::prepare();
     sunrise_mod_host::main_with(
         vec![ModEntry::new("dimprobe", Box::<DimProbe>::default())],
-        &[],
         BUILT,
         startup,
     );

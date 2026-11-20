@@ -3,7 +3,6 @@ use super::*;
 /// side asked about, its handler, or none to leave it to the next provider. A closure
 /// `|host, at| Some(Box::new(Tank(at)))` is one.
 pub trait BlockCapabilityProvider<T: ?Sized>: Send + Sync {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// The handler for the block entity at `at`, or none.
     fn provide(&self, host: &mut dyn ServerHost, at: BlockSide) -> Option<Box<T>>;
 }

@@ -27,7 +27,7 @@ pub const GAME_IDENTITY: [u8; sunrise_mod_package::game_identity::MARK.len()] =
 pub fn main() {
     let startup = sunrise_client::entry::prepare();
     std::hint::black_box(&sunrise_mod_package::holder::CAPABILITY);
-    sunrise_mod_host::main_with(Vec::new(), &[], &[], startup);
+    sunrise_mod_host::main_with(Vec::new(), &[], startup);
 }
 
 /// Establish the executable main thread stack before initialization.

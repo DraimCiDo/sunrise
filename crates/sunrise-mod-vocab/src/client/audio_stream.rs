@@ -199,7 +199,6 @@ impl std::fmt::Display for SpecFault {
 /// The game's side of one open audio stream. A mod reaches it through [`AudioStreamRef`], not
 /// directly. Every method works from any thread; `push` and the controls never wait on the mixer.
 pub trait AudioStreamSource: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// Queues interleaved `samples`: whole frames only (a trailing odd sample of a stereo stream
     /// is not taken). Returns the frames accepted, which falls short of the frames offered when
     /// the ring is full, or when another thread is pushing to the same stream at that moment

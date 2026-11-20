@@ -658,6 +658,29 @@ impl Game<'_> {
             self.glint_frame.alpha,
         );
     }
+    /// An item under `pose` (GUI pixels), cut by no slot and with a depth of its own: what
+    /// `DrawContext::model_3d` draws a turned item with.
+    pub(super) fn draw_item_model_posed(
+        &self,
+        batch: &mut HudBatch,
+        stack: &ItemStack,
+        pose: glam::Mat4,
+    ) -> bool {
+        let owner = self.player_owner(Some(stack));
+        let state = self.resolve_item(stack, DisplayContext::Gui, Some(&owner), 0);
+        let host = self.item_host();
+        item_render::gui::draw_posed(
+            &state,
+            &item_render::gui::GuiItemEnv {
+                renderer: &self.pack.item_renderer,
+                sprites: &self.gui.atlas.sprites,
+                host: &host,
+            },
+            batch,
+            pose,
+            self.glint_frame,
+        )
+    }
     /// The glint clock, options and sprite for this frame: read once per
     /// frame, not per item (`GameRenderer.extractOptions`).
     pub(super) fn capture_glint_frame(&self) -> item_render::GlintFrame {

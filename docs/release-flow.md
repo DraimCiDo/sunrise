@@ -248,7 +248,7 @@ the notes.
 | Archive | Runs on | Checks |
 | --- | --- | --- |
 | `sunrise-linux-x86_64.tar.gz` | Blacksmith `ubuntu-2204` (GitHub's `ubuntu-22.04` with `BLACKSMITH=off`; an older glibc, so it runs on any recent distribution) | the standard loader and libraries only (`tools/check_imports.py`) |
-| `sunrise-linux-musl-x86_64.tar.gz` | Alpine 3.22 in Docker on Blacksmith `ubuntu-2204`, targeting `x86_64-unknown-linux-musl` | musl loader and libraries only (`tools/check_imports.py --musl`), CPU baseline and every program's startup checked inside Alpine |
+| `sunrise-linux-musl-x86_64.tar.gz` | Same Ubuntu runner type as Linux; glibc-hosted Rust cross-compiles to `x86_64-unknown-linux-musl` | musl loader and libraries only, no RPATH/RUNPATH or glibc version requirements (`tools/check_imports.py --musl`), CPU baseline and startup of every packaged program in plain Alpine |
 | `sunrise-server-linux-x86_64.tar.gz` | the same Linux job, after the client archive: `sunrise-server`, `sunrise-prepare` and the game built with `--no-default-features` as `sunrise-engine` (docs/server.md) | as above, and neither `libasound.so.2` nor `libudev.so.1` (`tools/check_imports.py --server`) |
 | `sunrise-windows-x64.zip` | Blacksmith `windows-2025` (GitHub's `windows-latest` with `BLACKSMITH=off`), C runtime linked in | system DLLs only (`tools/check_imports.py`); PE machine is x64 |
 | `sunrise-windows-arm64.zip` | Blacksmith `windows-2025`, cross-built for `aarch64-pc-windows-msvc` (natively on GitHub's `windows-11-vs2026-arm` with `BLACKSMITH=off`), C runtime linked in | system DLLs only (`tools/check_imports.py`); PE machine is ARM64; every program's startup checks from the packaged archive on GitHub's native `windows-11-vs2026-arm` |
@@ -263,10 +263,13 @@ publishes) is `linux-smoke`'s, on Dyna's runner with the prepared files, from th
 
 The musl archive is an optional manual download for musl-based Linux desktops; see
 [installation and updates](native-client.md#musl-linux-manual-installation). The launcher still selects the
-standard glibc archive. The musl client and tools keep audio and controllers enabled and link musl dynamically
-(`-C target-feature=-crt-static`) to load graphics and window libraries at runtime. A failed musl build does
-not block other platforms: signing and publication omit the missing archive with a warning. The dedicated
-server archive remains glibc; the bundled musl `sunrise-server` refuses automatic updates to glibc archives.
+standard glibc archive. [`game-build.yml`](../.github/workflows/game-build.yml) supplies the GCC toolchain and
+sysroot from a digest-pinned Alpine 3.22 image. The musl client and tools keep audio and controllers enabled
+and link musl dynamically (`-C target-feature=-crt-static`) to load graphics and window libraries at runtime.
+The native Ubuntu packer bundles the artifacts, then startup checks run in the same Alpine base with only the
+runtime libraries added. A failed musl build does not block other platforms: signing and publication omit the
+missing archive with a warning. The dedicated server archive remains glibc; the bundled musl `sunrise-server`
+refuses automatic updates to glibc archives.
 
 Musl gameplay parity is not yet validated. On x86-64, `sunrise-core::jmath` uses the platform libm for several
 functions, so musl may round differently from glibc or HotSpot. Values near a simulation threshold could

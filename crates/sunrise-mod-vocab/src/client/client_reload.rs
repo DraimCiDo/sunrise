@@ -73,7 +73,6 @@ impl ClientReloadContext {
 /// not remove the barrier. On any error all pending applies are dropped,
 /// keeping every listener's previous assets.
 pub trait ClientReloadListener: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// Parse and validate new assets without changing the listener's live state.
     ///
     /// As vanilla's `SimpleJsonResourceReloadListener.scanDirectory`, a

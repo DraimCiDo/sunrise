@@ -359,9 +359,6 @@ pub fn diff(old: &Surface, new: &Surface) -> Diff {
     let free = free_bounds(new);
     let ids: BTreeSet<&String> = before.keys().chain(after.keys()).collect();
     let mut changes: BTreeMap<String, Change> = BTreeMap::new();
-    let legacy = (old.schema == crate::legacy_hash::LEGACY_SURFACE_SCHEMA
-        && new.schema == crate::SCHEMA)
-        .then(|| crate::legacy_hash::LegacyHashes::new(new));
     for id in ids {
         let (kind, lines) = match (before.get(id), after.get(id)) {
             (Some(a), None) => {
@@ -385,12 +382,7 @@ pub fn diff(old: &Surface, new: &Surface) -> Diff {
                 (ChangeKind::Added, vec![line])
             }
             (Some(a), Some(b)) => {
-                let unchanged = a.hash == b.hash
-                    || (a.view == b.view
-                        && legacy
-                            .as_ref()
-                            .and_then(|legacy| legacy.matches(id, &a.hash))
-                            == Some(true));
+                let unchanged = a.hash == b.hash;
                 let mut lines = if unchanged {
                     Vec::new()
                 } else {
@@ -902,8 +894,7 @@ fn pair<T>(
     lines
 }
 
-const ENGINE_KINDS: [(&str, &str); 3] = [
-    ("point", "Injection points"),
+const ENGINE_KINDS: [(&str, &str); 2] = [
     ("loop", "Published loops"),
     ("internal", "Listed internals (advisory)"),
 ];
@@ -992,7 +983,7 @@ impl Diff {
             self.new
         );
         if engine_changes {
-            text.push_str("\nEngine catalogs (point and loop removals and changes are breaking)\n");
+            text.push_str("\nEngine catalogs (loop removals and changes are breaking)\n");
             for (prefix, title) in ENGINE_KINDS {
                 let records = || self.changes.iter().filter(|c| record_kind(&c.id) == prefix);
                 // Only an audit includes internals; show their section when they change.

@@ -1,8 +1,8 @@
 {
-  "__private/points.rs::OPEN": {
-    "type": "Mutex<Open>",
-    "category": "dispatch table",
-    "reason": "Temporary points exception pending #2697: open injection-listener routing and seal state remain in the unchanged points module."
+  "__private/platform.rs::PLATFORM": {
+    "type": "OnceLock<Platform>",
+    "category": "set-once socket",
+    "reason": "The engine keeps one provider of platform callbacks for registration and profiling; the provider is installed before engine startup."
   },
   "block/fluid_capability.rs::BUCKET_IDS": {
     "type": "std::sync::LazyLock<[crate::Identifier;3]>",

@@ -38,7 +38,6 @@ impl From<(crate::Identifier, String)> for StartupProgressError {
 /// [`RegistrationContext::progress`](crate::RegistrationContext::progress) and
 /// [`RegistrationContext::message`](crate::RegistrationContext::message), not directly.
 pub trait StartupScreen: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// Open a bar of `steps` steps under the stage bar; the answer names it.
     /// Returns `StartupProgressError::TooManyBars` if 64 bars are already open.
     fn open(&self, label: String, steps: u32) -> Result<u32, StartupProgressError>;

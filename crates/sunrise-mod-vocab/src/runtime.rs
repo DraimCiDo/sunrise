@@ -17,7 +17,7 @@ impl ModEntry {
     }
 
     /// Marks the thread as inside this mod's `hook` until the guard drops, so a panic in it
-    /// names both. A trait injection's generated dispatch calls it.
+    /// names both. The generated hook dispatcher calls it.
     // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn enter(&self, hook: &'static str) -> crate::content::crash::ModGuard {

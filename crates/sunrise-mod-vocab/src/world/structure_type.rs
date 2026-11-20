@@ -55,7 +55,6 @@ pub struct FoundStructure {
 /// data pack structure with `"type": "modid:tower"`. Implemented once, kept by
 /// the game; deterministic and stateless.
 pub trait StructureType: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// `Structure.findGenerationPoint` with `generatePieces`: the start's
     /// position and its pieces for the chunk `context` names, or `None` for
     /// "no start in this chunk". The height and biome queries the context
@@ -130,7 +129,6 @@ impl PieceBeardifier {
 /// the engine's (`StructurePiece.createTag`: the type id, `BB`, `O`, `GD`)
 /// around [`add_additional_save_data`](StructurePiece::add_additional_save_data).
 pub trait StructurePiece: std::fmt::Debug + Send + Sync {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// `StructurePiece.getBoundingBox`: the piece's box, in world blocks.
     fn bounding_box(&self) -> BoundingBox;
     /// Override terrain shaping, even when the structure's adjustment is `None`.

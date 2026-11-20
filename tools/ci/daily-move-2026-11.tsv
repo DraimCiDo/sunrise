@@ -85,7 +85,6 @@ sunrise-core	lib	paletted::tests::index_check_matches_an_entry_by_entry_scan	cra
 sunrise-friends	lib	direct::tests::the_race_connects_and_checks_the_session	crates/sunrise-friends/src/direct.rs:303	slow
 sunrise-friends	lib	portmap::tests::nothing_answering_says_why	crates/sunrise-friends/src/portmap.rs:1094	slow
 sunrise-game	test:busy_launch	invalid_options_keep_usage_status_even_when_the_managed_install_is_busy	crates/sunrise-game/tests/busy_launch.rs:9	slow
-sunrise-mod-api-gen	lib	build::listed_render_slots_have_eligible_points	crates/sunrise-mod-api-gen/src/build.rs:291	slow
 sunrise-mod-api-gen	lib	dispatch::stack_count_tests::only_container_loot_filled_changes_when_stack_count_marker_is_removed	crates/sunrise-mod-api-gen/src/dispatch/stack_count_tests.rs:4	slow
 sunrise-mod-api-gen	lib	dispatch::stack_crossing_tests::block_numeric_index_runtime_and_mutants	crates/sunrise-mod-api-gen/src/dispatch.rs:1312	slow
 sunrise-mod-api-gen	lib	dispatch::stack_crossing_tests::level_block_read_refusal_runtime_and_mutants	crates/sunrise-mod-api-gen/src/dispatch.rs:1182	slow
@@ -102,7 +101,6 @@ sunrise-mod-api-gen	lib	patch::tests::a_method_moves_into_a_trait_of_its_own_typ
 sunrise-mod-api-gen	lib	patch::tests::refusals_are_named	crates/sunrise-mod-api-gen/src/patch.rs:1659	slow
 sunrise-mod-api-gen	lib	patch::tests::support_modules_and_bridges_land_in_the_mirror_their_rows_name	crates/sunrise-mod-api-gen/src/patch.rs:1814	slow
 sunrise-mod-api-gen	lib	points::tests::no_wire_public_values_refuse_before_point_record_emission	crates/sunrise-mod-api-gen/src/points.rs:1199	slow
-sunrise-mod-api-gen	lib	points::tests::point_inventory	crates/sunrise-mod-api-gen/src/points.rs:1163	slow
 sunrise-mod-api-gen	lib	surface::tests::the_real_tree_exports	crates/sunrise-mod-api-gen/src/surface/tests.rs:828	slow
 sunrise-mod-api-gen	lib	tests::fragment_hooks_generate	crates/sunrise-mod-api-gen/src/lib.rs:734	slow
 sunrise-mod-api-gen	lib	tests::new_hook_placeholder_is_reported_then_filled	crates/sunrise-mod-api-gen/src/lib.rs:956	slow

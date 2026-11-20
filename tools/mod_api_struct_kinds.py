@@ -33,6 +33,7 @@ CRATES = ('sunrise-mod-api', 'sunrise-mod-vocab')
 # match alone never exempts a declaration: both annotations below are required.
 PLATFORM_SOCKET_FILES = frozenset(
     'crates/sunrise-mod-vocab/src/' + file for file in (
+        '__private/platform.rs',
         'dispatch_scope.rs',
         'parts/registration_access.rs',
         'content/crash.rs',

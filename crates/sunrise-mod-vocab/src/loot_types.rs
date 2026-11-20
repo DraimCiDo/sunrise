@@ -38,7 +38,6 @@ pub trait LootTypeContext {
 /// A map codec in `Registries.LOOT_FUNCTION_TYPE`, registered before data loads.
 /// Values are immutable and shared between rolls; do not retain random state.
 pub trait ModLootFunction: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// Decode-equivalent field validation, run once per entry at load, not roll time.
     /// A failure refuses the entire candidate data generation.
     fn validate(&self, data: &LootEntryData) -> Result<(), String>;
@@ -63,7 +62,6 @@ pub trait ModLootFunction: Send + Sync + 'static {
 /// A map codec in `Registries.LOOT_CONDITION_TYPE`, registered before data loads.
 /// Terms run in order and short-circuit; a skipped term draws no random.
 pub trait ModLootCondition: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
     /// Validate this entry once at load; failures refuse the candidate generation.
     fn validate(&self, data: &LootEntryData) -> Result<(), String>;
     /// Parameters this codec reads. Absent parameters must be handled at runtime.
