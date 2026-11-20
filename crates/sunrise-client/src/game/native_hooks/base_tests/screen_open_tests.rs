@@ -372,10 +372,9 @@ fn mods_actions_route_pointer_and_keyboard_to_the_owner_and_close_to_the_selecti
                 .unwrap()
         };
         let action = |owner, key| {
-            target(Kind::ModListAction(mod_api::__private::ModListActionId {
-                owner,
-                key,
-            }))
+            target(Kind::ModListAction(
+                mod_api::__private::ModListActionId::new(owner, key),
+            ))
         };
         let tab_to = |game: &mut Game<'_>, rect| {
             for _ in 0..=widgets::last_targets().len() {

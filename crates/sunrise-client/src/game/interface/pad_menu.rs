@@ -2846,10 +2846,9 @@ mod tests {
         let action = |owner| {
             Some(Target {
                 rect,
-                kind: Kind::ModListAction(mod_api::__private::ModListActionId {
-                    owner,
-                    key: "details",
-                }),
+                kind: Kind::ModListAction(mod_api::__private::ModListActionId::new(
+                    owner, "details",
+                )),
             })
         };
         assert_eq!(

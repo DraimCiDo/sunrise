@@ -28,14 +28,11 @@ impl ModListActionsRegistrar for PartRegistrar {
         if actions.iter().any(|prior| prior.id.key == key) {
             return Err(ModListActionError::Duplicate(key.into()));
         }
-        actions.push(ModListAction {
-            id: ModListActionId {
-                owner: self.mod_id,
-                key,
-            },
+        actions.push(ModListAction::new(
+            ModListActionId::new(self.mod_id, key),
             label,
             activate,
-        });
+        ));
         Ok(())
     }
 }

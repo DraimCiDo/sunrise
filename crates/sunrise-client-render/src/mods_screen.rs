@@ -1556,10 +1556,7 @@ mod tests {
                 assert_eq!(
                     screen.click(&m, x, y),
                     (
-                        Action::Activate(ModListActionId {
-                            owner: "stats",
-                            key: "graphs"
-                        }),
+                        Action::Activate(ModListActionId::new("stats", "graphs")),
                         true
                     )
                 );
@@ -1580,10 +1577,7 @@ mod tests {
                 assert_eq!(
                     screen.click(&m, x, y),
                     (
-                        Action::Activate(ModListActionId {
-                            owner: "trails",
-                            key: "overview"
-                        }),
+                        Action::Activate(ModListActionId::new("trails", "overview")),
                         true
                     )
                 );

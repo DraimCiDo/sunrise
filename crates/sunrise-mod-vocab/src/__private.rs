@@ -71,8 +71,6 @@ pub fn block_hook_inert(hook: HookId, state: BlockState) -> bool {
         .is_some()
 }
 
-pub use crate::parts::{ModListAction, ModListActionId, mod_list_actions};
-
 /// Resolve a listener's owner once at load, for dispatch through [`mod_index_on`].
 pub fn mod_index(id: &str) -> Option<usize> {
     crate::mods().iter().position(|entry| entry.id == id)

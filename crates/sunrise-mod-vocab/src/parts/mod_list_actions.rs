@@ -86,6 +86,12 @@ pub struct ModListActionId {
     pub key: &'static str,
 }
 
+impl ModListActionId {
+    pub fn new(owner: &'static str, key: &'static str) -> Self {
+        Self { owner, key }
+    }
+}
+
 // hidden: frozen action table entry for the engine.
 #[doc(hidden)]
 #[derive(Clone, Debug)]
@@ -94,6 +100,16 @@ pub struct ModListAction {
     pub id: ModListActionId,
     pub label: &'static str,
     pub activate: ModListActionCallback,
+}
+
+impl ModListAction {
+    pub fn new(id: ModListActionId, label: &'static str, activate: ModListActionCallback) -> Self {
+        Self {
+            id,
+            label,
+            activate,
+        }
+    }
 }
 
 // hidden: indexed engine lookup; not a mod-facing registry.
