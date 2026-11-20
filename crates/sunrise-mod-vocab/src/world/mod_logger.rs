@@ -111,7 +111,7 @@ impl crate::RegistrationContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::content::crash::{ModCall, enter_native_mod};
+    use crate::content::crash::{self, ModCall};
     use crate::{HookId, Hooks, ModEntry};
 
     #[test]
@@ -132,16 +132,17 @@ mod tests {
         let mods = [ModEntry::new("actual_manifest_id", Box::new(Quiet))];
         let mut registration = crate::runtime::entered_registration(&mods, "register");
         let (_, context) = registration.next().unwrap();
-        let _other = enter_native_mod(ModCall {
+        // The vocabulary unit binary has no platform instrumentation backend. Change the
+        // same crash owner that enter_native_mod sets in an instrumented game.
+        let (frame, outer) = crash::push(ModCall {
             id: "other_mod",
             hook: "register",
             part: None,
         });
-        assert_eq!(
-            crate::content::crash::current_native_mod(),
-            Some("other_mod")
-        );
+        let owner = crash::current_native_mod();
         let logger = context.logger();
+        crash::pop(frame, outer);
+        assert_eq!(owner, Some("other_mod"));
         assert_eq!(
             logger.log(LogLevel::Info, format_args!("ready")),
             LogOutcome::Queued

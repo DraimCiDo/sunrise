@@ -1,8 +1,8 @@
-use mod_api::text::TextContent;
+use mod_api::content::crash::{ModCall, enter_native_mod};
 use mod_api::{
     BroadcastMessageEvent, ClientHost, ClientTickPostEvent, Flow, Hooks, Host, HostTransaction,
     LogLevel, LogOutcome, ModLogger, Registrar, RegistrationContext, ServerHost,
-    ServerStartedEvent, Text,
+    ServerStartedEvent,
 };
 use std::sync::OnceLock;
 
@@ -17,7 +17,14 @@ struct Fixture {
 #[mod_api::sunrise_mod]
 impl Hooks for Fixture {
     fn register(&self, _: &mut dyn Registrar, cx: &RegistrationContext) {
-        let logger = cx.logger();
+        let logger = {
+            let _other = enter_native_mod(ModCall {
+                id: "fnr_log_wrong",
+                hook: "register",
+                part: None,
+            });
+            cx.logger()
+        };
         assert!(logger.enabled(LogLevel::Info));
         assert_eq!(
             logger.log(LogLevel::Info, format_args!("{MARKER}registered {}", 17)),
@@ -57,17 +64,8 @@ impl Hooks for Fixture {
         );
     }
 
-    fn broadcast_message(&self, _: &dyn Host, event: &mut BroadcastMessageEvent<'_>) -> Flow {
-        fn append_plain(text: &Text, plain: &mut String) {
-            if let TextContent::Literal(literal) = &text.content {
-                plain.push_str(literal);
-            }
-            for child in &text.children {
-                append_plain(child, plain);
-            }
-        }
-        let mut plain = String::new();
-        append_plain(event.line, &mut plain);
+    fn broadcast_message(&self, host: &dyn Host, event: &mut BroadcastMessageEvent<'_>) -> Flow {
+        let plain = host.text_string(event.line).unwrap();
         assert!(
             !plain.contains(MARKER),
             "fixture log leaked to chat: {plain}"
