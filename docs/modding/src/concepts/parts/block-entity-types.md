@@ -89,30 +89,40 @@ Version 2 uses optional drops to represent empty slots; wrap a filled slot in `S
 A Part that keeps a value on each block entity of its type (a machine's progress, the last
 position of a moving head) declares it with `BlockEntityPartState` instead of keeping a side
 table. The game owns the values: one per block entity, in its attachment map, saved with the
-chunk through the attachment codec and kept by transactions.
+chunk through the attachment codec and kept by transactions. The Part instance supplies the
+key; keep it unchanged after registration.
 
 ```rust,ignore
-static PROGRESS: AttachmentType<u32> = AttachmentType {
+struct Press {
+    progress: AttachmentType<u32>,
+}
+
+const PROGRESS: AttachmentType<u32> = AttachmentType {
     namespace: "mymod", name: "press_progress", default: || 0,
     codec: Some(PROGRESS_CODEC), copy_on_death: false, sync: false,
 };
 impl BlockEntityPartState for Press {
     type Data = u32;
-    const DATA: &'static AttachmentType<u32> = &PROGRESS;
+
+    fn state_key(&self) -> &AttachmentType<Self::Data> {
+        &self.progress
+    }
 }
-r.block_entity_part_with_state(&press, Press)?;
+r.register_attachment_type("mymod:press_progress", false)?;
+r.block_entity_part_with_state(&press, Press { progress: PROGRESS })?;
 
 // In its tick, where the block entity is out of the world and `block_entity` finds nothing:
 let level = host.level(host.dimension()).unwrap();
 let entity = host.block_entity_identity(level, event.pos).unwrap();
-let done = Press::edit_state(host, entity, |_, progress| {
+let done = self.edit_state(host, entity, |_, progress| {
     *progress += 1;
     *progress >= 200
 })?;
 ```
 
-- `Press::state(host, entity)` and `state_existing` read a snapshot through `&dyn Host` and never
-  insert the default. `edit_state` takes `&mut dyn ServerHost` and runs in a nested transaction
+- Call `self.state(host, entity)` or `self.state_existing(host, entity)` on the Part. Both read a
+  snapshot through `&dyn Host` without inserting a default. `self.edit_state` takes
+  `&mut dyn ServerHost` and runs in a nested transaction
   of its own. The closure gets a copy and the host, and no store borrow is held while it runs. The
   result is stored when the closure returns.
 - Every call checks the handle first. A handle from another level gives `PartStateError::OtherLevel`.
@@ -136,10 +146,8 @@ let done = Press::edit_state(host, entity, |_, progress| {
   vanilla 26.3 reads region files with `NbtAccounter.unlimitedHeap`, an unbounded byte budget and
   depth 512. The 2 MiB quota of a chunk packet's block entity data is a network limit and does not
   cap saved state.
-- Registration refuses a declaration that syncs, copies on death, lies outside the mod's namespaces
-  or reuses a key with a type of another Rust type name. It refuses a type whose Wire form holds a resource
-  handle (an erased handler such as `Arc<dyn BlockPart>`): such a value cannot be saved. The refusal names the Part,
-  the key, the type and the reason.
+- Registration refuses a Part state key that syncs, copies on death or reuses a name declared with
+  a different Rust type. A key can come from another package, but its owner must declare it.
 - Values without a codec last for the session. Part state is server-side for now. A client reads the
   default, because nothing is sent to it yet.
 

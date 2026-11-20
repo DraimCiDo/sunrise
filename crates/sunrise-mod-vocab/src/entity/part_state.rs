@@ -18,13 +18,18 @@ use std::fmt;
 /// unknown type are refused when the game loads.
 ///
 /// ```rust,ignore
-/// struct Robot;
+/// struct Robot {
+///     charge: AttachmentType<u32>,
+/// }
 /// impl EntityPartState for Robot {
 ///     type Data = u32;
-///     const DATA: &'static AttachmentType<u32> = &CHARGE;
+///
+///     fn state_key(&self) -> &AttachmentType<Self::Data> {
+///         &self.charge
+///     }
 /// }
-/// // In a hook with `host: &mut dyn ServerHost` and the robot's `entity`:
-/// let full = Robot::edit_state(host, entity, |_, charge| {
+/// // In a Part hook with `host: &mut dyn ServerHost` and the robot's `entity`:
+/// let full = self.edit_state(host, entity, |_, charge| {
 ///     *charge += 1;
 ///     *charge >= 100
 /// })?;
@@ -46,13 +51,14 @@ use std::fmt;
 /// after the entity changed level, the state stays with the entity under its new id, and
 /// the old handle stays `Stale`. Travel fires no join or leave hook for it.
 ///
-/// Server-side only for now: `DATA` must not sync or copy on death, and a client reads
-/// the default.
+/// Server-side only for now: the state key must not sync or copy on death, and a client
+/// reads the default.
 pub trait EntityPartState: EntityPart + Sized {
     /// The value each entity of the Part's type keeps.
     type Data: Clone + Send + Sync + 'static;
-    /// Its attachment key, default and codec. The owner declares the key at registration;
-    /// without a codec the value is kept for the session only.
+    /// This Part instance's attachment key, default and codec. Return the same key throughout
+    /// the Part's lifetime; the registrar reads it before attaching the Part. Without a codec
+    /// the value lasts for the session only.
     fn state_key(&self) -> &AttachmentType<Self::Data>;
 
     /// The entity's value, or the default when it has none. Inserts nothing.

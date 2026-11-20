@@ -705,30 +705,17 @@ pub mod tests {
         sync: false,
     };
     #[cfg(test)]
-    struct Keeps<const OWNERS: bool> {
+    struct Keeps {
         state_key: AttachmentType<u32>,
     }
     #[cfg(test)]
     #[mod_api::sunrise_part]
-    impl BlockPart for Keeps<true> {}
+    impl BlockPart for Keeps {}
     #[cfg(test)]
     #[mod_api::sunrise_part]
-    impl BlockEntityPart for Keeps<true> {}
+    impl BlockEntityPart for Keeps {}
     #[cfg(test)]
-    impl BlockEntityPartState for Keeps<true> {
-        type Data = u32;
-        fn state_key(&self) -> &AttachmentType<u32> {
-            &self.state_key
-        }
-    }
-    #[cfg(test)]
-    #[mod_api::sunrise_part]
-    impl BlockPart for Keeps<false> {}
-    #[cfg(test)]
-    #[mod_api::sunrise_part]
-    impl BlockEntityPart for Keeps<false> {}
-    #[cfg(test)]
-    impl BlockEntityPartState for Keeps<false> {
+    impl BlockEntityPartState for Keeps {
         type Data = u32;
         fn state_key(&self) -> &AttachmentType<u32> {
             &self.state_key
@@ -738,15 +725,12 @@ pub mod tests {
     struct KeepsState<const OWNERS: bool>;
     #[cfg(test)]
     #[mod_api::__subscriptions]
-    impl<const OWNERS: bool> Hooks for KeepsState<OWNERS>
-    where
-        Keeps<OWNERS>: BlockEntityPartState + 'static,
-    {
+    impl<const OWNERS: bool> Hooks for KeepsState<OWNERS> {
         fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
             r.register_attachment_type("b:progress", false).unwrap();
             let press = r.block_entity_type_key("owner:press");
             let state_key = if OWNERS { OWNERS_PROGRESS } else { B_PROGRESS };
-            let _ = r.block_entity_part_with_state(&press, Keeps::<OWNERS> { state_key });
+            let _ = r.block_entity_part_with_state(&press, Keeps { state_key });
         }
     }
 

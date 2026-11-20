@@ -269,7 +269,16 @@ Both reads return `None` in callbacks without the corresponding view. A `LevelRe
 name an open server level or the current client level. Neither read loads chunks or opens loot
 containers. Both require the owning game thread, not a worker-thread hook body.
 
-`block_entity(pos)` reads this level's block entity without loading a chunk; it returns `None` when absent, unloaded or out for its tick. On a client it returns only the local block entity handle. `container_size(at)` and `container_stack(at, slot)` are the same side-local capability snapshots as `ItemsHost` supplies; neither generates unopened loot, and both refuse clients and unloaded positions. `BlockEntityPartState::state_in(level, entity)` and `state_existing_in` read the same attachment snapshots as their `Host` equivalents, without inserting a default, generating loot or loading chunks. Unloaded or stale holders fail; clients have no server Part state. All are owning-game-thread reads, never available in worker hook bodies.
+`block_entity(pos)` reads this level's block entity without loading a chunk; it returns `None` when
+absent, unloaded or out for its tick. On a client it returns only the local block entity handle.
+`container_size(at)` and `container_stack(at, slot)` are the same side-local capability snapshots as
+`ItemsHost` supplies; neither generates unopened loot, and both refuse clients and unloaded positions.
+
+On a block entity Part with state, call `part.state_in(level, entity)` or
+`part.state_existing_in(level, entity)` to read the same attachment snapshots as through `Host`,
+without inserting a default, generating loot or loading chunks. Unloaded or stale holders fail;
+clients have no server Part state. All of these reads require the owning game thread and cannot run
+in worker hook bodies.
 
 `LevelRandomHost::container_signal(pos)` is the engine comparator container read. Unlike the immutable slot snapshot, it generates unopened loot once, as vanilla's `getItem` does, then calculates 0 to 15 using each stack's maximum size. It returns `None` on clients and unloaded positions, never loads a chunk, and runs only on the owning game thread. `analog_output` version 2 receives this mutable host so the loot generation and random draws happen in vanilla order; it permits no other world edit.
 
@@ -288,8 +297,9 @@ On a client (its placement prediction and its own shape updates ask `state_for_p
 `may_place_on` and `can_sustain_plant` too) these reads answer from the client's loaded copy of the level, and the
 reads above that refuse clients return `None`, as do `block_in_tag` and `fluid_in_tag`. `tags()` still returns a
 service: `Tags::key` can resolve a key, but membership (`is_in_tag`) and member lists (`items`, `fluids`, `blocks`)
-return `None` in this view. `BlockEntityPartState::state_in` gives its default there. Never answer from those as if
-they were the server's: a client's own shape update that refuses a block removes it on that client.
+return `None` in this view. `part.state_in` gives the block entity Part's default there. Never answer
+from those as if they were the server's: a client's own shape update that refuses a block removes it
+on that client.
 `LevelTicksHost`'s signal reads moved here and now return `Option`.
 
 Before a block's placement state is selected, `ItemPart::placement_context` replaces the item's

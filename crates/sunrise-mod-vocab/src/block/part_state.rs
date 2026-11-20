@@ -16,13 +16,18 @@ use std::{cell::RefCell, fmt, sync::Arc};
 /// itself stays object-safe: this trait is only for the typed calls below.
 ///
 /// ```rust,ignore
-/// struct Press;
+/// struct Press {
+///     progress: AttachmentType<u32>,
+/// }
 /// impl BlockEntityPartState for Press {
 ///     type Data = u32;
-///     const DATA: &'static AttachmentType<u32> = &PROGRESS;
+///
+///     fn state_key(&self) -> &AttachmentType<Self::Data> {
+///         &self.progress
+///     }
 /// }
-/// // In a hook with `host: &mut dyn ServerHost` and the block entity's `entity`:
-/// let done = Press::edit_state(host, entity, |_, progress| {
+/// // In a Part hook with `host: &mut dyn ServerHost` and the block entity's `entity`:
+/// let done = self.edit_state(host, entity, |_, progress| {
 ///     *progress += 1;
 ///     *progress >= 200
 /// })?;
@@ -35,13 +40,14 @@ use std::{cell::RefCell, fmt, sync::Arc};
 /// [`PartStateError::Stale`]. A block entity out of the world for its own tick still
 /// answers, through [`BlockEntitiesHost::block_entity_identity`].
 ///
-/// Server-side only for now: `DATA` must not sync, and a client's copy holds nothing
-/// of it, so a client reads the default.
+/// Server-side only for now: the state key must not sync or copy on death, and a client
+/// reads the default.
 pub trait BlockEntityPartState: BlockEntityPart + Sized {
     /// The value each block entity of the Part's type keeps.
     type Data: Clone + Send + Sync + 'static;
-    /// Its attachment key, default and codec. The owner declares the key at registration;
-    /// without a codec the value is kept for the session only.
+    /// This Part instance's attachment key, default and codec. Return the same key throughout
+    /// the Part's lifetime; the registrar reads it before attaching the Part. Without a codec
+    /// the value lasts for the session only.
     fn state_key(&self) -> &AttachmentType<Self::Data>;
 
     /// The block entity's value, or the default when it has none. Inserts nothing.
@@ -164,9 +170,9 @@ impl std::error::Error for PartStateError {}
 #[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PartStateRefusal {
-    /// `DATA.sync` is set: Part state is not sent to clients yet.
+    /// The state key sets `sync`: Part state is not sent to clients yet.
     Sync,
-    /// `DATA.copy_on_death` is set: a block entity has no death to copy across.
+    /// The state key sets `copy_on_death`: Part state does not copy across death.
     CopyOnDeath,
     /// The same key is already declared with a type of another Rust type name, named here.
     Incompatible {
@@ -408,6 +414,7 @@ impl Drop for Editing {
 }
 
 /// [`BlockEntityPartState::edit_state`] or [`crate::EntityPartState::edit_state`] for any key.
+/// Borrow `key` for the duration of the edit; it need not be static.
 ///
 /// Runs in a transaction of its own, nested in the open one if any: the value is read
 /// (decoded once from its saved form, or the default when absent), lent to `edit` as a

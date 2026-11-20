@@ -87,20 +87,29 @@ attachment codec and kept by transactions, through the same calls and rules as
 [block entity Part state](block-entity-types.md#part-state).
 
 ```rust,ignore
+struct Robot {
+    charge: AttachmentType<u32>,
+}
 impl EntityPartState for Robot {
     type Data = u32;
-    const DATA: &'static AttachmentType<u32> = &CHARGE;
-}
-r.entity_part_with_state("mymod:robot", Robot)?;
 
-let full = Robot::edit_state(host, robot, |_, charge| {
+    fn state_key(&self) -> &AttachmentType<Self::Data> {
+        &self.charge
+    }
+}
+// CHARGE is an AttachmentType<u32> for mymod:charge.
+r.register_attachment_type("mymod:charge", false)?;
+r.entity_part_with_state("mymod:robot", Robot { charge: CHARGE })?;
+
+// In a Robot Part hook:
+let full = self.edit_state(host, robot, |_, charge| {
     *charge += 1;
     *charge >= 100
 })?;
 ```
 
-- `state` and `state_existing` read a snapshot and insert nothing; `edit_state` runs in a nested
-  transaction of its own, as for block entities.
+- On the Part, `self.state` and `self.state_existing` read a snapshot and insert nothing;
+  `self.edit_state` runs in a nested transaction of its own, as for block entities.
 - Every call checks the handle first:
   - a handle of another world open, or of an entity that was removed (or whose removal waits for
     the root commit), unloaded or moved under a new id, gives `PartStateError::Stale`, and
