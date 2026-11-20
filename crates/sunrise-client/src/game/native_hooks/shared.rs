@@ -159,13 +159,7 @@ impl Game<'_> {
                 }
                 ScreenDecision::Vanilla(target) => {
                     before(self);
-                    self.open_screen_target(target);
-                    if self.title.is_some() {
-                        // A title screen: told here, so the frame's observer
-                        // doesn't announce it again.
-                        self.screen_state.observed = self.observed_now();
-                        self.shown_init_post();
-                    }
+                    self.open_replacement_target(target);
                     return;
                 }
                 ScreenDecision::Open => {}
@@ -271,7 +265,7 @@ impl Game<'_> {
         self.dragging = false;
         match decision {
             ScreenDecision::Keep => unreachable!(),
-            ScreenDecision::Vanilla(target) => self.open_screen_target(target),
+            ScreenDecision::Vanilla(target) => self.open_replacement_target(target),
             ScreenDecision::ModScreen(other) => self.apply_screen(Screen::Mod, Some(other)),
             ScreenDecision::Open => {
                 self.apply_screen(Screen::Mod, Some(owner));
@@ -345,6 +339,17 @@ impl Game<'_> {
             .set(!matches!(decision, ScreenDecision::Open));
         decision
     }
+    /// Apply a vanilla replacement for an engine-owned screen. A replacement
+    /// in the title UI is an overlay, so record it here to avoid announcing
+    /// another opening during frame observation.
+    fn open_replacement_target(&mut self, target: ScreenTarget) {
+        self.open_screen_target(target);
+        if self.title.is_some() {
+            self.screen_state.observed = self.observed_now();
+            self.shown_init_post();
+        }
+    }
+
     /// Opens vanilla screen `target` as it opens on its own, in place of the
     /// one asked for (`ScreenOpening::Vanilla`, which `screen_decision` let
     /// through): the change fires no screen hook again.
