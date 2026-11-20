@@ -359,14 +359,13 @@ impl Game<'_> {
             line.split_whitespace().next(),
             Some("key" | "mouse" | "type")
         );
-        let config_was_open = self.config_screen.is_some();
         let result = self.with_user_input(input, |game| {
             game.control_command_inner(line, reply, event_loop)
         });
         self.settle_config_screen();
         self.settle_title_mode();
         // After handling, as the window's: the mods' mappings and `input_key` hear the key.
-        if !config_was_open && let Some((key, action)) = socket_key(line) {
+        if let Some((key, action)) = socket_key(line) {
             self.with_user_input(true, |game| game.socket_key_input(key, action));
         }
         if let Some(key) = released {

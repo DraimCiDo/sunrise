@@ -198,10 +198,14 @@ impl Game<'_> {
     }
     /// Open the selected live factory over the Mods list without pushing an
     /// Options page or touching the world. The list stays in OptionsUi.
-    pub(super) fn open_config_screen(&mut self, index: usize) {
+    pub(super) fn open_config_screen(
+        &mut self,
+        request: sunrise_client::options_ui::ConfigScreenRequest,
+    ) {
         use mod_api::content::crash::{ModCall, enter_native_mod};
         use sunrise_client::options_ui::Page;
 
+        let index = request.index;
         let selected = |game: &Self| {
             if game.screen != Screen::Options
                 || game.ui.options.page() != Page::Mods
@@ -212,12 +216,13 @@ impl Game<'_> {
                 return None;
             }
             let list = game.ui.options.mods_screen.as_ref()?;
-            let (selected, id) = list.selected_mod()?;
-            let row = game.settings.mods.installed.get(index)?;
-            if selected != index || id != row.id {
+            if list.id() != request.parent
+                || list.selected_mod() != Some((index, request.owner.as_str()))
+                || game.settings.mods.installed.get(index)?.id != request.owner
+            {
                 return None;
             }
-            mod_api::__private::config_screen_factory(id)
+            mod_api::__private::config_screen_factory(&request.owner)
         };
         let Some((owner, factory)) = selected(self) else {
             return;

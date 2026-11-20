@@ -9337,8 +9337,8 @@ impl Game<'_> {
         }
         // A character that comes with no key (Windows' Alt codes, `Alt` + digits on the numeric
         // keypad: a `WM_CHAR` after the Alt is released) reaches winit as a key event with no
-        // physical key. GLFW's char callback types it in the focused text field (`charTyped`),
-        // and every screen's key handler here would drop it for want of a key code.
+        // physical key. GLFW sends it through charTyped even for a custom screen with no
+        // engine-owned text field; the normal key handler would drop it for want of a key code.
         if let WindowEvent::KeyboardInput {
             event: key_event, ..
         } = &event
@@ -9346,6 +9346,10 @@ impl Game<'_> {
             && matches!(key_event.physical_key, PhysicalKey::Unidentified(_))
             && let Some(text) = key_event.text.as_deref()
         {
+            if self.config_screen.is_some() && !self.screen_over_playing() {
+                self.screen_chars_typed(Some(text));
+                return;
+            }
             let text: String = text.chars().filter(|c| !c.is_control()).collect();
             if !text.is_empty() && self.text_field_focused() && self.types_text() {
                 self.screen_text_each(&text, |game, c| {
@@ -9625,7 +9629,6 @@ impl Game<'_> {
         // it (`ScreenEvent.MouseButtonPressed.Post` and its siblings): set where
         // the Pre lets the input through, fired after the arms ran.
         let mut mouse_post: Option<native_hooks::ScreenMousePost> = None;
-        let was_config_screen = self.config_screen.is_some();
         let result: Result<()> = (|| {
             if let WindowEvent::MouseInput { state, button, .. } = &event
                 && !self.pad_synthetic_input()
@@ -9789,11 +9792,18 @@ impl Game<'_> {
                             }
                             native_hooks::ScreenMousePre::NotFired => {}
                         }
-                        if self.config_screen.is_some() {
+                        if self.prompt_open() {
+                            if self.command_prompt.is_none()
+                                && self.link_prompt.is_none()
+                                && self.code_of_conduct.is_none()
+                                && self.server_packs.prompt.is_none()
+                            {
+                                self.dialog_drag();
+                            }
                             return Ok(());
                         }
-                        if self.dialog_open() {
-                            self.dialog_drag();
+                        if self.config_screen.is_some() {
+                            return Ok(());
                         }
                         if self.screen == Screen::BlockEditor {
                             self.block_editor_drag();
@@ -9882,9 +9892,6 @@ impl Game<'_> {
                             scaled(raw_y),
                         ]));
                     }
-                    if self.config_screen.is_some() {
-                        return Ok(());
-                    }
                     // A prompt is vanilla's `Minecraft.screen`, the only one MouseHandler.onScroll
                     // tells: the top one hears the wheel, as the click arms below pick it, and
                     // nothing behind it does.
@@ -9895,6 +9902,9 @@ impl Game<'_> {
                         } else if self.server_packs.prompt.is_none() {
                             self.dialog_scroll(d);
                         }
+                        return Ok(());
+                    }
+                    if self.config_screen.is_some() {
                         return Ok(());
                     }
                     // The item panel beside a container screen pages on the
@@ -10842,7 +10852,6 @@ impl Game<'_> {
         })();
         if let Some(post) = mouse_post
             && result.is_ok()
-            && was_config_screen == self.config_screen.is_some()
         {
             self.screen_mouse_post(post);
         }

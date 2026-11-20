@@ -2,17 +2,28 @@ use super::*;
 use crate::game::native_entity_refs::tests::{run_fresh_cases, with_client_game};
 use mod_api::{
     ClientHost, ConfigScreenContext, ConfigScreenFactory, ConfigScreenParent, ConfigScreenRefusal,
-    ConfigScreenRegistrationError, ConfigScreenSession, Flow, Hooks, ModEntry, Registrar,
-    RegistrationContext, ScreenCharTypedPreEvent, ScreenKeyPressedPreEvent,
-    ScreenKeyReleasedPreEvent, ScreenMouseButtonPressedPreEvent, ScreenMouseButtonReleasedPreEvent,
-    ScreenMouseDraggedPreEvent, ScreenMouseScrolledPreEvent, ScreenOpeningEvent,
-    ScreenRenderPostEvent, SettingSpec,
+    ConfigScreenRegistrationError, ConfigScreenSession, Flow, Hooks, InputKeyEvent, ModEntry,
+    Registrar, RegistrationContext, ScreenCharTypedPreEvent, ScreenKeyPressedPreEvent,
+    ScreenKeyReleasedPreEvent, ScreenMouseButtonPressedPostEvent, ScreenMouseButtonPressedPreEvent,
+    ScreenMouseButtonReleasedPreEvent, ScreenMouseDraggedPreEvent, ScreenMouseScrolledPreEvent,
+    ScreenOpeningEvent, ScreenRenderPostEvent, SettingSpec,
 };
 use std::sync::{Arc, Mutex};
 use sunrise_client::mod_list::Installed;
 use sunrise_client::options_ui::Page;
-use winit::event::{
-    DeviceId, ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent,
+use winit::{
+    application::ApplicationHandler,
+    event::{DeviceId, ElementState, Ime, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent},
+    event_loop::{ActiveEventLoop, EventLoop},
+    platform::{pump_events::EventLoopExtPumpEvents, x11::EventLoopBuilderExtX11},
+    raw_window_handle::{HasWindowHandle, RawWindowHandle},
+};
+use x11rb::{
+    connection::Connection,
+    protocol::{
+        xproto::{self, ConnectionExt as _},
+        xtest::ConnectionExt as _,
+    },
 };
 
 #[derive(Default)]
@@ -21,6 +32,9 @@ struct State {
     veto: bool,
     calls: Vec<bool>,
     input: Vec<&'static str>,
+    characters: Vec<char>,
+    raw_w: Vec<mod_api::KeyAction>,
+    press_post: usize,
     parent: Option<ConfigScreenParent>,
 }
 
@@ -91,6 +105,16 @@ impl Hooks for ConfigMod {
         self.input(event.screen.id, "press")
     }
 
+    fn screen_mouse_button_pressed_post(
+        &self,
+        _: &dyn ClientHost,
+        event: &mut ScreenMouseButtonPressedPostEvent<'_>,
+    ) {
+        if event.screen.id == "mod" {
+            self.0.lock().unwrap().press_post += 1;
+        }
+    }
+
     fn screen_mouse_button_released_pre(
         &self,
         _: &dyn ClientHost,
@@ -139,18 +163,29 @@ impl Hooks for ConfigMod {
         }
     }
 
+    fn input_key(&self, _: &mut dyn ClientHost, event: &mut InputKeyEvent<'_>) {
+        if event.key == "key.keyboard.w" {
+            self.0.lock().unwrap().raw_w.push(event.action);
+        }
+    }
+
     fn screen_char_typed_pre(
         &self,
         host: &dyn ClientHost,
         event: &mut ScreenCharTypedPreEvent<'_>,
     ) -> Flow {
-        if event.screen.id == "mod" && event.c == 'x' {
-            assert_eq!(host.setting_bool("show"), Some(false));
-            host.set_setting("fixture", "show", "true");
-            host.set_setting("fixture", "show", "invalid");
-            assert_eq!(host.setting_bool("show"), Some(true));
+        if event.screen.id != "mod" {
+            return Flow::Continue;
         }
-        self.input(event.screen.id, "char")
+        self.0.lock().unwrap().characters.push(event.c);
+        if matches!(event.c, 'x' | 'y') {
+            let value = event.c == 'x';
+            assert_eq!(host.setting_bool("show"), Some(!value));
+            host.set_setting("fixture", "show", if value { "true" } else { "false" });
+            host.set_setting("fixture", "show", "invalid");
+            assert_eq!(host.setting_bool("show"), Some(value));
+        }
+        Flow::Cancel
     }
 }
 
@@ -160,7 +195,7 @@ impl ConfigMod {
             return Flow::Continue;
         }
         self.0.lock().unwrap().input.push(event);
-        if event == "press" {
+        if matches!(event, "press" | "key down") {
             Flow::Continue
         } else {
             Flow::Cancel
@@ -185,6 +220,32 @@ impl EventLoopCtl for NoLoop {
     fn set_control_flow(&self, _: winit::event_loop::ControlFlow) {}
 }
 
+/// Pump the X11 key through the real window callback without running idle ticks.
+struct KeyDelivery<'a, 'res> {
+    game: &'a mut Game<'res>,
+    expected: (KeyCode, ElementState),
+    received: bool,
+}
+
+impl ApplicationHandler for KeyDelivery<'_, '_> {
+    fn resumed(&mut self, _: &ActiveEventLoop) {}
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        if let WindowEvent::KeyboardInput {
+            event: key,
+            is_synthetic: false,
+            ..
+        } = &event
+            && id == self.game.window.as_ref().unwrap().id()
+            && (key.physical_key, key.state)
+                == (PhysicalKey::Code(self.expected.0), self.expected.1)
+        {
+            self.game.window_event(event_loop, id, event);
+            self.received = true;
+        }
+    }
+}
+
 #[test]
 #[ignore = "daily"]
 fn typed_config_screen_keeps_its_mods_parent_and_owns_input() {
@@ -203,89 +264,76 @@ fn typed_config_screen_keeps_its_mods_parent_and_owns_input() {
     .into();
     mod_platform::testing::with_mods(mods, || {
         with_client_game(|game| {
-            let mut builder = winit::event_loop::EventLoop::builder();
-            #[cfg(target_os = "linux")]
-            {
-                use winit::platform::x11::EventLoopBuilderExtX11;
-                builder.with_x11().with_any_thread(true);
-            }
-            let event_loop = builder.build().unwrap();
+            let mut builder = EventLoop::builder();
+            builder.with_x11().with_any_thread(true);
+            let mut event_loop = builder.build().unwrap();
             #[allow(deprecated)]
             let window = Arc::new(
                 event_loop
                     .create_window(
                         winit::window::Window::default_attributes()
-                            .with_visible(false)
                             .with_inner_size(winit::dpi::PhysicalSize::new(480, 240)),
                     )
                     .unwrap(),
             );
             game.options.offscreen = true;
+            game.settings.gui_scale = 1;
             game.renderer = Some(game.new_renderer(window.clone()).unwrap());
             let window_id = window.id();
+            let RawWindowHandle::Xlib(handle) = window.window_handle().unwrap().as_raw() else {
+                panic!("expected an X11 window");
+            };
             game.window = Some(window);
 
-            let row = |id: &str| Installed {
-                id: id.into(),
-                title: "Z Test Mod".into(),
-                description: String::new(),
-                problem: None,
-                dev: false,
-                native: None,
+            let (x11, screen) = x11rb::connect(None).unwrap();
+            let setup = x11.setup();
+            let root = setup.roots[screen].root;
+            x11.set_input_focus(xproto::InputFocus::PARENT, handle.window as u32, 0u32)
+                .unwrap()
+                .check()
+                .unwrap();
+            let keymap = x11
+                .get_keyboard_mapping(setup.min_keycode, setup.max_keycode - setup.min_keycode + 1)
+                .unwrap()
+                .reply()
+                .unwrap();
+            let keycode = |keysym| {
+                setup.min_keycode
+                    + keymap
+                        .keysyms
+                        .chunks_exact(usize::from(keymap.keysyms_per_keycode))
+                        .position(|names| names[0] == keysym)
+                        .unwrap() as u8
             };
-            let click = |game: &mut Game<'_>, x, y| {
-                let events = game.ui.options.click(
-                    &mut game.settings,
-                    &game.gui.atlas,
-                    x,
-                    y,
-                    (480.0, 240.0),
-                    [480, 240],
-                    false,
-                    false,
-                );
-                game.handle_option_events(events).unwrap();
-            };
-            let activate = |game: &mut Game<'_>| click(game, 397.0, 192.0);
-            let assert_parent = |game: &Game<'_>| {
-                assert_eq!(game.screen, Screen::Options);
-                assert_eq!(game.ui.options.page(), Page::Mods);
-                assert_eq!(
-                    game.ui.options.mods_screen.as_ref().unwrap().selected_mod(),
-                    Some((0, "fixture"))
-                );
-            };
-
-            game.settings.mods.installed = vec![row("fixture")];
-            game.list_native_mods();
-            game.player = None;
-            game.title = Some(game.new_title(game.save.root.clone()));
-            game.title_action(&NoLoop, Action::Mods).unwrap();
-            click(game, 61.0, 76.0);
-            assert_parent(game);
-            activate(game);
-            assert_eq!(game.mod_screen(), Some("fixture"));
-            assert_eq!(
-                game.stored_setting("fixture", "show"),
-                None,
-                "opening saves nothing"
-            );
-            let mut batch = HudBatch::scratch([480, 240]);
-            game.draw_screen_with_post_hook(&mut batch);
-            assert_eq!(batch.vertices.len(), 6);
-            assert_eq!(batch.vertices[0].pos, [10.0, 20.0]);
-            assert_eq!(batch.vertices[2].pos, [22.0, 28.0]);
-            assert!(
-                batch
-                    .vertices
-                    .iter()
-                    .all(|v| v.color == sunrise_client::hud::rgba(250, 32, 224, 255))
-            );
-
-            let button = |state| WindowEvent::MouseInput {
-                device_id: DeviceId::dummy(),
-                state,
-                button: MouseButton::Left,
+            let key = |game: &mut Game<'_>, event_loop: &mut EventLoop<()>, code, state| {
+                let keysym = match code {
+                    KeyCode::KeyW => u32::from(b'w'),
+                    KeyCode::Escape => 0xff1b,
+                    _ => unreachable!(),
+                };
+                let kind = if state == ElementState::Pressed {
+                    xproto::KEY_PRESS_EVENT
+                } else {
+                    xproto::KEY_RELEASE_EVENT
+                };
+                x11.xtest_fake_input(kind, keycode(keysym), 0, root, 0, 0, 0)
+                    .unwrap()
+                    .check()
+                    .unwrap();
+                let mut delivery = KeyDelivery {
+                    game,
+                    expected: (code, state),
+                    received: false,
+                };
+                let deadline = Instant::now() + Duration::from_secs(3);
+                while !delivery.received {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    assert!(
+                        !remaining.is_zero(),
+                        "window did not deliver {code:?} {state:?}"
+                    );
+                    event_loop.pump_app_events(Some(remaining), &mut delivery);
+                }
             };
             let input = |game: &mut Game<'_>, event| {
                 game.handle_window_event(
@@ -295,48 +343,174 @@ fn typed_config_screen_keeps_its_mods_parent_and_owns_input() {
                     crate::game::input_trace::InputOrigin::Agent,
                 );
             };
+            let button = |state| WindowEvent::MouseInput {
+                device_id: DeviceId::dummy(),
+                state,
+                button: MouseButton::Left,
+            };
             let move_to = |x, y| WindowEvent::CursorMoved {
                 device_id: DeviceId::dummy(),
                 position: winit::dpi::PhysicalPosition::new(x, y),
             };
-            input(game, move_to(61.0, 52.0)); // The Minecraft row in the hidden list.
-            input(game, button(ElementState::Pressed));
-            input(game, move_to(80.0, 60.0));
-            input(
-                game,
-                WindowEvent::MouseWheel {
-                    device_id: DeviceId::dummy(),
-                    delta: MouseScrollDelta::LineDelta(0.0, 1.0),
-                    phase: TouchPhase::Moved,
-                },
-            );
-            input(game, button(ElementState::Released));
-            game.replay_line("key w tap", &NoLoop);
-            game.replay_line("type x", &NoLoop);
-            game.replay_line("key esc tap", &NoLoop);
-            assert_parent(game);
-            assert!(!game.keys.raw(&KeyCode::KeyW));
-            assert_eq!(
-                game.stored_setting("fixture", "show").as_deref(),
-                Some("true")
-            );
-            assert_eq!(
-                state.lock().unwrap().input,
-                [
-                    "press", "drag", "scroll", "release", "key down", "key up", "char"
-                ]
-            );
+            let click = |game: &mut Game<'_>, x, y| {
+                input(game, move_to(x, y));
+                input(game, button(ElementState::Pressed));
+                input(game, button(ElementState::Released));
+            };
+            let activate = |game: &mut Game<'_>| click(game, 397.0, 192.0);
+            let assert_parent = |game: &Game<'_>, parent| {
+                assert_eq!(game.screen, Screen::Options);
+                assert_eq!(game.ui.options.page(), Page::Mods);
+                let list = game.ui.options.mods_screen.as_ref().unwrap();
+                assert_eq!(list.id(), parent);
+                assert_eq!(list.selected_mod(), Some((0, "fixture")));
+            };
+            let row = |id: &str| Installed {
+                id: id.into(),
+                title: "Z Test Mod".into(),
+                description: String::new(),
+                problem: None,
+                dev: false,
+                native: None,
+            };
+            let exercise = |game: &mut Game<'_>, event_loop: &mut EventLoop<()>, in_world| {
+                assert_eq!(game.mod_screen(), Some("fixture"));
+                assert!(
+                    game.render_with(|_, frame| {
+                        assert_eq!(frame.title, !in_world);
+                        let marker: Vec<_> = frame
+                            .hud
+                            .vertices
+                            .iter()
+                            .filter(|v| v.color == sunrise_client::hud::rgba(250, 32, 224, 255))
+                            .map(|v| v.pos)
+                            .collect();
+                        assert_eq!(marker.len(), 6);
+                        assert_eq!(marker[0], [10.0, 20.0]);
+                        assert_eq!(marker[2], [22.0, 28.0]);
+                        Ok(true)
+                    })
+                    .unwrap()
+                );
 
-            state.lock().unwrap().refuse = true;
-            activate(game);
-            assert_parent(game);
-            state.lock().unwrap().refuse = false;
-            state.lock().unwrap().veto = true;
-            activate(game);
-            assert_parent(game);
+                input(game, move_to(61.0, 52.0)); // Minecraft's row in the hidden list.
+                input(game, button(ElementState::Pressed));
+                input(game, move_to(80.0, 60.0));
+                input(
+                    game,
+                    WindowEvent::MouseWheel {
+                        device_id: DeviceId::dummy(),
+                        delta: MouseScrollDelta::LineDelta(0.0, 1.0),
+                        phase: TouchPhase::Moved,
+                    },
+                );
+                input(game, button(ElementState::Released));
+                assert!(!game.left);
+                key(game, event_loop, KeyCode::KeyW, ElementState::Pressed);
+                assert!(game.physical_keys.contains(&KeyCode::KeyW));
+                assert!(
+                    !game.keys.raw(&KeyCode::KeyW),
+                    "a held, unconsumed key reached gameplay"
+                );
+                key(game, event_loop, KeyCode::KeyW, ElementState::Released);
+                let c = if in_world { 'y' } else { 'x' };
+                input(game, WindowEvent::Ime(Ime::Commit(c.to_string())));
+                assert_eq!(
+                    game.stored_setting("fixture", "show").as_deref(),
+                    Some(if in_world { "false" } else { "true" })
+                );
+                let mut heard = state.lock().unwrap();
+                assert_eq!(
+                    std::mem::take(&mut heard.input),
+                    ["press", "drag", "scroll", "release", "key down", "key up"]
+                );
+                assert_eq!(std::mem::take(&mut heard.characters), ['w', c]);
+                assert_eq!(
+                    std::mem::take(&mut heard.raw_w),
+                    [mod_api::KeyAction::Press, mod_api::KeyAction::Release]
+                );
+                // A Post for the Config activation click, and another for the screen's click.
+                assert_eq!(std::mem::take(&mut heard.press_post), 2);
+            };
+
+            game.settings.mods.installed = vec![row("fixture")];
+            game.list_native_mods();
+            game.player = None;
+            game.title = Some(game.new_title(game.save.root.clone()));
+            {
+                use mod_api::__private::{ModPhase, PhaseOwner, contain_refusal};
+                let _setup = PhaseOwner::scope(ModPhase::Setup);
+                game.title_action(&NoLoop, Action::Mods).unwrap();
+                click(game, 61.0, 76.0);
+                let denied = contain_refusal("fixture", || {
+                    mod_api::prelude::ConfigHost::set_setting(game, "fixture", "show", "true");
+                })
+                .unwrap_err();
+                assert_eq!(denied.operation, "set_setting");
+                assert_eq!(game.stored_setting("fixture", "show"), None);
+
+                let request = game.ui.options.click(
+                    &mut game.settings,
+                    &game.gui.atlas,
+                    397.0,
+                    192.0,
+                    (480.0, 240.0),
+                    [480, 240],
+                    false,
+                    false,
+                );
+                game.ui.options.open_at(false, Page::Mods);
+                click(game, 61.0, 76.0);
+                let title_parent = game.ui.options.mods_screen.as_ref().unwrap().id();
+                game.handle_option_events(request).unwrap();
+                assert_parent(game, title_parent);
+                assert!(
+                    state.lock().unwrap().calls.is_empty(),
+                    "a stale request invoked the factory"
+                );
+
+                activate(game);
+                assert_eq!(
+                    game.stored_setting("fixture", "show"),
+                    None,
+                    "opening saves nothing"
+                );
+                exercise(game, &mut event_loop, false);
+                game.replay_line("key w tap", &NoLoop);
+                {
+                    let mut heard = state.lock().unwrap();
+                    assert_eq!(
+                        std::mem::take(&mut heard.raw_w),
+                        [mod_api::KeyAction::Press, mod_api::KeyAction::Release]
+                    );
+                    heard.input.clear();
+                }
+                key(
+                    game,
+                    &mut event_loop,
+                    KeyCode::Escape,
+                    ElementState::Pressed,
+                );
+                key(
+                    game,
+                    &mut event_loop,
+                    KeyCode::Escape,
+                    ElementState::Released,
+                );
+                assert_parent(game, title_parent);
+
+                state.lock().unwrap().refuse = true;
+                activate(game);
+                assert_parent(game, title_parent);
+                state.lock().unwrap().refuse = false;
+                state.lock().unwrap().veto = true;
+                activate(game);
+                assert_parent(game, title_parent);
+            }
             let stale = state.lock().unwrap().parent.clone().unwrap();
             state.lock().unwrap().veto = false;
 
+            let _world = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
             game.title = None;
             game.player = Some(
                 sunrise_client::motion::PlayerMotion::new(
@@ -347,18 +521,19 @@ fn typed_config_screen_keeps_its_mods_parent_and_owns_input() {
             );
             game.open_options_at(false, Page::Mods);
             click(game, 61.0, 76.0);
+            let world_parent = game.ui.options.mods_screen.as_ref().unwrap().id();
             activate(game);
-            assert_eq!(game.mod_screen(), Some("fixture"));
+            exercise(game, &mut event_loop, true);
             stale.go_back();
             game.settle_config_screen();
             assert_eq!(game.mod_screen(), Some("fixture"));
             state.lock().unwrap().parent.as_ref().unwrap().go_back();
             game.settle_config_screen();
-            assert_parent(game);
+            assert_parent(game, world_parent);
             activate(game);
             assert_eq!(game.mod_screen(), Some("fixture"));
             mod_api::prelude::ScreensClientHost::mod_screen_close(game, "fixture");
-            assert_parent(game);
+            assert_parent(game, world_parent);
             assert_eq!(
                 state.lock().unwrap().calls,
                 [false, false, false, true, true]

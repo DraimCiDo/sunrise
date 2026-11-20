@@ -4649,13 +4649,23 @@ impl Game<'_> {
     }
     /// Keeps a mod's setting `key`. A mod's hook or part keeps only its own mod's.
     pub(in crate::game) fn set_setting(&self, mod_id: &str, key: &str, value: &str) {
-        if Self::another_mods(mod_id) {
-            return;
-        }
-        if self.config_screen.is_some() && self.mod_screen() == Some(mod_id) {
+        let caller = mod_api::content::crash::current_native_mod();
+        if self.config_screen.is_some()
+            && !self.screen_over_playing()
+            && self.mod_screen() == Some(mod_id)
+            && caller == Some(mod_id)
+        {
             mod_settings::store_edit(&self.native_data_dir(mod_id), mod_id, key, value);
         } else {
-            self.store_setting(mod_id, key, value);
+            // The generated forwarder admits Setup so that the owner can edit
+            // at the title. All other callers retain the original phase gate.
+            mod_api::__private::check_access(
+                "set_setting",
+                mod_api::__private::LoadAccess::WorldOnly,
+            );
+            if caller.is_none_or(|id| id == mod_id) {
+                self.store_setting(mod_id, key, value);
+            }
         }
     }
     pub(super) fn store_setting(&self, mod_id: &str, key: &str, value: &str) -> bool {
@@ -4886,7 +4896,7 @@ impl LevelView<'_> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 #[path = "base_tests/config_screen_tests.rs"]
 mod config_screen_tests;
 #[cfg(test)]

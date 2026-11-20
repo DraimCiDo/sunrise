@@ -12,7 +12,14 @@ use crate::{
     screen_draw::{self as d, Draw, Measure, TextField},
     text::{Style, Text},
 };
-use std::{cell::Cell, collections::HashMap, sync::Arc};
+use std::{
+    cell::Cell,
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 /// `HeaderAndFooterLayout(8, 38)`: the room above and below the content.
 const HEADER_H: i32 = 8;
@@ -253,9 +260,14 @@ fn field(key: &str, value: &str, underlined: bool) -> Text {
     })
 }
 
+/// Identity of a retained Mods list, unchanged by a resize or selection change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ModsScreenId(u64);
+
 /// The Mods screen and its state.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct ModsScreen {
+    id: ModsScreenId,
     pub width: i32,
     pub height: i32,
     in_world: bool,
@@ -276,6 +288,10 @@ pub struct ModsScreen {
 }
 
 impl ModsScreen {
+    pub fn id(&self) -> ModsScreenId {
+        self.id
+    }
+
     /// The installed row selected in this list (as opposed to a built-in row).
     pub fn selected_mod(&self) -> Option<(usize, &str)> {
         let entry = &self.entries[self.selected?];
@@ -351,7 +367,9 @@ impl ModsScreen {
         let mut search = TextField::new(0, 0, SIDEBAR_W - SORT_W - 4, CONTROL_H);
         search.max_length = 64;
         search.hint = Some(tr("sunrise.mods.screen.search").with_color(d::GRAY));
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
         let mut screen = Self {
+            id: ModsScreenId(NEXT_ID.fetch_add(1, Ordering::Relaxed)),
             width,
             height,
             in_world,

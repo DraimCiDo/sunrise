@@ -1642,6 +1642,14 @@ fn matches_focus(id: &FocusId, i: usize, wd: &Widget) -> bool {
         _ => false,
     }
 }
+/// A custom Config activation bound to the selected installed mod and its Mods list.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConfigScreenRequest {
+    pub index: usize,
+    pub owner: String,
+    pub parent: crate::mods_screen::ModsScreenId,
+}
+
 /// What the game must do after an interaction.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
@@ -1707,7 +1715,7 @@ pub enum Event {
     /// Native mod `.0`'s page opened: the game reads its settings' kept values again.
     NativeSettings(usize),
     /// Request the selected loaded mod's custom Config screen, without changing this page.
-    ConfigScreen(usize),
+    ConfigScreen(ConfigScreenRequest),
     /// Setting `.1` of native mod `.0`'s page changed (`settings.mods`): the game keeps it and
     /// tells the mod (`setting_changed`).
     NativeSetting(usize, usize),
@@ -3206,17 +3214,19 @@ impl OptionsUi {
                 Do::OpenFolder => events.push(Event::OpenModFolder),
                 Do::Back => events.extend(self.back(s)),
                 Do::Config(i) => {
-                    let selected = self
-                        .mods_screen
-                        .as_ref()
-                        .and_then(|screen| screen.selected_mod());
-                    if let Some(page) = selected
-                        .filter(|(index, _)| *index == i)
-                        .and_then(|(_, id)| s.mods.installed.get(i).filter(|row| row.id == id))
-                        .and_then(|row| row.native.as_ref())
+                    if let Some(list) = &self.mods_screen
+                        && let Some((index, owner)) = list.selected_mod()
+                        && index == i
+                        && let Some(row) = s.mods.installed.get(index)
+                        && row.id == owner
+                        && let Some(page) = &row.native
                     {
                         if page.config_screen {
-                            events.push(Event::ConfigScreen(i));
+                            events.push(Event::ConfigScreen(ConfigScreenRequest {
+                                index,
+                                owner: owner.to_owned(),
+                                parent: list.id(),
+                            }));
                         } else if !page.settings.is_empty() {
                             self.push(Page::NativeMod(i));
                             events.push(Event::NativeSettings(i));
@@ -5300,9 +5310,17 @@ mod tests {
             ui.click(s, &atlas, x, y, (480.0, 240.0), [480, 240], false, false)
         };
         click(&mut ui, &mut settings, 61.0, 76.0);
+        let parent = ui.mods_screen.as_ref().unwrap().id();
         assert_eq!(
             click(&mut ui, &mut settings, 397.0, 192.0),
-            [Event::ButtonClick, Event::ConfigScreen(0)]
+            [
+                Event::ButtonClick,
+                Event::ConfigScreen(ConfigScreenRequest {
+                    index: 0,
+                    owner: "custom".into(),
+                    parent,
+                })
+            ]
         );
         assert_eq!(ui.page(), Page::Mods);
         assert_eq!(

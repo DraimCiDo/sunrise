@@ -34,8 +34,9 @@ pub trait ConfigHost {
     /// Keeps a mod's registered setting `key`. Another mod's id or an unregistered key keeps
     /// nothing. A successful write invalidates the typed read cache for this data folder and key;
     /// a failed write leaves it unchanged. This raw write does not fire `setting_changed`.
-    /// A custom Config screen accepts only text valid for the registered setting's kind
-    /// and limits, including over the title.
+    /// Only the active custom Config screen's owner can write at the title.
+    /// Edits in that screen must satisfy the registered setting's kind and limits.
+    /// Other callers must be in the World phase.
     #[access(ClientSetup)]
     fn set_setting(&self, mod_id: &str, key: &str, value: &str);
     /// Side: both.

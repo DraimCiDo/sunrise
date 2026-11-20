@@ -139,8 +139,6 @@ pub trait SettingsRegistrar {
     /// Register this mod's custom Config screen during `Hooks::register` on the client.
     /// It takes precedence over generated settings, even when there are no rows.
     /// A second registration returns `Duplicate` without replacing the first.
-    ///
-    /// Not on wasm: the factory and its sessions are process-local client UI objects.
     fn register_config_screen_factory(
         &mut self,
         factory: Box<dyn ConfigScreenFactory>,
