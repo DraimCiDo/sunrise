@@ -468,7 +468,7 @@ fn stock_hides_are_draw_local_and_refused_callbacks_cannot_erase_them() {
         );
         assert!(unadorned_mobs.iter().any(|v| inside(v.uv, remote)));
         assert!(preview.iter().any(|v| inside(v.uv, local)));
-        let quad_uses = |quad: &[Vertex], sprite| {
+        let quad_uses = |quad: &[Vertex; 4], sprite| {
             let uv = std::array::from_fn(|k| quad.iter().map(|v| v.uv[k]).sum::<f32>() / 4.0);
             inside(uv, sprite)
         };
