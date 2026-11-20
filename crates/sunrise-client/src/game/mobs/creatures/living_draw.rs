@@ -165,7 +165,13 @@ impl Game<'_> {
         // model and vanilla layers; the mods' layers and post hooks still follow.
         let modded = replacement.is_some_and(|renderer| {
             self.mod_living_renderer_geometry(
-                &renderer, mob, alpha as f32, camera, packed, true, out,
+                &renderer,
+                mob,
+                alpha as f32,
+                camera,
+                packed,
+                true,
+                out,
             )
         });
         if mob.species() == Species::SulfurCube && !mob.is_invisible() && !modded {

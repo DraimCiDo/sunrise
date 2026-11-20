@@ -261,7 +261,13 @@ impl Game<'_> {
             .0
             .is_some_and(|renderer| {
                 self.mod_living_renderer_geometry(
-                    &renderer, mob, partial, camera, FULL_BRIGHT, false, out,
+                    &renderer,
+                    mob,
+                    partial,
+                    camera,
+                    FULL_BRIGHT,
+                    false,
+                    out,
                 )
             });
         let atlas = &self.gui.atlas;

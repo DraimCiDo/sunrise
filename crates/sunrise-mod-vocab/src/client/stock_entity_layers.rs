@@ -5,7 +5,6 @@ use std::cell::Cell;
 
 /// The slot of a humanoid armor layer, not the item's equipment slot.
 // exhaustive: these are the four slots drawn by the humanoid armor layer.
-// no wire: native render callback selector, never serialized.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ArmorLayerSlot {
     /// The helmet layer.
@@ -20,7 +19,6 @@ pub enum ArmorLayerSlot {
 
 /// The independent passes of a worn humanoid armor piece.
 // exhaustive: the base material, foil and trim are the stock armor passes.
-// no wire: native render callback selector, never serialized.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ArmorLayerPass {
     /// The armor material, including its base texture layers.
@@ -32,7 +30,6 @@ pub enum ArmorLayerPass {
 }
 
 /// A stock layer of the current living-entity renderer. Not a model part or a mod-added layer.
-// no wire: native render callback selector, never serialized.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StockEntityLayer {
@@ -62,7 +59,6 @@ impl StockEntityLayer {
 }
 
 /// Why a stock layer hide made no edit.
-// no wire: native render callback refusal, never serialized.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HideLayerError {
@@ -71,7 +67,6 @@ pub enum HideLayerError {
 }
 
 // hidden: the renderer's fixed-size mask, used for both supported and hidden layers.
-// no wire: internal draw-local state, never serialized.
 #[doc(hidden)]
 #[derive(Clone, Copy, Default)]
 pub struct StockLayerMask(u32);
@@ -91,7 +86,6 @@ impl StockLayerMask {
 /// Hide stock layers for one world draw in `render_player_pre` or `render_living_pre`.
 /// Successful edits accumulate across listeners and both hooks. They cannot show a layer or
 /// affect the inventory preview, another draw, equipment, or the entity's base model.
-// no wire: borrowed native render callback editor, never serialized.
 pub struct HiddenLayers<'draw> {
     supported: StockLayerMask,
     hidden: &'draw Cell<StockLayerMask>,
