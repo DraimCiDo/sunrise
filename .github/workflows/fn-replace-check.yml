@@ -200,7 +200,7 @@ jobs:
           echo "LAUNCHER=$(realpath "$target/release/sunrise-launcher")" >> "$GITHUB_ENV"
       - name: Function replacement check (build and link)
         run: |
-          # api_only has no [native] row; beside alpha the mixed set still takes the engine route.
+          # api_only has no native patches; beside alpha the mixed set still takes the engine route.
           FNR_ROUTE=prebuilt FNR_MODS="alpha beta one ten fdshape support registry lower loop loop_second api_only" \
             tools/ci/fn_replace_check.sh "$LAUNCHER" "$FNR_SCRATCH/sdk-base" "$FNR_SCRATCH/check" 2>&1 \
             | tee "$FNR_SCRATCH/fnr-check.log"

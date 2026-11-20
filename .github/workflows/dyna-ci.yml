@@ -638,11 +638,6 @@ jobs:
         continue-on-error: true
         run: |
           python3 tools/ci/cargo_timings.py target/cargo-timings/cargo-timing.html | tee -a "$GITHUB_STEP_SUMMARY"
-          # The points build script's phases (seconds since it started), from the file it writes beside its output.
-          for timing in target/debug/build/sunrise-mod-points-*/out/points-timing.txt; do
-            [ -f "$timing" ] || continue
-            { echo "points build script phases:"; cat "$timing"; } | tee -a "$GITHUB_STEP_SUMMARY"
-          done
       # Binaries run normally, three at a time, under the inet/resolver preload guard. Only a binary
       # recording a violation is rerun per test to name culprits, even if they swallow the refusal.
       # The guard library is built here only; the daily run does not preload it. Unix sockets remain available.

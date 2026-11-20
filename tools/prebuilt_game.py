@@ -76,7 +76,7 @@ RUNTIME = "bin"
 # The required inputs (`sunrise_mod_package::sdk::Inputs`): `members` lists what each slice must hold.
 INPUTS = ROOT / "crates/sunrise-mod-package/src/sdk/inputs.json"
 # The crates an API-only mod may name; their closure is the `api` archive.
-API_ROOTS = ("sunrise-mod-api", "sunrise-mod-points")
+API_ROOTS = ("sunrise-mod-api",)
 # The game libraries outside the API closure, in the runtime archive.
 GAME_LIBRARIES = ("sunrise_mod_host", "sunrise_official")
 # The lowest of the libraries the prebuilt game is split into: every other one links it.
@@ -90,8 +90,6 @@ LINK_ARG = "cargo:sunrise-executable-link-arg="
 # cargo passes their folders to rustc, a plain rustc gets them from here (`-L native=OUT/native`).
 NATIVE = "native"
 NATIVE_SUFFIXES = (".a", ".lib")
-# The game's injection points, listed by the staging pass: the launcher routes mods' point injections by it.
-POINTS = "points.json"
 # The staged internals signatures, checked against a mod's declared access list.
 INTERNALS = "internals.json"
 # The published loops (`#[sunrise_loop]`), which a mod's `[[native.loop]]` rows name.
@@ -100,10 +98,10 @@ LOOPS = "loops.json"
 # launcher's patch step reads it instead of walking the game's source. Only the engine route patches functions, so it
 # is in the `engine` slice, not with the rest of the build data in `api`.
 FUNCTIONS = "functions.json"
-# The SDK's build data (`point_shape::build_data`): each file opens with `schema` and `build.commit`.
-BUILD_DATA = (FUNCTIONS, INTERNALS, LOOPS, POINTS)
+# The SDK's build data: each file opens with `schema` and `build.commit`.
+BUILD_DATA = (FUNCTIONS, INTERNALS, LOOPS)
 # The build data the API route reads, in the `api` slice.
-API_BUILD_DATA = (INTERNALS, LOOPS, POINTS)
+API_BUILD_DATA = (INTERNALS, LOOPS)
 BUILD_DATA_SCHEMA = 1
 BUILD_DATA_ARCHIVE = "build-data.tar.xz"
 # The surface export (`sunrise-stage surface`), an SDK asset of its own.
@@ -240,7 +238,7 @@ def stage(target_dir: Path, stage_tool: Path | None = None, *, sdk_dylibs: bool 
             path.write_bytes(data)
             if os.name == "posix" and mode & 0o111:
                 path.chmod(stat.S_IMODE(path.stat().st_mode) | (mode & 0o111))
-        arguments = [str(scratch), str(scratch / POINTS), str(scratch / INTERNALS), commit]
+        arguments = [str(scratch), str(scratch / INTERNALS), commit]
         if stage_tool is None:
             # Build the tool from a stable copy of the unmodified commit, not the disposable rewrite tree.
             source = target_dir / "stage-in"
@@ -1167,7 +1165,7 @@ def exports(out: Path) -> None:
         print(f"{library.name}: {names} exported names (Windows' limit is {EXPORT_LIMIT:,})")
         if names > EXPORT_WARNING:
             warning = (f"{library.name} exports {names:,} names, {EXPORT_LIMIT - names:,} short of Windows' "
-                       f"{EXPORT_LIMIT:,}: cut exported names before adding points or internals (#589)")
+                       f"{EXPORT_LIMIT:,}: cut exported names before exposing more internals (#589)")
             print(f"::warning::{warning}")
             if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
                 with open(summary, "a", encoding="utf-8") as file:

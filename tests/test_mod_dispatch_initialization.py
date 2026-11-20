@@ -33,7 +33,7 @@ def test_bodies(source):
 def violations(root):
     failures = []
     for crate in ('sunrise-mod-api', 'sunrise-mod-host',
-                  'sunrise-mod-points', 'sunrise-mod-render', 'sunrise-client',
+                  'sunrise-mod-render', 'sunrise-client',
                   'sunrise-client-lib'):
         for path in (root / 'crates' / crate).rglob('*.rs'):
             relative = path.relative_to(root).as_posix()
