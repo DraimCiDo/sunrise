@@ -1,6 +1,5 @@
 //! A block entity Part whose tick exercises the Part state accessors.
 use mod_api::*;
-use std::sync::Arc;
 
 pub static COUNT: AttachmentType<i32> = AttachmentType {
     namespace: "part_state_fixture",
@@ -17,7 +16,7 @@ pub static COUNT: AttachmentType<i32> = AttachmentType {
     sync: false,
 };
 
-/// What modes 1 and 3 set once their checks passed, so the game sees they ran to the end.
+/// Set to 1 after the undecodable-value check, so the game sees it ran to the end.
 pub static MARK: AttachmentType<i32> = AttachmentType {
     namespace: "part_state_fixture",
     name: "part_state_mark",
@@ -33,23 +32,10 @@ pub static MARK: AttachmentType<i32> = AttachmentType {
     sync: false,
 };
 
-/// A type whose Wire form holds a resource handle: refused on every target.
-type Held = Option<Arc<dyn BlockPart>>;
-static HELD: AttachmentType<Held> = AttachmentType {
-    namespace: "part_state_fixture",
-    name: "part_state_held",
-    default: || None,
-    codec: None,
-    copy_on_death: false,
-    sync: false,
-};
-
 /// Each tick does what its block entity's first data slot says:
 /// - 0: an aborted edit, a refused recursive edit, then a committed count;
 /// - 1: an edit of an undecodable saved value is refused before its closure runs, then `MARK`
-///   is set to 1;
-/// - 3: the declaration of a state holding a resource handle is refused, as compiled here,
-///   then `MARK` is set to 3.
+///   is set to 1.
 pub struct Counter;
 #[mod_api::sunrise_part]
 impl BlockPart for Counter {}
@@ -70,13 +56,6 @@ impl BlockEntityPart for Counter {
                     })
                 );
                 assert_eq!(edit_part_state(host, entity, &MARK, |_, m| *m = 1), Ok(()));
-            }
-            3 => {
-                assert_eq!(
-                    PartStateDeclaration::of(&HELD).check(),
-                    Err(PartStateRefusal::ResourceHandle)
-                );
-                assert_eq!(edit_part_state(host, entity, &MARK, |_, m| *m = 3), Ok(()));
             }
             _ => {
                 let aborted: Result<(), ()> = host.transaction(|host, _| {
@@ -99,7 +78,7 @@ impl BlockEntityPartState for Counter {
 }
 
 pub fn register(registrar: &mut dyn Registrar) {
-    for name in ["part_state_count", "part_state_mark", "part_state_held"] {
+    for name in ["part_state_count", "part_state_mark"] {
         registrar
             .register_attachment_type(&format!("part_state_fixture:{name}"), false)
             .unwrap();

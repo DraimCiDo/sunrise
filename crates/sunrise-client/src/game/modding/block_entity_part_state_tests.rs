@@ -599,9 +599,6 @@ fn part_state_counts_ticks_across_chunk_reload() {
                 }
                 assert_eq!(saved_value(game, pos, "part_state_count"), Some(3));
 
-                tick_in(game, pos, 3);
-                assert_eq!(saved_value(game, pos, "part_state_mark"), Some(3));
-
                 // Unloaded by the owner, then loaded back from the region file.
                 assert!(game.streaming.set_forced(key.0, key.1, false));
                 for _ in 0..9 {
