@@ -32,8 +32,10 @@ pub trait EffectsClientHost {
     /// fading with distance (`volume` past 1 carries farther, 16 blocks times the volume), as
     /// thunder heard after the flash or a blast heard when its shock wave arrives. Its
     /// `SoundRef` follows and controls this play: `state`, `stop` and `fade`. None, with nothing
-    /// played, on a server or for a value out of range; an event the resources don't have plays
-    /// nothing, as vanilla's, and its handle reads `Stopped` once the update has tried it.
+    /// played, on a server or for a value out of range (`SoundPlay::effects` included, by
+    /// `SoundEffects::valid`); an event the resources don't have plays nothing, as vanilla's,
+    /// and its handle reads `Stopped` once the update has tried it. Its effects stay as given
+    /// unless the sound ticks: a `play_sound` listener can change them on each live refresh.
     #[access(ClientSetup)]
     fn play_local_sound(&self, sound: &SoundPlay, after: u32) -> Option<SoundRef>;
     /// Side: client.

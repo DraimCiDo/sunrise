@@ -101,9 +101,10 @@ fn discover_catalog(
         )
     })?;
     let projects = [api::Project::read(&bundle).map_err(|e| e.to_string())?];
-    let declared = [dependencies::from_manifest(
-        &bundle.manifest.dependencies,
+    let declared = [dependencies::build_dependencies(
+        &bundle.manifest,
         sunrise_mod_package::manifest::Side::Both,
+        |id| bundle.manifest.id == id,
     )];
     let inputs = [dependencies::Mod {
         id: &bundle.manifest.id,

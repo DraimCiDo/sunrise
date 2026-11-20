@@ -554,6 +554,8 @@ impl Game<'_> {
         self.options.resources = root.clone();
         self.falling_vertices.get_mut().clear();
         self.pack = pack;
+        // The joined level's environment for the frame has the packs' layers over its type.
+        self.build_level_environments();
         let skip = self
             .settings
             .extras

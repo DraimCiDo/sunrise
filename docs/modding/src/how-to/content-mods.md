@@ -782,6 +782,13 @@ rebuild just because tags changed. A same-parameter read from a build listener
 sees completed tabs and the previous contents of the remaining tabs;
 a different-parameter read returns `CreativeTabReadError::Reentrant`.
 
+With a shared `&dyn Host`, use `host.built_creative_tabs()` to read the last
+completed snapshot without firing any build callbacks. It returns `Ok(None)`
+before that side's first completed build and `CreativeTabReadError::Unavailable`
+outside a live world. It does not change the snapshot's build permissions.
+Each tab's `display_name` is a translatable component for its `itemGroup.*` key,
+with the catalog's `title` as its text fallback.
+
 Unknown component types fail content loading unless a code mod registers them.
 Item-id-specific behaviour does not follow a template: a copy of the trident does not throw.
 
@@ -1019,14 +1026,21 @@ A mod menu type (vanilla's `MenuType`) is declared in `data/<id>/sunrise/menu/<n
 from (`results`, as a furnace's result slot):
 
 ```json
-{ "slots": 9, "data_slots": 2, "results": [7, 8] }
+{ "slots": 9, "data_slots": 2, "results": [7, 8], "inputs": [0, 1] }
 ```
+
+The optional menu `inputs` list marks machine feeds, including fuel, as `Input`
+in [`MenuRef::slot_kinds`](../concepts/capabilities/menu-slots.md). Indices start at zero and
+must be unique and below `slots`; they cannot overlap `results`, the crafting grid,
+or its result slot. Both linked and unlinked slots can be inputs. Omit the list (or
+use `[]`) to leave ordinary slots as `Storage`. The role does not change which items
+a slot accepts or how clicks and item transfers work.
 
 It is the menu type `<id>:<name>`, with its network id after vanilla's. A mod block's container opens it when its
 `menu` names it with as many slots ([native mods](native-mods.md), `r.block_container(&block, container)`). The menu holds
 its slots, then the player's 36. A shift-click from the inventory goes to the first slots with room, never a result
 slot, and one on the container goes to the inventory, as a chest's does. `results` fence players only: hoppers follow the
-container's faces and `inputs`, so leave result slots out of `inputs`. The data slots are the block entity's `data`
+block entity container's faces and insertion rules, not the menu's `inputs` list. The data slots are the block entity's `data`
 (16-bit on the network, as vanilla's), all sent when it opens, then each change. A Sunrise client shows it through the
 mod's own screen (`screen`); without one it closes again. `player.open_mod_menu` can open the same type without a
 block, and a registered recipe-book screen applies to either opening. Clients join a server only with the same mods' menu

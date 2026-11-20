@@ -552,6 +552,9 @@ impl Game<'_> {
         if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
             return false;
         }
+        if let Some(mut host) = super::journal_level_write::JournalLevelWrite::new(self, level) {
+            return mod_api::LevelWriteHost::remove_block(&mut host, pos, moved);
+        }
         let changed =
             self.with_level(|_, level, ticks| level.remove_block_write(ticks, pos, moved));
         let _ = self.process_level_events();
@@ -615,7 +618,11 @@ impl Game<'_> {
         tool: Option<&ItemStack>,
         collect: bool,
     ) -> Option<Vec<ItemStack>> {
-        if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
+        // Loot and break effects cannot be rolled back by the level journal.
+        if self.transaction_current().is_some()
+            || !self.native_level_write_allowed(level, pos)
+            || self.dim.key() != level.dimension()
+        {
             return None;
         }
         let at = sunrise_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
