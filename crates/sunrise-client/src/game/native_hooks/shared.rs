@@ -453,7 +453,7 @@ impl Game<'_> {
     /// (`screen_hooks_heard`), `set_mode` applies at once. Run after each window
     /// event and control command, and each frame.
     pub(super) fn settle_title_mode(&mut self) {
-        let gated = self.screen_hooks_heard() || self.has_screen_init_post();
+        let gated = self.screen_hooks_heard() || self.has_screen_init_hooks();
         let Some(title) = self.title.as_mut() else {
             return;
         };

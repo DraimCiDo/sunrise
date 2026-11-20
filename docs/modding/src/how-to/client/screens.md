@@ -48,6 +48,9 @@ and initial focus are installed, before drawing or input. A resize or effective
 GUI-scale change rebuilds the controls, even if the panel rectangle looks the
 same. Drawing another frame or dismissing an overlay over an unchanged build
 is not initialization.
+On `title` and the full `paused` menu, `screen_init_pre` can skip the stock
+listeners. Post still fires on that empty build; it can add the first control.
+Other screens do not expose their stock listeners.
 
 Widget editing is supported on `title` and `paused` (the full pause menu).
 Other screens can still notify listeners; their widget list is empty and edits

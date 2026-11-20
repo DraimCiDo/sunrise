@@ -336,6 +336,8 @@ pub(super) struct ScreenBuildState {
     viewport: Option<([u32; 2], GuiSize)>,
     pub(super) overlay: Option<&'static str>,
     widgets_pending: bool,
+    pub(super) defer_init: bool,
+    title_inputs: Option<(usize, bool)>,
     pub(super) widget_epoch: u64,
     pub(super) widgets: Option<super::screen_widgets::BuiltScreenWidgets>,
     /// The frame's effects answer, while this frame asked for one.
@@ -509,6 +511,9 @@ impl Game<'_> {
     /// and drops it when it closes. A frame that changes neither builds
     /// nothing, so `observe_screen` calls it every frame.
     pub(super) fn build_screen(&mut self) {
+        if self.screen_state.build.defer_init {
+            return;
+        }
         let shown = self.screen != Screen::Playing || self.title.is_some();
         let overlay = self.overlay_screen_id();
         // Gui.setScreen: KeyMapping.releaseAll, as the screen or overlay opens.
@@ -519,6 +524,12 @@ impl Game<'_> {
         let (framebuffer, gui) = self.gui_frame_now();
         let identity = if self.screen == Screen::Playing {
             self.title.as_ref().map(|title| title.mode.id())
+        } else {
+            None
+        };
+        let title_inputs = if let Some(title) = &mut self.title {
+            title.mods = self.settings.mods.installed.len();
+            (identity == Some("title")).then_some((title.mods, title.allows_multiplayer))
         } else {
             None
         };
@@ -608,7 +619,9 @@ impl Game<'_> {
         let overlay_changed = std::mem::replace(&mut state.overlay, overlay) != overlay;
         let closed = !shown && state.current.is_some();
         let rebuilt = state.sync(self.screen, shown, identity, gui, layout);
-        if closed || rebuilt || (shown && resized) {
+        let title_changed =
+            std::mem::replace(&mut state.title_inputs, title_inputs) != title_inputs;
+        if closed || rebuilt || (shown && resized) || title_changed {
             state.widget_epoch = state.widget_epoch.wrapping_add(1);
             state.widgets_pending = shown;
             if state.widgets.take().is_some() {
@@ -620,9 +633,9 @@ impl Game<'_> {
         } else if overlay_changed {
             self.pad.menu.armed = None;
         }
-        if self.has_screen_init_post() {
+        if self.has_screen_init_hooks() {
             match overlay {
-                Some(id) if overlay_changed || resized => {
+                Some(id) if (overlay_changed || resized) && self.has_screen_init_post() => {
                     self.init_stock_screen_widgets(Some(id), gui, true);
                 }
                 None if std::mem::take(&mut self.screen_state.build.widgets_pending) => {

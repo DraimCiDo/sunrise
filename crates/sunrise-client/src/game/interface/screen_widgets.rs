@@ -4,7 +4,7 @@
 
 use super::{Game, Screen, glfw_modifiers};
 use mod_api::client::widgets::{
-    Outcome, ScreenWidgetAction, ScreenWidgets, Widget, WidgetId, Widgets,
+    Outcome, ScreenWidgetAction, ScreenWidgetBuild, Widget, WidgetId, Widgets,
 };
 use mod_api::content::crash::{ModCall, enter_native_mod};
 use std::cell::RefCell;
@@ -25,6 +25,7 @@ pub(super) struct BuiltScreenWidgets {
     removed: [u64; 4],
     added: RefCell<Widgets>,
     actions: Vec<(WidgetId, ScreenWidgetAction)>,
+    labels: Vec<std::sync::Arc<crate::text::Text>>,
     targets: Vec<Target>,
     added_targets: Vec<(Target, WidgetId)>,
 }
@@ -50,28 +51,6 @@ impl Game<'_> {
         let size = (gui.size[0] as f32, gui.size[1] as f32);
         let title = !overlay && self.screen == Screen::Playing && identity == Some("title");
         let pause = !overlay && self.screen == Screen::Paused && self.pause_menu;
-        let stock: Vec<StockControl> = if title {
-            let title = self.title.as_mut().expect("title build has a title");
-            title.mods = self.settings.mods.installed.len();
-            title
-                .main_widget_rows(&self.gui.atlas, size)
-                .into_iter()
-                .map(|(id, bounds, label, active)| StockControl {
-                    id,
-                    bounds,
-                    label: mod_api::Text::literal(label),
-                    active,
-                })
-                .collect()
-        } else if pause {
-            self.pause_stock_widgets(size)
-        } else {
-            Vec::new()
-        };
-        let mut staged = ScreenWidgets::__new(title || pause);
-        for widget in &stock {
-            staged.__stock(widget.id, widget.bounds, Some(widget.label.clone()));
-        }
         let epoch = self.screen_state.build.widget_epoch;
         let mut view = self
             .observed_screen_view()
@@ -82,24 +61,69 @@ impl Game<'_> {
         if view.rect == [0.0; 4] {
             view.rect = [0.0, 0.0, size.0, size.1];
         }
-        self.native_screen_init_post(&view, &mut staged);
+        let mut skip_stock = false;
+        if title || pause {
+            self.native_screen_init_pre(&view, &mut skip_stock);
+        }
+        let post = self.has_screen_init_post();
+        if !post && !skip_stock {
+            return;
+        }
+        let stock: Vec<StockControl> = if title && !skip_stock {
+            let title = self.title.as_ref().expect("title build has a title");
+            title
+                .main_widget_rows(&self.gui.atlas, size)
+                .into_iter()
+                .map(|(id, bounds, label, active)| StockControl {
+                    id,
+                    bounds,
+                    label: mod_api::Text::literal(label),
+                    active,
+                })
+                .collect()
+        } else if pause && !skip_stock {
+            self.pause_stock_widgets(size)
+        } else {
+            Vec::new()
+        };
+        let mut staged =
+            ScreenWidgetBuild::__new((title || pause).then_some([size.0, size.1]), |text| {
+                sunrise_client_lib::api_text::to_engine(text).map(|label| {
+                    let label: std::sync::Arc<dyn std::any::Any + Send + Sync> =
+                        std::sync::Arc::new(label);
+                    label
+                })
+            });
+        for widget in &stock {
+            staged.__stock(widget.id, widget.bounds, Some(widget.label.clone()));
+        }
+        if post {
+            self.native_screen_init_post(&view, &mut staged);
+        }
         if self.screen_state.build.widget_epoch != epoch || (!title && !pause) {
             return;
         }
-        let mut removed = [0u64; 4];
+        let mut removed = if skip_stock { [u64::MAX; 4] } else { [0u64; 4] };
         for widget in &stock {
             removed[usize::from(widget.id / 64)] |= 1 << (widget.id % 64);
         }
         let mut added = Widgets::new();
         let mut actions = Vec::new();
+        let mut labels = Vec::new();
         let mut added_targets = Vec::new();
-        for entry in staged.__finish() {
+        for (ordinal, entry) in staged.__finish().into_iter().enumerate() {
             if let Some(id) = entry.stock {
                 removed[usize::from(id / 64)] &= !(1 << (id % 64));
                 continue;
             }
             let (id, active, rect, kind) = match entry.widget {
                 Some(Widget::Button(button)) => {
+                    let label = entry.render_label.expect("prepared button label");
+                    labels.push(
+                        label
+                            .downcast::<crate::text::Text>()
+                            .expect("game prepared the label"),
+                    );
                     let (active, rect) = (button.active, button.rect);
                     (added.add_button(button), active, rect, Kind::Button)
                 }
@@ -110,7 +134,14 @@ impl Game<'_> {
                 _ => continue,
             };
             if active {
-                added_targets.push((Target { rect, kind }, id));
+                added_targets.push((
+                    Target {
+                        rect,
+                        kind,
+                        listener: Some((epoch, 256 + ordinal)),
+                    },
+                    id,
+                ));
             }
             if let Some(action) = entry.action {
                 actions.push((id, action));
@@ -124,39 +155,77 @@ impl Game<'_> {
             .map(|control| Target {
                 rect: control.bounds,
                 kind: Kind::Button,
+                listener: Some((epoch, usize::from(control.id))),
             })
             .chain(added_targets.iter().map(|&(target, _)| target))
             .collect::<Vec<_>>();
-        if self
-            .pad
-            .menu
-            .focus
-            .is_some_and(|old| !targets.iter().any(|target| target.rect == old.rect))
-        {
-            self.pad_clear_focus();
-        }
         if title && let Some(title) = &mut self.title {
             title.set_removed_main_widgets(removed);
         }
+        let screen = self.key_screen();
         let stock_focus = if title {
-            self.title.as_mut().map(|title| &mut title.focused_button)
+            &mut self
+                .title
+                .as_mut()
+                .expect("title build has a title")
+                .focused_button
         } else {
-            Some(&mut self.pause_focus)
+            &mut self.pause_focus
         };
-        if let Some(focus) = stock_focus
-            && focus.is_some_and(|id| removed[usize::from(id / 64)] & (1 << (id % 64)) != 0)
-        {
-            *focus = stock
+        let old_stock = *stock_focus;
+        let old_target = self.pad.menu.focus.filter(|_| {
+            self.focus_screen == screen
+                || (self.pad.menu.keyboard && self.pad.menu.key_screen == screen)
+        });
+        let old_stock_id = old_target.and_then(|target| match target.listener {
+            Some((_, id)) => u8::try_from(id).ok(),
+            None => stock
                 .iter()
-                .find(|control| control.active)
-                .map(|control| control.id);
+                .find(|control| control.bounds == target.rect)
+                .map(|control| control.id),
+        });
+        let surviving_stock = |id| {
+            targets
+                .iter()
+                .copied()
+                .find(|target| target.listener == Some((epoch, usize::from(id))))
+        };
+        let replacement = if old_target.is_some() {
+            old_stock_id
+                .and_then(surviving_stock)
+                .or_else(|| targets.first().copied())
+        } else if let Some(id) = old_stock {
+            surviving_stock(id).or_else(|| targets.first().copied())
+        } else {
+            None
+        };
+        *stock_focus = replacement.and_then(|target| u8::try_from(target.listener.unwrap().1).ok());
+        if old_target.is_some() {
+            self.pad.menu.focus = replacement;
         }
-        let added = RefCell::new(added);
+        if let Some(target) = replacement {
+            // The first draw must not clear the focus just repaired by init.
+            self.focus_screen = self.key_screen();
+            if self.pad.menu.keyboard {
+                self.pad.menu.key_screen = self.focus_screen;
+                self.pad.menu.key_restart = None;
+            }
+            if let Some(&(_, id)) = added_targets
+                .iter()
+                .find(|(candidate, _)| candidate.same_control(target))
+            {
+                added.set_focus(self, Some(id));
+                if old_target.is_none() {
+                    self.pad.menu.focus = Some(target);
+                }
+            }
+        }
         self.screen_state.build.widgets = Some(BuiltScreenWidgets {
             stock,
             removed,
-            added,
+            added: RefCell::new(added),
             actions,
+            labels,
             targets,
             added_targets,
         });
@@ -183,10 +252,15 @@ impl Game<'_> {
             return;
         };
         let mut draw = super::host::draw::GameDrawContext::new(self, batch);
-        let _ = build
-            .added
-            .borrow_mut()
-            .draw(&mut draw, self, [self.cursor.0, self.cursor.1]);
+        draw.widget_labels = Some(build.labels.iter());
+        let mouse = if self.pad.menu.focus.is_some() && self.pad_focus_mode() {
+            // The controller's synthetic pointer is not a hover on every
+            // widget under it: only the selected listener has focus.
+            [f32::INFINITY; 2]
+        } else {
+            [self.cursor.0, self.cursor.1]
+        };
+        let _ = build.added.borrow_mut().draw(&mut draw, self, mouse);
     }
 
     fn press_stock_screen_button(&mut self, action: ScreenWidgetAction) {
@@ -235,6 +309,14 @@ impl Game<'_> {
         outcome.handled()
     }
 
+    pub(super) fn end_stock_widget_capture(&self) -> bool {
+        self.screen_state
+            .build
+            .widgets
+            .as_ref()
+            .is_some_and(|build| build.added.borrow_mut().mouse_released(0).handled())
+    }
+
     pub(super) fn stock_widget_drag(&self) -> bool {
         self.active_stock_widgets().is_some_and(|build| {
             build
@@ -252,6 +334,24 @@ impl Game<'_> {
                 .focused()
                 .is_some_and(|id| added.text_field(id).is_some())
         })
+    }
+
+    pub(super) fn stock_widget_edit(
+        &self,
+        edited: Option<&mod_api::client::widgets::TextEdit>,
+    ) -> Option<mod_api::client::widgets::TextEdit> {
+        let mut added = self.active_stock_widgets()?.added.borrow_mut();
+        let id = added.focused()?;
+        let field = added.text_field_mut(id)?;
+        if let Some(edited) = edited {
+            if field.value() != edited.value {
+                field.edit.select_all();
+                field.edit.insert_text(&edited.value);
+            }
+            field.edit.set_cursor(edited.highlight, false);
+            field.edit.set_cursor(edited.cursor, true);
+        }
+        Some(field.edit.clone())
     }
 
     pub(super) fn stock_widget_type(&self, text: &str) -> bool {
@@ -281,15 +381,16 @@ impl Game<'_> {
         Some(&self.active_stock_widgets()?.targets)
     }
 
-    pub(super) fn focus_stock_widget_field(&self, target: Target) -> bool {
+    pub(super) fn focus_stock_widget(&self, target: Target) -> bool {
         let Some(build) = self.active_stock_widgets() else {
             return false;
         };
-        let Some((_, id)) = build.added_targets.iter().find(|(at, _)| *at == target) else {
-            return false;
-        };
-        build.added.borrow_mut().set_focus(self, Some(*id));
-        true
+        let id = build
+            .added_targets
+            .iter()
+            .find_map(|(candidate, id)| candidate.same_control(target).then_some(*id));
+        build.added.borrow_mut().set_focus(self, id);
+        id.is_some()
     }
 
     pub(super) fn press_stock_widget_target(&mut self, target: Target) -> bool {
@@ -299,7 +400,7 @@ impl Game<'_> {
         let Some(&(_, id)) = build
             .added_targets
             .iter()
-            .find(|(candidate, _)| *candidate == target)
+            .find(|(candidate, _)| candidate.same_control(target))
         else {
             return false;
         };
@@ -343,12 +444,50 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::{event_loop::EventLoopCtl, native_entity_refs::tests::with_client_game};
+    use crate::game::{
+        event_loop::EventLoopCtl, native_entity_refs::tests::with_client_game,
+        native_hooks::particle_count_tests::frame_scene,
+    };
     use mod_api::client::widgets::{Button, ScreenWidgetError, ScreenWidgetRef};
-    use mod_api::{ClientHost, Hooks, ModEntry, ScreenInitPostEvent, Text, testing::with_mods};
+    use mod_api::{
+        ClientHost, Flow, Hooks, ModEntry, ScreenCharTypedPreEvent, ScreenInitPostEvent,
+        ScreenInitPreEvent, ScreenMouseButtonReleasedPreEvent, Text, testing::with_mods,
+    };
     use std::cell::RefCell;
     use std::sync::{Arc, Mutex};
-    use sunrise_client::{gamepad, widgets};
+    use sunrise_client::{gamepad, osk, widgets};
+    use winit::{
+        dpi::PhysicalSize,
+        event::{DeviceId, ElementState, MouseButton, WindowEvent},
+    };
+
+    fn resize(game: &mut Game<'_>, width: u32, height: u32) {
+        game.handle_window_event_inner(
+            &NoLoop,
+            WindowEvent::Resized(PhysicalSize::new(width, height)),
+            None,
+        );
+    }
+
+    fn left(game: &mut Game<'_>, state: ElementState) {
+        game.handle_window_event_inner(
+            &NoLoop,
+            WindowEvent::MouseInput {
+                device_id: DeviceId::dummy(),
+                state,
+                button: MouseButton::Left,
+            },
+            None,
+        );
+    }
+
+    fn frame(game: &mut Game<'_>, generation: u64) -> widgets::Narration {
+        widgets::set_narrating(true);
+        assert!(game.render_with(|_, _| Ok(true)).unwrap());
+        widgets::end_frame(generation);
+        widgets::set_narrating(false);
+        widgets::take_last_narration()
+    }
 
     const ADDED: [f32; 4] = [9.0, 17.0, 60.0, 20.0];
     thread_local! {
@@ -429,10 +568,7 @@ mod tests {
                     .listeners()
                     .any(|view| view.label == Some(&Text::literal("Refused")))
             );
-            let widget = Widget::Button(Button::new(
-                [9.0, 40.0, 60.0, 20.0],
-                Text::literal("Second action"),
-            ));
+            let widget = Widget::Button(Button::new(ADDED, Text::literal("Second action")));
             event
                 .widgets
                 .add_listener(widget, Some(("settings", press)))
@@ -452,29 +588,55 @@ mod tests {
         .into();
         with_mods(mods, || {
             with_client_game(|game| {
-                game.title = None;
+                let _event_loop = frame_scene(game);
                 game.settings.gui_scale = 3;
+                resize(game, 1280, 720);
                 game.pause_menu = true;
                 game.pause_focus = Some(1); // Options, removed by the first listener.
                 game.set_screen(Screen::Paused);
-                assert_eq!(game.pause_focus, Some(0)); // First remaining stock control.
-                assert!(game.pause_widget_removed(1));
+                let said = frame(game, 1);
+                assert_eq!(game.pause_focus, Some(0)); // Repaired through the first frame.
+                assert!(
+                    !said
+                        .items
+                        .iter()
+                        .any(|item| item.rect == [111.0, 140.0, 98.0, 20.0])
+                );
+                let buttons: Vec<_> = said
+                    .items
+                    .iter()
+                    .filter_map(|item| match &item.what {
+                        widgets::What::Button { message, .. } => Some(message.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                assert!(buttons.ends_with(&["Example action", "Second action"]));
+
+                // A real mouse event over the former Options button does not open it.
+                game.cursor = (125.0, 149.0);
+                left(game, ElementState::Pressed);
+                left(game, ElementState::Released);
+                assert_eq!(game.screen, Screen::Paused);
+
                 let targets = game.stock_widget_targets().unwrap();
-                let second = targets[targets.len() - 1];
-                let first = targets[targets.len() - 2];
-                let last_stock = targets[targets.len() - 3];
-                assert_eq!(first.rect, ADDED);
-                assert_eq!(second.rect, [9.0, 40.0, 60.0, 20.0]);
+                let [.., last_stock, first, second] = targets else {
+                    panic!("expected stock and two additions")
+                };
+                let (last_stock, first, second) = (*last_stock, *first, *second);
+                assert_eq!(first.rect, second.rect);
+                assert!(!first.same_control(second));
                 game.cursor = (20.0, 20.0);
-                assert!(game.stock_widget_mouse(true));
-                assert!(game.stock_widget_mouse(false));
+                left(game, ElementState::Pressed);
+                left(game, ElementState::Released);
                 game.clear_stock_widget_focus();
-                game.pad.menu.focus = Some(last_stock);
-                game.pad.menu.keyboard = true;
+                game.key_focus_adopt(last_stock, false);
                 assert!(game.key_focus_key(&NoLoop, KeyCode::Tab));
                 assert_eq!(game.pad.menu.focus, Some(first));
                 assert!(game.key_focus_key(&NoLoop, KeyCode::Tab));
                 assert_eq!(game.pad.menu.focus, Some(second));
+                frame(game, 2);
+                let targets = game.stock_widget_targets().unwrap().to_vec();
+                game.pad_follow_focus(&NoLoop, &targets);
                 assert!(game.key_focus_key(&NoLoop, KeyCode::Enter));
                 game.pad.menu.focus = Some(first);
                 game.pad_menu_button(&NoLoop, gamepad::Button::South, true)
@@ -486,39 +648,18 @@ mod tests {
                     [
                         ("first", "settings".to_owned()),
                         ("later", "settings".to_owned()),
-                        ("first", "settings".to_owned())
+                        ("first", "settings".to_owned()),
                     ]
                 );
-
-                widgets::set_narrating(true);
-                let mut batch = HudBatch::new([1280, 720], game.settings.gui_scale_inputs());
-                game.draw_pause_menu(&mut batch);
-                widgets::end_frame(1);
-                let said = widgets::take_last_narration();
-                widgets::set_narrating(false);
-                let buttons: Vec<_> = said
-                    .items
-                    .iter()
-                    .filter_map(|item| match &item.what {
-                        widgets::What::Button { message, .. } => Some(message.as_str()),
-                        _ => None,
-                    })
-                    .collect();
-                assert!(buttons.ends_with(&["Example action", "Second action"]));
-                assert!(
-                    !said
-                        .items
-                        .iter()
-                        .any(|item| item.rect == [111.0, 140.0, 98.0, 20.0])
-                );
-
-                game.build_screen();
                 assert_eq!(refs.lock().unwrap().len(), 1);
+
+                // The physical viewport changed, but both GUI extents round to the same pixels.
+                let old_gui = game.gui_size();
                 game.pad.menu.focus = Some(first);
                 game.pad_menu_button(&NoLoop, gamepad::Button::South, true)
                     .unwrap();
-                game.settings.gui_scale = 1;
-                game.build_screen();
+                resize(game, 1279, 719);
+                assert_eq!(game.gui_size(), old_gui);
                 game.pad_menu_button(&NoLoop, gamepad::Button::South, false)
                     .unwrap();
                 assert!(PRESSES.with_borrow(Vec::is_empty));
@@ -529,7 +670,7 @@ mod tests {
                         .iter()
                         .filter(|target| target.rect == ADDED)
                         .count(),
-                    1
+                    2
                 );
                 game.set_screen(Screen::Playing);
                 assert!(game.stock_widget_targets().is_none());
@@ -543,11 +684,22 @@ mod tests {
     fn no_post_listener_preserves_stock_widgets() {
         with_mods(Vec::new().into(), || {
             with_client_game(|game| {
-                game.title = None;
+                let _event_loop = frame_scene(game);
+                game.settings.gui_scale = 3;
+                resize(game, 1280, 720);
+                game.pause_menu = true;
                 game.set_screen(Screen::Paused);
+                let said = frame(game, 1);
+                assert!(
+                    said.items
+                        .iter()
+                        .any(|item| item.rect == [111.0, 140.0, 98.0, 20.0])
+                );
                 assert!(game.stock_widget_targets().is_none());
-                assert!(!game.pause_widget_removed(1));
-                assert!(!game.stock_widget_mouse(true));
+                game.cursor = (125.0, 149.0);
+                left(game, ElementState::Pressed);
+                left(game, ElementState::Released);
+                assert_eq!(game.screen, Screen::Options);
             })
         });
     }
@@ -555,6 +707,30 @@ mod tests {
     struct TitleField;
     #[mod_api::__subscriptions]
     impl Hooks for TitleField {
+        fn screen_mouse_button_released_pre(
+            &self,
+            _: &dyn ClientHost,
+            _: &mut ScreenMouseButtonReleasedPreEvent<'_>,
+        ) -> Flow {
+            Flow::Cancel
+        }
+
+        fn screen_char_typed_pre(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut ScreenCharTypedPreEvent<'_>,
+        ) -> Flow {
+            if event.c == '!'
+                && let Some(field) = event.field.as_mut()
+            {
+                field.value.push_str("cd");
+                field.cursor = 4;
+                field.highlight = 4;
+                return Flow::Cancel;
+            }
+            Flow::Continue
+        }
+
         fn screen_init_post(&self, _: &dyn ClientHost, event: &mut ScreenInitPostEvent<'_>) {
             if event.screen.id != "title" {
                 return;
@@ -583,7 +759,9 @@ mod tests {
         let mods = vec![ModEntry::new("title_field", Box::new(TitleField))].into();
         with_mods(mods, || {
             with_client_game(|game| {
+                let _event_loop = frame_scene(game);
                 game.settings.gui_scale = 3;
+                resize(game, 1280, 720);
                 let saves = tempfile::tempdir().unwrap();
                 game.show_title(game.new_title(saves.path().to_owned()));
                 assert_eq!(
@@ -597,11 +775,42 @@ mod tests {
                         .iter()
                         .any(|row| row.rect == [113.0, 204.0, 98.0, 20.0])
                 );
-                game.cursor = (20.0, 20.0);
-                assert!(game.stock_widget_mouse(true));
-                assert!(game.stock_widget_text_focused());
-                assert!(game.stock_widget_type("abcd"));
-                assert!(game.stock_widget_key(KeyCode::Backspace));
+                let field = *game.stock_widget_targets().unwrap().last().unwrap();
+                game.key_focus_adopt(field, false);
+                game.pad_menu_button(&NoLoop, gamepad::Button::South, true)
+                    .unwrap();
+                assert!(game.pad.menu.osk.is_some());
+                game.pad_osk_output(osk::Output::Text("ab!".into()));
+                game.pad_osk_output(osk::Output::Backspace);
+                assert_eq!(game.stock_widget_edit(None).unwrap().value, "abc");
+                game.pad_osk_output(osk::Output::Close);
+                frame(game, 1);
+                for release in [true, false] {
+                    game.cursor = (20.0, 20.0);
+                    left(game, ElementState::Pressed);
+                    if release {
+                        // The release's Pre hook cancels delivery to the field.
+                        left(game, ElementState::Released);
+                    } else {
+                        game.handle_window_event_inner(&NoLoop, WindowEvent::Focused(false), None);
+                    }
+                    let before = game.stock_widget_edit(None).unwrap();
+                    let projection = game.renderer_pointer_projection().unwrap();
+                    let position = projection.window_pointer((72.0, 20.0));
+                    let sample = sunrise_client::window::PointerSample::Physical {
+                        position,
+                        backing_scale: 1.0,
+                    };
+                    game.handle_window_event_inner(
+                        &NoLoop,
+                        WindowEvent::CursorMoved {
+                            position,
+                            device_id: DeviceId::dummy(),
+                        },
+                        Some(sample),
+                    );
+                    assert_eq!(game.stock_widget_edit(None).unwrap(), before);
+                }
                 // A sign editor is an overlay, not a new title build.
                 game.open_sign_editor((0, 64, 0), true);
                 assert!(game.stock_widget_targets().is_none());
@@ -611,6 +820,82 @@ mod tests {
                 assert_eq!(
                     added.text_field(added.focused().unwrap()).unwrap().value(),
                     "abc"
+                );
+            })
+        });
+    }
+
+    struct SkipStock;
+    #[mod_api::__subscriptions]
+    impl Hooks for SkipStock {
+        fn screen_init_pre(&self, _: &dyn ClientHost, _: &mut ScreenInitPreEvent<'_>) -> Flow {
+            Flow::Cancel
+        }
+
+        fn screen_init_post(&self, _: &dyn ClientHost, event: &mut ScreenInitPostEvent<'_>) {
+            if !matches!(event.screen.id, "title" | "paused") {
+                return;
+            }
+            assert_eq!(event.widgets.listeners().len(), 0);
+            let mut opaque = Text::literal("Invalid label");
+            opaque.metadata = sunrise_core::nbt::Tag::compound([(
+                "number",
+                sunrise_core::nbt::Tag::Float(f32::NAN.to_bits()),
+            )]);
+            let binding = Some(("only", press as mod_api::client::widgets::ScreenWidgetPress));
+            assert_eq!(
+                event
+                    .widgets
+                    .add_listener(Widget::Button(Button::new(ADDED, opaque)), binding),
+                Err(ScreenWidgetError::InvalidText)
+            );
+            event
+                .widgets
+                .add_listener(
+                    Widget::Button(Button::new(ADDED, Text::literal("Only added control"))),
+                    binding,
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn pre_skips_stock_but_post_can_install_the_only_control() {
+        let mods = vec![ModEntry::new("skip_stock", Box::new(SkipStock))].into();
+        with_mods(mods, || {
+            with_client_game(|game| {
+                let _event_loop = frame_scene(game);
+                game.settings.gui_scale = 3;
+                resize(game, 1280, 720);
+                let saves = tempfile::tempdir().unwrap();
+                game.show_title(game.new_title(saves.path().to_owned()));
+                let title = frame(game, 1);
+                assert_eq!(title.items.len(), 1);
+                assert!(
+                    matches!(&title.items[0].what, widgets::What::Button { message, .. } if message == "Only added control")
+                );
+                game.hide_title();
+                game.pause_menu = true;
+                game.pause_focus = Some(1);
+                game.set_screen(Screen::Paused);
+                let paused = frame(game, 2);
+                assert_eq!(paused.items.len(), 1);
+                assert!(
+                    matches!(&paused.items[0].what, widgets::What::Button { message, .. } if message == "Only added control")
+                );
+                // The removed stock focus repaired to the only remaining control,
+                // not to the old Options rectangle or to an absent stock row.
+                assert_eq!(
+                    game.pad.menu.focus,
+                    game.stock_widget_targets().unwrap().first().copied()
+                );
+                game.cursor = (20.0, 20.0);
+                left(game, ElementState::Pressed);
+                left(game, ElementState::Released);
+                assert_eq!(
+                    PRESSES.with_borrow_mut(std::mem::take),
+                    [("skip_stock", "only".to_owned())]
                 );
             })
         });

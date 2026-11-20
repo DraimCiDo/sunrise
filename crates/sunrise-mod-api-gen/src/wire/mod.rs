@@ -394,6 +394,11 @@ pub(super) fn surface_reading<'a>(
         }
         for (module, via, function) in &members {
             let name = function.sig.ident.to_string();
+            // The stock screen build and its callback-scoped listener list are native-only.
+            if *owner == "Hooks" && matches!(name.as_str(), "screen_init_pre" | "screen_init_post")
+            {
+                continue;
+            }
             let subscription = SUBSCRIBED.iter().any(|(o, n)| o == owner && *n == name);
             if hidden(&function.attrs) && !subscription {
                 continue;

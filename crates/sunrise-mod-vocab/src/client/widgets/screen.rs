@@ -2,8 +2,8 @@
 
 use super::{Widget, char_len, is_allowed_chat_character, utf16_len};
 use crate::{ClientHost, Text};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::{any::Any, sync::Arc};
 use sunrise_mod_api_macros::Wire;
 
 /// An opaque reference to a widget in one stock screen build. Removing the
@@ -42,7 +42,7 @@ pub struct ScreenWidgetView<'a> {
 pub enum ScreenWidgetError {
     /// This screen does not expose its listeners yet.
     UnsupportedScreen,
-    /// A coordinate, extent or far edge is not finite, or an extent is not positive.
+    /// Bounds must intersect the build viewport, with positive extents no larger than it.
     InvalidBounds,
     /// A label or initial text edit is malformed.
     InvalidText,
@@ -79,27 +79,36 @@ pub struct ScreenWidgetEntry {
     pub stock: Option<u8>,
     pub widget: Option<Widget>,
     pub action: Option<ScreenWidgetAction>,
+    pub render_label: Option<Arc<dyn Any + Send + Sync>>,
 }
 
 static NEXT_WIDGET: AtomicU64 = AtomicU64::new(0);
 
+type PrepareLabel = fn(&Text) -> Result<Arc<dyn Any + Send + Sync>, crate::text::TextFormError>;
+
+/// Engine-owned staging. Only dispatch can lend an editing view of it.
+#[doc(hidden)]
+// no wire: engine-side staging and native callback bindings.
+pub struct ScreenWidgetBuild {
+    entries: Vec<ScreenWidgetEntry>,
+    actions: Vec<(&'static str, Arc<str>)>,
+    viewport: Option<[f32; 2]>,
+    prepare_label: PrepareLabel,
+}
+
 /// The staged widget listeners of an initialized stock screen, available only
 /// during `screen_init_post`. Stock listeners come first and edits from earlier
 /// successful callbacks are visible. Only `title` and `paused` expose listeners.
-///
-/// Not on wasm: a button binds a native function pointer for later activation.
-// no wire: callback-scoped list of stock and native-owned controls.
-pub struct ScreenWidgets {
-    entries: Vec<ScreenWidgetEntry>,
-    actions: Vec<(&'static str, Arc<str>)>,
-    supported: bool,
-    owner: Option<&'static str>,
+// no wire: callback-scoped borrow of stock and native-owned controls.
+pub struct ScreenWidgets<'a> {
+    build: &'a mut ScreenWidgetBuild,
+    owner: &'static str,
 }
 
-impl ScreenWidgets {
+impl ScreenWidgets<'_> {
     /// Lists the current staged listeners in screen order.
     pub fn listeners(&self) -> impl ExactSizeIterator<Item = ScreenWidgetView<'_>> {
-        self.entries.iter().map(|entry| ScreenWidgetView {
+        self.build.entries.iter().map(|entry| ScreenWidgetView {
             listener: entry.reference,
             kind: entry.kind,
             bounds: entry.bounds,
@@ -115,20 +124,27 @@ impl ScreenWidgets {
         widget: Widget,
         action: Option<(&str, ScreenWidgetPress)>,
     ) -> Result<ScreenWidgetRef, ScreenWidgetError> {
-        let Some(owner) = self.owner.filter(|_| self.supported) else {
-            return Err(ScreenWidgetError::UnsupportedScreen);
-        };
+        let [width, height] = self
+            .build
+            .viewport
+            .ok_or(ScreenWidgetError::UnsupportedScreen)?;
         let bounds @ [x, y, w, h] = widget.rect();
-        if !bounds.into_iter().chain([x + w, y + h]).all(f32::is_finite) || w <= 0.0 || h <= 0.0 {
+        if !bounds.into_iter().all(f32::is_finite)
+            || !(0.0 < w && w <= width && 0.0 < h && h <= height)
+            || x + w <= 0.0
+            || y + h <= 0.0
+            || x >= width
+            || y >= height
+        {
             return Err(ScreenWidgetError::InvalidBounds);
         }
-        let (kind, label, action) = match (&widget, action) {
+        let owner = self.owner;
+        let (kind, label, action, render_label) = match (&widget, action) {
             (Widget::Button(button), Some((id, press))) if !id.trim().is_empty() => {
-                button
-                    .label
-                    .validate()
+                let render_label = (self.build.prepare_label)(&button.label)
                     .map_err(|_| ScreenWidgetError::InvalidText)?;
                 if self
+                    .build
                     .actions
                     .iter()
                     .any(|(mod_id, action)| *mod_id == owner && action.as_ref() == id)
@@ -136,11 +152,12 @@ impl ScreenWidgets {
                     return Err(ScreenWidgetError::DuplicateAction);
                 }
                 let id: Arc<str> = id.into();
-                self.actions.push((owner, id.clone()));
+                self.build.actions.push((owner, id.clone()));
                 (
                     ScreenWidgetKind::Button,
                     Some(button.label.clone()),
                     Some(ScreenWidgetAction { owner, id, press }),
+                    Some(render_label),
                 )
             }
             (Widget::TextField(field), None) => {
@@ -157,12 +174,13 @@ impl ScreenWidgets {
                     ScreenWidgetKind::TextField,
                     Some(Text::literal(field.message.clone())),
                     None,
+                    None,
                 )
             }
             _ => return Err(ScreenWidgetError::InvalidAction),
         };
         let reference = ScreenWidgetRef(NEXT_WIDGET.fetch_add(1, Ordering::Relaxed));
-        self.entries.push(ScreenWidgetEntry {
+        self.build.entries.push(ScreenWidgetEntry {
             reference,
             kind,
             bounds,
@@ -170,6 +188,7 @@ impl ScreenWidgets {
             stock: None,
             widget: Some(widget),
             action,
+            render_label,
         });
         Ok(reference)
     }
@@ -177,25 +196,27 @@ impl ScreenWidgets {
     /// Removes a listener, including a stock control, from drawing, input,
     /// focus and narration for this build. References from other builds refuse.
     pub fn remove_listener(&mut self, listener: ScreenWidgetRef) -> Result<(), ScreenWidgetError> {
-        if !self.supported {
+        if self.build.viewport.is_none() {
             return Err(ScreenWidgetError::UnsupportedScreen);
         }
         let index = self
+            .build
             .entries
             .iter()
             .position(|entry| entry.reference == listener)
             .ok_or(ScreenWidgetError::UnknownListener)?;
-        self.entries.remove(index);
+        self.build.entries.remove(index);
         Ok(())
     }
+}
 
-    #[doc(hidden)]
-    pub fn __new(supported: bool) -> Self {
+impl ScreenWidgetBuild {
+    pub fn __new(viewport: Option<[f32; 2]>, prepare_label: PrepareLabel) -> Self {
         Self {
             entries: Vec::new(),
             actions: Vec::new(),
-            supported,
-            owner: None,
+            viewport,
+            prepare_label,
         }
     }
 
@@ -209,12 +230,12 @@ impl ScreenWidgets {
             stock: Some(id),
             widget: None,
             action: None,
+            render_label: None,
         });
     }
 
     #[doc(hidden)]
-    pub(crate) fn __checkpoint(&mut self, owner: &'static str) -> (Vec<ScreenWidgetEntry>, usize) {
-        self.owner = Some(owner);
+    pub(crate) fn __checkpoint(&self) -> (Vec<ScreenWidgetEntry>, usize) {
         (self.entries.clone(), self.actions.len())
     }
 
@@ -222,6 +243,10 @@ impl ScreenWidgets {
     pub(crate) fn __rollback(&mut self, (entries, actions): (Vec<ScreenWidgetEntry>, usize)) {
         self.entries = entries;
         self.actions.truncate(actions);
+    }
+
+    pub(crate) fn __edit(&mut self, owner: &'static str) -> ScreenWidgets<'_> {
+        ScreenWidgets { build: self, owner }
     }
 
     #[doc(hidden)]
@@ -239,12 +264,12 @@ mod tests {
 
     #[test]
     fn malformed_edits_leave_the_staged_list_unchanged() {
-        let mut build = ScreenWidgets::__new(true);
-        build.__checkpoint("first");
+        let mut staged = ScreenWidgetBuild::__new(Some([320.0, 240.0]), |_| Ok(Arc::new(())));
+        let mut build = staged.__edit("first");
         let button = |rect| Widget::Button(Button::new(rect, Text::literal("Example")));
         let binding = Some(("settings", press as ScreenWidgetPress));
         assert_eq!(
-            build.add_listener(button([f32::MAX, 4.0, f32::MAX, 20.0]), binding),
+            build.add_listener(button([1.0, 4.0, f32::MAX, 20.0]), binding),
             Err(ScreenWidgetError::InvalidBounds)
         );
         assert_eq!(

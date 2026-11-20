@@ -26,8 +26,8 @@ use crate::{ClientHost, DrawContext, SoundPlay, Text};
 
 mod screen;
 pub use screen::{
-    ScreenWidgetAction, ScreenWidgetEntry, ScreenWidgetError, ScreenWidgetKind, ScreenWidgetPress,
-    ScreenWidgetRef, ScreenWidgetView, ScreenWidgets,
+    ScreenWidgetAction, ScreenWidgetBuild, ScreenWidgetEntry, ScreenWidgetError, ScreenWidgetKind,
+    ScreenWidgetPress, ScreenWidgetRef, ScreenWidgetView, ScreenWidgets,
 };
 
 #[path = "widgets_text_edit.rs"]

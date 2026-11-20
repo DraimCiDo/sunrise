@@ -5015,12 +5015,6 @@ impl Game<'_> {
             // TitleScreen.extractRenderState, then ToastManager over it: vanilla
             // draws the toast manager on every screen, so a pack download or a
             // resource-reload failure still shows on the title (#4428).
-            // The buttons crates add show by what is installed now: the Mods
-            // page's list changes while the title is open.
-            let mods = self.settings.mods.installed.len();
-            if let Some(title) = &mut self.title {
-                title.mods = mods;
-            }
             let drawn = self.draw_title_screen_with_pre_hook(&mut batch);
             if drawn && let Some(title) = &self.title {
                 title.draw_with_items(
@@ -9282,6 +9276,19 @@ impl Game<'_> {
         ) {
             self.window_pointer_space.take();
         }
+        // The title's registered rows use the live installed-mod count. Keep their
+        // build in sync for input as well as for rendering.
+        if self.title.is_some() && self.screen == Screen::Playing && self.has_screen_init_hooks() {
+            self.build_screen();
+        }
+        let stock_widget_released = matches!(
+            event,
+            WindowEvent::MouseInput {
+                state: ElementState::Released,
+                button: MouseButton::Left,
+                ..
+            }
+        ) && self.end_stock_widget_capture();
         let pressed = match &event {
             WindowEvent::KeyboardInput { event, .. } => {
                 event.state == ElementState::Pressed && !event.repeat
@@ -9298,6 +9305,7 @@ impl Game<'_> {
             self.physical_buttons.clear();
             self.drag_button = None;
             self.container_buttons.clear();
+            self.end_stock_widget_capture();
         }
         if let WindowEvent::ModifiersChanged(m) = &event {
             self.update_modifiers(m.state());
@@ -9702,12 +9710,15 @@ impl Game<'_> {
                 return Ok(());
             }
             self.key_focus_mouse_press(&event);
-            if let WindowEvent::MouseInput {
-                state,
-                button: MouseButton::Left,
-                ..
-            } = &event
-                && self.stock_widget_mouse(*state == ElementState::Pressed)
+            if stock_widget_released
+                || (matches!(
+                    event,
+                    WindowEvent::MouseInput {
+                        state: ElementState::Pressed,
+                        button: MouseButton::Left,
+                        ..
+                    }
+                ) && self.stock_widget_mouse(true))
             {
                 return Ok(());
             }
@@ -9737,7 +9748,7 @@ impl Game<'_> {
                         r.resize(size.width, size.height);
                     }
                     self.refresh_window_cursor();
-                    if self.has_screen_init_post() {
+                    if self.has_screen_init_hooks() {
                         self.build_screen();
                     }
                     self.observe_fullscreen();
