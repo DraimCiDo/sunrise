@@ -140,7 +140,7 @@ pub(super) struct MenuCursor {
     pub(super) held: [bool; 2],
     /// The focused button A went down on: letting go presses it, unless the
     /// focus moved or the input was cancelled first.
-    pub(super) armed: Option<Rect>,
+    pub(super) armed: Option<Target>,
     /// The frame count when `pad_reveal` scrolled the focused row into view: the frames drawn
     /// before it still show the row where it was, so the focus isn't looked for in them.
     pub(super) revealed: Option<u64>,
@@ -268,13 +268,20 @@ fn beside(rect: Rect, targets: &[Rect]) -> Option<usize> {
         .map(|(i, _)| i)
 }
 
-/// Where letting go of A clicks: the armed button, if the focus is still on it. A row scrolled
+/// The button to press when A is released, if the focus is still on it. A row scrolled
 /// into view under A (`pad_reveal`) is found again a fraction of a pixel off.
-fn armed_click(armed: Option<Rect>, focus: Option<Target>) -> Option<(f32, f32)> {
-    let same = |a: Rect, b: Rect| a.iter().zip(b).all(|(a, b)| (a - b).abs() < SAME_RECT);
-    focus
-        .filter(|focus| armed.is_some_and(|armed| same(armed, focus.rect)))
-        .map(|focus| focus.center())
+fn armed_target(armed: Option<Target>, focus: Option<Target>) -> Option<Target> {
+    let armed = armed?;
+    focus.filter(|focus| {
+        let owned = matches!(armed.kind, Kind::ModListAction(_))
+            || matches!(focus.kind, Kind::ModListAction(_));
+        (!owned || armed.kind == focus.kind)
+            && armed
+                .rect
+                .iter()
+                .zip(focus.rect)
+                .all(|(a, b)| (a - b).abs() < SAME_RECT)
+    })
 }
 
 impl Game<'_> {
@@ -670,6 +677,15 @@ impl Game<'_> {
         self.pad_pointer_button(event_loop, right, false);
     }
 
+    fn press_focused_button(&mut self, event_loop: &dyn EventLoopCtl, focus: Target) {
+        if let Kind::ModListAction(id) = focus.kind {
+            self.audio.play_button_click();
+            self.activate_mod_list_action(id);
+        } else {
+            self.pad_click_at(event_loop, focus.center(), false);
+        }
+    }
+
     /// The wheel event being handled only scrolls (`MenuCursor::stick_scroll`).
     pub(super) fn pad_stick_scroll(&self) -> bool {
         self.pad.menu.stick_scroll || self.pad.menu.step_scroll
@@ -792,8 +808,8 @@ impl Game<'_> {
                 }
                 Button::South if self.pad.menu.armed.is_some() => {
                     let armed = self.pad.menu.armed.take();
-                    if let Some(at) = armed_click(armed, self.pad.menu.focus) {
-                        self.pad_click_at(event_loop, at, false);
+                    if let Some(focus) = armed_target(armed, self.pad.menu.focus) {
+                        self.press_focused_button(event_loop, focus);
                     }
                 }
                 Button::South if self.pad.menu.held[0] => {
@@ -940,7 +956,7 @@ impl Game<'_> {
                     }
                     Kind::Button | Kind::ModListAction(_) | Kind::Tab(_) => {
                         self.pad_pointer_to(event_loop, focus.center());
-                        self.pad.menu.armed = Some(focus.rect);
+                        self.pad.menu.armed = Some(focus);
                     }
                     _ => {
                         self.pad_pointer_to(event_loop, focus.center());
@@ -2182,14 +2198,7 @@ impl Game<'_> {
                 let focus = self.pad_reveal(focus);
                 self.pad.menu.focus = Some(focus);
                 // AbstractButton.keyPressed: onPress, with its click sound.
-                if let Kind::ModListAction(id) = focus.kind {
-                    let _ = self.handle_option_events(vec![
-                        Event::ButtonClick,
-                        Event::ActivateModListAction(id),
-                    ]);
-                } else {
-                    self.pad_click_at(event_loop, focus.center(), false);
-                }
+                self.press_focused_button(event_loop, focus);
             }
             (Act::ToggleSlider, _) => self.pad.menu.slider_edit = !slider_edit,
             (Act::Nudge(sign), Some(focus)) => self.pad_nudge(event_loop, focus, sign),
@@ -2801,12 +2810,12 @@ mod tests {
         let rect = [10.0, 20.0, 100.0, 20.0];
         let kind = Kind::Button;
         let focus = Some(Target { rect, kind });
-        assert_eq!(armed_click(Some(rect), focus), Some((60.0, 30.0)));
+        assert_eq!(armed_target(focus, focus), focus);
         let refound = Some(Target {
             rect: [10.0, 20.000_002, 100.0, 20.0],
             kind,
         });
-        assert!(armed_click(Some(rect), refound).is_some());
+        assert_eq!(armed_target(focus, refound), refound);
         // A row scrolled into view at frame 10 is looked for again from frame 12.
         assert!(!reveal_pending(None, 10));
         assert!(reveal_pending(Some(10), 10) && reveal_pending(Some(10), 11));
@@ -2815,9 +2824,24 @@ mod tests {
             rect: [10.0, 44.0, 100.0, 20.0],
             kind,
         });
-        assert_eq!(armed_click(Some(rect), moved), None);
-        assert_eq!(armed_click(Some(rect), None), None);
-        assert_eq!(armed_click(None, focus), None);
+        assert_eq!(armed_target(focus, moved), None);
+        assert_eq!(armed_target(focus, None), None);
+        assert_eq!(armed_target(None, focus), None);
+
+        let action = |owner| {
+            Some(Target {
+                rect,
+                kind: Kind::ModListAction(mod_api::__private::ModListActionId {
+                    owner,
+                    key: "details",
+                }),
+            })
+        };
+        assert_eq!(
+            armed_target(action("stats"), action("stats")),
+            action("stats")
+        );
+        assert_eq!(armed_target(action("stats"), action("trails")), None);
     }
 
     #[test]
