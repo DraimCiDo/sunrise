@@ -13,7 +13,7 @@ pub trait Hooks {
     /// layers, the cape among them, keep every part.
     /// `hidden_layers.hide(layer)` instead hides an individual stock layer or armor pass for
     /// this world draw. The living pre hook inherits these hides; it cannot undo them.
-    /// Not on wasm: `hidden_layers` lends the current stock renderer's native editor.
+    /// A panicking or refused callback does not contribute hides.
     #[hook(
         side = "client",
         version = 2,

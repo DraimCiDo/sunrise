@@ -71,19 +71,16 @@ pub enum HideLayerError {
 }
 
 // hidden: the renderer's fixed-size mask, used for both supported and hidden layers.
+// no wire: internal draw-local state, never serialized.
 #[doc(hidden)]
 #[derive(Clone, Copy, Default)]
 pub struct StockLayerMask(u32);
 
 impl StockLayerMask {
-    pub const fn new(cape_and_wings: bool, head: bool, main: bool, off: bool, armor: bool) -> Self {
-        Self(
-            (cape_and_wings as u32 * 0b11)
-                | (head as u32 * StockEntityLayer::HeadItem.bit())
-                | (main as u32 * StockEntityLayer::HeldItem(Hand::Main).bit())
-                | (off as u32 * StockEntityLayer::HeldItem(Hand::Off).bit())
-                | (armor as u32 * (0xfff << 5)),
-        )
+    pub const PLAYER: Self = Self((1 << 17) - 1);
+
+    pub fn insert(&mut self, layer: StockEntityLayer) {
+        self.0 |= layer.bit();
     }
 
     pub const fn contains(self, layer: StockEntityLayer) -> bool {
@@ -95,12 +92,12 @@ impl StockLayerMask {
 /// Successful edits accumulate across listeners and both hooks. They cannot show a layer or
 /// affect the inventory preview, another draw, equipment, or the entity's base model.
 // no wire: borrowed native render callback editor, never serialized.
-pub struct HiddenLayers {
+pub struct HiddenLayers<'draw> {
     supported: StockLayerMask,
-    hidden: Cell<StockLayerMask>,
+    hidden: &'draw Cell<StockLayerMask>,
 }
 
-impl HiddenLayers {
+impl<'draw> HiddenLayers<'draw> {
     /// Hide `layer` if the stock renderer supports it, even if its usual draw conditions aren't
     /// met right now. Repeating a hide is harmless. A refusal does not change any prior edit.
     pub fn hide(&self, layer: StockEntityLayer) -> Result<(), HideLayerError> {
@@ -114,11 +111,8 @@ impl HiddenLayers {
 
     // hidden: the engine issues a fresh editor for each world draw.
     #[doc(hidden)]
-    pub fn __new(supported: StockLayerMask) -> Self {
-        Self {
-            supported,
-            hidden: Cell::default(),
-        }
+    pub fn __new(supported: StockLayerMask, hidden: &'draw Cell<StockLayerMask>) -> Self {
+        Self { supported, hidden }
     }
 
     // hidden: only the stock draw consumes the resulting mask.
@@ -134,7 +128,7 @@ impl HiddenLayers {
                 self.0.set(self.1);
             }
         }
-        let mut restore = Restore(&self.hidden, self.hidden.get());
+        let mut restore = Restore(self.hidden, self.hidden.get());
         let answer = call();
         if answer.is_ok() {
             restore.1 = self.hidden.get();

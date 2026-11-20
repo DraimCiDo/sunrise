@@ -11,7 +11,7 @@ impl Game<'_> {
         who: &PlayerRender<'_>,
         draw: &mut BlockEntityDraw,
         hidden: &mut HiddenParts,
-        hidden_layers: &mod_api::HiddenLayers,
+        hidden_layers: &mod_api::HiddenLayers<'_>,
         canceled: &mut bool,
     ) {
         self.fire_render_player_pre(player, who, draw, hidden, hidden_layers, canceled);

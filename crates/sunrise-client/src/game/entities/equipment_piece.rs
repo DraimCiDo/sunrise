@@ -28,7 +28,7 @@ impl ArmorSlot {
     pub(super) fn index(self) -> usize {
         self as usize
     }
-    fn layer(self, pass: ArmorLayerPass) -> StockEntityLayer {
+    pub(super) fn layer(self, pass: ArmorLayerPass) -> StockEntityLayer {
         let slot = match self {
             Self::Head => ArmorLayerSlot::Head,
             Self::Chest => ArmorLayerSlot::Chest,
@@ -132,6 +132,21 @@ fn resolve_piece<'a>(
     })
 }
 
+use sunrise_items::equipment::{CHEST, FEET, HEAD, LEGS};
+
+/// The model layers the mob's humanoid equipment renderer submits, in submission order.
+pub(super) const MOB_ARMOR: [(usize, &str, &str, ArmorSlot); 4] = [
+    (CHEST, "chestplate", "chest", ArmorSlot::Chest),
+    (LEGS, "leggings", "legs", ArmorSlot::Legs),
+    (FEET, "boots", "feet", ArmorSlot::Feet),
+    (HEAD, "helmet", "head", ArmorSlot::Head),
+];
+
+pub(super) fn has_mob_armor_layer(mob: &Mob) -> bool {
+    !sunrise_client::mobs::render::avatar(mob)
+        && !sunrise_client::mobs::equine::is_equine(mob.species())
+}
+
 impl Game<'_> {
     pub(super) fn mob_equipment_layers(
         &self,
@@ -140,22 +155,15 @@ impl Game<'_> {
         hidden_layers: StockLayerMask,
     ) -> Vec<sunrise_client::mobs::render::Layer> {
         use sunrise_client::mobs::render;
-        use sunrise_items::equipment::{CHEST, FEET, HEAD, LEGS};
-        if sunrise_items::equipment::ARMOR
-            .iter()
-            .all(|&slot| mob.extra.slot_stack(slot).is_none())
-            || render::avatar(mob)
-            || sunrise_client::mobs::equine::is_equine(mob.species())
+        if !has_mob_armor_layer(mob)
+            || sunrise_items::equipment::ARMOR
+                .iter()
+                .all(|&slot| mob.extra.slot_stack(slot).is_none())
         {
             return Vec::new();
         }
         let mut out = Vec::new();
-        for (slot, layer, worn) in [
-            (CHEST, "chestplate", "chest"),
-            (LEGS, "leggings", "legs"),
-            (FEET, "boots", "feet"),
-            (HEAD, "helmet", "head"),
-        ] {
+        for (slot, layer, worn, _) in MOB_ARMOR {
             let Some(stack) = mob.extra.slot_stack(slot) else {
                 continue;
             };
@@ -600,8 +608,8 @@ mod material_tests {
                 ],
             ),
         ] {
-            let editor =
-                mod_api::HiddenLayers::__new(StockLayerMask::new(false, false, false, false, true));
+            let hidden = std::cell::Cell::default();
+            let editor = mod_api::HiddenLayers::__new(StockLayerMask::PLAYER, &hidden);
             if let Some(pass) = hide {
                 editor
                     .hide(StockEntityLayer::Armor(ArmorLayerSlot::Chest, pass))
