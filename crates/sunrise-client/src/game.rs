@@ -535,6 +535,7 @@ struct GameLevel<'w> {
     /// Only this destroyed block has an entity as its loot `this` parameter.
     /// Neighbour/default/machine drops keep the no-entity context.
     drop_breaker_at: Option<BlockPos>,
+    drop_snapshot: std::cell::RefCell<Option<spill::DropSnapshot>>,
     /// Where `Block.dropResources` puts the drops instead of popping them,
     /// while a mod's machine breaks a block (`native_machine_destroy_block`).
     drop_into: Option<Vec<ItemStack>>,
@@ -2882,6 +2883,7 @@ impl Game<'_> {
         pos: [i32; 3],
         state: BlockStateId,
         held: Option<&ItemStack>,
+        source: Option<&sunrise_world::loot::copy::BlockSource>,
     ) -> Vec<ItemStack> {
         let dynamic = self.pending.dynamic(pos);
         let place = self.loot_place_at(pos.map(|v| f64::from(v) + 0.5), None);
@@ -2893,7 +2895,7 @@ impl Game<'_> {
                 breaker: true,
                 ..Default::default()
             };
-            self.roll_block_loot(pos, state, Some(entity as u32), roll)
+            self.roll_block_loot_with_source(pos, state, Some(entity as u32), roll, source)
         });
         let player = self.native_acting_id();
         self.native_block_loot(pos, state, Some(player), held, None, &mut drops);
@@ -3282,6 +3284,7 @@ impl Game<'_> {
                 },
             },
             drop_breaker_at: None,
+            drop_snapshot: Default::default(),
             drop_into: None,
         };
         f(self.res.behaviours(), &mut level, &mut self.block_ticks)
@@ -3921,8 +3924,8 @@ impl Game<'_> {
                     }
                 }
                 // Handled as the behaviour emits it (GameLevel::emit).
-                LevelEvent::DropResources { pos, state } => {
-                    self.with_level(|_, level, _| level.drop_resources_now(pos, state));
+                LevelEvent::DropResources { pos, state, cause } => {
+                    self.with_level(|_, level, _| level.drop_resources_now(pos, state, cause));
                 }
                 LevelEvent::FallingBlock {
                     pos,
@@ -4378,16 +4381,16 @@ impl Game<'_> {
         let key = (pos[0], pos[1], pos[2]);
         self.unpack_loot(container_loot::LootTarget::Block(key), None);
         let live = (!self.creative)
-            .then(|| self.live_block_entity(key, &facts.name))
+            .then(|| self.world.block_entities.get(&key).cloned())
             .flatten();
         // Mod data is encoded only if the removed block goes on to roll loot.
         let mod_source = match &live {
-            Some((BlockEntity::Mod(_), _)) => Some((
+            Some(BlockEntity::Mod(_)) => Some((
                 self.world.block_entities.generation(&key),
                 self.world.block_names.get(&key).cloned(),
                 self.world.block_lock(key).cloned(),
             )),
-            Some((entity, _)) => {
+            Some(entity) => {
                 let saved = sunrise_client::save::block_entity_encode::encode(
                     key,
                     entity,
@@ -4406,6 +4409,7 @@ impl Game<'_> {
                 None
             }
         };
+        let mut source = self.pending.source(pos);
         let hive = match self.world.block_entities.get(&key) {
             Some(BlockEntity::Beehive(h)) => self.hive_state(pos).map(|s| ((**h).clone(), s)),
             _ => None,
@@ -4429,7 +4433,7 @@ impl Game<'_> {
                 if let Some(p) = self.player.as_mut() {
                     p.cause_food_exhaustion(0.005);
                 }
-                if let (Some((entity, _)), Some((generation, name, lock))) = (&live, mod_source) {
+                if let (Some(entity), Some((generation, name, lock))) = (&live, mod_source) {
                     let saved = self.encode_removed_block_entity(
                         key,
                         entity,
@@ -4437,21 +4441,37 @@ impl Game<'_> {
                         &facts.name,
                         self.res.items(),
                     );
-                    self.pending
-                        .record_source(pos, spill::source_snapshot(saved, name, lock.as_ref()));
+                    source = Some(
+                        self.pending
+                            .record_source(pos, spill::source_snapshot(saved, name, lock.as_ref())),
+                    );
                 }
-                let stacks = self.block_loot_at(pos, state, held.as_ref());
+                // Never consult the cell after removal: listeners may have replaced its occupant.
+                let source = source.or_else(|| {
+                    spill::implicit_block_source(pos, &facts.name)
+                        .map(|tag| std::sync::Arc::new(spill::source_snapshot(tag, None, None)))
+                });
+                let stacks = self.block_loot_at(pos, state, held.as_ref(), source.as_deref());
                 let silk = held
                     .as_ref()
                     .is_some_and(|h| h.enchantment_level("minecraft:silk_touch") > 0);
                 // Block.dropResources: the item entities, then spawnAfterBreak's
                 // experience, with the mods' say between the two.
                 let breaker = Some(self.native_acting_id());
-                let dropped = self.player_block_dropped(
-                    (pos, state),
-                    (breaker, held.as_ref(), live),
-                    (stacks, exp_to_drop),
-                );
+                let dropped = self.with_level(|_, level, _| {
+                    level.block_dropped(
+                        spill::DropContext {
+                            pos: BlockPos::new(pos[0], pos[1], pos[2]),
+                            state,
+                            cause: mod_api::BlockDestructionCause::PlayerBreak,
+                            breaker,
+                            tool: held.as_ref(),
+                            source,
+                        },
+                        stacks,
+                        exp_to_drop,
+                    )
+                });
                 let canceled = dropped.canceled;
                 if let Some(kept) = self.break_collect.as_mut() {
                     kept.extend(dropped.items.into_iter().map(|item| item.stack));

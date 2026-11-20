@@ -34,12 +34,24 @@ use {
 struct ExplosionDrops {
     stacks: Vec<([i32; 3], ItemStack)>,
     blocks: Vec<ExplosionBlockDrops>,
+    orbs: Vec<ExplosionOrbAward>,
+    infestations: Vec<sunrise_client::mobs::Mob>,
+}
+
+struct ExplosionOrbAward {
+    value: u32,
+    merge_id: i32,
+    prepared: Option<sunrise_client::entities::ExperienceOrb>,
 }
 
 struct ExplosionBlockDrops {
     pos: [i32; 3],
     state: BlockStateId,
     pieces: Vec<ExplosionDropPiece>,
+    source: Option<super::spill::LootSource>,
+    experience: u32,
+    orb_count: usize,
+    infestation: bool,
 }
 
 struct ExplosionDropPiece {
@@ -1775,26 +1787,33 @@ impl Game<'_> {
     /// blocks drop, its silverfish (`spawnInfestation`) comes out at the
     /// bottom centre of the block, with its spawn animation.
     pub(super) fn spawn_infestation(&mut self, pos: [i32; 3]) {
+        if let Some(mob) = self.prepare_infestation(pos)
+            && let Some(id) = self.insert_spawned_mob(mob)
+        {
+            self.mob_poof(id);
+        }
+    }
+
+    fn prepare_infestation(&mut self, pos: [i32; 3]) -> Option<sunrise_client::mobs::Mob> {
         if !self
             .ui
             .rules
             .bool_at(sunrise_client::gamerules::vanilla::BLOCK_DROPS)
         {
-            return;
+            return None;
         }
         let at = [
             f64::from(pos[0]) + 0.5,
             f64::from(pos[1]),
             f64::from(pos[2]) + 0.5,
         ];
-        if let Some(id) = self.spawn_mob(
+        self.create_mob_reason(
             "minecraft:silverfish",
             at,
             false,
             crate::game::creatures::SpawnSite::Plain,
-        ) {
-            self.mob_poof(id);
-        }
+            None,
+        )
     }
     /// `BlockBehaviour.onExplosionHit` (TNT: `wasExploded` primes a short fuse).
     /// The blast's block step on `targets` (`ServerExplosion.explode` from
@@ -1823,11 +1842,17 @@ impl Game<'_> {
             }
             let mut drops = ExplosionDrops::default();
             for &pos in targets.iter() {
-                if self.explosion_hit_block(pos, radius, interaction, start, &mut drops)? {
-                    hit += 1;
+                match self.explosion_hit_block(pos, radius, interaction, start, &mut drops) {
+                    Ok(broken) => hit += usize::from(broken),
+                    Err(error) => {
+                        for mob in drops.infestations {
+                            self.discard_unjoined_mob::<()>(mob.id);
+                        }
+                        return Err(error);
+                    }
                 }
             }
-            self.spawn_explosion_drops(drops);
+            self.spawn_explosion_drops(drops, start);
         }
         if fire {
             for &pos in targets.iter() {
@@ -1903,26 +1928,79 @@ impl Game<'_> {
         let drops = self
             .part_drops_from_explosion(pos, state, explosion)
             .unwrap_or(!is_tnt);
-        // Block.onExplosionHit runs spawnAfterBreak before the drops.
-        if drops && name.starts_with("minecraft:infested_") {
-            self.spawn_infestation(pos);
-        }
-        // Its dropExperience is whether the blast's indirect source is a
-        // player (a primed TNT's owner, not a mob's): ores, sculk and spawners
-        // sample their experience then, and pop it while blocks drop.
-        if drops && self.combat.blast_owner_player {
-            let xp = sunrise_world::level::removal::break_experience(&mut self.world.random, &name)
-                .unwrap_or(0);
-            if xp > 0
-                && self
-                    .ui
-                    .rules
-                    .bool_at(sunrise_client::gamerules::vanilla::BLOCK_DROPS)
-            {
-                self.spawn_orbs(pos.map(|v| f64::from(v) + 0.5), xp);
-            }
-        }
         if drops {
+            let listened = self.native_authoritative()
+                && mod_api::__private::listened(mod_api::HookId::BlockDrops);
+            // Prepare spawnAfterBreak at the vanilla point in the random stream. Publication
+            // waits for the per-block event only when there is a listener.
+            let infestation = if name.starts_with("minecraft:infested_") {
+                if listened {
+                    if let Some(mob) = self.prepare_infestation(pos) {
+                        dropped.infestations.push(mob);
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    self.spawn_infestation(pos);
+                    false
+                }
+            } else {
+                false
+            };
+            // Ores, sculk and spawners sample XP only when the blast owner is a player.
+            let mut experience = 0;
+            let orb_start = dropped.orbs.len();
+            if self.combat.blast_owner_player {
+                let xp =
+                    sunrise_world::level::removal::break_experience(&mut self.world.random, &name)
+                        .unwrap_or(0);
+                if xp > 0
+                    && self
+                        .ui
+                        .rules
+                        .bool_at(sunrise_client::gamerules::vanilla::BLOCK_DROPS)
+                {
+                    let centre = pos.map(|v| f64::from(v) + 0.5);
+                    if listened {
+                        experience = xp;
+                        let area = super::item_entities::orb_award_area(centre);
+                        // Reserve the fresh orb's position, id and entity random at the
+                        // vanilla point. A later cancellation can remove a merge target;
+                        // the apply step still makes that award if it was accepted.
+                        dropped.orbs.extend(
+                            super::spill::prepare_orb_awards(&mut self.world.random, xp).map(
+                                |(value, merge_id)| ExplosionOrbAward {
+                                    value,
+                                    merge_id,
+                                    prepared: None,
+                                },
+                            ),
+                        );
+                        for index in orb_start..dropped.orbs.len() {
+                            let ExplosionOrbAward {
+                                value, merge_id, ..
+                            } = dropped.orbs[index];
+                            let can_merge = |orb: &sunrise_client::entities::ExperienceOrb| {
+                                area.intersects(orb.bounds())
+                                    && orb.can_merge(merge_id as u32, value as i32)
+                            };
+                            let has_target = self.orbs.iter().any(can_merge)
+                                || dropped.orbs[..index]
+                                    .iter()
+                                    .filter_map(|award| award.prepared.as_ref())
+                                    .any(can_merge);
+                            if !has_target {
+                                dropped.orbs[index].prepared =
+                                    Some(self.prepare_orb(centre, [0.0; 3], value));
+                            }
+                        }
+                    } else {
+                        self.spawn_orbs(centre, xp);
+                    }
+                }
+            }
+            let orb_count = dropped.orbs.len() - orb_start;
             // Capture the entity the admitted roll actually sees. Spill, on removal below,
             // uses the stored slots rather than the serializer's output.
             if let Some(saved) = self.loot_block_entity(pos, &name) {
@@ -1939,17 +2017,17 @@ impl Game<'_> {
                 .combat
                 .explosion_direct
                 .or(self.combat.explosion_source);
+            let source = self.block_loot_source(pos, state);
             let mut drops = sunrise_world::loot::with_native_loot_place(place, || {
                 let roll = sunrise_client::items::BlockLootRoll {
                     dynamic: &dynamic,
                     explosion: decay,
                     ..Default::default()
                 };
-                self.roll_block_loot(pos, state, entity, roll)
+                self.roll_block_loot_with_source(pos, state, entity, roll, source.as_deref())
             });
             self.native_block_loot(pos, state, None, None, Some(radius), &mut drops);
             let mut pieces: Vec<ExplosionDropPiece> = Vec::new();
-            let listened = mod_api::__private::listened(mod_api::HookId::BlockDrops);
             for stack in drops {
                 if &*stack.item == "minecraft:air" || stack.count == 0 {
                     continue;
@@ -1973,9 +2051,15 @@ impl Game<'_> {
                 );
             }
             if listened {
-                dropped
-                    .blocks
-                    .push(ExplosionBlockDrops { pos, state, pieces });
+                dropped.blocks.push(ExplosionBlockDrops {
+                    pos,
+                    state,
+                    pieces,
+                    source,
+                    experience,
+                    orb_count,
+                    infestation,
+                });
             }
         }
         self.pending.clear(pos);
@@ -2018,20 +2102,40 @@ impl Game<'_> {
     /// draws. Each block owns only its contribution to a merged stack: canceling
     /// it cannot take another block's loot. Unedited contributions rejoin their
     /// original entity; edited or added entities spawn exactly as returned.
-    fn spawn_explosion_drops(&mut self, drops: ExplosionDrops) {
-        if !mod_api::__private::listened(mod_api::HookId::BlockDrops) {
+    fn spawn_explosion_drops(&mut self, drops: ExplosionDrops, start: &ExplosionStart<'_>) {
+        if drops.blocks.is_empty() {
             for (pos, stack) in drops.stacks {
                 self.pop_resource(pos, stack);
             }
             return;
         }
+        let cause = mod_api::BlockDestructionCause::Explosion {
+            radius: start.radius,
+            direct_source: self.loot_entity_ref(self.combat.explosion_direct.or(start.source)),
+            causing_entity: self.loot_entity_ref(start.owner),
+        };
         let items: Vec<_> = self.with_level(|_, level, _| {
             drops
                 .stacks
                 .into_iter()
-                .map(|(pos, stack)| level.block_drop_item(pos, stack))
+                .map(|(pos, stack)| {
+                    if level.rules.block_drops {
+                        level.block_drop_item(pos, stack)
+                    } else {
+                        super::spill::BlockItemDrop {
+                            position: super::spill::pop_position(&mut level.world.random, pos),
+                            stack,
+                            random: None,
+                            velocity: [0.0; 3],
+                            pickup_delay: 10,
+                            state: Default::default(),
+                        }
+                    }
+                })
                 .collect()
         });
+        let mut infestations = drops.infestations.into_iter();
+        let mut orbs = drops.orbs.into_iter();
         let mut merged: Vec<Option<super::spill::BlockItemDrop>> = vec![None; items.len()];
         let mut edited = Vec::new();
         for block in drops.blocks {
@@ -2046,17 +2150,30 @@ impl Game<'_> {
                 .collect();
             let dropped = self.with_level(|_, level, _| {
                 level.block_drops_ready(
-                    BlockPos::new(block.pos[0], block.pos[1], block.pos[2]),
-                    block.state,
-                    None,
-                    None,
+                    super::spill::DropContext {
+                        pos: BlockPos::new(block.pos[0], block.pos[1], block.pos[2]),
+                        state: block.state,
+                        cause,
+                        breaker: None,
+                        tool: None,
+                        source: block.source,
+                    },
                     super::spill::BlockDrops {
                         items: originals.iter().map(|(_, item)| item.clone()).collect(),
-                        experience: 0,
+                        experience: block.experience,
                         canceled: false,
                     },
                 )
             });
+            if block.infestation
+                && let Some(mob) = infestations.next()
+            {
+                if dropped.canceled {
+                    self.discard_unjoined_mob::<()>(mob.id);
+                } else if let Some(id) = self.insert_spawned_mob(mob) {
+                    self.mob_poof(id);
+                }
+            }
             for item in dropped.items {
                 if let Some(index) = originals.iter().position(|(_, original)| *original == item) {
                     let (piece, _) = originals.swap_remove(index);
@@ -2068,15 +2185,29 @@ impl Game<'_> {
                     edited.push(item);
                 }
             }
-            // Keep the blast path's zero base XP; the event may award some.
-            if dropped.experience > 0 {
-                self.spawn_orbs(block.pos.map(|v| f64::from(v) + 0.5), dropped.experience);
+            let centre = block.pos.map(|v| f64::from(v) + 0.5);
+            for award in orbs.by_ref().take(block.orb_count) {
+                if dropped.experience != block.experience {
+                    continue;
+                }
+                if !self.merge_new_orb(centre, award.value, award.merge_id) {
+                    let orb = award
+                        .prepared
+                        .unwrap_or_else(|| self.prepare_orb(centre, [0.0; 3], award.value));
+                    self.publish_orb(orb);
+                }
+            }
+            if dropped.experience != block.experience && dropped.experience > 0 {
+                self.spawn_orbs(centre, dropped.experience);
             }
         }
-        for item in merged.into_iter().flatten().chain(edited) {
-            // A fresh constructor random, as `spawn_item` draws, with the state a hook set.
-            let random = None;
-            self.add_item_drop(super::spill::BlockItemDrop { random, ..item });
+        for item in merged.into_iter().flatten() {
+            self.add_item_drop(item);
+        }
+        for mut item in edited {
+            // Edited shares are independent entities, not a second use of the merged UUID.
+            item.random = None;
+            self.add_item_drop(item);
         }
     }
 
@@ -2257,6 +2388,7 @@ mod tests {
 
     struct DropProbe {
         edit: bool,
+        cancel_only: bool,
         seen: std::sync::Arc<std::sync::Mutex<Vec<[i32; 3]>>>,
     }
 
@@ -2295,6 +2427,9 @@ mod tests {
                 1,
                 "only this block's contribution"
             );
+            if self.cancel_only && event.pos.x == 1 {
+                return mod_api::Flow::Cancel;
+            }
             if self.edit {
                 assert_eq!(
                     mod_api::__private::item_key_id(event.drops[0].stack.item()).unwrap(),
@@ -2350,6 +2485,13 @@ mod tests {
                 game.dropped.clear();
                 game.orbs.clear();
                 game.world.random.set_seed(7);
+                let start = game.explosion_start(
+                    [0.0; 3],
+                    4.0,
+                    BlockInteraction::Destroy,
+                    false,
+                    "minecraft:explosion",
+                );
                 let mut drops = ExplosionDrops::default();
                 for pos in [[1, 64, 1], [2, 64, 1]] {
                     game.world.set(pos[0], pos[1], pos[2], dirt).unwrap();
@@ -2357,48 +2499,58 @@ mod tests {
                         pos,
                         4.0,
                         BlockInteraction::Destroy,
-                        &ExplosionStart::from(mod_api::__private::built::ExplosionStart {
-                            dimension: "minecraft:overworld",
-                            center: [0.0; 3],
-                            radius: 4.0,
-                            fire: false,
-                            interaction: mod_api::BlockInteraction::Destroy,
-                            damage_type: "minecraft:explosion",
-                            source: None,
-                            owner: None,
-                        }),
+                        &start,
                         &mut drops,
                     )
                     .unwrap();
                 }
-                game.spawn_explosion_drops(drops);
+                game.spawn_explosion_drops(drops, &start);
                 game.world.random.next_int()
             };
-            let baseline = blast(game);
+            let (baseline, seeds) = sunrise_client::random_source::record_seeds(|| blast(game));
             assert_eq!(game.dropped.len(), 1);
             assert_eq!(game.dropped[0].stack.count, 2);
-            let position = game.dropped[0].position;
+            let (position, velocity) = (game.dropped[0].position, game.dropped[0].velocity);
             let seen = Arc::new(Mutex::new(Vec::new()));
-            let mods = |edit| {
+            let mods = |edit, cancel_only| {
                 vec![mod_api::ModEntry::new(
                     "drop-probe",
                     Box::new(DropProbe {
                         edit,
+                        cancel_only,
                         seen: seen.clone(),
                     }),
                 )]
                 .into()
             };
-            mod_platform::testing::with_mods(mods(false), || {
-                assert_eq!(blast(game), baseline);
+            mod_platform::testing::with_mods(mods(false, false), || {
+                assert_eq!(
+                    sunrise_client::random_source::replay_seeds(seeds.clone(), || blast(game)),
+                    baseline
+                );
+                assert!(seeds.complete());
                 assert_eq!(game.dropped.len(), 1);
                 assert_eq!(game.dropped[0].stack.count, 2);
                 assert_eq!(game.dropped[0].position, position);
-                assert!(game.orbs.is_empty(), "explosions default to no XP");
+                assert_eq!(game.dropped[0].velocity, velocity);
+                assert!(
+                    game.orbs.is_empty(),
+                    "this blast has no player causing entity"
+                );
             });
             assert_eq!(*seen.lock().unwrap(), [[1, 64, 1], [2, 64, 1]]);
             seen.lock().unwrap().clear();
-            mod_platform::testing::with_mods(mods(true), || {
+            mod_platform::testing::with_mods(mods(false, true), || {
+                assert_eq!(blast(game), baseline);
+                assert_eq!(game.dropped.len(), 1);
+                assert_eq!(
+                    (&*game.dropped[0].stack.item, game.dropped[0].stack.count),
+                    ("minecraft:dirt", 1)
+                );
+                assert_eq!(game.dropped[0].position, position);
+            });
+            seen.lock().unwrap().clear();
+            mod_platform::testing::with_mods(mods(true, false), || {
                 blast(game);
                 let check = |game: &Game<'_>| {
                     assert_eq!(game.dropped.len(), 1);

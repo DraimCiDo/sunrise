@@ -1,0 +1,2 @@
+sunrise-client game::native_hooks::block_entity_save_additional_tests::tests::final_drops_read_the_same_outgoing_serializer_across_destruction_routes lib daily resources
+sunrise-client game::spill::tests::block_drops_rejects_invalid_edits_as_one_decision lib daily resources

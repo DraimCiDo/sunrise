@@ -394,7 +394,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         if !self.level.allow_leaves_decay(pos) {
                             continue;
                         }
-                        self.drop_resources(state, pos);
+                        self.drop_resources(state, pos, super::DropCause::Unspecified);
                         self.remove_block(pos, false);
                     }
                 }
@@ -453,7 +453,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         if !self.level.allow_block_fade(pos, state, b.air()) {
                             continue;
                         }
-                        self.drop_resources(state, pos);
+                        self.drop_resources(state, pos, super::DropCause::Unspecified);
                         self.remove_block(pos, false);
                         self.game_event(pos, "minecraft:block_destroy");
                     }

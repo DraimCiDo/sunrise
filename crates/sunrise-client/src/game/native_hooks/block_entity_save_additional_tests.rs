@@ -379,7 +379,7 @@ mod tests {
                             *seen,
                             [
                                 ("removed", Some(Tag::Int(7))),
-                                ("drops", Some(Tag::Int(7))),
+                                ("drops", Some(Tag::Int(11))),
                                 ("removed", Some(Tag::Int(7))),
                                 ("removed", Some(Tag::Int(7))),
                             ]
@@ -390,5 +390,199 @@ mod tests {
                 })
             });
         }
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn final_drops_read_the_same_outgoing_serializer_across_destruction_routes() {
+        use crate::game::explosion::BlockInteraction;
+        use mod_api::{BlockDestructionCause as Cause, LevelDestructionCause as LevelCause};
+        use sunrise_client::{command::args::GameMode, mobs::MobEvent, motion::PlayerMotion};
+        use sunrise_core::geometry::Vec3;
+
+        struct CopyPayload(Arc<Mutex<Vec<(Cause, Option<mod_api::BlockEntityRef>)>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for CopyPayload {
+            fn block_drops(
+                &self,
+                level: &dyn LevelHost,
+                event: &mut mod_api::BlockDropsEvent<'_>,
+            ) -> mod_api::Flow {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push((event.cause(), event.block_entity));
+                if let Some(entity) = event.block_entity {
+                    let serial = match level
+                        .block_entity_data(entity)
+                        .and_then(|mut tag| tag.remove(&"count".into()))
+                    {
+                        Some(Tag::Int(serial)) => serial,
+                        other => panic!("outgoing serializer payload missing: {other:?}"),
+                    };
+                    event.drops[0].stack = mod_api::ItemStack::new(
+                        mod_api::__private::item_key("minecraft:emerald").unwrap(),
+                        serial as u32,
+                    )
+                    .unwrap();
+                }
+                mod_api::Flow::Continue
+            }
+        }
+        let serial = Arc::new(AtomicI32::new(12));
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![
+            ModEntry::new("test", Box::new(Mod(serial.clone()))),
+            ModEntry::new("observer", Box::new(CopyPayload(seen.clone()))),
+        ]
+        .into();
+        mod_platform::testing::with_mods(mods, || {
+            with_game(|game| {
+                mod_api::__private::resolve_block_entity_types(
+                    ["test:counter", "test:silent"],
+                    |_| Some(()),
+                )
+                .unwrap();
+                game.options.dedicated = Some(Vec::new());
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                game.block_ticks
+                    .add_empty_chunk(ChunkPos::new(0, 0))
+                    .unwrap();
+                game.player =
+                    Some(PlayerMotion::new(game.motion, Vec3::new(4.5, 64.0, 4.5)).unwrap());
+                game.lan_acting_uuid = Some(123);
+                game.lan_acting_entity = Some(20);
+                game.lan_acting_permission = Some(0);
+                game.set_mode(GameMode::Survival);
+                let at = [7, 64, 4];
+                let reg = game.pack.assets.registry;
+                let dirt = reg.default_state("minecraft:dirt").unwrap();
+                let poppy = reg.default_state("minecraft:poppy").unwrap();
+                let power = reg.default_state("minecraft:redstone_block").unwrap();
+                let piston = game
+                    .with_props(
+                        reg.default_state("minecraft:piston").unwrap(),
+                        &[("facing", "east")],
+                    )
+                    .unwrap();
+                let direct = game.loot_entity_ref(Some(91));
+                let owner = game.loot_entity_ref(Some(20));
+                assert!(direct.is_some() && owner.is_some());
+                for (kind, expected) in [
+                    ("player", Cause::PlayerBreak),
+                    ("mob", Cause::MobBreak),
+                    ("piston", Cause::Level(LevelCause::Piston)),
+                    ("command", Cause::Level(LevelCause::Command)),
+                    (
+                        "blast",
+                        Cause::Explosion {
+                            radius: 4.0,
+                            direct_source: direct,
+                            causing_entity: owner,
+                        },
+                    ),
+                    ("entity-free", Cause::PlayerBreak),
+                ] {
+                    game.dropped.clear();
+                    let before = serial.load(Ordering::Relaxed);
+                    let state = if kind == "piston" { poppy } else { dirt };
+                    game.world.set(at[0], at[1], at[2], state).unwrap();
+                    if kind != "entity-free" {
+                        game.world.block_entities.insert(
+                            (at[0], at[1], at[2]),
+                            BlockEntity::Mod(Box::new(ModBlockEntity::new(
+                                "test:counter".into(),
+                                ModBlockEntityFields {
+                                    nbt: Compound::from([("count".into(), Tag::Int(7))]),
+                                    ..Default::default()
+                                },
+                            ))),
+                        );
+                    }
+                    match kind {
+                        "player" | "entity-free" => {
+                            assert!(game.break_block_as_player(at).unwrap())
+                        }
+                        "mob" => game
+                            .handle_mob_events(vec![MobEvent::BreakBlock {
+                                pos: at,
+                                drop: true,
+                                by: None,
+                                breaker: None,
+                            }])
+                            .unwrap(),
+                        "piston" => {
+                            game.world.set(7, 63, 4, dirt).unwrap();
+                            game.world.set(6, 64, 4, piston).unwrap();
+                            game.world.set(5, 64, 4, power).unwrap();
+                            game.with_level(|b, level, ticks| {
+                                assert!(b.client_block_event(
+                                    level,
+                                    ticks,
+                                    sunrise_core::position::BlockPos::new(6, 64, 4),
+                                    0,
+                                    sunrise_core::geometry::Direction::East as i32
+                                ));
+                            });
+                        }
+                        "command" => game.destroy_block_dropping(at).unwrap(),
+                        "blast" => {
+                            let start = mod_api::ExplosionStart::from(
+                                mod_api::__private::built::ExplosionStart {
+                                    dimension: "minecraft:overworld",
+                                    center: [0.0; 3],
+                                    radius: 4.0,
+                                    fire: false,
+                                    interaction: mod_api::BlockInteraction::Destroy,
+                                    damage_type: "minecraft:explosion",
+                                    source: Some(91),
+                                    owner: Some(20),
+                                },
+                            );
+                            assert_eq!(
+                                game.explosion_block_step(
+                                    &mut [at],
+                                    4.0,
+                                    BlockInteraction::Destroy,
+                                    false,
+                                    &start
+                                )
+                                .unwrap(),
+                                1
+                            );
+                        }
+                        _ => unreachable!(),
+                    }
+                    let heard = std::mem::take(&mut *seen.lock().unwrap());
+                    let [(cause, snapshot)] = heard.as_slice() else {
+                        panic!("expected one {kind} event, got {heard:?}")
+                    };
+                    assert_eq!(*cause, expected, "{kind}");
+                    assert_eq!(game.dropped.len(), 1, "{kind}");
+                    let item = &game.dropped[0].stack;
+                    if kind == "entity-free" {
+                        assert!(snapshot.is_none());
+                        assert_eq!((&*item.item, item.count), ("minecraft:dirt", 1));
+                        assert_eq!(serial.load(Ordering::Relaxed), before);
+                    } else {
+                        assert_eq!(
+                            (&*item.item, item.count),
+                            ("minecraft:emerald", before as u32),
+                            "{kind}"
+                        );
+                        assert_eq!(
+                            serial.load(Ordering::Relaxed),
+                            before + 1,
+                            "{kind}: one serialization"
+                        );
+                        game.with_level(|_, level, _| {
+                            assert!(level.block_entity_data(snapshot.unwrap()).is_none())
+                        });
+                    }
+                }
+            })
+        });
     }
 }

@@ -1448,7 +1448,9 @@ pub trait LevelHost {
         Err(crate::PartStateError::Stale)
     }
     /// Read a block entity's saved data without identity metadata from this level.
-    /// Stale generations and handles from another level or world return None.
+    /// During `block_drops`, reads the outgoing snapshot captured for loot rather than
+    /// the current block at that position. Its reference expires when dispatch ends.
+    /// Stale references and handles from another level or world return `None` without loading chunks.
     fn block_entity_data(&self, _entity: crate::BlockEntityRef) -> Option<crate::Compound> {
         None
     }

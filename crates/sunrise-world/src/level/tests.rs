@@ -4201,7 +4201,7 @@ fn update_shape_hook_can_answer_for_the_block() {
     );
     assert_eq!(level.block_state(pos), b.air());
     assert!(level.inner.events.iter().any(
-        |e| matches!(e, LevelEvent::DropResources { pos: p, state } if *p == pos && *state == fence)
+        |e| matches!(e, LevelEvent::DropResources { pos: p, state, .. } if *p == pos && *state == fence)
     ));
 }
 
@@ -4710,7 +4710,7 @@ fn survive_hooks_answer_for_the_block() {
     );
     assert_eq!(level.block_state(pos), b.air());
     assert!(level.inner.events.iter().any(
-        |e| matches!(e, LevelEvent::DropResources { pos: p, state } if *p == pos && *state == dandelion)
+        |e| matches!(e, LevelEvent::DropResources { pos: p, state, .. } if *p == pos && *state == dandelion)
     ));
 
     // canSurvive answered for the block itself wins over its own rule, either way.

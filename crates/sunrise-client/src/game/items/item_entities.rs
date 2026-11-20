@@ -24,6 +24,12 @@ struct GivenBack {
     next: usize,
 }
 
+pub(super) fn orb_award_area(at: [f64; 3]) -> Aabb {
+    let centre = Vec3::new(at[0], at[1], at[2]);
+    let half = Vec3::new(0.5, 0.5, 0.5);
+    Aabb::new(centre.subtract(half), centre.add_vector(half))
+}
+
 impl Game<'_> {
     pub(super) fn tick_items(&mut self) {
         let mut round = self.item_update_round();
@@ -442,9 +448,7 @@ impl Game<'_> {
     }
     /// `tryMergeToExisting`: true when an orb took the new one.
     pub(super) fn merge_new_orb(&mut self, at: [f64; 3], value: u32, merge_id: i32) -> bool {
-        let centre = Vec3::new(at[0], at[1], at[2]);
-        let half = Vec3::new(0.5, 0.5, 0.5);
-        let area = Aabb::new(centre.subtract(half), centre.add_vector(half));
+        let area = orb_award_area(at);
         // A server's orbs are its own; a LAN or server guest only shows them.
         if self.remote.is_none() {
             for i in 0..self.orbs.len() {
@@ -605,6 +609,16 @@ impl Game<'_> {
     /// points against `roughly` is turned round, and the orb starts half its
     /// size (0.25) along `roughly`, unstuck if it collides there.
     pub(super) fn add_orb_toward(&mut self, at: [f64; 3], roughly: [f64; 3], value: u32) {
+        let orb = self.prepare_orb(at, roughly, value);
+        self.publish_orb(orb);
+    }
+
+    pub(super) fn prepare_orb(
+        &mut self,
+        at: [f64; 3],
+        roughly: [f64; 3],
+        value: u32,
+    ) -> ExperienceOrb {
         let len_sqr = roughly.iter().map(|v| v * v).sum::<f64>();
         // Vec3.normalize: a vector shorter than 1e-5 has no direction.
         let len = len_sqr.sqrt();
@@ -627,7 +641,7 @@ impl Game<'_> {
             velocity = Vec3::new(-velocity.x, -velocity.y, -velocity.z);
         }
         self.next_entity += 1;
-        self.orbs.push(ExperienceOrb {
+        ExperienceOrb {
             attachment_lifetime: Default::default(),
             fall_distance: 0.0,
             rotation: [0.0, 0.0],
@@ -647,8 +661,12 @@ impl Game<'_> {
             air: 300,
             following: None,
             fire_ticks: 0,
-        });
+        }
+    }
+
+    pub(super) fn publish_orb(&mut self, orb: ExperienceOrb) {
         // ServerLevel.addFreshEntity.
+        self.orbs.push(orb);
         self.native_joins_flush(false, 0);
     }
     /// The orbs' tick, but for the movement: that is `run_ordered_ticks`'s,
