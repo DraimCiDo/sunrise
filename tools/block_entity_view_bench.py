@@ -39,6 +39,7 @@ def main():
         "kernel": platform.release(),
         "rustc": hot_paths.first_line(["rustc", "--version"]),
         "valgrind": hot_paths.first_line([args.valgrind, "--version"]) if args.valgrind else None,
+        "instruction_scope": "ticker thread" if args.valgrind else None,
     }
     (work / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     checksum = {}
@@ -52,7 +53,9 @@ def main():
                     mods = "none" if route in ("empty", "no_listener") else "native"
                     folder = work / f"{'ir' if instrumented else 'native'}-{repeat}-{route}"
                     if instrumented:
-                        counts, rows = hot_paths.callgrind(args.valgrind, game, resources, folder, mods, name)
+                        counts, rows = hot_paths.callgrind(
+                            args.valgrind, game, resources, folder, mods, name, separate_threads=True
+                        )
                         if name not in counts:
                             raise SystemExit(f"Callgrind did not report {name}; see {folder}")
                         sample = {"instructions": counts[name][0]}

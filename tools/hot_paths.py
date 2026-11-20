@@ -156,10 +156,13 @@ def parse_dump(text):
     return name, instructions, allocations
 
 
-def callgrind(valgrind, game, resources, work, mods, only):
+def callgrind(valgrind, game, resources, work, mods, only, *, separate_threads=False):
     """One process under Callgrind; returns {workload: (instructions, allocator calls)} and the lines."""
     prefix = [valgrind, '--tool=callgrind', f'--main-stacksize={STACK}', '--instr-atstart=no', '--dump-instr=no', '--collect-jumps=no',
               '--cache-sim=no', '--branch-sim=no', f'--callgrind-out-file={work}/callgrind.out']
+    if separate_threads:
+        # Only the thread issuing the client request gets a dump with the workload label.
+        prefix.append('--separate-threads=yes')
     rows = run_game(game, resources, work, mods, only, prefix)
     counted = {}
     for dump in sorted(work.glob('callgrind.out*')):
