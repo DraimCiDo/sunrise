@@ -2,7 +2,6 @@
 
 /// The engine-assigned visibility category of a local chat line.
 /// It does not identify a sender or attest to a signature.
-// no wire: source of the native local chat insertion hook.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: the two system-message visibility categories
 pub enum LocalChatSource {

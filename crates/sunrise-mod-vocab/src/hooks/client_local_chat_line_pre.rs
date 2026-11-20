@@ -17,7 +17,6 @@ pub trait Hooks {
     ///
     /// Received messages use `client_chat_received` instead. Redraw, rewrap and
     /// replay of chat history do not fire this hook. Client-side.
-    /// Not on wasm: this local insertion decision is a native hook.
     #[hook(
         side = "client",
         contract = "cancel",
