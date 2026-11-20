@@ -2,7 +2,7 @@
 
 use super::{Dim, Game, api_values::TryIntoApi, native_entity_refs::tests::with_game};
 use mod_api::{
-    BlockChangedEvent, BlockEntityError, BlockState, BlockStateError, BlockStatesHost as Host,
+    BlockChangedEvent, BlockEntityError, BlockState, BlockStateError, BlockStateRecord,
     BlockUpdateFlags, Compound, Hooks, HostTransaction as _, LevelDimension, LevelHost, LevelRef,
     LevelWriteError, ServerHost,
 };
@@ -225,9 +225,15 @@ fn outer_abort_restores_state_and_payload_without_notices_or_dirtying_chunks() {
 #[ignore = "daily"]
 fn adjacent_replay_does_not_break_a_tentative_wall_torch() {
     with_two_levels(|game, _, parked, _, _| {
-        let stone = Host::block_state_id(game, "minecraft:stone").unwrap();
-        let air = Host::block_state_id(game, "minecraft:air").unwrap();
-        let torch = Host::block_state_id(game, "minecraft:wall_torch[facing=east]").unwrap();
+        let stone = (&*game as &dyn ServerHost)
+            .block_state_id("minecraft:stone")
+            .unwrap();
+        let air = (&*game as &dyn ServerHost)
+            .block_state_id("minecraft:air")
+            .unwrap();
+        let torch = (&*game as &dyn ServerHost)
+            .block_state_id("minecraft:wall_torch[facing=east]")
+            .unwrap();
         let next = [3, 64, 2];
         assert_eq!(
             parked.set_block(game, POS, stone, BlockUpdateFlags::KNOWN_SHAPE),
@@ -263,7 +269,9 @@ fn adjacent_replay_does_not_break_a_tentative_wall_torch() {
 fn tentative_holder_and_payload_follow_the_outer_transaction() {
     with_two_levels(|game, current, parked, [north, _, _], heard| {
         let original = game.block_entity(parked, POS).unwrap();
-        let barrel = Host::block_state_id(game, "minecraft:barrel").unwrap();
+        let barrel = (&*game as &dyn ServerHost)
+            .block_state_id("minecraft:barrel")
+            .unwrap();
         let flags = BlockUpdateFlags::KNOWN_SHAPE;
         let mut aborted_holder = None;
         let aborted = (game as &mut dyn ServerHost).transaction(|host, _| {
@@ -322,7 +330,9 @@ fn tentative_holder_and_payload_follow_the_outer_transaction() {
 fn committed_saved_jukebox_record_without_a_song_clock_stays_idle() {
     use sunrise_client::containers::BlockEntity;
     with_two_levels(|game, _, parked, _, _| {
-        let jukebox = Host::block_state_id(game, "minecraft:jukebox").unwrap();
+        let jukebox = (&*game as &dyn ServerHost)
+            .block_state_id("minecraft:jukebox")
+            .unwrap();
         let flags = BlockUpdateFlags::KNOWN_SHAPE;
         let Tag::Compound(record) = sunrise_client::command::snbt::parse_fully(
             r#"{RecordItem:{id:"minecraft:music_disc_cat",count:1}}"#,
@@ -365,9 +375,15 @@ fn parked_removal_sound_and_queued_song_reach_only_target_guests() {
     use sunrise_client::lan::{NetConfig, hub::HubConfig};
     use sunrise_protocol::packets::play::Clientbound;
     with_two_levels(|game, _, parked, _, _| {
-        let beacon = Host::block_state_id(game, "minecraft:beacon").unwrap();
-        let jukebox = Host::block_state_id(game, "minecraft:jukebox").unwrap();
-        let air = Host::block_state_id(game, "minecraft:air").unwrap();
+        let beacon = (&*game as &dyn ServerHost)
+            .block_state_id("minecraft:beacon")
+            .unwrap();
+        let jukebox = (&*game as &dyn ServerHost)
+            .block_state_id("minecraft:jukebox")
+            .unwrap();
+        let air = (&*game as &dyn ServerHost)
+            .block_state_id("minecraft:air")
+            .unwrap();
         let flags = BlockUpdateFlags::KNOWN_SHAPE;
         let song_at = [3, 64, 2];
         assert_eq!(parked.set_block(game, POS, beacon, flags), Ok(true));
@@ -484,7 +500,12 @@ fn stale_or_unloaded_targets_never_write_or_load() {
             Err(LevelWriteError::Stale)
         );
         assert_eq!(
-            parked.set_block(game, POS, BlockState::new(east.block(), u16::MAX), flags),
+            parked.set_block(
+                game,
+                POS,
+                BlockStateRecord::new(east.block(), u16::MAX).into(),
+                flags
+            ),
             Err(LevelWriteError::InvalidState(BlockStateError::UnknownState))
         );
         game.with_resident_block_level(Dim::Nether, |game| game.world.chunks.remove(&(0, 0)))

@@ -369,7 +369,9 @@ fn a_net_zero_block_write_keeps_the_live_observers_contents_watches() {
             let _phase = __private::PhaseOwner::scope(__private::ModPhase::World);
             let observer = game.block_entity(level, OBSERVER).unwrap();
             let chest = level.block_state(game, OBSERVER).unwrap();
-            let air = BlockStatesHost::block_state_id(game, "minecraft:air").unwrap();
+            let air = (&*game as &dyn ServerHost)
+                .block_state_id("minecraft:air")
+                .unwrap();
             observer.watch_contents(game, source_pos(), true).unwrap();
             (game as &mut dyn ServerHost)
                 .transaction(|host, _| {
