@@ -53,8 +53,10 @@ item entity. Explicit mod-issued world notifications are not deferred with these
 `LevelRef::set_block` and `BlockEntityRef::{merge_data, replace_data}` participate in the
 open transaction without a separate token argument. Storage is recorded by level lifetime
 and position, so the same coordinates in two levels are independent. Reads see tentative
-states and saved payloads. At outer commit, each cell whose state changed runs its normal
-write with the original state, final state and last write's flags. Implicit saved-data
+states, block entities and saved payloads, including payloads on newly placed block entities.
+At outer commit, state writes replay in order from the published world, without exposing
+other cells' tentative states to the block lifecycle. Each changed cell applies its final
+state with its last write's flags. Implicit saved-data
 updates go to the addressed level at commit, not the level that opened the transaction.
 Abort restores the state and payload without those effects. An unsafe write phase is
 refused before mutation; neither the call nor publication loads a chunk or level.

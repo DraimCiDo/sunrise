@@ -40,8 +40,8 @@ game event or advancement. `place_block` and `update_from_neighbour_shapes` refu
 To place from a stack or saved data, write the state with `set_block`, then load the block entity data
 if any, then call `set_placed_by` with the original stack (if any). `BlockItem.place` applies item data
 before `Block.setPlacedBy`; the standalone call only runs the last step. When `set_block` stages
-creation of a new block entity in a transaction, its normal creation runs at outer commit; load its
-payload after that commit.
+a new block entity in a transaction, you can look up its handle and load its payload in that
+transaction. The outer commit publishes it; an abort discards both the new holder and its payload.
 
 ## Initialize a block after placement
 

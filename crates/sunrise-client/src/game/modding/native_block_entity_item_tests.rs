@@ -624,9 +624,8 @@ fn each_slot_journalled_container_aborts_to_its_exact_stacks() {
     });
 }
 
-/// `LevelRef::set_block` writes the world at once, outside the transaction (on `main` too), so
-/// an abort after it doesn't bring the old block back. What the slot journal must not do is
-/// write a kept slot into the block entity that replaced the one it was taken from.
+/// A staged replacement rolls back with its original slots. An engine write that
+/// replaces the holder outright must never receive the displaced holder's slot snapshot.
 #[test]
 #[ignore = "daily"]
 fn a_kept_slot_goes_back_only_into_the_block_entity_it_came_from() {
@@ -637,7 +636,8 @@ fn a_kept_slot_goes_back_only_into_the_block_entity_it_came_from() {
             let level = entity.level(game).unwrap();
             let pos = (3, 64, 1);
             let replace = |game: &mut super::Game<'_>, block: &str, commit: bool| {
-                container_at(game, pos, "minecraft:chest");
+                let chest = container_at(game, pos, "minecraft:chest");
+                let original = game.block_entity(level, [3, 64, 1]).unwrap();
                 let items = level.capability(game, &ITEMS, [3, 64, 1], None).unwrap();
                 let stone =
                     ItemResource::of(&ItemStack::new("minecraft:stone", 1).try_into_api().unwrap());
@@ -655,17 +655,38 @@ fn a_kept_slot_goes_back_only_into_the_block_entity_it_came_from() {
                         if commit { Ok(()) } else { Err(()) }
                     });
                 assert_eq!(result.is_ok(), commit);
+                if !commit {
+                    assert_eq!(game.block_entity(level, [3, 64, 1]), Some(original));
+                    assert_eq!(slots_at(game, pos), Some(chest));
+                }
             };
             replace(game, "minecraft:air", false);
-            assert_eq!(slots_at(game, pos), None, "removed, as on main");
             replace(game, "minecraft:barrel", false);
+            replace(game, "minecraft:air", true);
+            assert_eq!(slots_at(game, pos), None);
+
+            container_at(game, pos, "minecraft:chest");
+            let items = level.capability(game, &ITEMS, [3, 64, 1], None).unwrap();
+            let stone =
+                ItemResource::of(&ItemStack::new("minecraft:stone", 1).try_into_api().unwrap());
+            let state = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:barrel")
+                .unwrap();
+            let outcome = mod_api::run_transaction(game, |game, tx| {
+                assert_eq!(items.extract(game, tx, 0, &stone, 10), 10);
+                // Deliberately use the non-journaled engine path to test the generation guard.
+                assert!(game.apply_native_block_write([3, 64, 1], state, 0, None));
+                Err::<(), ()>(())
+            });
+            assert_eq!(outcome, Err(()));
             let barrel = slots_at(game, pos).expect("the barrel's block entity");
             assert!(
                 barrel.iter().all(Option::is_none),
                 "the chest's kept slot was not written into the barrel: {barrel:?}"
             );
-            replace(game, "minecraft:air", true);
-            assert_eq!(slots_at(game, pos), None);
             assert!(game.transactions.is_empty());
         });
     });

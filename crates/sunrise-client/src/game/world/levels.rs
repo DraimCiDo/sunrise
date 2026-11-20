@@ -181,6 +181,8 @@ pub(super) struct Parked {
     persist: persist::EntityMemory,
     lectern_pulses: Vec<((i32, i32, i32), i32)>,
     lid_openers: HashMap<(i32, i32, i32), i32>,
+    captured_sounds: Vec<sunrise_client::audio::CapturedSound>,
+    lan_songs: Vec<([i32; 3], Option<String>)>,
     lan_events: Vec<super::QueuedLevelEvent>,
     lan_block_events: Vec<([i32; 3], i32, i32, u32)>,
     lan_entity_events: Vec<(i32, i8)>,
@@ -802,6 +804,8 @@ impl Game<'_> {
             lan_events: Vec::new(),
             lan_block_events: Vec::new(),
             lan_entity_events: Vec::new(),
+            captured_sounds: Vec::new(),
+            lan_songs: Vec::new(),
             lan_critical_hits: Vec::new(),
             lan_states: Default::default(),
             anims: Default::default(),
@@ -954,6 +958,10 @@ impl Game<'_> {
         swap(&mut self.persist, &mut p.persist);
         swap(&mut self.lectern_pulses, &mut p.lectern_pulses);
         swap(&mut self.lid_openers, &mut p.lid_openers);
+        if let Some(capture) = &mut self.audio.capture {
+            swap(capture, &mut p.captured_sounds);
+        }
+        swap(&mut self.lan_songs, &mut p.lan_songs);
         swap(&mut self.lan_events, &mut p.lan_events);
         swap(&mut self.lan_block_events, &mut p.lan_block_events);
         swap(&mut self.lan_entity_events, &mut p.lan_entity_events);

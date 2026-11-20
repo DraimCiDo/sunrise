@@ -53,7 +53,7 @@ impl<'g, 'a> JournalLevelWrite<'g, 'a> {
 }
 
 impl Game<'_> {
-    /// Stage an already validated write and hide any displaced entity from tentative reads.
+    /// Stage an already validated write, including the holder visible to tentative reads.
     pub(super) fn stage_native_block_write(
         &mut self,
         pos @ [x, y, z]: [i32; 3],
@@ -66,10 +66,25 @@ impl Game<'_> {
             return false;
         }
         self.journal_pin_block_storage();
-        if !self.res.behaviours().keeps_block_entity(old, state)
-            && self.world.block_entities.get(&(x, y, z)).is_some()
-        {
-            self.journal_block_replacement((x, y, z));
+        if !self.res.behaviours().keeps_block_entity(old, state) {
+            let key = (x, y, z);
+            let displaced = self.world.block_entities.get(&key).is_some();
+            if displaced {
+                self.journal_block_replacement(key);
+            }
+            // The factory can read the staged state, but this is not a normal
+            // level pass: leave pending sounds and other effects alone.
+            self.ensure_stateful_entity_table();
+            if let Some(entity) =
+                self.with_level_access(false, |_, level, _| level.new_block_entity_for_state(state))
+            {
+                if !displaced {
+                    self.journal_block_replacement(key);
+                }
+                self.world
+                    .block_entities
+                    .insert_journaled(key, entity, None);
+            }
         }
         true
     }

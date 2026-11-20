@@ -429,6 +429,7 @@ struct GameLevel<'w> {
     border: &'w sunrise_core::geometry::border::BorderGeometry,
     world: &'w mut World,
     command_block_transition: Option<command_blocks::CommandBlockTransition>,
+    staged_block_entity: Option<transactions::StagedBlockEntity>,
     redstone_experiments: bool,
     facts: &'w BlockFacts,
     /// The block-state facts a part reads through `LevelHost::block_states`.
@@ -3204,6 +3205,7 @@ impl Game<'_> {
             },
             part_state_index: self.attachment_indexes.get(&self.dim),
             command_block_transition: None,
+            staged_block_entity: None,
             positions: piston_carry_state::PositionState {
                 gateways: &mut self.be_anims.gateway_servers,
                 hoppers: &mut self.hoppers,

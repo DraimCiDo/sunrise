@@ -29,9 +29,12 @@ impl Game<'_> {
         pos: [i32; 3],
         state: BlockStateId,
         flags: i32,
+        staged: Option<crate::game::transactions::StagedBlockEntity>,
     ) -> bool {
-        let changed = self
-            .with_level(|_, level, ticks| level.apply_native_block_write(ticks, pos, state, flags));
+        let changed = self.with_level(|_, level, ticks| {
+            level.staged_block_entity = staged;
+            level.apply_native_block_write(ticks, pos, state, flags)
+        });
         let _ = self.process_level_events();
         changed
     }

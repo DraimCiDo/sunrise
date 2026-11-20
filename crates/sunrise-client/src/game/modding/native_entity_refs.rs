@@ -501,7 +501,7 @@ impl Game<'_> {
         let flags = flags.bits();
         self.with_resident_block_level(target, |game| {
             if game.transactions.is_empty() {
-                game.apply_native_block_write(pos, state, flags)
+                game.apply_native_block_write(pos, state, flags, None)
             } else {
                 game.stage_native_block_write(
                     pos,

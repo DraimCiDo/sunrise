@@ -230,6 +230,9 @@ impl Game<'_> {
         }
         for &(part, _) in &view.parts {
             self.journal_block_entity(part);
+            if view.kind == Kind::Jukebox {
+                self.journal_jukebox_slot(part);
+            }
         }
     }
     /// Game-held vanilla containers coalesce their implicit notice at the root commit.

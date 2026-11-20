@@ -80,9 +80,10 @@ pub trait LevelBlocksBackendMut {
     /// including when another level is in place (`MinecraftServer.getLevel`). No levels or
     /// chunks are loaded. Compatible block entities keep their handles and attachments.
     /// Stale/unavailable levels and invalid states return typed errors. `Ok(false)` means
-    /// no change or a refused position. In a Host transaction the new state is readable
-    /// immediately; the outermost commit publishes the final change with the last write's
-    /// flags. An abort restores storage without publishing that change.
+    /// no change or a refused position. In a Host transaction the new state and any
+    /// new block entity are readable immediately. The outermost commit publishes the
+    /// final change with the last write's flags. An abort restores storage without
+    /// publishing that change.
     #[access(WorldOnly)]
     fn level_set_block(
         &mut self,

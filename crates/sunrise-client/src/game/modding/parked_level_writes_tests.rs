@@ -2,8 +2,9 @@
 
 use super::{Dim, Game, api_values::TryIntoApi, native_entity_refs::tests::with_game};
 use mod_api::{
-    BlockChangedEvent, BlockEntityError, BlockState, BlockStateError, BlockUpdateFlags, Compound,
-    Hooks, HostTransaction as _, LevelDimension, LevelHost, LevelRef, LevelWriteError, ServerHost,
+    BlockChangedEvent, BlockEntityError, BlockState, BlockStateError, BlockStatesHost as Host,
+    BlockUpdateFlags, Compound, Hooks, HostTransaction as _, LevelDimension, LevelHost, LevelRef,
+    LevelWriteError, ServerHost,
 };
 use std::sync::{Arc, Mutex};
 use sunrise_client::chunk::Chunk;
@@ -124,6 +125,13 @@ fn parked_property_and_payload_writes_reach_only_the_addressed_entity() {
         assert_eq!(current.block_state(game, POS), Some(north));
         assert_eq!(parked.block_state(game, POS), Some(east));
         assert_eq!(game.block_entity(parked, POS), Some(entity));
+        assert_eq!(
+            game.native_level_world(parked)
+                .unwrap()
+                .block_log
+                .as_deref(),
+            Some(&[KEY][..])
+        );
         assert_eq!(entity.merge_data(game, payload(3)), Ok(true));
         assert_eq!(entity.position(game), Some(POS));
         assert_eq!(game.block_entity(parked, POS), Some(entity));
@@ -131,7 +139,6 @@ fn parked_property_and_payload_writes_reach_only_the_addressed_entity() {
         assert_eq!(sticks(game, current), None);
         let world = game.native_level_world(parked).unwrap();
         assert!(world.block_entities.attachments(KEY).is_some());
-        assert!(world.block_log.as_ref().unwrap().contains(&KEY));
         assert!(game.world.block_log.as_ref().unwrap().is_empty());
     });
 }
@@ -211,6 +218,256 @@ fn outer_abort_restores_state_and_payload_without_notices_or_dirtying_chunks() {
         let world = game.native_level_world(parked).unwrap();
         assert_eq!(world.block_log.as_deref(), Some(&[][..]));
         assert!(!world.modified.contains(&(0, 0)));
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn adjacent_replay_does_not_break_a_tentative_wall_torch() {
+    with_two_levels(|game, _, parked, _, _| {
+        let stone = Host::block_state_id(game, "minecraft:stone").unwrap();
+        let air = Host::block_state_id(game, "minecraft:air").unwrap();
+        let torch = Host::block_state_id(game, "minecraft:wall_torch[facing=east]").unwrap();
+        let next = [3, 64, 2];
+        assert_eq!(
+            parked.set_block(game, POS, stone, BlockUpdateFlags::KNOWN_SHAPE),
+            Ok(true)
+        );
+        (game as &mut dyn ServerHost)
+            .transaction(|host, _| {
+                assert_eq!(
+                    parked.set_block(host, POS, air, BlockUpdateFlags::NEIGHBORS),
+                    Ok(true)
+                );
+                assert_eq!(
+                    parked.set_block(host, next, torch, BlockUpdateFlags::KNOWN_SHAPE),
+                    Ok(true)
+                );
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+        assert_eq!(parked.block_state(game, POS), Some(air));
+        assert_eq!(parked.block_state(game, next), Some(torch));
+        game.with_resident_block_level(Dim::Nether, |game| {
+            assert!(
+                game.dropped.is_empty(),
+                "the torch wasn't placed when its support was replayed"
+            );
+        })
+        .unwrap();
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn tentative_holder_and_payload_follow_the_outer_transaction() {
+    with_two_levels(|game, current, parked, [north, _, _], heard| {
+        let original = game.block_entity(parked, POS).unwrap();
+        let barrel = Host::block_state_id(game, "minecraft:barrel").unwrap();
+        let flags = BlockUpdateFlags::KNOWN_SHAPE;
+        let mut aborted_holder = None;
+        let aborted = (game as &mut dyn ServerHost).transaction(|host, _| {
+            host.transaction(|host, _| {
+                assert_eq!(parked.set_block(host, POS, barrel, flags), Ok(true));
+                let staged = host.block_entity(parked, POS).unwrap();
+                assert_ne!(staged, original);
+                aborted_holder = Some(staged);
+                assert_eq!(staged.merge_data(host, payload(4)), Ok(true));
+                assert_eq!(
+                    staged.data(host).unwrap().get(&"Items".into()),
+                    payload(4).get(&"Items".into())
+                );
+                Ok::<_, ()>(())
+            })?;
+            assert_eq!(host.block_entity(parked, POS), aborted_holder);
+            assert!(heard.lock().unwrap().is_empty());
+            Err::<(), ()>(())
+        });
+        assert_eq!(aborted, Err(()));
+        assert!(aborted_holder.unwrap().data(game).is_none());
+        assert_eq!(game.block_entity(parked, POS), Some(original));
+        assert_eq!(parked.block_state(game, POS), Some(north));
+        assert_eq!(sticks(game, parked), None);
+        assert!(heard.lock().unwrap().is_empty());
+        assert!(
+            game.native_level_world(parked)
+                .unwrap()
+                .block_log
+                .as_ref()
+                .unwrap()
+                .is_empty()
+        );
+
+        let staged = (game as &mut dyn ServerHost)
+            .transaction(|host, _| {
+                assert_eq!(parked.set_block(host, POS, barrel, flags), Ok(true));
+                let staged = host.block_entity(parked, POS).unwrap();
+                assert_ne!(Some(staged), aborted_holder);
+                assert_eq!(staged.replace_data(host, payload(6)), Ok(true));
+                Ok::<_, ()>(staged)
+            })
+            .unwrap();
+        assert_eq!(game.block_entity(parked, POS), Some(staged));
+        assert_eq!(sticks(game, parked), Some(6));
+        assert_eq!(sticks(game, current), None);
+        assert_eq!(
+            *heard.lock().unwrap(),
+            [(LevelDimension::Nether, north, barrel, flags)]
+        );
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn committed_saved_jukebox_record_without_a_song_clock_stays_idle() {
+    use sunrise_client::containers::BlockEntity;
+    with_two_levels(|game, _, parked, _, _| {
+        let jukebox = Host::block_state_id(game, "minecraft:jukebox").unwrap();
+        let flags = BlockUpdateFlags::KNOWN_SHAPE;
+        let Tag::Compound(record) = sunrise_client::command::snbt::parse_fully(
+            r#"{RecordItem:{id:"minecraft:music_disc_cat",count:1}}"#,
+        )
+        .unwrap() else {
+            unreachable!()
+        };
+        let other = [3, 64, 2];
+        for at in [POS, other] {
+            assert_eq!(parked.set_block(game, at, jukebox, flags), Ok(true));
+        }
+        let synchronous = game.block_entity(parked, other).unwrap();
+        assert_eq!(synchronous.replace_data(game, record.clone()), Ok(true));
+        let transactional = game.block_entity(parked, POS).unwrap();
+        (game as &mut dyn ServerHost)
+            .transaction(|host, _| {
+                assert_eq!(transactional.replace_data(host, record), Ok(true));
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+        let world = game.native_level_world(parked).unwrap();
+        for key in [KEY, (3, 64, 2)] {
+            let Some(BlockEntity::Jukebox(entity)) = world.block_entities.get(&key) else {
+                panic!("expected a jukebox at {key:?}");
+            };
+            assert_eq!(
+                entity.record().map(|record| record.item.as_ref()),
+                Some("minecraft:music_disc_cat")
+            );
+            assert!(!entity.playing);
+            assert!(!entity.song_clock_present);
+        }
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn parked_removal_sound_and_queued_song_reach_only_target_guests() {
+    use super::native_sound_refs::tests::{guest, packets};
+    use sunrise_client::lan::{NetConfig, hub::HubConfig};
+    use sunrise_protocol::packets::play::Clientbound;
+    with_two_levels(|game, _, parked, _, _| {
+        let beacon = Host::block_state_id(game, "minecraft:beacon").unwrap();
+        let jukebox = Host::block_state_id(game, "minecraft:jukebox").unwrap();
+        let air = Host::block_state_id(game, "minecraft:air").unwrap();
+        let flags = BlockUpdateFlags::KNOWN_SHAPE;
+        let song_at = [3, 64, 2];
+        assert_eq!(parked.set_block(game, POS, beacon, flags), Ok(true));
+        assert_eq!(parked.set_block(game, song_at, jukebox, flags), Ok(true));
+        let Tag::Compound(record) = sunrise_client::command::snbt::parse_fully(
+            r#"{RecordItem:{id:"minecraft:music_disc_cat",count:1}}"#,
+        )
+        .unwrap() else {
+            unreachable!()
+        };
+        let entity = game.block_entity(parked, song_at).unwrap();
+        assert_eq!(entity.replace_data(game, record), Ok(true));
+
+        let net = NetConfig {
+            listen: false,
+            announce: false,
+            lod_distance: 0,
+            ..NetConfig::lan(0, String::new(), 3)
+        };
+        let config = HubConfig {
+            default_game_mode: 0,
+            guest_commands: false,
+            force_game_mode: false,
+            hardcore: false,
+            view_distance: 2,
+            simulation_distance: 2,
+            dimension: OVERWORLD.into(),
+            allow_flight: true,
+            seed: 0,
+            max_players: 3,
+            integrated: true,
+            levels: game.level_shapes,
+            level_seeds: game.levels.runtime.seeds(),
+        };
+        let settings = super::lan::LanSettings {
+            port: 0,
+            guest_commands: false,
+            force_game_mode: false,
+        };
+        game.lan_host(settings, net, config).unwrap();
+        let (mut overworld, rx_overworld) = guest(21, 21, [2.5, 64.5, 2.5]);
+        overworld.dimension = OVERWORLD.into();
+        let (mut nether, rx_nether) = guest(22, 22, [2.5, 64.5, 2.5]);
+        nether.dimension = NETHER.into();
+        game.lan
+            .as_mut()
+            .unwrap()
+            .hub
+            .guests
+            .extend([overworld, nether]);
+
+        assert_eq!(parked.set_block(game, POS, air, flags), Ok(true));
+        game.with_resident_block_level(Dim::Nether, |game| game.jukebox_inserted(song_at))
+            .unwrap();
+        game.lan_flush_effects();
+        let heard = |packet: &Clientbound| {
+            matches!(
+                packet,
+                Clientbound::Sound(_)
+                    | Clientbound::LevelEvent(sunrise_protocol::packets::play::LevelEvent {
+                        kind: 1010,
+                        ..
+                    })
+            )
+        };
+        assert!(!packets(&rx_overworld).iter().any(heard));
+        assert!(!packets(&rx_nether).iter().any(heard));
+        game.with_resident_block_level(Dim::Nether, |game| game.lan_flush_effects())
+            .unwrap();
+        assert!(!packets(&rx_overworld).iter().any(heard));
+        let packets = packets(&rx_nether);
+        let sound = game.lan.as_ref().unwrap().hub.sound_packet(
+            "minecraft:block.beacon.deactivate",
+            [2.5, 64.5, 2.5],
+            1.0,
+            1.0,
+            0,
+            0,
+        );
+        let Clientbound::Sound(expected) = sound else {
+            panic!("expected the beacon sound");
+        };
+        assert_eq!(
+            packets
+                .iter()
+                .filter_map(|packet| match packet {
+                    Clientbound::Sound(p) => Some(format!("{:?}", p.sound)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            [format!("{:?}", expected.sound)]
+        );
+        assert_eq!(
+            packets
+                .iter()
+                .filter(|packet| matches!(packet,
+            Clientbound::LevelEvent(p) if p.kind == 1010 && p.pos == song_at))
+                .count(),
+            1
+        );
     });
 }
 
