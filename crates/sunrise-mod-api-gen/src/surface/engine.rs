@@ -4,7 +4,7 @@ use std::path::Path;
 
 pub(super) fn collect(
     root: &Path,
-    wire: &crate::points::WireTypes,
+    wire: &crate::points::PointTypes,
     with_internals: bool,
 ) -> Result<Vec<EngineItem>, String> {
     let mut items = Vec::new();

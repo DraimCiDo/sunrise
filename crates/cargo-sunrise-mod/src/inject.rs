@@ -109,7 +109,7 @@ fn availability(catalog: &Catalog, request: &Request<'_>) -> String {
     {
         Some(Point {
             api_refusal: None, ..
-        }) => "available (native and wasm)".to_owned(),
+        }) => "available".to_owned(),
         Some(Point {
             api_refusal: Some(why),
             ..

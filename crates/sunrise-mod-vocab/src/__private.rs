@@ -743,7 +743,7 @@ pub mod points;
 
 include!(concat!(env!("OUT_DIR"), "/mod_api_exports_private.rs"));
 
-/// How many listeners this thread has entered, wasm and native alike. A scoped
+/// How many listeners this thread has entered. A scoped
 /// resource that must not outlive one listener compares it between operations.
 pub fn listener_serial() -> u64 {
     crate::runtime::listener_serial()

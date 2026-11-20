@@ -1,3 +1,4 @@
+> Historical audit notes for the revisions cited below, not a description of the current engine.
 
 ## Entity snapshot revision boundary
 

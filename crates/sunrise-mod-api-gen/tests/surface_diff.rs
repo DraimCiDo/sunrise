@@ -11,7 +11,6 @@ fn function(path: &str) -> Function {
         FunctionContract {
             signature: format!("fn {path}()"),
             impl_generics: String::new(),
-            wasm: true,
             refs: vec![],
         },
     )

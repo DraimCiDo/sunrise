@@ -78,13 +78,9 @@ INPUTS = ROOT / "crates/sunrise-mod-package/src/sdk/inputs.json"
 # The crates an API-only mod may name; their closure is the `api` archive.
 API_ROOTS = ("sunrise-mod-api", "sunrise-mod-points")
 # The game libraries outside the API closure, in the runtime archive.
-GAME_LIBRARIES = ("sunrise_mod_host", "sunrise_mod_wasm", "sunrise_official")
+GAME_LIBRARIES = ("sunrise_mod_host", "sunrise_official")
 # The lowest of the libraries the prebuilt game is split into: every other one links it.
 SDK_BASE = "sunrise-core"
-# A crate the wasm runtime depends on normally links into its dylib alone, and a C library inside a Rust dylib is
-# hidden from the other: #1596 put mimalloc there and the game's library, which calls it, no longer linked. These
-# `links` keys carry no library: rayon-core and wasm-bindgen-shared keep one copy, sunrise-mod-vocab hands on a folder.
-LINKS_WITHOUT_LIBRARY = {"rayon-core", "sunrise-mod-vocab", "wasm-bindgen-shared"}
 # Source files the folder carries besides compiler outputs.
 CARRIED = {"Cargo.toml": None, IDENTITY: None, LOCK: ROOT / LOCK, TEMPLATE: ROOT / "crates/sunrise-client/src" / TEMPLATE,
            NATIVE_MODS_TEMPLATE: ROOT / "crates/sunrise-client/src" / NATIVE_MODS_TEMPLATE}
@@ -271,8 +267,7 @@ def stage(target_dir: Path, stage_tool: Path | None = None, *, sdk_dylibs: bool 
 
 
 def prepare_sdk_manifests(staged: Path) -> None:
-    """Build the host and official layer as dylibs in one Cargo graph, and split out the API and
-    wasm libraries. With prefer-dynamic, the official layer uses the host's engine state."""
+    """Build the host and official layer as dylibs in one Cargo graph, and split out the API libraries. With prefer-dynamic, the official layer uses the host's engine state."""
     metadata = json.loads(run(["cargo", "metadata", "--format-version", "1", "--filter-platform", rustc_host()],
                               cwd=staged))
     split = sdk_dylibs(metadata)
@@ -310,9 +305,9 @@ def normal_dependencies(metadata: dict) -> dict[str, list[str]]:
 
 
 def sdk_dylibs(metadata: dict) -> set[str]:
-    """The names of the crates split out of the game as libraries of their own: the wasm runtime, and the API
-    closure's crates that stand on `SDK_BASE`. A library holds every crate below it that no library it links
-    holds, so a crate beside the base (sunrise-mod-call, with sha2) would hold a second copy of whatever both
+    """The names of the API closure's crates split out of the game as libraries of their own: those that stand on
+    `SDK_BASE`. A library holds every crate below it that no library it links
+    holds, so another crate beside the base would hold a second copy of whatever both
     use, and rustc refuses to link two. Such a crate stays inside the first library above it."""
     dependencies = normal_dependencies(metadata)
     closure = api_closure(metadata)
@@ -330,7 +325,7 @@ def sdk_dylibs(metadata: dict) -> set[str]:
         return False
 
     return {package["name"] for package in metadata["packages"]
-            if package["name"] == "sunrise-mod-wasm" or package["id"] in closure and stands_on_base(package["id"])}
+            if package["id"] in closure and stands_on_base(package["id"])}
 
 
 def shared_twice(metadata: dict, libraries: set[str]) -> str | None:
@@ -369,10 +364,10 @@ def shared_twice(metadata: dict, libraries: set[str]) -> str | None:
 
 def cargo_features(server: bool, platform: str) -> list[str]:
     """The game crate's features for this archive. The archive's std is a shared library with its own
-    default-allocator `__rust_alloc`, and the wasm runtime's library, below the game, binds to it. Only ELF's
+    default-allocator `__rust_alloc`. Only ELF's
     dynamic linker (Linux) resolves every library's `__rust_alloc` to the first definition, the game's mimalloc.
     Windows (#2394) and macOS (#3877) bind each import to the library it was linked against, so a game allocator
-    there leaves the wasm runtime, the mods' executable and std's own code on std's heap beside it, and a block
+    there can leave other libraries and std's own code on std's heap beside it, and a block
     freed on the other heap aborts. So everywhere but Linux the game keeps no allocator of its own and every
     library shares std's (the system heap)."""
     features = ["--no-default-features"] if server else []
@@ -550,12 +545,6 @@ def native_links(metadata: dict, root: str) -> list[dict]:
     runtime = runtime_packages(metadata, root)
     return [{"name": package["name"], "version": package["version"], "library": package["links"]}
             for package in metadata["packages"] if package["id"] in runtime and package.get("links")]
-
-
-def wasm_runtime_native_links(metadata: dict) -> list[str]:
-    """Native libraries in sunrise-mod-wasm's normal dependencies, on any platform."""
-    return [f"{link['name']} ({link['library']})" for link in native_links(metadata, "sunrise-mod-wasm")
-            if link["name"] not in LINKS_WITHOUT_LIBRARY]
 
 
 def facade_crates(deps: Path, runtime: set[str]) -> list[str]:
@@ -782,9 +771,8 @@ def check(out: Path) -> None:
     ]
     if stray:
         sys.exit(f"prebuilt folder holds files that aren't compiler outputs: {stray}")
-    for crate in ("sunrise_mod_wasm", "sunrise_mod_host"):
-        if dylib(out / "deps", crate) is None:
-            sys.exit(f"prebuilt folder has no {crate.replace('_', '-')} dylib")
+    if dylib(out / "deps", "sunrise_mod_host") is None:
+        sys.exit("prebuilt folder has no sunrise-mod-host dylib")
 
     commit = identity.get("commit")
     for name in BUILD_DATA:
@@ -1171,7 +1159,7 @@ def export_count(library: Path) -> int:
 
 
 def exports(out: Path) -> None:
-    """Report every DLL's Windows export count (#589), the separate wasm runtime included; warn on one past 80% of
+    """Report every DLL's Windows export count (#589); warn on one past 80% of
     the limit and fail, after reporting them all, on any past 90%."""
     over = []
     for library in sorted((out / "deps").glob("*.dll")):
@@ -1220,16 +1208,8 @@ def main() -> None:
     index_parser.add_argument("--nightly", help="the Nightly name that ships this build")
     index_parser.add_argument("--previous", nargs=2, metavar=("BUILD", "DIFF"),
                               help="the SDK published before this one, and the surface diff against it")
-    commands.add_parser("links", help="refuse a native library in the wasm runtime's dependencies (no build)")
     args = parser.parse_args()
-    if args.command == "links":
-        native = wasm_runtime_native_links(json.loads(run(["cargo", "metadata", "--locked", "--format-version", "1"],
-                                                          cwd=ROOT)))
-        if native:
-            sys.exit(f"sunrise-mod-wasm's normal dependencies link a native library: {', '.join(native)}. The wasm "
-                     "runtime is its own dylib in the prebuilt game, where the library is hidden from the game's "
-                     "library that uses it; make it a dev-dependency or move what it needs to a crate without one.")
-    elif args.command == "build":
+    if args.command == "build":
         build(args.out.resolve(), args.server)
     elif args.command == "exports":
         exports(args.out.resolve())

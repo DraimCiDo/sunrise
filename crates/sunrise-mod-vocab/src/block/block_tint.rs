@@ -68,10 +68,6 @@ pub struct ResolverBiome {
 /// workers, so it keeps no mutable state and gets no `Host`.
 pub trait BiomeColorResolver: Send + Sync + 'static {
     // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::biome_color_resolver::<Self>();
-    }
     /// `getColor(biome, x, z)`: the colour of `biome` (`minecraft:plains`) at block column
     /// `(x, z)`, 0xRRGGBB.
     fn color(&self, biome: &str, info: &ResolverBiome, x: f64, z: f64) -> u32;
@@ -143,10 +139,6 @@ pub trait BlockAndTintGetter {
 /// keeps no mutable state.
 pub trait BlockTintSource: Send + Sync + 'static {
     // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::block_tint_source::<Self>();
-    }
     /// `color(state)`: the colour without a world, where the block is drawn away from a level (a
     /// block in a minecart, a mod's drawn block). Also the default of the two below.
     fn color(&self, state: &BlockState, metadata: &dyn BlockMetadata) -> u32;
@@ -220,7 +212,6 @@ pub enum VanillaTint {
 /// One layer of a block's tint list: one of vanilla's sources or a mod's own.
 #[derive(Clone)]
 // exhaustive: mods build one; the game evaluates both kinds
-#[derive(sunrise_mod_api_macros::Wire)]
 pub enum TintLayer {
     /// A vanilla source, evaluated by the game as for its own blocks.
     Vanilla(VanillaTint),
@@ -262,7 +253,6 @@ pub trait BlockTintSources {
 /// The game's [`BlockTintSources`]: the registrations in order.
 #[derive(Default)]
 // exhaustive: its field is private; the game builds it
-#[derive(sunrise_mod_api_macros::Wire)]
 pub struct BlockTintRegistry {
     registrations: Vec<(Vec<TintLayer>, Vec<String>)>,
 }

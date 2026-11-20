@@ -70,8 +70,7 @@ pub trait ClientRenderClientHost {
     /// already names an image or a GUI sprite, `OverBudget` past the mod's
     /// [`DYNAMIC_TEXTURE_MOD_IMAGES`] images or [`DYNAMIC_TEXTURE_MOD_BYTES`] of pixels, and
     /// `NoSlot` when every slot of the image's class is held. The game keeps a copy of the
-    /// pixels, counted in the byte budget, to upload them again into a rebuilt atlas. Native
-    /// and wasm mods make the same call; the pixels cross as bytes.
+    /// pixels, counted in the byte budget, to upload them again into a rebuilt atlas.
     #[access(WorldOnly)]
     fn create_dynamic_texture(
         &mut self,

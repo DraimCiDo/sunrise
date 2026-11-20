@@ -103,7 +103,7 @@ pub fn stage(
         started.elapsed().as_secs_f64()
     );
     let started = Instant::now();
-    let wire = crate::build::wire_types(root)?;
+    let wire = crate::build::point_types(root)?;
     eprintln!(
         "stage_phase=wire seconds={:.3}",
         started.elapsed().as_secs_f64()

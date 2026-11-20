@@ -9,8 +9,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 /// One particle of a provider's type, as its tick reads and writes it: the fields of vanilla's
-/// `Particle` a `tick` moves. Plain numbers, so a tick allocates nothing, and one value for
-/// native and wasm mods alike.
+/// `Particle` a `tick` moves. Plain numbers, so a tick allocates nothing.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it for each tick and a mod only edits its fields
 #[derive(sunrise_mod_api_macros::Wire)]
@@ -52,10 +51,6 @@ pub struct ModParticle {
 /// reaches no gameplay. A provider that needs the world reads it in a hook and keeps what it read.
 pub trait ParticleProvider: Send + Sync + 'static {
     // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::particle_provider::<Self>();
-    }
     /// `Particle.tick`: advance `particle` by one tick. The game has set `previous` and `age`
     /// already and expires the particle once `age` passes `lifetime`; the tick sets `position`,
     /// `frame`, `size`, `rgba`, `lifetime` and `removed`. A number that is not finite expires the

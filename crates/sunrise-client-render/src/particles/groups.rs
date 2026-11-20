@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 /// engine built after.
 static REGISTERED: OnceLock<Vec<ParticleGroup>> = OnceLock::new();
 
-/// Sets the native and wasm mods' particle groups (`register_particle_groups`), once, before the
+/// Sets the mods' particle groups (`register_particle_groups`), once, before the
 /// resources first load; each engine then resolves its sprite sets' groups at every load. A group
 /// whose id is not `<namespace>:<path>` in a namespace other than vanilla's, or that another group
 /// has already, is logged and left out. False when already set.

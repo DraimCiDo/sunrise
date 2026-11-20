@@ -5,27 +5,22 @@ use crate::*;
 #[sunrise_mod_api_macros::host_area]
 pub trait ServicesServerHost {
     /// The commands service.
-    /// Not on wasm: a frame resource; its methods are the imports.
     #[access(WorldOnly)]
     #[service]
     fn commands(&mut self) -> &mut dyn Commands;
     /// The levels service.
-    /// Not on wasm: a frame resource; its methods are the imports.
     #[access(WorldOnly)]
     #[service]
     fn levels(&self) -> &dyn Levels;
     /// The messages service.
-    /// Not on wasm: a frame resource; its methods are the imports.
     #[access(WorldOnly)]
     #[service]
     fn messages(&self) -> &dyn Messages;
     /// The players service.
-    /// Not on wasm: a frame resource; its methods are the imports.
     #[access(WorldOnly)]
     #[service]
     fn players(&self) -> &dyn Players;
     /// The runtime_levels service.
-    /// Not on wasm: a frame resource; its methods are the imports.
     #[access(WorldOnly)]
     #[service]
     fn runtime_levels(&mut self) -> &mut dyn RuntimeLevels;
@@ -34,17 +29,14 @@ pub trait ServicesServerHost {
 #[sunrise_mod_api_macros::host_area]
 pub trait ServicesClientHost {
     /// Persistent model groups.
-    /// Not on wasm: a frame resource; its methods are the imports.
     #[access(PublishedResources)]
     #[service]
     fn instance_groups(&self) -> &dyn InstanceGroups;
     /// The client_session service.
-    /// Not on wasm: a frame resource; its methods are the imports.
     #[access(WorldOnly)]
     #[service]
     fn client_session(&self) -> &dyn ClientSession;
     /// The render_assets service.
-    /// Not on wasm: a frame resource; its methods are the imports.
     #[access(PublishedResources)]
     #[service]
     fn render_assets(&self) -> &dyn RenderAssets;
@@ -357,9 +349,8 @@ pub trait RenderAssets {
     /// [`InstanceGroupRef`] and `BlockEntityDrawContext::terrain_model`. `ModelError::UnknownModel` for a
     /// state with no baked model (air, a block drawn by a special renderer) or one the live
     /// block-state index lacks (a block it does not hold, or an ordinal past the block's states).
-    /// In a wasm mod, a block key the game never issued is refused when the call crosses the
-    /// boundary, before this lookup. Resolve once per distinct state in `client_setup` and again
-    /// in `client_resources_reloaded`, not each frame; the handle goes stale on a reload.
+    /// Resolve once per distinct state in `client_setup` and again in `client_resources_reloaded`,
+    /// not each frame; the handle goes stale on a reload.
     fn block_state_model(&self, state: BlockState) -> Result<ModelRef, ModelError> {
         crate::world::phase::unprovided(
             "RenderAssets::block_state_model",
@@ -373,9 +364,8 @@ pub trait RenderAssets {
     /// order without repeats: each weighted alternative and each multipart part its properties
     /// select, whichever one a position's seed would pick. A valid state with no baked binding
     /// returns an empty list. A state the live block-state index lacks (a block it does not
-    /// hold, or an ordinal past the block's states) returns `ModelError::UnknownModel`; in a wasm
-    /// mod, a block key the game never issued is refused when the call crosses the boundary,
-    /// before this lookup. Cache keys until the next `model_baking_completed`.
+    /// hold, or an ordinal past the block's states) returns `ModelError::UnknownModel`.
+    /// Cache keys until the next `model_baking_completed`.
     fn block_state_models(&self, state: BlockState) -> Result<Vec<BakedModelKey>, ModelError> {
         crate::world::phase::unprovided(
             "RenderAssets::block_state_models",

@@ -45,7 +45,7 @@
 //! Names assembled inside a macro from outside the mod (`paste!`, `concat_idents!`) never appear
 //! in the source and are out of the scan's reach; the compile catches them. A file that does not
 //! parse, or nests deeper than [`syntax::MAX_NESTING`], cannot be judged ([`ScanError`]), and
-//! neither can any file where the parser cannot have a stack of its own (on wasm). Even a mod
+//! neither can any file where the parser cannot reserve its own stack. Even a mod
 //! judged to fit is compiled on the player's machine against the target build, and that compile
 //! stays the final check. The scan also records the public paths the mod writes each item by:
 //! imported, written out, under an API glob (`prelude::Biome` after `use mod_api::*`), or
@@ -173,6 +173,8 @@ pub struct Used {
 /// What a mod uses of one surface, sorted by id.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Uses {
+    /// Schema for records scanned against the source build.
+    pub schema: u32,
     pub items: Vec<Used>,
 }
 
@@ -181,10 +183,15 @@ impl Uses {
         self.items.iter().map(|used| &used.entry)
     }
 
+    /// Checks the scanned records against the API of another build.
+    pub fn fits(&self, target: &Surface) -> Fit {
+        fits_with_schema(self.schema, self.entries(), target)
+    }
+
     /// The table a package carries for a mod made for `made_for` (a build id).
     pub fn table(&self, made_for: impl Into<String>) -> UsesTable {
         UsesTable {
-            schema: USES_SCHEMA,
+            schema: self.schema,
             made_for: made_for.into(),
             entries: self.entries().cloned().collect(),
         }
@@ -426,7 +433,7 @@ pub enum ScanError {
     /// The file nests brackets, generics or expressions deeper than the scan parses
     /// ([`syntax::MAX_NESTING`]), at this line.
     TooDeep { file: String, line: usize },
-    /// The parser's own stack could not be had (always so on wasm), so the file was not parsed.
+    /// The parser's own stack could not be reserved, so the file was not parsed.
     NoStack { file: String },
     /// The child process that parses first ([`crate::child`]) died, by a signal, an overflow or
     /// a limit on its memory or processor time, while parsing this file (none: before it
@@ -2142,6 +2149,11 @@ fn list(
         .map(|h| (h.id.as_str(), h.contract.version))
         .collect();
     Uses {
+        schema: if surface.schema == crate::legacy_hash::LEGACY_SURFACE_SCHEMA {
+            crate::legacy_hash::LEGACY_USES_SCHEMA
+        } else {
+            USES_SCHEMA
+        },
         items: origins
             .into_iter()
             .map(|(id, origin)| {
@@ -2395,7 +2407,18 @@ pub enum Fit {
 /// every type keeps its impls, every struct the mod builds can still be built (and keeps its
 /// field set when built in full), and every hook keeps the version the entry names. A hook entry
 /// that names none is [`Fit::Unversioned`] when nothing else changed.
-pub fn fits<'a>(entries: impl IntoIterator<Item = &'a Entry>, target: &Surface) -> Fit {
+#[cfg(test)]
+pub(crate) fn fits<'a>(entries: impl IntoIterator<Item = &'a Entry>, target: &Surface) -> Fit {
+    fits_with_schema(USES_SCHEMA, entries, target)
+}
+
+fn fits_with_schema<'a>(
+    schema: u32,
+    entries: impl IntoIterator<Item = &'a Entry>,
+    target: &Surface,
+) -> Fit {
+    let legacy = (schema < USES_SCHEMA && target.schema == crate::SCHEMA)
+        .then(|| crate::legacy_hash::LegacyHashes::new(target));
     let hashes: BTreeMap<&str, &str> = target.entries().collect();
     let types: BTreeMap<&str, &Type> = target.types.iter().map(|t| (t.id.as_str(), t)).collect();
     let versions: BTreeMap<&str, u64> = target
@@ -2435,7 +2458,11 @@ pub fn fits<'a>(entries: impl IntoIterator<Item = &'a Entry>, target: &Surface) 
             misfit(Change::Removed);
             continue;
         };
-        if *hash != entry.hash {
+        let matches = legacy
+            .as_ref()
+            .and_then(|legacy| legacy.matches(id, &entry.hash))
+            .unwrap_or(*hash == entry.hash);
+        if !matches {
             misfit(Change::Changed);
         }
         for path in &entry.paths {
@@ -2512,7 +2539,7 @@ pub fn fits<'a>(entries: impl IntoIterator<Item = &'a Entry>, target: &Surface) 
 }
 
 /// The schema [`UsesTable`] writes.
-pub const USES_SCHEMA: u32 = 2;
+pub const USES_SCHEMA: u32 = 3;
 
 /// The schema before it, which [`UsesTable::read`] still reads: published packages carry it. Its
 /// lists recorded a build wherever the scan was in doubt, with nothing to tell a doubt from a
@@ -2561,7 +2588,7 @@ impl std::fmt::Display for UsesError {
             Self::Json(error) => write!(f, "the uses table is not valid: {error}"),
             Self::Schema(schema) => write!(
                 f,
-                "the uses table has schema {schema}; this tool reads schemas {DOUBTING_SCHEMA} and {USES_SCHEMA}"
+                "the uses table has schema {schema}; this tool reads schemas {DOUBTING_SCHEMA}–{USES_SCHEMA}"
             ),
             Self::DuplicateId(id) => write!(f, "the uses table lists {id} twice"),
         }
@@ -2571,6 +2598,12 @@ impl std::fmt::Display for UsesError {
 impl std::error::Error for UsesError {}
 
 impl UsesTable {
+    /// Checks the entries covered by the typed API. The caller judges any native engine-code
+    /// entries separately against the target build's executable catalog.
+    pub fn fits<'a>(&'a self, api: impl IntoIterator<Item = &'a Entry>, target: &Surface) -> Fit {
+        fits_with_schema(self.schema, api, target)
+    }
+
     /// Reads a table: refuses an oversized document, an unknown schema, malformed JSON and
     /// repeated ids, and unknown fields: the table is this crate's own format, and a field a newer
     /// writer adds is a check this reader would silently skip. Entries come back sorted by id.
@@ -2584,7 +2617,7 @@ impl UsesTable {
         }
         let header: Header =
             serde_json::from_slice(bytes).map_err(|e| UsesError::Json(e.to_string()))?;
-        if ![USES_SCHEMA, DOUBTING_SCHEMA].contains(&header.schema) {
+        if !(DOUBTING_SCHEMA..=USES_SCHEMA).contains(&header.schema) {
             return Err(UsesError::Schema(header.schema));
         }
         let mut table: Self =

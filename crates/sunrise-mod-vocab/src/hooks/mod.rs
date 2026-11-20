@@ -34,8 +34,8 @@
 //!
 //! Every hook needs `///` lines: they are the rustdoc of its trait method, and a hook without them
 //! is refused. `HookId` values are process-local dispatch indexes, not persistent API identities.
-//! Wasm subscriptions cross as names; native mods compile for the selected revision. Existing
-//! split hooks retain their generated order through each file's `// catalog-order: N` comment.
+//! Native mods compile for the selected revision. Existing split hooks retain their generated order
+//! through each file's `// catalog-order: N` comment.
 //! These frozen ordinals only keep the split's output byte-identical; they provide no cross-build
 //! compatibility. New hooks omit the comment and follow in file-name order. No shared list is
 //! edited: the generator discovers the files directly.

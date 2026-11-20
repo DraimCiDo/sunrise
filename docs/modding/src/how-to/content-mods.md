@@ -16,11 +16,10 @@ cargo sunrise-mod check target/sunrise-mod/my_mod.smod   # the registry's checks
 ```
 
 - `new <path> [--name "Name"]` writes the content template. `--template native` writes
-  a flat native mod instead, and `--template wasm` a wasm one: `sunrise-mod.toml`, root `Cargo.toml`
+  a flat native mod instead: `sunrise-mod.toml`, root `Cargo.toml`
   and `src/lib.rs`, and empty `assets/` and `data/` directories. The mod is pinned to the build of the current
   Nightly (players have it), or to `--sunrise`'s: `nightly-<YYYY-MM-DD>`, or a commit sha (7 hex digits are enough when
-  they name one build). A native mod pins it in `[native] sunrise`, a wasm mod in `Cargo.toml`'s
-  `[package.metadata.sunrise] sdk`. `Cargo.toml` names the API by path,
+  they name one build). The native mod pins it in `[native] sunrise`. `Cargo.toml` names the API by path,
   `sunrise-mod-api = { path = ".sunrise/sdk/api/crates/sunrise-mod-api" }`, the only form a build
   takes. Every other form is refused under `E_SDK_SOURCE`, naming why: the old git form, a version alone (Cargo
   would take the crate from crates.io, where anyone can publish its name), another source, or another path. `new` fetches that build's SDK into `.sunrise/sdk/`,
@@ -37,8 +36,7 @@ cargo sunrise-mod check target/sunrise-mod/my_mod.smod   # the registry's checks
   rules and runs the reference checks of `check` below. If `target/` or `target/sunrise-mod/` is a symlink, the build
   refuses it without touching the previous package. Otherwise, once the build reaches output cleanup, it removes the
   previous `<id>.smod` before running the reference checks. Earlier failures, such as a manifest or SDK error,
-  can leave the previous package in place. A content build compiles nothing; a native build compiles against the pinned SDK, and `--wasm` compiles the
-  module before packaging. Native code requires
+  can leave the previous package in place. A content build compiles nothing; a native build compiles against the pinned SDK. Native code requires
   both `Cargo.toml` and `[native]`; inconsistent declarations and a manifest without capability `registries` are refused.
 - For content mods, `run` builds, then starts `sunrise-client` (on `PATH`, or `--game PATH`, or `SUNRISE_CLIENT`) with
   `--dev-mod target/sunrise-mod/<id>.smod`, always on. Native projects use the pinned SDK's game. Use `--jars <dir>`
@@ -97,8 +95,7 @@ A block's `item` defaults to true, in code as in a file: `Block::with_item(false
 batch. New identifiers from code—including block entity types and other registrar
 declarations—may use any namespace owned by that mod's manifest. Bare names use
 the mod ID; an explicit owned namespace stays unchanged. An unowned namespace
-refuses registration with a diagnostic naming both the mod and namespace. This
-is identical for native and wasm mods. Attaching a Part to an existing vanilla or
+refuses registration with a diagnostic naming both the mod and namespace. Attaching a Part to an existing vanilla or
 foreign block or item is a reference, not a new declaration, and remains allowed.
 
 Code declarations carry component patches as `Vec<(String, Option<Tag>)>`:
@@ -116,14 +113,14 @@ position, removed state, `moved_by_piston` and `replacement`: the exact state
 written if the listener leaves `answer` unanswered, the fluid's legacy block
 (air when dry, water for a waterlogged block). Answer `Some(state)` to choose a
 different state, or `None` to keep `replacement`. Named injections request
-`hook_version = 2`; native and wasm mods rebuild against this signature. Only the
+`hook_version = 2`. Only the
 removed block's own Part is called, not the replacement block's Part.
 
 The chosen state goes through the normal `setBlock` effects with flags 3, plus
 64 for piston movement. An unknown or unregistered state is refused with a
 reason and the vanilla replacement is written. This covers `Level.removeBlock`,
 not every direct `setBlock` or the separate `destroyBlock` path. The level view
-is read-only while answering, on both native and wasm.
+is read-only while answering.
 
 ## The manifest
 
@@ -156,9 +153,6 @@ Code mods add `[native]` for exact build pins and optional raw injections ([Inje
 from this manifest, not Cargo metadata ([Native mods](native-mods/02-the-package.md)). Both content and code mods support `[dependencies]`: use `base = "^1.2"` for a required dependency or
 `extra = { version = "^2", optional = true }` for an optional one. Missing required dependencies, incompatible installed versions and cycles refuse startup. Content layers load after their dependencies; an absent optional dependency is ignored. Both kinds may include a fixed-name `icon.png` at the top level, with no
 manifest key: a valid square PNG, at most 512 × 512 pixels and 256 KiB encoded ([Mod files](../reference/manifest.md)).
-Use `cargo sunrise-mod build --wasm` to build a Rust mod as `mod.wasm`. A wasm package
-requires a matching `[wasm]` declaration. Loading refuses an undeclared or missing module, a module
-over 64 MiB, invalid WebAssembly or shared-group structure, or bytes that do not match the declared SHA-512.
 
 ### Java jars as external assets
 
@@ -224,7 +218,7 @@ For attachments, “carries” means **declares**: a server package may use anot
 attachment, because clients compare A and decode the value through A. If A is itself a server package, A is the
 declarer refused by name. Attachment load checks declaration conflicts (including foreign namespaces) first,
 then undeclared uses naming the calling package and id, then server-package declarations; no content is admitted
-after a refusal. See [attachments](../concepts/attachments.md) for the shared native and wasm declaration API.
+after a refusal. See [attachments](../concepts/attachments.md) for the declaration API.
 Assets, lang and data vanilla syncs itself (recipes, loot, tags) are allowed. Where a hook runs is still the hook's own side: the manifest says what a client must have, not where a
 hook runs. A vanilla or other
 non-Sunrise client is refused when the server needs both-side mods, with their names and versions and an English
@@ -255,7 +249,7 @@ event id, such as `"minecraft:block.chain.break"` or a sound of the mod's own `s
 all three sites. They also accept an object, for example `"open_sound": {"use": "rope:open", "redstone": "rope:powered"}`:
 `use` is a player's interaction (including client prediction), `explosion` is an unpowered gate triggered by an
 explosion, and `redstone` is a power change that changes the open state. A missing site keeps the **template wood's**
-sound, not another site's override. Native and wasm declarations use `GateSound::All` or `GateSound::Sites` with
+sound, not another site's override. Code declarations use `GateSound::All` or `GateSound::Sites` with
 `on_use`, `on_explosion`, and `on_redstone`. Both keys need a `*_fence_gate` template; unknown sites and invalid
 `namespace:path` sound ids fail the load naming the file and key. Leaving both keys out keeps the wood's sounds.
 Pitch draws, volume, sound source, player exclusion and game events are unchanged.
@@ -295,7 +289,7 @@ template's published occlusion shape. A full shape is a solid render with light 
 shape is not. Unset preserves the template's ability to occlude. Skylight-down and special template light rules
 remain inherited. Partial declared outlines retain the existing directional shape-light occlusion rule.
 
-`offset` takes `NONE`, `XZ` or `XYZ` (`OffsetType` in native and wasm drafts).
+`offset` takes `NONE`, `XZ` or `XYZ` (`OffsetType` in code drafts).
 `NONE` disables an inherited offset. `XZ` jitters horizontally; `XYZ` also moves downward.
 An explicit mode defaults to maximum horizontal displacement 0.25 and, for `XYZ`, maximum downward
 displacement 0.2. Optional `max_horizontal_offset` (finite 0 to 0.25) and `max_vertical_offset`
@@ -309,7 +303,7 @@ its column offset at `(0, 0, 0)`, as vanilla's state cache does.
 This works on both sides and does not require a hook.
 
 `instrument` takes any vanilla `NoteBlockInstrument` constant name (for example `HARP` or `FLUTE`);
-native and wasm declarations use `NoteInstrument`. A note block reads ordinary instruments from the block
+code declarations use `NoteInstrument`. A note block reads ordinary instruments from the block
 below it and head instruments (`ZOMBIE` through `CUSTOM_HEAD`) from the block above it. `CUSTOM_HEAD`
 is silent without a skull block entity above the note block with a `note_block_sound`.
 `ignited_by_lava` sets lava's ignition flag; a subscribed per-position `ignited_by_lava` hook still answers
@@ -375,7 +369,6 @@ A double plant keeps its template's class and companion-half behaviour, so this 
 The placed half takes source water at its cell; the companion half uses the water tag at its own cell, so an upper half above the water line is dry. An enum named `waterlogged`,
 a template that already has that property, a standalone liquid block such as `minecraft:lava`, or an
 always-water template (`seagrass`, `tall_seagrass`, `kelp`, `kelp_plant`, `bubble_column`) is refused.
-Native and wasm `Block` declarations use the same rule.
 
 A block with template `minecraft:farmland` may set `"base_block": "namespace:block"` to choose the block it becomes when it dries out, is trampled, or has a solid block placed above it. The ID must name a registered block; without the key, the template's dirt base is used.
 
@@ -607,12 +600,12 @@ was made: `entity()` (the entity's id, `None` for the empty, position and cache 
   so a mod whose rule reads its own state must send it to the client. If the two disagree the
   server corrects the player's position (the usual "moved wrongly" correction), never a kick.
 - **Bounds**, as for a published shape: at most 64 boxes, every coordinate finite and each minimum
-  at most its maximum. These bound what crosses the Wire from a wasm part too.
+  at most its maximum.
 - **Faults.** A panic, a trap or a refused shape keeps the normal shape, switches that block's
   `collision_shape` off for the session, for every mod's part on that block, and logs once,
   naming the mods and the block.
 - **Cost.** Nothing for a block without such a part. An opted-in block costs one call per
-  distinct question in a tick, and a wasm part adds a Wire crossing to each.
+  distinct question in a tick.
 
 An item copies its template's data components, with `max_stack_size` and
 `rarity` changed, and any other 26.3 component set or removed in
@@ -648,8 +641,7 @@ Code mods can also register a namespaced custom pose once in `Hooks::register` t
 `Registrar::register_arm_pose("mymod:flip", uses_both_arms, affects_offhand)`. Keep its
 `CustomArmPose` token and return `ArmPose::Custom(token)` from `get_arm_pose`. The two
 flags independently control the humanoid's two-arm ordering and whether the other
-hand's pose gives way. The token carries these flags as Wire data, so the pose's
-flag getters do not require a registration table inside a wasm guest. Duplicate, malformed and foreign-namespace ids refuse registration.
+hand's pose gives way. The token carries both flags. Duplicate, malformed and foreign-namespace ids refuse registration.
 
 In `arm_pose_transform`, match `event.pose` to that token and set `event.angles.right`
 or `event.angles.left` to absolute `[pitch, yaw, roll]` in radians. `event.right_arm`
@@ -659,7 +651,6 @@ physical-arm application order and do not run for a suppressed pose.
 Each non-finite angle leaves the base model component unchanged. The transform runs
 only for selected registered poses, on local players, remote players and humanoid mobs;
 swing and mob-specific animations run afterward and can change those angles.
-Native and wasm mods use the same registration, token and Wire angle value.
 
 For a change to an intermediate vanilla pose (including `item`), listen to
 `humanoid_setup_anim` instead. This client hook runs inside each actual humanoid
@@ -675,7 +666,7 @@ crouch, bob and swim animation still apply. Armor stands then replace rotations
 with their saved pose, preserving position edits. Their armor models run the same
 setup independently. A model can animate more than
 once per frame, so listeners must not treat this as a once-per-entity frame
-notification or advance simulation from it. Native and wasm use the same finite
+notification or advance simulation from it. Both callbacks use the same finite
 part snapshot, with no callback or stack snapshot when nobody subscribes.
 
 ```json
@@ -906,8 +897,7 @@ only that slot. Omission and `"none"` are different: a villager with no step ove
 plays `minecraft:block.stone.step` on stone. Invalid ids stop content admission,
 with the entity and sound slot in the error. These four slots cover ordinary ambient,
 hurt, death and footstep playback; additional events such as trading interactions or
-projectile attacks keep their existing sounds. Native and wasm packages use this same
-content definition and resource table.
+projectile attacks keep their existing sounds.
 
 A code mod can also register an attribute type of its own with `Registrar::declare_attribute(path, default,
 min, max, syncable, sentiment, tooltip)` (vanilla's `RangedAttribute` in the attribute registry). Only both-side
@@ -959,8 +949,7 @@ fields)` (NeoForge's `DataPackRegistryEvent.NewRegistry`).
 schema: `Bool`, `Int { min, max }`, `Float { min, max }`, `Text { max_len }`, `Identifier` or `Reference { registry }`,
 each required or given a default. Entry `addon:fire` is `data/addon/example/spell/fire.json`
 (`DatapackRegistryDeclaration::entry_file`), the registry's namespace being a folder as NeoForge's modded
-registries have it. The game decodes entries against the schema without running mod code, so native and wasm
-mods get the same bounds: an undeclared key, a missing required key, a wrong type or an out-of-range value fails
+registries have it. The game decodes entries against the schema without running mod code: an undeclared key, a missing required key, a wrong type or an out-of-range value fails
 the entry, and a default never stands in for invalid data. The engine adds no entry-size or field-count limit
 of its own. Only both-side packages may declare registries. The game loads entries from mod content and enabled data packs.
 
@@ -1087,7 +1076,7 @@ or non-lendable containers, and positions after 64 accepted containers
 in the same server tick. `recipe_sources` is asked per player action, never per
 tick; `menu_links` is asked per open linked mod menu each tick, only when a mod
 subscribes. With no listener its tick path does no work or allocation. Both hooks
-are public server collect hooks with identical native and wasm behavior.
+are public server collect hooks.
 
 #### Namespaces and limits
 

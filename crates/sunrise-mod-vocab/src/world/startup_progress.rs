@@ -1,6 +1,5 @@
 //! Mod lines and progress bars on the startup loading screen: NeoForge's
 //! `StartupNotificationManager` (`addModMessage`, `addProgressBar`, `popBar`) and `ProgressMeter`.
-use crate::wire::{Reader, Wire, WireError, Writer};
 use std::sync::{Arc, OnceLock};
 
 /// A startup progress operation was refused.
@@ -37,14 +36,9 @@ impl From<(crate::Identifier, String)> for StartupProgressError {
 
 /// The game's side of the startup loading screen. A mod reaches it through
 /// [`RegistrationContext::progress`](crate::RegistrationContext::progress) and
-/// [`RegistrationContext::message`](crate::RegistrationContext::message), not directly. A wasm
-/// mod holds the game's screen by id and each call crosses to the game.
+/// [`RegistrationContext::message`](crate::RegistrationContext::message), not directly.
 pub trait StartupScreen: Send + Sync + 'static {
     // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::startup_screen::<Self>();
-    }
     /// Open a bar of `steps` steps under the stage bar; the answer names it.
     /// Returns `StartupProgressError::TooManyBars` if 64 bars are already open.
     fn open(&self, label: String, steps: u32) -> Result<u32, StartupProgressError>;
@@ -59,7 +53,6 @@ pub trait StartupScreen: Send + Sync + 'static {
     /// A line on the screen that fades after a few seconds.
     fn message(&self, text: String);
 }
-crate::wire::wire_handlers::handler!(dyn StartupScreen, "StartupScreen");
 
 static SCREEN: OnceLock<Arc<dyn StartupScreen>> = OnceLock::new();
 

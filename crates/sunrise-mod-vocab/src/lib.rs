@@ -22,4 +22,3 @@ mod generated {
 }
 
 include!(concat!(env!("OUT_DIR"), "/mod_api_exports_root.rs"));
-include!(concat!(env!("OUT_DIR"), "/wire_generated.rs"));

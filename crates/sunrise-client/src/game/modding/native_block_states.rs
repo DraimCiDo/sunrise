@@ -32,7 +32,7 @@ impl Game<'_> {
         mod_api::__private::fluid_key(id)
     }
     /// The canonical block id retained by the load-owned registration slot. An invalid slot
-    /// is a boundary error, including when a wasm guest supplies it.
+    /// is a boundary error.
     pub(super) fn block_key_id(&self, key: BlockKey) -> String {
         mod_api::__private::block_key_id(key)
             .expect("invalid block key slot")

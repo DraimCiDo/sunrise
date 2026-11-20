@@ -60,10 +60,10 @@ sends a correction even below the normal distance threshold, for creative player
 and from obstructed starts too. A replacement equal to the request retains the
 normal vanilla distance rules.
 
-A native panic or trapped/refused wasm listener restores the originally requested
+A listener panic restores the originally requested
 delta, not an earlier listener's replacement. Later listeners do not run on that
 invocation, and the failed listener is disabled for this hook for the session;
-its other hooks remain enabled. Native and wasm listeners share this contract.
+its other hooks remain enabled.
 
 A mod moves an entity through the same moment with `EntityRef::move_by(host, delta, cause)`
 (`Entity.move(cause, delta)`, server only): the collision scan stops it at blocks, the world border and
@@ -108,7 +108,7 @@ the server has rolls vanilla's `minecraft:gameplay/fishing`, with one warning na
 the id. A client reads only the `surface`: it draws the bobber floating and ignores the table and
 the wait.
 
-#### Item use lifecycle (native and wasm)
+#### Item use lifecycle
 
 `living_entity_use_item_tick` runs after the may-still-use check. Its `duration`
 replaces the remaining-ticks counter. Next come per-tick effects only above zero,
@@ -130,7 +130,7 @@ clearing the use. Finish is not cancellable; its result stack can be replaced.
 
 ## Player size and pose fit
 
-`entity_size` resolves dimensions through a read-only `Host` on both native and wasm.
+`entity_size` resolves dimensions through a read-only `Host`.
 Before player motion, standing, crouching and swimming candidates are resolved;
 an unchanged current-pose answer is reused. The fit test and pose application share
 the resolved answer. Answer using the event's pose, not the entity's current pose:

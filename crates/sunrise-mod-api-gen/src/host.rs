@@ -365,20 +365,6 @@ fn load(root: &Path) -> Result<Vec<Area>, String> {
     Ok(areas)
 }
 
-/// The areas whose backend the game answers from a borrowed view of its tables
-/// (`#[table_backend]`): each as its file stem and its backend trait's name. A level view lends
-/// those tables too, through the method named for the stem (`LevelHost::block_states`).
-pub(super) fn table_areas(root: &Path) -> Result<Vec<(String, String)>, String> {
-    Ok(load(root)?
-        .into_iter()
-        .filter(|area| area.tables.contains_key(&Tier::Backend))
-        .map(|area| {
-            let backend = area.trait_name(Tier::Backend);
-            (area.stem, backend)
-        })
-        .collect())
-}
-
 /// The area modules, the prelude that names every trait of them, and one macro for each union of
 /// them (`impl_host_areas!`, `impl_server_host_areas!`...) that implements the area traits of that
 /// union with their defaults, except the areas a double overrides: what a test double or a startup

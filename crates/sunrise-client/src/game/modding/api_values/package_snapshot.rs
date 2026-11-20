@@ -5,7 +5,6 @@ use sunrise_mod_package::manifest::{Manifest, Property};
 fn package_snapshot(
     manifest: &Manifest,
     kind: mod_api::PackageKind,
-    runtime: Option<mod_api::PackageRuntime>,
     has_icon: bool,
 ) -> mod_api::PackageInfo {
     let mut details = mod_api::PackageDetails::default();
@@ -16,7 +15,8 @@ fn package_snapshot(
     details.homepage.clone_from(&manifest.homepage);
     details.issues.clone_from(&manifest.issues);
     details.icon_path = has_icon.then(|| "icon.png".to_owned());
-    details.runtime = runtime;
+    details.runtime =
+        (kind == mod_api::PackageKind::Code).then_some(mod_api::PackageRuntime::Native);
     details.properties = manifest
         .properties
         .iter()
@@ -102,18 +102,9 @@ impl TryIntoApi for sunrise_mod_package::manifest::Package {
     type Api = mod_api::PackageInfo;
     type Error = std::convert::Infallible;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
-        let (kind, runtime) = if self.manifest.wasm.is_some() {
-            (
-                mod_api::PackageKind::Code,
-                Some(mod_api::PackageRuntime::Wasm),
-            )
-        } else {
-            (mod_api::PackageKind::Content, None)
-        };
         Ok(package_snapshot(
             &self.manifest,
-            kind,
-            runtime,
+            mod_api::PackageKind::Content,
             self.icon.is_some(),
         ))
     }
@@ -125,7 +116,6 @@ impl TryIntoApi for sunrise_mod_package::packages::AdjacentManifest {
         Ok(package_snapshot(
             &self.manifest,
             mod_api::PackageKind::Code,
-            Some(mod_api::PackageRuntime::Native),
             self.has_icon,
         ))
     }
@@ -160,7 +150,7 @@ mod tests {
         let source = manifest(
             "load_before=['later']\n[dependencies]\nbase={version='^1',optional=true,order='none',side='server',reason='Shared API',url='https://example.test/api'}\n[incompatible]\nbad={version='<2',side='client',reason='Conflict'}\n[discouraged]\nslow='*'",
         );
-        let snapshot = package_snapshot(&source, mod_api::PackageKind::Content, None, false);
+        let snapshot = package_snapshot(&source, mod_api::PackageKind::Content, false);
         let rows = snapshot.dependencies();
         assert_eq!(rows.len(), 4);
         assert_eq!(
@@ -217,7 +207,6 @@ mod tests {
             let snapshot = package_snapshot(
                 &manifest(&format!("side='{side}'\n")),
                 mod_api::PackageKind::Content,
-                None,
                 false,
             );
             assert_eq!(snapshot.side(), expected);
@@ -233,17 +222,12 @@ mod tests {
              [dependencies]\nother = { version = '^1', optional = true }\n\
              [properties]\ntier = 3\n",
         );
-        let info = package_snapshot(
-            &manifest,
-            mod_api::PackageKind::Code,
-            Some(mod_api::PackageRuntime::Wasm),
-            true,
-        );
+        let info = package_snapshot(&manifest, mod_api::PackageKind::Code, true);
         assert_eq!(info.name(), "Test");
         assert_eq!(info.homepage(), Some("https://example.org"));
         assert_eq!(info.issues(), None);
         assert_eq!(info.icon_path(), Some("icon.png"));
-        assert_eq!(info.runtime(), Some(mod_api::PackageRuntime::Wasm));
+        assert_eq!(info.runtime(), Some(mod_api::PackageRuntime::Native));
         let [dependency] = info.dependencies() else {
             panic!("one dependency")
         };
@@ -259,7 +243,7 @@ mod tests {
     }
 
     #[test]
-    fn a_native_package_and_a_content_package_convert_with_their_runtime() {
+    fn a_native_package_and_a_content_package_convert_with_their_kind() {
         let native = sunrise_mod_package::packages::AdjacentManifest {
             path: std::path::PathBuf::from("sunrise-native-mods/test"),
             manifest: manifest("[properties]\ntier = 3\n"),
@@ -268,8 +252,8 @@ mod tests {
         };
         let info = native.try_into_api().unwrap();
         assert_eq!(info.kind(), mod_api::PackageKind::Code);
-        assert_eq!(info.runtime(), Some(mod_api::PackageRuntime::Native));
         assert_eq!(info.icon_path(), Some("icon.png"));
+        assert_eq!(info.runtime(), Some(mod_api::PackageRuntime::Native));
         assert_eq!(
             info.property("tier"),
             Some(&mod_api::PropertyValue::Integer(3))
@@ -277,11 +261,9 @@ mod tests {
         let content = sunrise_mod_package::manifest::Package {
             manifest: manifest(""),
             icon: None,
-            layouts: Default::default(),
         };
         let info = content.try_into_api().unwrap();
         assert_eq!(info.kind(), mod_api::PackageKind::Content);
-        assert_eq!(info.runtime(), None);
         assert_eq!(info.icon_path(), None);
     }
 }

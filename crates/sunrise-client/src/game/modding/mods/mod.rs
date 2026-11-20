@@ -1,7 +1,7 @@
 // game-module-visibility: pub(crate)
 //! Mods in the game (`docs/modding/src/how-to/content-mods.md`): content mods' blocks, items, data and
 //! assets (`content_root`), and the Mods page's rows. Code mods are native (`native_hooks.rs`)
-//! or wasm (`sunrise-mod-wasm`, loaded at startup); any other executable file is refused.
+//! with content-only packages loaded separately.
 use super::{
     Game, execution_role::ExecutionRole, owner_link::OwnerRequest,
     registration_capability_coverage as coverage,
@@ -160,23 +160,18 @@ impl ModsState {
             .native
             .packages()
             .iter()
-            .map(|package| (&package.manifest, true));
-        let selected = self.selected.iter().map(|selected| {
-            (
-                &selected.package.manifest,
-                selected.package.manifest.wasm.is_some(),
-            )
-        });
-        sunrise_mod_package::enabled::EnabledMods::new(native.chain(selected).filter_map(
-            |(manifest, code)| {
-                let enabled = if code {
-                    self.code_owner_enabled(&manifest.id)
-                } else {
-                    accepted_content(&manifest.id)
-                };
-                enabled.then(|| (manifest.id.clone(), manifest.side))
-            },
-        ))
+            .map(|package| &package.manifest)
+            .filter(|manifest| self.code_owner_enabled(&manifest.id));
+        let content = self
+            .selected
+            .iter()
+            .map(|package| &package.package.manifest)
+            .filter(|manifest| accepted_content(&manifest.id));
+        sunrise_mod_package::enabled::EnabledMods::new(
+            native
+                .chain(content)
+                .map(|manifest| (manifest.id.clone(), manifest.side)),
+        )
     }
 
     pub(super) fn select(
@@ -188,9 +183,7 @@ impl ModsState {
             sunrise_mod_package::selection::content_packages(game_dir, enabled, &self.dev)
                 .filter(|selected| {
                     let id = &selected.package.manifest.id;
-                    // A refused wasm mod's content stays out with its code.
                     !self.native.built().iter().any(|built| built.id == *id)
-                        && !crate::entry::code_startup_refused(id)
                 })
                 .collect();
         self.refused = Default::default();
@@ -793,7 +786,7 @@ pub(super) fn content_overlay(
                 .any(|missing| missing.owners.contains(&source.manifest.id))
         })
         .filter(|source| {
-            let code = source.manifest.native.is_some() || source.manifest.wasm.is_some();
+            let code = source.manifest.native.is_some();
             !code || seen.insert(source.manifest.id.as_str())
         })
         .collect();
@@ -1035,9 +1028,6 @@ mod particle_registry_reload_tests {
 /// The content root with everything the mods declare registered against the
 /// process: block entities, mob effects, entity and menu types, fluid looks,
 /// and the protocol's local mod list, each set once.
-///
-/// `pub(in crate::game)`: the general entity tick's wasm tests
-/// (`game::entities::general::tick_tests`) build the fixture's game the same way.
 pub(in crate::game) fn content_root(
     root: &std::path::Path,
     sources: &ModsState,
@@ -1486,7 +1476,7 @@ fn live_switch_of(
     content_ids: &mut std::collections::BTreeSet<String>,
     live_ids: &mut std::collections::BTreeSet<String>,
 ) {
-    if package.is_native() || package.manifest.wasm.is_some() {
+    if package.is_native() {
         return;
     }
     let id = &package.manifest.id;
@@ -1679,7 +1669,6 @@ impl Game<'_> {
                     }
                 };
                 let m = &package.manifest;
-                let refused = crate::entry::code_refusal(&m.id);
                 live_switch_of(
                     path,
                     &package,
@@ -1695,7 +1684,7 @@ impl Game<'_> {
                     id: m.id.clone(),
                     title: format!("{} {}", m.name, m.version),
                     description: m.description.clone(),
-                    problem: refused.map(|why| format!("Not loaded: {why}")),
+                    problem: None,
                     dev: self.mods.dev.contains(path),
                     native: None,
                 }
@@ -1838,7 +1827,7 @@ impl Game<'_> {
             at.elapsed().as_millis()
         );
     }
-    /// Apply the player's switches at the canonical native and wasm dispatch boundary.
+    /// Apply the player's switches at the canonical native dispatch boundary.
     pub(super) fn sync_native_switches(&self) {
         self.instance_groups
             .borrow_mut()

@@ -486,7 +486,7 @@ fn a_failing_renderer_is_dropped_until_reload_and_a_type_without_one_draws_nothi
     );
 }
 
-#[path = "../../../../sunrise-mod-wasm/tests/fixture/src/general_renderer.rs"]
+#[path = "native_general_renderers_tests/fixture.rs"]
 mod fixture;
 
 struct NativeProbe;
@@ -572,8 +572,7 @@ fn spawn_row(server: &mut Game<'_>, position: [f64; 3]) -> u32 {
     row.id()
 }
 
-/// Opens an integrated flat world whose window reads the fixture's renderer (`native` or `wasm`
-/// child case), has `place` put a row of the fixture's type with fuel 7 on the server above
+/// Opens an integrated flat world whose window reads the fixture's renderer, has `place` put a row of the fixture's type with fuel 7 on the server above
 /// build height, and checks that the window shows it: the tracker syncs the row and its field
 /// with no injected client packets, and the renderer's quad, whose width is the fuel, is in the
 /// frame's entity pass, before and after a resource reload that leaves the row in place.
@@ -582,21 +581,17 @@ fn integrated_scene(test: &str, place: fn(&mut Game<'_>, [f64; 3]) -> u32) {
     if super::native_entity_refs::tests::run_fresh_cases(
         &format!("game::native_general_renderers_tests::{test}"),
         CASE,
-        &["native", "wasm"],
+        &["game"],
     ) {
         return;
     }
     sunrise_guest_stack::run_on_guest_stack(move || {
         mod_platform::__private::initialize().unwrap();
-        let mods: mod_api::Mods = if std::env::var(CASE).unwrap() == "wasm" {
-            super::block_entity_tick_reply_tests::wasm_mods().into()
-        } else {
-            vec![mod_api::ModEntry::new(
-                "wasm_fixture",
-                Box::new(NativeProbe),
-            )]
-            .into()
-        };
+        let mods = vec![mod_api::ModEntry::new(
+            "general_render_fixture",
+            Box::new(NativeProbe),
+        )]
+        .into();
         let registration =
             mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Registration);
         mod_platform::testing::with_mods(mods, || {
@@ -678,26 +673,22 @@ fn integrated_scene(test: &str, place: fn(&mut Game<'_>, [f64; 3]) -> u32) {
 }
 
 /// The integrated server loads a real general row and syncs its fuel to its window through
-/// the tracker. Both renderer adapters turn that field into geometry, and still do so after
-/// resource reload, with the tracked row left in place.
+/// the tracker. The renderer turns that field into geometry before and after resource reload.
 #[test]
 #[ignore = "daily"]
-fn integrated_general_renderer_reads_synced_fuel_on_native_and_wasm() {
+fn integrated_general_renderer_reads_synced_fuel() {
     integrated_scene(
-        "integrated_general_renderer_reads_synced_fuel_on_native_and_wasm",
+        "integrated_general_renderer_reads_synced_fuel",
         load_saved_row,
     );
 }
 
 /// #2642 end to end: a test mod's general row spawned by `LevelRef::spawn_entity` in an
-/// integrated world is drawn in its window by the type's renderer, on native and Wasm.
+/// integrated world is drawn in its window by the type's renderer.
 #[test]
 #[ignore = "daily"]
-fn a_spawned_general_row_is_drawn_in_its_window_on_native_and_wasm() {
-    integrated_scene(
-        "a_spawned_general_row_is_drawn_in_its_window_on_native_and_wasm",
-        spawn_row,
-    );
+fn a_spawned_general_row_is_drawn_in_its_window() {
+    integrated_scene("a_spawned_general_row_is_drawn_in_its_window", spawn_row);
 }
 
 fn poll_until(game: &mut Game<'_>, ready: impl Fn(&Game<'_>) -> bool) {

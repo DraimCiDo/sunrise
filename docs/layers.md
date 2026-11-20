@@ -162,7 +162,7 @@ Sunrise's own extras and its product, and every built-in address of an outside s
 
 ## Tools
 
-Developer tools that no player runs: `xtask`, `sunrise-bots`, `sunrise-mod-api-gen-tests`, `sunrise-mod-wasm-wire-loopback`, and the Python in
+Developer tools that no player runs: `xtask`, `sunrise-bots`, `sunrise-mod-api-gen-tests`, and the Python in
 `tools/`. They may depend on anything, and no shipped crate depends on them. `cargo-sunrise-mod`, the mod author's
 tool, is one: it fetches and checks Sunrise's signed mod SDK, so it reads `sunrise-addresses` and
 `sunrise-release-sign` beside the engine's mod crates.
@@ -193,7 +193,7 @@ and Parts registration state; it is not yet a stateless or unsafe-free interface
 | A speed-up that keeps vanilla's results | engine | next to the code it speeds up |
 | A call to a Mojang or Microsoft service vanilla makes | engine | `auth.rs`, `realms/`, `skins.rs`, `sunrise-server-files` |
 | A place mods, ports or Sunrise can hook into | engine + platform | an extension point in the engine crate, naming no type from above; its public face in the platform |
-| A mod hook or host interface | engine + platform | `sunrise-mod-vocab` owns the engine vocabulary and dispatch; `sunrise-mod-api` re-exports it for mods and owns guest transport |
+| A mod hook or host interface | engine + platform | `sunrise-mod-vocab` owns the engine vocabulary and dispatch; `sunrise-mod-api` re-exports it for mods and links the native mod to the platform |
 | A mod package format | platform | `sunrise-mod-package` |
 | A shader or resource pack format vanilla doesn't read | platform | `sunrise-shaders`, `sunrise-optifine`, `sunrise-polytone`, or a new platform crate |
 | Controller support: a device, bindings, glyphs, pad menus | platform | the pad modules, on the engine's input hooks ([Controllers](#controllers-replays-and-ui-pages)) |
@@ -238,8 +238,7 @@ that. sunrise-plain becomes a plain build of this repository.
 **Licence.** The project's licence is being decided (the poll ends around 2026-11-10); the Sunrise repository's
 licence follows from it. If this repository becomes GPL, the official game links the Sunrise crates into the same
 executable as the engine and the platform, so the Sunrise layer must be GPL-compatible too: no closed native code in
-it. Mods loaded as WebAssembly run as separate modules, not linked into the executable, so they could stay closed
-(duckybertduck's reading; the licence decision settles it).
+it.
 
 **Every official download includes it.** These paths must ship the Sunrise layer:
 

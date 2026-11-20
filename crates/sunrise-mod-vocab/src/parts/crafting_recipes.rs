@@ -1,6 +1,6 @@
 //! Startup registration and portable values for mod crafting recipe kinds.
 use super::*;
-use crate::wire::{Reader, Wire, WireError, Writer};
+use crate::wire::{Reader, Wire, Writer};
 
 /// An owned, untrimmed crafting grid. Cells are row-major; empty cells are None.
 #[derive(Clone, Debug, PartialEq, sunrise_mod_api_macros::Wire)]
@@ -56,7 +56,7 @@ pub struct CraftingRecipeCodec<T> {
     decode: fn(&CraftingRecipeValue) -> Result<T, String>,
 }
 impl<T: Wire> CraftingRecipeCodec<T> {
-    /// Use the same Wire encoding on native and wasm targets.
+    /// Encodes the recipe value using its `Wire` form.
     pub fn wire() -> Self {
         Self {
             encode: |value| {
@@ -131,14 +131,10 @@ pub trait CraftingRecipeKind: Send + Sync + 'static {
 }
 
 /// Portable dispatch to the sole owner of a registered kind.
-// hidden: type erasure for generated native/wasm registration transport.
+// hidden: type erasure for dispatch to the registered handler.
 #[doc(hidden)]
 pub trait CraftingRecipeHandler: Send + Sync {
     // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::crafting_recipe_handler::<Self>();
-    }
     /// Decode one recipe object.
     fn decode(&self, json: &str) -> Result<CraftingRecipeValue, String>;
     /// Write one decoded value for sync.
@@ -165,7 +161,6 @@ pub trait CraftingRecipeHandler: Send + Sync {
         grid: CraftingGrid,
     ) -> Option<Vec<Option<crate::ItemStack>>>;
 }
-crate::wire::wire_handlers::handler!(dyn CraftingRecipeHandler, "CraftingRecipeHandler");
 struct TypedKind<K: CraftingRecipeKind> {
     kind: K,
     codec: CraftingRecipeCodec<K::Value>,

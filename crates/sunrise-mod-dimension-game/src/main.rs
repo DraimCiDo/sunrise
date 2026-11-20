@@ -130,7 +130,6 @@ impl Hooks for DimProbe {
 }
 
 fn main() {
-    sunrise_mod_host::exit_if_compile_child();
     let startup = sunrise_client::entry::prepare();
     sunrise_mod_host::main_with(
         vec![ModEntry::new("dimprobe", Box::<DimProbe>::default())],

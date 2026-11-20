@@ -93,7 +93,7 @@ pub struct ApiItems {
     pub listeners: TokenStream,
     /// Its `PointId` variants.
     pub variants: TokenStream,
-    /// Its typed native and wasm dispatch functions.
+    /// Its typed native dispatch functions.
     pub dispatch: TokenStream,
 }
 
@@ -534,7 +534,7 @@ fn unit_result(ty: &Type) -> bool {
 }
 
 /// The type a scalar crosses as in a record: `usize`/`isize` as `u64`/`i64`, one width on every
-/// host and in a wasm guest (whose `usize` is 32-bit); none for a type that crosses as itself.
+/// host; none for a type that is stored as itself.
 pub fn wide(ty: &Type) -> Option<Type> {
     let Type::Path(path) = ty else { return None };
     if path.path.is_ident("usize") {
@@ -583,21 +583,6 @@ impl Shape {
     /// Whether its API listeners have a record: every parameter has an API type.
     pub fn api(&self) -> bool {
         self.api_refusal.is_none()
-    }
-
-    /// The record's `cancel` or `result` field, with its type.
-    fn outcome_field(&self) -> Option<(syn::Ident, TokenStream)> {
-        match &self.returns {
-            Returns::Unit | Returns::UnitResult => Some((format_ident!("cancel"), quote!(bool))),
-            Returns::Value(value) => {
-                let field = &value.field;
-                Some((
-                    format_ident!("result"),
-                    quote!(::std::option::Option<#field>),
-                ))
-            }
-            Returns::Opaque => None,
-        }
     }
 
     /// The record's declaration in `mod_points`, documented from the function's `target`. Its
@@ -656,7 +641,6 @@ impl Shape {
         quote! {
             #[doc = #doc]
             #[non_exhaustive]
-            #[cfg_attr(any(target_arch = "wasm32", feature = "wasm-guest"), derive(::mod_api::Wire))]
             pub struct #record #lifetime {
                 #( #[doc = #field_docs] pub #names: #fields, )*
                 #extra
@@ -671,18 +655,6 @@ impl Shape {
                 }
             }
         }
-    }
-
-    /// The record fields as a shared shape codec's nested mutable field list.
-    pub fn wire_fields(&self, args: TokenStream) -> TokenStream {
-        let mut fields: Vec<_> = self.args.iter().map(|arg| arg.name.clone()).collect();
-        if let Some((name, _)) = self.outcome_field() {
-            fields.push(name);
-        }
-        fields
-            .iter()
-            .rev()
-            .fold(quote!(()), |tail, field| quote!((&mut #args.#field, #tail)))
     }
 
     /// Typed API function constructors, dispatchers and place ids for this point.
@@ -716,20 +688,6 @@ impl Shape {
             ),
             (_, Some(_)) => (quote!(host: &dyn ::mod_api::Host,), quote!(host,), quote!()),
         };
-        let forwarded_host = match (self.receiver, self.side) {
-            (_, None) => quote!(super::__private::PointHost::None),
-            (Receiver::Mut, Some(Side::Server)) => {
-                quote!(super::__private::PointHost::Server(&mut *host))
-            }
-            (Receiver::Mut, Some(Side::Client)) => {
-                quote!(super::__private::PointHost::Client(&mut *host))
-            }
-            (Receiver::Mut, Some(Side::Both)) => {
-                quote!(super::__private::PointHost::Side(host.reborrow()))
-            }
-            (_, Some(_)) => quote!(super::__private::PointHost::Read(host)),
-        };
-        let wire_fields = self.wire_fields(quote!(args));
         let mut places = vec![(self.name.clone(), "head")];
         if self.has_return() {
             places.push((format!("{}_return", self.name), "return"));
@@ -752,15 +710,10 @@ impl Shape {
                 #[doc = #doc]
                 pub fn #method(#host args: &mut #record) {
                     #reborrow
-                    super::__private::fire_api(PointId::#variant, &mut |kind| match kind {
-                        super::__private::ApiKind::Typed(function) => {
-                            // SAFETY: the typed constructor checked this place's exact function type.
-                            let function = unsafe { ::std::mem::transmute::<*const (), super::listeners::#listener>(function) };
-                            function(#passed args);
-                        }
-                        super::__private::ApiKind::Forwarded(endpoint, id) => {
-                            endpoint.forward(id, #forwarded_host, &mut ::mod_api::wire::Fields(#wire_fields));
-                        }
+                    super::__private::fire_api(PointId::#variant, &mut |function| {
+                        // SAFETY: the typed constructor checked this place's exact function type.
+                        let function = unsafe { ::std::mem::transmute::<*const (), super::listeners::#listener>(function.as_ptr()) };
+                        function(#passed args);
                     });
                 }
             });

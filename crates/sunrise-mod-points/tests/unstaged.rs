@@ -1,5 +1,5 @@
 //! Plain builds must not accept listeners that can never fire.
-use mod_api::__private::points::{Forward, Place, PointHost, SlotListener};
+use mod_api::__private::points::{Place, SlotListener};
 use mod_points::RegisterError;
 
 #[test]
@@ -24,12 +24,9 @@ fn tick(_: mod_api::HostSide<'_>, _: &mut mod_points::TickArgs) {}
 /// A place built outside its table is refused by name, staged or not: no index is trusted.
 #[test]
 fn a_place_outside_the_table_is_refused() {
-    struct Never;
-    impl Forward for Never {
-        fn forward(&self, _: u64, _: PointHost<'_>, _: &mut dyn mod_api::wire::Record) {}
-    }
     let place = Place::new(&mod_points::__private::TABLE, usize::MAX);
-    let slot = SlotListener::forwarded("outside_mod", place, &Never, 0);
+    // SAFETY: this checks only registration; the out-of-range place cannot be called.
+    let slot = unsafe { SlotListener::api("outside_mod", place, tick as *const ()) };
     let error = mod_api::__private::points::register(&slot).unwrap_err();
     assert_eq!(
         error,

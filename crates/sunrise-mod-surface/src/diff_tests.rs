@@ -104,14 +104,13 @@ fn hook(name: &str, side: Side, arguments: &[(&str, &str)]) -> Hook {
     )
 }
 
-fn function(path: &str, signature: &str, wasm: bool) -> Function {
+fn function(path: &str, signature: &str) -> Function {
     Function::new(
         format!("fn:{path}"),
         "",
         FunctionContract {
             signature: signature.into(),
             impl_generics: String::new(),
-            wasm,
             refs: vec![],
         },
     )
@@ -124,7 +123,6 @@ fn method(owner: &str, name: &str, required: bool) -> Method {
         MethodContract {
             signature: format!("fn {name}(&self)"),
             required,
-            wasm: true,
             refs: vec![],
         },
     )
@@ -309,7 +307,7 @@ fn identical_surfaces_have_no_changes() {
 
 #[test]
 fn a_removed_record_is_breaking() {
-    let old = functions(vec![function("spawn", "fn spawn()", true)]);
+    let old = functions(vec![function("spawn", "fn spawn()")]);
     let d = diff(&old, &functions(vec![]));
     assert_eq!(d.verdict, Verdict::Breaking);
     assert_eq!(
@@ -326,7 +324,7 @@ fn a_removed_record_is_breaking() {
 
 #[test]
 fn a_new_record_is_additive() {
-    let new = functions(vec![function("spawn", "fn spawn()", true)]);
+    let new = functions(vec![function("spawn", "fn spawn()")]);
     let d = diff(&functions(vec![]), &new);
     assert_eq!(d.verdict, Verdict::Additive);
     assert_eq!(
@@ -343,8 +341,8 @@ fn a_new_record_is_additive() {
 
 #[test]
 fn a_rename_is_a_removal_and_an_addition() {
-    let old = functions(vec![function("spawn", "fn spawn()", true)]);
-    let new = functions(vec![function("summon", "fn summon()", true)]);
+    let old = functions(vec![function("spawn", "fn spawn()")]);
+    let new = functions(vec![function("summon", "fn summon()")]);
     let d = diff(&old, &new);
     let seen: Vec<_> = d.changes.iter().map(|c| (c.id.as_str(), c.kind)).collect();
     assert_eq!(
@@ -540,21 +538,9 @@ fn a_hook_side_change_is_breaking() {
 }
 
 #[test]
-fn leaving_wasm_breaks_and_joining_it_adds() {
-    let on = functions(vec![function("ground", "fn ground()", true)]);
-    let off = functions(vec![function("ground", "fn ground()", false)]);
-    let d = diff(&on, &off);
-    let (_, _, class, what, _) = only(&d);
-    assert_eq!((class, what), (Class::Breaking, vec!["no longer on wasm"]));
-    let d = diff(&off, &on);
-    let (_, _, class, what, _) = only(&d);
-    assert_eq!((class, what), (Class::Additive, vec!["now on wasm"]));
-}
-
-#[test]
 fn a_changed_signature_is_breaking_and_shown() {
-    let old = functions(vec![function("name", "fn name(x: &'a str)", true)]);
-    let new = functions(vec![function("name", "fn name(x: &'b str)", true)]);
+    let old = functions(vec![function("name", "fn name(x: &'a str)")]);
+    let new = functions(vec![function("name", "fn name(x: &'b str)")]);
     let d = diff(&old, &new);
     let (_, _, class, what, _) = only(&d);
     assert_eq!(
@@ -819,31 +805,28 @@ fn a_wire_change_adds_when_a_type_starts_crossing_and_is_conditional_otherwise()
     };
     assert_eq!(
         class_and_lines(&none, &derive),
-        (
-            Class::Additive,
-            vec!["now crosses the wasm boundary".into()]
-        )
+        (Class::Additive, vec!["now implements `Wire`".into()])
     );
     assert_eq!(
         class_and_lines(&derive, &none),
         (
             Class::Conditional,
-            vec!["no longer crosses the wasm boundary: affects wasm mods only".into()]
+            vec!["no longer implements `Wire`: affects users of this encoding".into()]
         )
     );
     assert_eq!(
         class_and_lines(&derive, &via),
         (
             Class::Conditional,
-            vec!["wire form: `derive` → `via:u32`: affects wasm mods only".into()]
+            vec!["wire form: `derive` → `via:u32`: affects users of this encoding".into()]
         )
     );
 }
 
 #[test]
 fn breaking_changes_come_first_and_notes_declare_them() {
-    let old = functions(vec![function("a", "fn a()", true)]);
-    let new = functions(vec![function("b", "fn b()", true)]);
+    let old = functions(vec![function("a", "fn a()")]);
+    let new = functions(vec![function("b", "fn b()")]);
     let mut d = diff(&old, &new);
     assert_eq!(d.undeclared().count(), 1);
     let note = Note {
@@ -1171,7 +1154,7 @@ fn a_struct_gaining_non_exhaustive_is_conditional_whatever_else_changed() {
 }
 
 #[test]
-fn a_wire_layout_change_affects_wasm_mods_only() {
+fn a_wire_layout_change_is_conditional() {
     let at = |shape: &str| {
         let mut s = types(vec![structure("Pos", false, &[("x", "i32")])]);
         s.types[0].shape = Some(shape.into());
@@ -1183,7 +1166,7 @@ fn a_wire_layout_change_affects_wasm_mods_only() {
             "type:Pos",
             ChangeKind::Changed,
             Class::Conditional,
-            vec!["wire layout: `aaaa` → `bbbb`: affects wasm mods only"],
+            vec!["wire layout: `aaaa` → `bbbb`: affects users of this encoding"],
             vec![]
         )
     );
@@ -1191,7 +1174,7 @@ fn a_wire_layout_change_affects_wasm_mods_only() {
 
 #[test]
 fn a_hash_change_no_field_explains_is_breaking() {
-    let old = functions(vec![function("now", "fn now() -> u64", true)]);
+    let old = functions(vec![function("now", "fn now() -> u64")]);
     let mut new = old.clone();
     new.functions[0].hash = "a newer writer's hash".into();
     assert_eq!(
@@ -1296,7 +1279,6 @@ fn a_called_trait_gaining_a_supertrait_that_breaks_dyn_breaks() {
         MethodContract {
             signature: "fn find<T: Wire>(&self) -> T".into(),
             required: true,
-            wasm: true,
             refs: vec![],
         },
     );

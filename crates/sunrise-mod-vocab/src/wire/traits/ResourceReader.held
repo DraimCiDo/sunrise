@@ -1,3 +1,0 @@
-The load's resources while a sprite source is asked, read-only, handed to the mod in the
-sprite_source event and held by id for that one call: the mod calls it to read the winning copy of a
-resource, every pack's copy of it, or the paths under a prefix.

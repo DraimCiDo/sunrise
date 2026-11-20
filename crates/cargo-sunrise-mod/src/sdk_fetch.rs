@@ -66,7 +66,7 @@ pub(crate) fn fetch_pinned(project: &Path, build: &str) -> Result<PinnedSdk, Str
 
 /// The game checkout the project at `project` builds against, when its `sunrise-mod-api`
 /// dependency is a path to `crates/sunrise-mod-api` of a game workspace the project itself lies in
-/// (the game's own wasm fixtures): such a project builds against that tree and fetches no SDK. A
+/// (such as a fixture in the game repository): it builds against that tree and fetches no SDK. A
 /// project whose dependency points anywhere else, its own `.sunrise/sdk/` included, gets `None`.
 pub(crate) fn game_tree(project: &Path) -> Result<Option<PathBuf>, String> {
     let read = |path: &Path| -> Result<toml::Table, String> {
@@ -110,69 +110,13 @@ pub(crate) fn game_tree(project: &Path) -> Result<Option<PathBuf>, String> {
     Ok(member.then(|| root.to_path_buf()))
 }
 
-/// The build the project pins: a native mod's `[native] sunrise`, any other code mod's
-/// `[package.metadata.sunrise] sdk` in `Cargo.toml`.
+/// The build a native mod pins in `[native] sunrise`.
 pub(crate) fn pin(project: &Path) -> Result<String, String> {
-    let read = |name: &str| {
-        let path = project.join(name);
-        fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))
-    };
-    let manifest = Manifest::parse(&read(MANIFEST)?)?;
-    let build = match manifest.native {
-        Some(native) => native.sunrise,
-        None => {
-            let cargo: toml::Table = read("Cargo.toml")?
-                .parse()
-                .map_err(|e| format!("Cargo.toml: {e}"))?;
-            cargo
-                .get("package")
-                .and_then(|p| p.get("metadata"))
-                .and_then(|m| m.get("sunrise"))
-                .and_then(|h| h.get("sdk"))
-                .and_then(toml::Value::as_str)
-                .ok_or("Cargo.toml has no [package.metadata.sunrise] sdk: the SDK build this mod is made for")?
-                .to_owned()
-        }
-    };
-    if !sunrise_mod_package::manifest::revision(&build) {
-        return Err(format!(
-            "the pinned SDK build `{build}` is not a full commit sha (40 lowercase hex digits)"
-        ));
-    }
-    Ok(build)
-}
-
-/// Pins the project at `project` to `build`, a full sha, and drops the SDK of the old pin: the
-/// next command fetches the new one.
-pub(crate) fn repin(project: &Path, build: &str) -> Result<(), String> {
-    // The pin's own comment and spacing stay: only its value changes.
-    let edit = |name: &str, pin: &dyn Fn(&mut toml_edit::DocumentMut) -> &mut toml_edit::Item| {
-        let path = project.join(name);
-        let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let mut doc: toml_edit::DocumentMut = text
-            .parse()
-            .map_err(|e| format!("{}: {e}", path.display()))?;
-        let item = pin(&mut doc);
-        match item.as_value_mut() {
-            Some(value) => crate::internals::set_string(value, build),
-            None => *item = toml_edit::value(build),
-        }
-        fs::write(&path, doc.to_string()).map_err(|e| format!("{}: {e}", path.display()))
-    };
-    let manifest = Manifest::parse(
-        &fs::read_to_string(project.join(MANIFEST)).map_err(|e| format!("{MANIFEST}: {e}"))?,
-    )?;
-    if manifest.native.is_some() {
-        edit(MANIFEST, &|doc| &mut doc["native"]["sunrise"])?;
-    } else {
-        edit("Cargo.toml", &|doc| {
-            &mut doc["package"]["metadata"]["sunrise"]["sdk"]
-        })?;
-    }
-    match fs::remove_dir_all(project.join(DIR)) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("{DIR}: {e}")),
-        _ => Ok(()),
-    }
+    let text = crate::bounded::read(&project.join(MANIFEST), crate::bounded::MAX_MANIFEST)?;
+    Manifest::parse(&text)?
+        .native
+        .map(|native| native.sunrise)
+        .ok_or_else(|| format!("{MANIFEST}: a content mod does not pin an SDK"))
 }
 
 /// The build id `text` names: a full sha as written; `nightly` or `nightly-<date>` through that

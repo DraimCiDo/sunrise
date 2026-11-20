@@ -2135,7 +2135,6 @@ struct Game<'a> {
     player_model: Option<Mob>,
     block_entity_tick_key: Option<block_entity_tick_items::Key>,
     block_entity_tick_items: Option<Box<block_entity_tick_items::Scope>>,
-    wasm_dispatch_failures: std::rc::Rc<std::cell::Cell<u64>>,
 }
 /// The open world's dimensions past vanilla's three. One per process, as a window
 /// and its server thread name the same dimensions.
@@ -3325,29 +3324,6 @@ impl Game<'_> {
             );
         });
         self.process_level_events()
-    }
-    /// `BlockState.canSurvive(level, pos)` for `state` at `pos` in the level in
-    /// place: the rule a placement checks before `level_set` (a sapling on
-    /// grass, a torch on a wall), with a mod block's own `native_can_survive`
-    /// hook. False for an invalid state, an unloaded or out-of-height
-    /// position, and on a client.
-    ///
-    /// This is the non-closure equivalent of `with_level(|b, level, ticks|
-    /// b.can_survive(level, ticks, pos, state))`, for a wasm mod whose
-    /// internals view cannot send a closure.
-    // A wasm mod's staged internals table calls this; nothing in Sunrise does.
-    #[allow(dead_code)]
-    fn level_can_survive(&mut self, pos: [i32; 3], state: BlockStateId) -> bool {
-        if !self.is_logical_server()
-            || !self.world.loaded(pos[0], pos[2])
-            || !self.world.shape.contains_y(pos[1])
-            || self.pack.assets.registry.state(state).is_none()
-        {
-            return false;
-        }
-        self.with_level(|b, level, ticks| {
-            b.can_survive(level, ticks, BlockPos::new(pos[0], pos[1], pos[2]), state)
-        })
     }
     fn attack_block(&mut self, pos: [i32; 3]) -> Result<()> {
         let note = self.with_level(|b, level, ticks| {
@@ -11352,8 +11328,6 @@ impl<'a> Game<'a> {
             transactions: Default::default(),
             block_entity_tick_key: None,
             block_entity_tick_items: None,
-            wasm_dispatch_failures:
-                sunrise_mod_runtime::dispatch_failures::dispatch_failure_counter(),
             contents_changing: Vec::new(),
             mod_screen: None,
             mod_container_viewers: HashMap::new(),
@@ -11689,12 +11663,6 @@ pub(crate) fn run_with(
     let mod_phase = mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::Packages);
     api_values::install_packages(options.mods.native.packages(), &options.mods.selected)?;
     mods::install_registration_data(&vanilla_root, mods::runtime_files::sources(&options.mods))?;
-    {
-        use mod_api::__private::game::RegistrationContextNew;
-        let context = mod_api::RegistrationContext::new();
-        let inventory: Vec<_> = context.mods().iter().cloned().collect();
-        crate::entry::initialize_code(&inventory);
-    }
     sunrise_engine_slots::seal().expect("engine registration seals once at startup");
     arm_points!();
     mod_phase.advance(mod_api::__private::ModPhase::Registration)?;

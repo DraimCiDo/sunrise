@@ -21,7 +21,7 @@ For stack-derived breaking or eating particles, call
 `add_particle`. This read resolves the ground model with seed 0, preserving all
 layer particle sprites and resource-pack and stack-component overrides. It returns
 `None` for invalid stacks or unavailable resources/provider. It is available in
-Setup, Reloading and World, on native and wasm. Resolve again after resource reloads.
+Setup, Reloading and World. Resolve again after resource reloads.
 It allocates a sprite list only when called; it adds no per-tick work.
 
 ### Tinting an item crumb

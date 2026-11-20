@@ -1,7 +1,6 @@
 //! Cargo-facing generation: the mod API's and the game's generated files.
 use super::{Catalog, Target, free_function_source, host, sources};
 use quote::ToTokens;
-use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
 mod vocab_boundary;
 
@@ -69,68 +68,38 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             // engine's `GoalCx` in `mobs/part_goals.rs`.
             ("mod_api_goal_view_generated.rs", generated.goal_view),
         ],
-        Target::Api | Target::Vocab | Target::Marks => {
-            if matches!(target, Target::Api) {
-                generate_api_parts(root, out_dir)?;
+        Target::Api => return generate_api_parts(root, out_dir),
+        Target::Vocab => {
+            write_vocab_output(
+                out_dir,
+                super::parts::OUTPUT,
+                &super::parts::source(root)?,
+                &inventory,
+                &vocab_sources,
+            )?;
+            for (name, code) in super::exports::sources(root)? {
+                write_vocab_output(out_dir, &name, &code, &inventory, &vocab_sources)?;
             }
-            if matches!(target, Target::Vocab) {
-                write_vocab_output(
-                    out_dir,
-                    super::parts::OUTPUT,
-                    &super::parts::source(root)?,
-                    &inventory,
-                    &vocab_sources,
-                )?;
-                for (name, code) in super::exports::sources(root)? {
-                    write_vocab_output(out_dir, &name, &code, &inventory, &vocab_sources)?;
-                }
-            }
-            let hooks = generated.hooks;
             let included = [
                 (host::AREAS_OUTPUT, generated.areas.as_str()),
-                ("mod_api_generated.rs", hooks.as_str()),
+                ("mod_api_generated.rs", generated.hooks.as_str()),
                 ("mod_api_generated_host.rs", generated.host.as_str()),
             ];
-            let (providers, sources) = super::capability_providers::generate(root, &included)?;
-            // The resolver recurses through the API's types: give it a deep stack.
-            let generated_wire = std::thread::scope(|scope| {
-                std::thread::Builder::new()
-                    .stack_size(64 << 20)
-                    .spawn_scoped(scope, || {
-                        super::wire::generate_with_providers(root, &included, &providers)
-                    })
-                    .map_err(|e| e.to_string())?
-                    .join()
-                    .map_err(|_| "generating the wire impls panicked".to_string())?
-            })?;
-            for path in sources.iter().chain(&generated_wire.sources) {
+            let (providers, paths) = super::capability_providers::generate(root, &included)?;
+            for path in paths {
                 crate::rerun_if_changed(&path.display());
             }
-            let outputs = vec![
-                (MARKS_OUTPUT, generated_wire.marks),
+            vec![
                 (host::AREAS_OUTPUT, generated.areas),
-                ("mod_api_generated.rs", hooks),
+                ("mod_api_generated.rs", generated.hooks),
                 ("mod_api_generated_host.rs", generated.host),
                 ("capability_providers_generated.rs", providers),
-                ("wire_generated.rs", generated_wire.wire),
-                (GUEST_OUTPUT, generated_wire.guest),
-            ];
-            outputs
-                .into_iter()
-                // Vocab keeps the mod side's guest transport as well, for `sunrise-mod-api`'s build to
-                // take (`generate_api_parts`): it comes from the sources Vocab has just generated.
-                .filter(|(name, _)| match target {
-                    Target::Api => *name == GUEST_OUTPUT,
-                    Target::Vocab => *name != MARKS_OUTPUT,
-                    Target::Marks => *name == MARKS_OUTPUT,
-                    Target::Client => unreachable!(),
-                })
-                .collect()
+            ]
         }
     };
     for (name, code) in outputs {
         let code = generated_source(root, &target, name, code)?;
-        if matches!(target, Target::Vocab) && name != GUEST_OUTPUT {
+        if matches!(target, Target::Vocab) {
             write_vocab_output(out_dir, name, &code, &inventory, &vocab_sources)?;
         } else {
             write_if_changed(out_dir.join(name), &code).map_err(|e| e.to_string())?;
@@ -140,16 +109,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
     Ok(())
 }
 
-/// The handler traits' import functions, which `sunrise-mod-marks` includes: the one place the
-/// imports' unsafe code lives, so the vocabulary holds none.
-pub const MARKS_OUTPUT: &str = "handler_marks_generated.rs";
-
-/// The mod side's WebAssembly guest transport, which `sunrise-mod-api` includes.
-pub const GUEST_OUTPUT: &str = "wire_guest_generated.rs";
-
-/// `sunrise-mod-api`'s own generated file: the modules and re-exports of its Part kinds. Its guest
-/// transport ([`GUEST_OUTPUT`]) comes from `sunrise-mod-vocab`'s build, which generates the same sources:
-/// the API's build script copies it instead of parsing the catalog, the vocabulary and the game again.
+/// Generate the mod API's Part registration modules.
 pub fn generate_api_parts(root: &Path, out_dir: &Path) -> Result<(), String> {
     crate::rerun_if_changed(&root.join("crates/sunrise-mod-api/src/parts").display());
     write_if_changed(
@@ -298,87 +258,20 @@ fn listed_render_slots_have_eligible_points() {
     super::points::game_points(&root).unwrap();
 }
 
-/// The `mod_api` types with a `Wire` layout ([`super::wire`]), for point records.
-/// A source tree without the mod API (a generator fixture's) has none.
-pub(crate) fn wire_types(root: &Path) -> Result<std::collections::BTreeSet<String>, String> {
+/// The approved value types for existing native point records. Use the audited catalog
+/// from before the transport removal, not a fresh eligibility guess that changes point signatures.
+pub(crate) fn point_types(root: &Path) -> Result<crate::points::PointTypes, String> {
     if !root.join("crates/sunrise-mod-vocab/src/hooks").is_dir() {
         return Ok(Default::default());
     }
-    let generated = sources(root, super::FillMode::Require)?;
-    wire_types_from_sources(root, &generated)
-}
-
-/// Resolve Wire layouts from already validated, immutable API sources.
-/// The caller has established that the mod API directory exists.
-pub(super) fn wire_types_from_sources(
-    root: &Path,
-    generated: &super::Sources,
-) -> Result<std::collections::BTreeSet<String>, String> {
-    let included = [
-        (host::AREAS_OUTPUT, generated.areas.as_str()),
-        ("mod_api_generated.rs", generated.hooks.as_str()),
-        ("mod_api_generated_host.rs", generated.host.as_str()),
-    ];
-    // The resolution reads the three sources and the indexed crates' files, and nothing a game
-    // edit changes: it is cached by their contents, and recomputed when any of them differs.
-    let name = wire_entry(root, &included)?;
-    if let Some(cached) = crate::interface_cache::load(&name)? {
-        return Ok(cached.lines().map(str::to_owned).collect());
-    }
-    // The resolver recurses through the API's types: give it a deep stack.
-    let types = std::thread::scope(|scope| {
-        std::thread::Builder::new()
-            .stack_size(64 << 20)
-            .spawn_scoped(scope, || super::wire::owned_types(root, &included))
-            .map_err(|e| e.to_string())?
-            .join()
-            .map_err(|_| "reading the wire types panicked".to_string())?
-    })?;
-    let body = types
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>()
-        .join("\n");
-    crate::interface_cache::store(&name, &body)?;
-    Ok(types)
-}
-
-/// The cache entry of the wire types resolved from `included` and the indexed crates below `root`.
-fn wire_entry(root: &Path, included: &[(&str, &str)]) -> Result<String, String> {
-    let mut key = Sha256::new();
-    for (name, code) in included {
-        key.update([name.as_bytes(), &[0], code.as_bytes(), &[0]].concat());
-    }
-    for (_, directory) in crate::index::CRATES {
-        hash_tree(root, &root.join(directory), &mut key)?;
-    }
-    Ok(format!("wire-types-{:x}.cache", key.finalize()))
-}
-
-/// Feeds `key` every file below `directory`, in path order: each one's path below `root` and its bytes.
-fn hash_tree(root: &Path, directory: &Path, key: &mut Sha256) -> Result<(), String> {
-    // A tree without one of the crates reads none of it.
-    if !directory.is_dir() {
-        return Ok(());
-    }
-    let mut entries = fs::read_dir(directory)
-        .map_err(|e| format!("{}: {e}", directory.display()))?
-        .map(|entry| entry.map(|entry| entry.path()))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    entries.sort();
-    for path in entries {
-        if path.is_dir() {
-            hash_tree(root, &path, key)?;
-        } else {
-            let bytes = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            let relative = path.strip_prefix(root).unwrap_or(&path);
-            key.update(relative.as_os_str().as_encoded_bytes());
-            key.update([0]);
-            key.update(Sha256::digest(bytes));
-        }
-    }
-    Ok(())
+    let file = root.join("crates/sunrise-mod-api-gen/native-point-types.txt");
+    crate::rerun_if_changed(&file.display());
+    let text = fs::read_to_string(&file).map_err(|error| format!("{}: {error}", file.display()))?;
+    Ok(text
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(str::to_owned)
+        .collect())
 }
 
 /// `sunrise-mod-points`' generated file: each point's record, `PointId` and typed function constructors,
@@ -398,15 +291,7 @@ pub fn generate_engine_points(root: &Path, out_dir: &Path) -> Result<(), String>
             }
             crate::rerun_if_staged(root);
             let points = super::points::game_points(root)?;
-            println!("cargo:rerun-if-env-changed=SUNRISE_POINT_NAMES");
-            let selected = std::env::var("SUNRISE_POINT_NAMES")
-                .ok()
-                .map(|json| {
-                    serde_json::from_str::<std::collections::BTreeSet<String>>(&json)
-                        .map_err(|error| format!("SUNRISE_POINT_NAMES: {error}"))
-                })
-                .transpose()?;
-            let code = super::points::engine_records(&points, selected.as_ref());
+            let code = super::points::engine_records(&points);
             let generated = syn::parse_file(&code).map_err(|e| format!("engine points: {e}"))?;
             let code = short_lines(generated);
             write_if_changed(out_dir.join("engine_points.rs"), code).map_err(|e| e.to_string())
@@ -472,22 +357,13 @@ pub(super) fn generate_points_inner(root: &Path, out_dir: &Path) -> Result<(), S
         crate::rerun_if_changed(&path.display());
     }
     phase("tracked");
-    println!("cargo:rerun-if-env-changed=SUNRISE_POINT_NAMES");
-    let selected = std::env::var("SUNRISE_POINT_NAMES")
-        .ok()
-        .map(|json| {
-            serde_json::from_str::<std::collections::BTreeSet<String>>(&json)
-                .map_err(|error| format!("SUNRISE_POINT_NAMES: {error}"))
-        })
-        .transpose()?;
-    // Only a staged copy compiles the points' sites into the game; the wasm host's listener
-    // fixture brings its own.
+    // Only a staged copy compiles the points' sites into the game.
     crate::rerun_if_staged(root);
     let staged =
         root.join(".sunrise-source-staged").is_file() || cfg!(feature = "listener-fixture");
     let points = super::points::game_points(root)?;
     phase("game_points");
-    let code = super::points::records_selected(&points, selected.as_ref())
+    let code = super::points::records(&points)
         + &format!(
             "/// Whether this build compiled the points' sites into the game: only the prebuilt game, built from a staged copy of the source, has them. A build without them refuses every listener at load.\npub const STAGED: bool = {staged};\n"
         );
@@ -573,39 +449,5 @@ mod tests {
         assert_eq!(reparsed, original);
         assert!(text.lines().count() > 10);
         assert!(text.contains("\"a, b; c\""));
-    }
-
-    /// A cached wire result follows every input it was derived from: the generated API sources (the
-    /// catalog and hooks) and each indexed crate's files (mod-vocab's among them), and not the game.
-    #[test]
-    fn the_wire_cache_entry_follows_the_catalog_and_vocab_but_not_the_game() {
-        let root = std::env::temp_dir().join(format!("wire-entry-{}", std::process::id()));
-        let vocab = root.join("crates/sunrise-mod-vocab/src");
-        let game = root.join("crates/sunrise-client/src/game");
-        fs::create_dir_all(vocab.join("hooks")).unwrap();
-        fs::create_dir_all(&game).unwrap();
-        fs::write(
-            vocab.join("hooks/delivery.rs"),
-            "pub struct PayloadDeclaration;",
-        )
-        .unwrap();
-        fs::write(game.join("boat.rs"), "fn paddle() {}").unwrap();
-        let entry = |hooks: &str| wire_entry(&root, &[("mod_api_generated.rs", hooks)]).unwrap();
-        let before = entry("pub trait Hooks {}");
-        assert_eq!(before, entry("pub trait Hooks {}"));
-        fs::write(game.join("boat.rs"), "fn paddle() { edited(); }").unwrap();
-        assert_eq!(before, entry("pub trait Hooks {}"), "a game edit");
-        assert_ne!(
-            before,
-            entry("pub trait Hooks { fn added(); }"),
-            "a catalog change"
-        );
-        fs::write(
-            vocab.join("hooks/delivery.rs"),
-            "pub struct PayloadDeclaration { pub delivery: u8 }",
-        )
-        .unwrap();
-        assert_ne!(before, entry("pub trait Hooks {}"), "a vocab change");
-        fs::remove_dir_all(root).unwrap();
     }
 }

@@ -3,7 +3,7 @@
 ![Three ways into the game: hooks and Parts first, then an [[inject]] listener at a point the game publishes,
 then the native route, which compiles against the exact game build.](../images/reaching-the-game.svg)
 
-An `[[inject]]` attaches a typed listener to an injection point without compiling game code. Prefer a named hook or Part method when one exists. API points work on native and wasm, on engine functions.
+An `[[inject]]` attaches a typed listener to an injection point without compiling game code. Prefer a named hook or Part method when one exists. API points attach to engine functions.
 
 To change a call or value inside a function, replace its body, or run code inside a hot loop, a native mod
 takes [the native route](native-route.md): [`[[native.mixin]]`](native-route/2-mixins.md), [`[[native.loop]]`](native-route/3-loops.md),
@@ -28,11 +28,11 @@ priority = 0
 | `return` | After the body; mutable returned value |
 | `replace` | Owns the function and returns its result without running the body |
 
-Listeners receive API records. Mutable parameters are copied back. A `Game` method's API point also supplies the side's Host. A parameter without an API/Wire form refuses registration, naming its type, on both targets.
+Listeners receive API records. Mutable parameters are copied back. A `Game` method's API point also supplies the side's Host. A parameter without an API/Wire form refuses registration, naming its type.
 
 A staged SDK build supplies these sites. A plain, unstaged game has no point sites and
 refuses API listeners at load by name. The launcher selects the SDK build when any
-enabled mod, native or wasm, declares an `[[inject]]` row. Each point is a replaceable
+enabled mod declares an `[[inject]]` row. Each point is a replaceable
 engine function with an API record: its head loads one replacement cell, and the
 dispatcher for a listened point is installed through that cell. Because a cell holds one
 function pointer, a point is never generic: `#[point]` refuses a function with a type or

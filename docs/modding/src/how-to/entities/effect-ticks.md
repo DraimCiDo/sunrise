@@ -61,11 +61,4 @@ amounts therefore subtract exhaustion. To remove at most 4, read the current foo
 snapshot and add `-food.exhaustion.min(4.0)` only when exhaustion is positive. Food
 changes have no effect on a mob without food data.
 
-## Native and wasm
-
-The same Part methods, resolved keys, snapshots and queued changes cross the shared
-Wire boundary for both targets. Content-only owners can have native or wasm dependents;
-code dependencies still obey the existing same-target linking rule. A `side = "server"`
-package can attach because both methods are server-only. No engine-owned holder storage crosses it. A wasm
-module requiring an unavailable import is refused while linking, naming the
-module and missing symbol; it is not loaded with a silently disabled capability.
+A `side = "server"` package can attach a Part because both methods are server-only.

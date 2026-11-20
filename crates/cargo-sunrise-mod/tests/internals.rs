@@ -141,26 +141,6 @@ fn internals_add_writes_pinned_hashes_and_preserves_the_rest_of_the_manifest() {
 
 #[test]
 #[ignore = "daily"]
-fn internals_commands_refuse_wasm_mods_without_edits() {
-    let project = Project::new("wasm-refused", "");
-    let manifest = format!(
-        "id='example'\nname='Example'\nversion='0.1.0'\napi='0.2'\ncapabilities=['registries']\n[wasm]\nsha512='{}'\ntoolchain='nightly'\n",
-        "a".repeat(128)
-    );
-    fs::write(project.dir.join(MANIFEST), &manifest).unwrap();
-    for args in [
-        &["internals", "add", "Example"][..],
-        &["internals", "sync"][..],
-    ] {
-        let output = project.run(args);
-        assert!(!output.status.success());
-        assert!(String::from_utf8_lossy(&output.stderr).contains("needs a [native] mod"));
-        assert_eq!(project.text(), manifest);
-    }
-}
-
-#[test]
-#[ignore = "daily"]
 fn native_sync_refuses_repo() {
     let project = Project::new("sync-native-repo", "");
     let output = project.run(&["internals", "sync", "--repo", "."]);

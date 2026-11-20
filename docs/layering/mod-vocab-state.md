@@ -77,12 +77,11 @@ OUT_DIR file checked by the generator before writing it.
 | `runtime.rs::MODS` | `OnceLock<Installed>` | dispatch table | Dependency-ordered hook routing and its per-mod enabled bits remain engine-owned. |
 | `runtime.rs::MODS_SWITCHED` | `std::sync::atomic::AtomicU64` | dispatch table | Counts changes to the per-mod enabled bits it sits beside; read through the host's capability provider table, never by a guest's own copy. |
 | `runtime.rs::TEST_MODS` | `std::cell::Cell<Option<&'staticInstalled>>` | dispatch table | Thread-local dispatch inventory for isolated engine tests. |
-| `wire/wire_resources.rs::ACCESS` | `OnceLock<ResourceAccess>` | set-once socket | Set-once platform callback registration; mutable platform storage lives above the engine. |
-| `wire/wire_resources.rs::shared::MARKER` | `std::sync::OnceLock<std::sync::Arc<Unsupported>>` | immutable cache | Shared immutable unsupported-resource marker with no writable payload. |
+| `wire/static_strings.rs::intern::STRINGS` | `OnceLock<Mutex<HashSet<&'staticstr>>>` | immutable cache | Bounded interning for decoded static strings; entries are immutable, shared by value, and never evicted. |
 | `world/phase_refusal.rs::SCOPE` | `Cell<Option<Scope>>` | reentrancy guard | Per-thread record of the mod and hook whose listener call is in flight and whether a refusal has latched, which the gate reads to contain a wrong-phase Host call. |
 | `world/phase_refusal.rs::report::LOGGED` | `OnceLock<Mutex<HashSet<(&'staticstr,&'staticstr)>>>` | reentrancy guard | Process-wide set of the (mod, operation) pairs whose refusal has been logged, so a refusing hook names the operation once and not on every call. |
 | `world/server_reload.rs::first::ID` | `LazyLock<Identifier>` | immutable cache | Immutable vanilla reload-boundary identifier, allocated once and shared by anchor declarations. |
 | `world/server_reload.rs::functions::ID` | `LazyLock<Identifier>` | immutable cache | Immutable vanilla reload-boundary identifier, allocated once and shared by anchor declarations. |
 | `world/server_reload.rs::last::ID` | `LazyLock<Identifier>` | immutable cache | Immutable vanilla reload-boundary identifier, allocated once and shared by anchor declarations. |
-| `world/startup_progress.rs::SCREEN` | `OnceLock<Arc<dynStartupScreen>>` | dispatch table | One engine-installed startup-screen service; registration contexts carry this same resource to native and wasm mods, and retained progress handles use it after registration. |
+| `world/startup_progress.rs::SCREEN` | `OnceLock<Arc<dynStartupScreen>>` | dispatch table | One engine-installed startup-screen service; registration contexts carry this same resource to mods, and retained progress handles use it after registration. |
 | `world/ticket_controller.rs::TEST_CONTROLLERS` | `std::cell::Cell<Option<&'static[ControllerInfo]>>` | Parts lookup table | Thread-local test lookup of installed Parts metadata by engine-issued slot. |

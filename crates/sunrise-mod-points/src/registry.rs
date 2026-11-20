@@ -3,7 +3,6 @@
 use crate::PointId;
 use mod_api::__private::points::{Place, Table};
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use mod_api::__private::points::register;
 pub use mod_api::__private::points::{RegisterError, stop};
 

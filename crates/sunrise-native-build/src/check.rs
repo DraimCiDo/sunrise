@@ -110,7 +110,7 @@ pub fn judge<E>(
         .entries
         .iter()
         .partition(|entry| entry.id.starts_with(game_uses::PREFIX));
-    let (mut misfits, mut unversioned) = match uses::fits(api, surface()?.as_ref()) {
+    let (mut misfits, mut unversioned) = match table.fits(api, surface()?.as_ref()) {
         Fit::Fits => (Vec::new(), Vec::new()),
         Fit::DoesNotFit(misfits) => (misfits, Vec::new()),
         // The build the list was made for, which has the versions, is not at hand here.

@@ -173,7 +173,6 @@ without slots, from inside a slot or after a panic.
 
 | Code | Message | Fix |
 | --- | --- | --- |
-| `E_LOOP_WASM` | `<mod>:<row>: <loop>: [[native.loop]] compiles game code; only native mods can fill a loop` | Build the mod native. |
 | `E_LOOP_INVALID` | `<mod>:<row>: invalid loop; name a published loop of the game, such as block_entities.tick` | Name the loop. |
 | | `… invalid helper; name a Rust file under src/ in this package` | Put the helper under `src/`, ending in `.rs`. |
 | | `… invalid with; name the slot type the helper defines` | Write the type's name, a plain identifier. |

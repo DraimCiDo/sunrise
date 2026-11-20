@@ -1,7 +1,7 @@
 //! `WorldDrawContext::name_tag` (#4171): a mod's label hides behind a wall unless it is
 //! see-through, shrinks with distance as a name tag does, is refused whole for text too deep
 //! or a position that is not finite, draws as vanilla's name tags in its light and the
-//! player's text background opacity, and draws the same from a compiled wasm mod.
+//! player's text background opacity.
 use super::host::draw::GameWorldDrawContext;
 use super::native_entity_refs::tests::with_client_game;
 use glam::{DVec3, Mat4, Vec3};
@@ -9,7 +9,7 @@ use mod_api::{DrawError, Hooks, NameTagOptions, Text, WorldDrawContext};
 use sunrise_client::block_entity_render::vertex_light;
 use sunrise_client::{mesher::Vertex, world_geometry::WorldGeometry};
 
-#[path = "../../../../sunrise-mod-wasm/tests/fixture/src/world_name_tags.rs"]
+#[path = "world_name_tag_tests/scene.rs"]
 mod scene;
 
 /// Four blocks in front of the label's anchor (0.5 above (0.5, 70, 0.5)), facing south (+Z).
@@ -506,7 +506,7 @@ fn a_label_too_deep_or_not_finite_is_refused_and_draws_nothing() {
     });
 }
 
-/// The wasm fixture's scene, run natively.
+/// Adds labels to the actual frame via a native render hook.
 struct Native;
 #[mod_api::__subscriptions]
 impl Hooks for Native {
@@ -519,10 +519,8 @@ impl Hooks for Native {
     }
 }
 
-/// The scene drawn by a whole world view (`fill_world_geometry`, every stage): the name-tag
-/// vertices it adds to the entities, its see-through vertices, and their pixels in front of
-/// a wall that hides the labels that are not see-through.
-fn scene_frame(game: &mut super::Game<'_>) -> ([Vec<Vertex>; 2], Vec<u8>, Vec<u32>) {
+/// The world pass and see-through pass receive the scene's labels.
+fn scene_frame(game: &mut super::Game<'_>) -> ([Vec<Vertex>; 2], Vec<u32>) {
     face_south(game);
     game.world.game_time = scene::SCENE_TIME;
     game.see_through_vertices.clear();
@@ -530,8 +528,6 @@ fn scene_frame(game: &mut super::Game<'_>) -> ([Vec<Vertex>; 2], Vec<u8>, Vec<u3
     let mut entities = Vec::new();
     game.fill_world_geometry(false, CAMERA, Mat4::IDENTITY, 0.0, &mut draw, &mut entities);
     let see_through = std::mem::take(&mut game.see_through_vertices);
-    let open = pixels(game, &entities, &see_through);
-    let walled = pixels(game, &[wall(game), entities.clone()].concat(), &see_through);
     // Each call's result, from the scene's marker lines: `code` across, the call's index up.
     let mut results: Vec<(f32, u32)> = draw
         .batch()
@@ -541,89 +537,20 @@ fn scene_frame(game: &mut super::Game<'_>) -> ([Vec<Vertex>; 2], Vec<u8>, Vec<u3
         .collect();
     results.sort_by(|a, b| a.0.total_cmp(&b.0));
     let results = results.into_iter().map(|(_, code)| code).collect();
-    ([entities, see_through], [open, walled].concat(), results)
+    ([entities, see_through], results)
 }
 
-/// The same `name_tag` calls from the compiled wasm fixture (through the generated import)
-/// and from a native mod draw the same vertices and the same pixels (#4171's done-when).
 #[test]
 #[ignore = "daily"]
-fn a_wasm_mods_labels_draw_the_same_pixels_as_a_native_mods() {
-    crate::game::in_own_process(
-        "game::world_name_tag_tests::a_wasm_mods_labels_draw_the_same_pixels_as_a_native_mods",
-        || {
-            sunrise_guest_stack::run_on_guest_stack(|| {
-                sunrise_mod_wasm::copy_probe::with_load_budget(|| {
-                    // The native control only draws labels; leave the process-wide block entity
-                    // table unset until the wasm fixture loads its declared types.
-                    let native: mod_api::Mods =
-                        vec![mod_api::ModEntry::new("native_labels", Box::new(Native))].into();
-                    let mut expected = None;
-                    mod_platform::testing::with_mods(native, || {
-                        with_client_game(|game| expected = Some(scene_frame(game)));
-                    });
-                    let (expected_vertices, expected_pixels, native_results) = expected.unwrap();
-                    assert_eq!(
-                        native_results,
-                        scene::RESULT_CODES,
-                        "native name_tag results"
-                    );
-                    let [world, through] = &expected_vertices;
-                    // Hidden (one copy), Through (two) and Bold (one) drew; NaN was refused.
-                    assert!(!world.is_empty() && !through.is_empty());
-
-                    let mods: mod_api::Mods = wasm_mods().into();
-                    let mut actual = None;
-                    mod_platform::testing::with_mods(mods.clone(), || {
-                        crate::game::api_values::install_parts(&mods).unwrap();
-                        let base = std::path::PathBuf::from(
-                            std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap(),
-                        );
-                        let root = super::mods::content_root(&base, &Default::default()).unwrap();
-                        super::native_entity_refs::tests::with_game_role(
-                            root.prepared().to_owned(),
-                            crate::game::execution_role::ExecutionRole::Client,
-                            |game| actual = Some(scene_frame(game)),
-                        );
-                    });
-                    let (actual_vertices, actual_pixels, wasm_results) = actual.unwrap();
-                    assert_eq!(wasm_results, scene::RESULT_CODES, "wasm name_tag results");
-                    for (copy, (native, wasm)) in ["world", "see-through"]
-                        .iter()
-                        .zip(expected_vertices.iter().zip(&actual_vertices))
-                    {
-                        assert_eq!(bytes(native), bytes(wasm), "the {copy} vertices");
-                    }
-                    assert!(expected_pixels == actual_pixels, "the same pixels");
-                })
-            })
-        },
-    );
-}
-
-/// The compiled wasm fixture (`SUNRISE_WASM_FIXTURE`, on `SUNRISE_WASM_STD`), loaded.
-fn wasm_mods() -> Vec<mod_api::ModEntry> {
-    use sunrise_mod_package::manifest::Package;
-    use sunrise_mod_wasm::{WasmPackage, load};
-    let path = std::path::PathBuf::from(std::env::var_os("SUNRISE_WASM_FIXTURE").unwrap());
-    let manifest = Package::read(&path).unwrap().manifest;
-    let info = mod_api::PackageInfo::new(
-        manifest.id.clone(),
-        manifest.version.to_string(),
-        mod_api::PackageKind::Code,
-        mod_api::Side::Both,
-        vec![manifest.id.clone()],
-        vec![],
-    );
-    let loaded = load(
-        &std::fs::read(std::env::var_os("SUNRISE_WASM_STD").unwrap()).unwrap(),
-        vec![WasmPackage {
-            manifest,
-            module: Package::read_wasm(&path).unwrap(),
-        }],
-    );
-    assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
-    assert_eq!(loaded.mods.len(), 1);
-    loaded.initialize(&[info]).unwrap();
-    loaded.mods
+fn a_render_hook_can_add_labels_to_both_depth_passes() {
+    let mods = vec![mod_api::ModEntry::new("native_labels", Box::new(Native))].into();
+    mod_platform::testing::with_mods(mods, || {
+        with_client_game(|game| {
+            let ([world, through], results) = scene_frame(game);
+            assert_eq!(results, scene::RESULT_CODES);
+            // Hidden (one copy), Through (two) and Bold (one) drew; NaN was refused.
+            assert!(!world.is_empty() && !through.is_empty());
+            assert!(world.len() > through.len());
+        });
+    });
 }

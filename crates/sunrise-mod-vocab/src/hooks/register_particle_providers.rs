@@ -51,8 +51,7 @@ leaves a number that is not finite. The particle draws on the blended layer, so 
 group lists its type: it then draws in that group, on the group's blend.
 `position`, `frame` (a sprite of the set, clamped), `size`, `rgba`, `lifetime` and `removed` are the tick's to
 write. `state` is four numbers that stay with the particle, zero at spawn; it is the only per-particle data,
-since every particle of a type shares the one provider (the same for native and wasm mods: a wasm tick is one
-call with the particle copied in and out). A tick has no `Host` and no level, since the engine ticks particles
+since every particle of a type shares the one provider. A tick has no `Host` and no level, since the engine ticks particles
 below gameplay; a provider that needs the world reads it in a hook. A type with no provider keeps its
 declarative motion, and live provider particles are dropped when resources reload, as a compiled
 controller's are."#]

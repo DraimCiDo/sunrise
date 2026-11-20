@@ -76,7 +76,7 @@ fn title_ticks_join_world_resources_without_the_desktop_model_publication() {
             host: &mut dyn mod_api::ClientHost,
             _: &mut mod_api::ClientTickPostEvent,
         ) {
-            // This Host import is also available to a wasm listener. It reads items in
+            // This Host method reads items in
             // WorldRest, even when there is no open level.
             let stone = host
                 .item_key(&mod_api::Identifier::parse("minecraft:stone").unwrap())

@@ -1437,7 +1437,7 @@ pub use snbt::{
     SnbtError, parse_snbt, parse_snbt_argument, parse_snbt_utf16, snbt_suggestions, snbt_whitespace,
 };
 
-/// A tag as its network NBT bytes (`write_network`), the form it crosses to a wasm mod in; a
+/// A tag as its network NBT bytes (`write_network`); a
 /// tag past the default limits is refused, with the reason.
 impl TryFrom<&Tag> for Vec<u8> {
     type Error = Error;

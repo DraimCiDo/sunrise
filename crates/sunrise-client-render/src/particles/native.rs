@@ -42,7 +42,7 @@ impl Clone for Box<dyn Controller> {
 /// and read by every engine built after.
 static REGISTERED: OnceLock<BTreeMap<String, Arc<dyn ParticleProvider>>> = OnceLock::new();
 
-/// Sets the native and wasm mods' particle providers (`register_particle_providers`), once, before
+/// Sets the mods' particle providers (`register_particle_providers`), once, before
 /// the resources first load; each engine then resolves its sprite sets' providers at every load.
 /// False when already set.
 pub fn register_particle_providers(providers: BTreeMap<String, Arc<dyn ParticleProvider>>) -> bool {
