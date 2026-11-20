@@ -80,8 +80,6 @@ impl Game<'_> {
         )
     }
 
-    /// The saved data of `entity` at `key` without identity or position metadata, with its
-
     /// Opens a block entity's menu for a connected player (`ServerPlayer.openMenu`).
     /// Returns Stale for an invalidated entity; Ok(false) for a wrong-level player,
     /// non-provider, cancelled open, or an unconnected player such as a fake player.
