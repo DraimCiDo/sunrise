@@ -415,7 +415,7 @@ fn hidden_world_layers_skip_geometry_and_texture_callbacks() {
     in_scene_process(
         "hidden_world_layers_skip_geometry_and_texture_callbacks",
         || {
-            struct Hide(Arc<AtomicBool>);
+            struct Hide(Arc<Mutex<Option<StockEntityLayer>>>);
             #[mod_api::__subscriptions]
             impl Hooks for Hide {
                 fn render_player_pre(
@@ -423,15 +423,14 @@ fn hidden_world_layers_skip_geometry_and_texture_callbacks() {
                     _: &dyn ClientHost,
                     event: &mut RenderPlayerPreEvent<'_>,
                 ) -> Flow {
-                    if self.0.load(Ordering::Relaxed) {
-                        event.hidden_layers.hide(StockEntityLayer::Cape).unwrap();
-                        event.hidden_layers.hide(StockEntityLayer::Wings).unwrap();
+                    if let Some(layer) = *self.0.lock().unwrap() {
+                        event.hidden_layers.hide(layer).unwrap();
                     }
                     Flow::Continue
                 }
             }
 
-            let hidden = Arc::new(AtomicBool::new(false));
+            let hidden = Arc::new(Mutex::new(None));
             let seen = Arc::new(Mutex::new(Vec::new()));
             let calls = seen.clone();
             let key = Identifier::parse("picker:masked").unwrap();
@@ -446,8 +445,11 @@ fn hidden_world_layers_skip_geometry_and_texture_callbacks() {
                     let texture = upload(game, "picker:masked", 64, 32);
                     let profile = game.gui.atlas.sprites[PROFILE];
                     let equipment = game.gui.atlas.sprites[VANILLA_WINGS];
-                    for layer in [PlayerLayer::Cape, PlayerLayer::Wings] {
-                        hidden.store(false, Ordering::Relaxed);
+                    for (layer, selector) in [
+                        (PlayerLayer::Cape, StockEntityLayer::Cape),
+                        (PlayerLayer::Wings, StockEntityLayer::Wings),
+                    ] {
+                        *hidden.lock().unwrap() = None;
                         if layer == PlayerLayer::Wings {
                             game.armor[1] = Some(ItemStack::new("minecraft:elytra", 1));
                         }
@@ -457,8 +459,12 @@ fn hidden_world_layers_skip_geometry_and_texture_callbacks() {
                             [(layer, PlayerLayerView::World)]
                         );
 
-                        hidden.store(true, Ordering::Relaxed);
+                        *hidden.lock().unwrap() = Some(selector);
                         let vertices = world(game);
+                        assert!(
+                            !vertices.is_empty(),
+                            "hiding a layer must not cancel the avatar"
+                        );
                         assert!(!uses(&vertices, texture));
                         assert!(!uses(&vertices, profile));
                         assert!(!uses(&vertices, equipment));
