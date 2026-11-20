@@ -42,6 +42,8 @@ Neither category identifies a sender or signature. The listener gets a shared
 This native listener bolds client notices without changing their contents.
 Return `Flow::Cancel` (or set `event.cancelled`) to suppress a line instead.
 An invalid edit leaves the original in place unless the line was cancelled.
+Lines whose click actions cannot cross the mod text boundary, such as the
+file link in the default screenshot notice, bypass the hook.
 
 ```rust,no_run
 use mod_api::{ClientHost, ClientLocalChatLinePreEvent, Flow, Hooks, LocalChatSource};
@@ -57,7 +59,7 @@ impl Hooks for DecorateChat {
         event: &mut ClientLocalChatLinePreEvent<'_>,
     ) -> Flow {
         if event.source() == LocalChatSource::Client {
-            event.message.style.bold = Some(true);
+            event.message_mut().style.bold = Some(true);
         }
         Flow::Continue
     }

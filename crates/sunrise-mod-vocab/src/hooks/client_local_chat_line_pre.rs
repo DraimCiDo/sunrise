@@ -6,9 +6,10 @@ pub trait Hooks {
     /// This includes game notices and lines from `ClientHost::chat_line`, even
     /// without a connection. The source describes visibility, not a sender or signature.
     ///
-    /// Edit `message` to change the styled line or cancel to skip it, including
-    /// logging and accounting. If the original cannot cross the text boundary,
-    /// this hook is skipped; if the replacement is invalid, the original is
+    /// Use `event.message_mut()` to edit the styled line or cancel to skip it,
+    /// including logging and accounting. If the original cannot cross the text
+    /// boundary (for example, it has a trusted file link), this hook is skipped.
+    /// If the replacement is invalid, the original is
     /// kept unless cancelled. A failing listener's edits (including cancellation)
     /// are discarded, and later listeners still run in order. An insertion
     /// inside a transaction is published only on commit. The shared host cannot

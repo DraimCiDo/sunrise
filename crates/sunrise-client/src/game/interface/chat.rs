@@ -1210,7 +1210,7 @@ impl Game<'_> {
         }
         if self.options.execution_role.is_client()
             && mod_api::__private::listened(mod_api::HookId::ClientLocalChatLinePre)
-            && let Ok(original) = sunrise_client_lib::api_text::to_api(&text)
+            && let Ok(original) = sunrise_client_lib::api_text::to_api_for_edit(&text)
         {
             let mut message = original.clone();
             let mut cancel = false;
@@ -1221,14 +1221,17 @@ impl Game<'_> {
                     cancel: &mut cancel,
                 },
             );
-            if cancel {
-                return;
-            }
+            // Compare against the bounded original, not against another unvalidated tree.
             // An observing listener leaves the exact engine component in place.
-            if message != original
+            if !cancel
+                && message != original
                 && let Ok(replacement) = sunrise_client_lib::api_text::to_engine(&message)
             {
                 text = replacement;
+            }
+            message.discard();
+            if cancel {
+                return;
             }
         }
         self.after_commit(After::LocalChat(text, category, presentation));

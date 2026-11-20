@@ -22,8 +22,11 @@ impl Hooks for Decorate {
         event: &mut ClientLocalChatLinePreEvent<'_>,
     ) -> Flow {
         if event.source() == self.0 {
-            event.message.children.push(mod_api::Text::literal("!"));
-            event.message.style.bold = Some(true);
+            event
+                .message_mut()
+                .children
+                .push(mod_api::Text::literal("!"));
+            event.message_mut().style.bold = Some(true);
         }
         Flow::Continue
     }
@@ -101,12 +104,20 @@ fn hud_only_notices_keep_their_local_accounting() {
         |game| {
             let _server = connect(game);
             game.ui.screenshot_messages.push("capture.png".into());
-            game.finish_screenshot(&Ok([1, 1]), Some(Text::literal("screenshot saved")));
+            game.finish_screenshot(&Ok([1, 1]), None);
             game.native_chat("native notice");
+            let components = game.ui.chat.recent_components(2);
+            assert_eq!(game.ui.chat.recent_lines(1), ["native notice!"]);
+            assert_eq!(components[1]["translate"], "screenshot.success");
             assert_eq!(
-                game.ui.chat.recent_lines(3),
-                ["native notice!", "screenshot saved!"],
+                components[1]["with"][0],
+                serde_json::json!({
+                    "text": "capture.png",
+                    "underlined": true,
+                    "click_event": {"action": "open_file", "path": "capture.png"},
+                })
             );
+            assert!(components[1].get("bold").is_none());
             assert_eq!(game.ui.chat.received, 2);
             assert_eq!(game.remote.as_ref().unwrap().chat_received, 0);
         },
@@ -123,7 +134,10 @@ impl Hooks for First {
         _: &dyn ClientHost,
         event: &mut ClientLocalChatLinePreEvent<'_>,
     ) -> Flow {
-        event.message.children.push(mod_api::Text::literal("A"));
+        event
+            .message_mut()
+            .children
+            .push(mod_api::Text::literal("A"));
         Flow::Continue
     }
 }
@@ -137,7 +151,10 @@ impl Hooks for Mark {
         _: &dyn ClientHost,
         event: &mut ClientLocalChatLinePreEvent<'_>,
     ) -> Flow {
-        event.message.children.push(mod_api::Text::literal(self.0));
+        event
+            .message_mut()
+            .children
+            .push(mod_api::Text::literal(self.0));
         if self.0 == "B" && event.source() == LocalChatSource::Server {
             Flow::Cancel
         } else {
@@ -159,7 +176,7 @@ impl Hooks for ObserveCancelled {
         self.0
             .lock()
             .unwrap()
-            .push((event.cancelled, event.message.children.len()));
+            .push((event.cancelled, event.message().children.len()));
         Flow::Continue
     }
 }
@@ -197,7 +214,7 @@ fn listener_order_and_cancellation_control_history_and_accounting() {
 
 fn invalid_text() -> mod_api::Text {
     let mut text = mod_api::Text::literal("too deep");
-    for _ in 0..mod_api::text::MAX_TEXT_DEPTH {
+    for _ in 0..32_768 {
         text = mod_api::Text::literal("").append(text);
     }
     text
@@ -212,7 +229,7 @@ impl Hooks for InvalidReplacement {
         _: &dyn ClientHost,
         event: &mut ClientLocalChatLinePreEvent<'_>,
     ) -> Flow {
-        *event.message = invalid_text();
+        *event.message_mut() = invalid_text();
         Flow::Continue
     }
 }
@@ -220,10 +237,15 @@ impl Hooks for InvalidReplacement {
 #[test]
 #[ignore = "daily"]
 fn invalid_replacement_keeps_original() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
     with_chat_mods(
-        vec![ModEntry::new("invalid", Box::new(InvalidReplacement))],
+        vec![
+            ModEntry::new("invalid", Box::new(InvalidReplacement)),
+            ModEntry::new("observer", Box::new(ObserveCancelled(seen.clone()))),
+        ],
         |game| {
             game.system_message(Text::literal("original"));
+            assert_eq!(*seen.lock().unwrap(), [(false, 1)]);
             assert_eq!(game.ui.chat.recent_lines(2), ["original"]);
         },
     );
@@ -273,7 +295,7 @@ impl Hooks for Unwind {
         _: &dyn ClientHost,
         event: &mut ClientLocalChatLinePreEvent<'_>,
     ) -> Flow {
-        *event.message = mod_api::Text::literal("discard me");
+        *event.message_mut() = mod_api::Text::literal("discard me");
         event.cancelled = true;
         panic!("local chat listener failed");
     }

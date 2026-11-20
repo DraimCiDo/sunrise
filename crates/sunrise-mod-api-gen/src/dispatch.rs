@@ -481,13 +481,15 @@ pub(super) fn emit<'a>(
 
         let mut lifetimes = EventLifetimes::default();
         let mut fields = String::new();
-        let mut getter = None;
+        let mut getters = String::new();
+        let mut found_read_only = false;
         let mut inits = Vec::new();
         let mut write_back = String::new();
         // Rollback fields and whether the event holds them behind a mutable reference.
         let mut rollback: Vec<(String, bool)> = Vec::new();
         // The rolled-back fields a snapshot copies by `Clone` rather than by `Copy`.
         let mut cloned: Vec<String> = Vec::new();
+        let mut text_snapshots: Vec<String> = Vec::new();
         // The `&mut dyn Trait` fields: registrars and draw surfaces, with no value to snapshot.
         let mut surfaces: Vec<String> = Vec::new();
         let stack_outputs: Vec<_> = args
@@ -586,18 +588,19 @@ pub(super) fn emit<'a>(
                     }
                     surfaces.push(name.clone());
                 }
-                if hook.isolate == Some(Isolation::Requested)
-                    && !rollback_pointee_is_copy(&field_ty)
-                {
-                    return Err(format!(
-                        "{}: isolate rolls a listener's writes back to the requested values; \
-                         its mutable argument {name} must be a Copy primitive or a fixed array \
-                         of them",
-                        hook.name
-                    ));
-                }
                 if !rollback_pointee_is_copy(&field_ty) {
-                    cloned.push(name.clone());
+                    match hook.isolate {
+                        Some(Isolation::Listener) if ty_tokens == "& mut Text" => {
+                            text_snapshots.push(name.clone());
+                        }
+                        Some(_) => {
+                            return Err(format!(
+                                "{}: isolated mutable argument {name} has no safe rollback snapshot",
+                                hook.name
+                            ));
+                        }
+                        None => cloned.push(name.clone()),
+                    }
                 }
                 rollback.push((name.clone(), true));
             }
@@ -605,9 +608,21 @@ pub(super) fn emit<'a>(
                 if scalar || matches!(field_ty, Type::Reference(_)) {
                     return Err(format!("{}: read_only names a copied input", hook.name));
                 }
-                getter = Some(format!(
-                    "/// Read the `{name}` supplied by the engine.\npub const fn {name}(&self) -> {} {{ self.{name} }}",
+                found_read_only = true;
+                getters.push_str(&format!(
+                    "/// Read the `{name}` supplied by the engine.\npub const fn {name}(&self) -> {} {{ self.{name} }}\n",
                     field.to_token_stream()
+                ));
+                ""
+            } else if hook.isolate == Some(Isolation::Listener)
+                && let Type::Reference(reference) = &field_ty
+                && reference.mutability.is_some()
+            {
+                // Rollback must always restore the engine's slot, not a referent selected by a mod.
+                let pointee = reference.elem.to_token_stream();
+                getters.push_str(&format!(
+                    "/// Read the staged `{name}`.\npub fn {name}(&self) -> &{pointee} {{ self.{name} }}\n\
+                     /// Edit the staged `{name}`.\npub fn {name}_mut(&mut self) -> &mut {pointee} {{ self.{name} }}\n"
                 ));
                 ""
             } else if event_type == "ApplyEffectTickEvent" && name == "changes" {
@@ -679,10 +694,13 @@ pub(super) fn emit<'a>(
         } else {
             "// no wire: borrowed event crosses as call arguments."
         };
-        let getter = match (getter, &hook.read_only) {
-            (Some(getter), _) => format!("impl {event_type}{elided} {{ {getter} }}\n"),
-            (None, Some(field)) => return Err(format!("{name}: unknown read_only input {field}")),
-            (None, None) => String::new(),
+        if !found_read_only && let Some(field) = &hook.read_only {
+            return Err(format!("{name}: unknown read_only input {field}"));
+        }
+        let getter = if getters.is_empty() {
+            getters
+        } else {
+            format!("impl {event_type}{elided} {{ {getters} }}\n")
         };
         let non_exhaustive = if hook.non_exhaustive {
             "#[non_exhaustive]\n"
@@ -1052,6 +1070,11 @@ pub(super) fn emit<'a>(
             .filter(|(field, _)| !surfaces.contains(field))
         {
             let index = snaps.len();
+            if text_snapshots.contains(field) {
+                snaps.push(format!("crate::text::TextSnapshot::new({event}.{field})"));
+                restores.push(format!("{saved}.{index}.restore({event}.{field});"));
+                continue;
+            }
             snaps.push(if cloned.contains(field) {
                 // `to_owned`, not `clone`: this generator cannot tell a `Copy` field type from an
                 // owned one, and `clippy::clone_on_copy` would flag a `clone` of the first.
@@ -1074,7 +1097,9 @@ pub(super) fn emit<'a>(
             String::new()
         } else {
             // A snapshot that only copies is no work to defer: `then_some`.
-            let (then, arm) = if !snaps.iter().any(|snap| snap.starts_with("ToOwned")) {
+            let (then, arm) = if text_snapshots.is_empty()
+                && !snaps.iter().any(|snap| snap.starts_with("ToOwned"))
+            {
                 ("then_some", "")
             } else {
                 ("then", "|| ")
