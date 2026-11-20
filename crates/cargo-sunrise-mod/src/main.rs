@@ -6,9 +6,6 @@
 //!   SDK unless `--sunrise` names another build (`nightly-<date>` or a sha), with that SDK fetched
 //!   into `.sunrise/sdk/` (`sdk_fetch.rs`).
 //! - `update [--sunrise <build>]`: repin this mod; for a native mod, also diff/refresh declared internals.
-//! - `inject update [--accept <id>]…`: refresh declarations without repinning.
-//! - `inject sync --repo <game checkout>`: validate API injection pins against a game catalog.
-//! - `inject add <at> --kind <kind> [--call <callee>] [--nth N] [--with <fn>]`: pin an inject.
 //! - `internals sync [--repo <path>]`: sync declarations for native or wasm mods.
 //! - `internals add <path>… [--kind <kind>]`: declare internals from the prebuilt catalog.
 //! - `build [--update-lock | --wasm [--catalog <points.json>] [--with <mod>]…]`: the `.smod` in `target/sunrise-mod/`, with the mod's `assets/`
@@ -39,8 +36,6 @@ mod bounded;
 mod check;
 mod dev;
 mod help;
-mod inject;
-mod inject_sync;
 mod internals;
 mod jar;
 mod layouts;
@@ -149,10 +144,9 @@ fn main() -> ExitCode {
         Some("native-lock") => return native_build::lock(&args[1..]),
         Some("native-layout") => return native_build::layout(&args[1..]),
         Some("internals") => internals::run(&args[1..]),
-        Some("inject") => inject::run(&args[1..]),
-        Some("update") => update_args(&args[1..]).and_then(|(sunrise, accept)| {
+        Some("update") => update_args(&args[1..]).and_then(|sunrise| {
             sdk_cmds::update_report(entry, Path::new("."), sunrise)
-                .and_then(|()| update(Path::new("."), &sdk_fetch::fetch_build, sunrise, &accept))
+                .and_then(|()| update(Path::new("."), &sdk_fetch::fetch_build, sunrise))
                 .map(|()| println!("Run `cargo sunrise-mod check`."))
         }),
         None | Some("--help" | "-h") => {
@@ -407,10 +401,10 @@ fn pin(sunrise: Option<&str>) -> Result<String, String> {
     )
 }
 
-/// `update [--sunrise <build>] [--accept <inject id>]…`: the build and the accepted injects.
-fn update_args(args: &[String]) -> Result<(Option<&str>, Vec<&str>), String> {
-    let mut options = Options::new("update", args, &["--sunrise", "--accept"]);
-    let parsed = (options.value("--sunrise")?, options.values("--accept")?);
+/// The optional build in `update [--sunrise <build>]`.
+fn update_args(args: &[String]) -> Result<Option<&str>, String> {
+    let mut options = Options::new("update", args, &["--sunrise"]);
+    let parsed = options.value("--sunrise")?;
     options.finish()?;
     Ok(parsed)
 }
@@ -426,15 +420,10 @@ fn refuse_content_update(dir: &Path, manifest: &Manifest) -> Result<(), String> 
     Ok(())
 }
 
-/// Repins the mod. A native mod's declared internals and injects are checked against the new
+/// Repins the mod. A native mod's declared internals are checked against the new
 /// build first, reporting signature changes before writing; a wasm mod has none, so only its pin
 /// moves. `Cargo.toml` names the SDK by path, so the next command fetches the new one.
-fn update(
-    dir: &Path,
-    fetch: FetchSdk,
-    sunrise: Option<&str>,
-    accept: &[&str],
-) -> Result<(), String> {
+fn update(dir: &Path, fetch: FetchSdk, sunrise: Option<&str>) -> Result<(), String> {
     let path = dir.join(MANIFEST);
     let text = bounded::read(&path, bounded::MAX_MANIFEST)?;
     let manifest = Manifest::parse(&text)?;
@@ -451,20 +440,10 @@ fn update(
     let mut doc: toml_edit::DocumentMut = text
         .parse()
         .map_err(|e| format!("{}: {e}", path.display()))?;
-    if !manifest.internals.is_empty() || manifest.inject.iter().any(|i| i.hash.is_none()) {
+    if !manifest.internals.is_empty() {
         // #2593: these become the pinned catalogs with the mod's own modules applied.
         let old = internals::load(dir, &native.sunrise)?;
         let new = internals::load(dir, &sunrise)?;
-        let (reports, refused) = inject::update::pin_moves(&manifest, &old, &new, accept);
-        for report in reports {
-            println!("{report}");
-        }
-        if refused {
-            return Err(
-                "update refused; no files changed (pass --accept <inject id> to take a change)"
-                    .into(),
-            );
-        }
         print!("{}", internals::refresh(&manifest, &mut doc, &old, &new)?);
     }
     internals::set_string(
@@ -1005,7 +984,7 @@ mod tests {
         // A build whose SDK cannot be fetched: nothing is written.
         let broken = |_: &Path, _: &str| Err("no such build".to_owned());
         let newer = "89abcdef0123456789abcdef0123456789abcdef";
-        assert!(update(&path, &broken, Some(newer), &[]).is_err());
+        assert!(update(&path, &broken, Some(newer)).is_err());
         assert_eq!(std::fs::read(path.join(MANIFEST)).unwrap(), before);
     }
 
@@ -1014,7 +993,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("gems");
         new(&[path.display().to_string()], &offline).unwrap();
-        let error = update(&path, &offline, None, &[]).unwrap_err();
+        let error = update(&path, &offline, None).unwrap_err();
         assert!(error.contains("pins no game build"), "{error}");
     }
 
@@ -1349,7 +1328,7 @@ mod tests {
             .contains("is not a build")
         );
         let newer = "89abcdef0123456789abcdef0123456789abcdef";
-        update(&path, &offline, Some(newer), &[]).unwrap();
+        update(&path, &offline, Some(newer)).unwrap();
         let manifest =
             Manifest::parse(&std::fs::read_to_string(path.join(MANIFEST)).unwrap()).unwrap();
         let native = manifest.native.unwrap();
@@ -1415,7 +1394,7 @@ mod tests {
         let manifest = std::fs::read_to_string(path.join(MANIFEST)).unwrap();
         std::fs::create_dir_all(path.join(sdk_fetch::DIR)).unwrap();
         let newer = "89abcdef0123456789abcdef0123456789abcdef";
-        update(&path, &offline, Some(newer), &[]).unwrap();
+        update(&path, &offline, Some(newer)).unwrap();
         assert_eq!(
             std::fs::read_to_string(&cargo).unwrap(),
             text.replace(
@@ -1459,8 +1438,8 @@ mod tests {
                 extra: &line[7..],
             })
         );
-        let line = argv("--sunrise nightly --accept a --accept b");
-        assert_eq!(update_args(&line), Ok((Some("nightly"), vec!["a", "b"])));
+        let line = argv("--sunrise nightly");
+        assert_eq!(update_args(&line), Ok(Some("nightly")));
         for (error, option) in [
             (
                 build_args(&argv("--relase")).map(drop).unwrap_err(),

@@ -1,8 +1,7 @@
 //! `sunrise-mod.toml`, a mod's manifest, and the `.smod` file around it.
 //!
-//! Raw injection schema adapted from horizon-mixins (Copyright (c) 2026 levzzz),
+//! Native mixin schema adapted from horizon-mixins (Copyright (c) 2026 levzzz),
 //! MIT licensed; see `HORIZON_MIXINS_LICENSE` and `THIRD_PARTY_NOTICES.md`.
-pub mod inject;
 mod jar;
 pub mod loops;
 pub mod mixin;
@@ -186,8 +185,6 @@ pub struct Manifest {
     /// Game internals used by this mod, fingerprinted against its pinned build.
     #[serde(default)]
     pub internals: Vec<Internal>,
-    #[serde(default, deserialize_with = "inject::rows")]
-    pub inject: Vec<inject::Inject>,
     /// Free-form values other mods read through `PackageInfo::property`.
     #[serde(default)]
     pub properties: std::collections::BTreeMap<String, Property>,
@@ -533,22 +530,6 @@ impl Manifest {
             ))
         };
         let m: Manifest = toml::from_str(text).map_err(|e| {
-            // Serde knows the rejected field; this owning boundary supplies its provenance.
-            if let Ok(table) = toml::from_str::<toml::Table>(text)
-                && let Some(rows) = table.get("inject").and_then(toml::Value::as_array)
-            {
-                for row in rows {
-                    if let Some(Err(error)) = row.as_table().cloned().map(inject::row) {
-                        let field = |key| row.get(key).and_then(toml::Value::as_str).unwrap_or("?");
-                        let id = table.get("id").and_then(toml::Value::as_str).unwrap_or("?");
-                        return format!(
-                            "{MANIFEST}: {id}:{}: {}: {error}",
-                            field("id"),
-                            field("at")
-                        );
-                    }
-                }
-            }
             let native_alone = toml::from_str::<toml::Table>(text).is_ok_and(|mut table| {
                 table.contains_key("wasm")
                     && table.remove("native").is_some()
@@ -560,19 +541,6 @@ impl Manifest {
                 toml_error(text, &e)
             }
         })?;
-        inject::Inject::check_all(&m.inject, &m.id, m.native.is_some() || m.wasm.is_some())
-            .map_err(|e| e.to_string())?;
-        for entry in &m.inject {
-            if m.dependencies
-                .keys()
-                .any(|id| entry.at.split("::").next() == Some(id.replace('-', "_").as_str()))
-            {
-                return Err(format!(
-                    "{}: target {} is another mod's function; use the library mod's own hooks and functions",
-                    entry.id, entry.at
-                ));
-            }
-        }
         Internal::check_all(&m.internals)?;
         if !m.internals.is_empty() && m.native.is_none() && m.wasm.is_none() {
             return Err(format!(
@@ -689,8 +657,7 @@ impl Manifest {
         }
         if let Some(native) = &m.native {
             // Native source edits share one id space.
-            let mut ids: std::collections::HashSet<_> =
-                m.inject.iter().map(|entry| &entry.id).collect();
+            let mut ids = std::collections::HashSet::new();
             for id in native
                 .mixin
                 .iter()
@@ -1643,15 +1610,59 @@ mod tests {
     use super::*;
 
     #[test]
-    fn injections_at_dependency_functions_are_refused_by_name() {
-        let text = format!(
-            "{EXAMPLE}[native]\ngame='26.3'\nmixins='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'\nsunrise='0123456789012345678901234567890123456789'\n[dependencies]\nchemlib='1'\n[[inject]]\nid='listen'\nat='chemlib::transfer'\nkind='head'\nwith='listen'\n"
-        );
-        let error = Manifest::parse(&text).unwrap_err();
-        assert!(
-            error.contains("chemlib::transfer") && error.contains("own hooks and functions"),
-            "{error}"
-        );
+    fn published_native_manifests_keep_their_pins_and_routes() {
+        let manifests = [
+            (
+                "supercapes",
+                include_str!("../tests/manifests/supercapes.toml"),
+                Side::Client,
+                true,
+            ),
+            (
+                "better_inventory",
+                include_str!("../tests/manifests/better-inventory.toml"),
+                Side::Client,
+                true,
+            ),
+            (
+                "motion_blur",
+                include_str!("../tests/manifests/sunrise-motion-blur.toml"),
+                Side::Client,
+                true,
+            ),
+            (
+                "machine_sample",
+                include_str!("../tests/manifests/sunrise-machine-sample.toml"),
+                Side::Both,
+                false,
+            ),
+        ];
+        for (id, text, side, has_mixin) in manifests {
+            let manifest = Manifest::parse(text).unwrap_or_else(|error| panic!("{id}: {error}"));
+            assert_eq!(manifest.id, id);
+            assert_eq!(manifest.api, "0.2", "{id}");
+            assert_eq!(manifest.side, side, "{id}");
+            assert_eq!(manifest.capabilities, [Capability::Registries], "{id}");
+            let native = manifest
+                .native
+                .expect("a native mod keeps its [native] table");
+            assert_eq!(native.game, "26.3", "{id}");
+            assert_eq!(native.sunrise.len(), 40, "{id}");
+            assert_eq!(
+                native.mixins.as_deref(),
+                Some("e59da9094f0c2fdda6c627fe9eff22dec6a906f0"),
+                "{id}"
+            );
+            assert_eq!(!native.mixin.is_empty(), has_mixin, "{id}");
+            if !has_mixin {
+                assert!(
+                    native.bridge.is_empty()
+                        && native.module.is_empty()
+                        && native.r#loop.is_empty(),
+                    "{id}"
+                );
+            }
+        }
     }
 
     #[test]

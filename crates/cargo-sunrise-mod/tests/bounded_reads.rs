@@ -50,13 +50,7 @@ impl Drop for Fixture {
 fn large(path: &Path, limit: u64) {
     fs::File::create(path).unwrap().set_len(limit + 1).unwrap();
 }
-const COMMANDS: &[&[&str]] = &[
-    &["inject", "add", "lower::run", "--kind", "head"],
-    &["inject", "update"],
-    &["inject", "sync", "--repo", "game"],
-    &["internals", "add", "lower::run"],
-    &["internals", "sync"],
-];
+const COMMANDS: &[&[&str]] = &[&["internals", "add", "lower::run"], &["internals", "sync"]];
 #[test]
 #[ignore = "daily"]
 fn bounded_manifest_commands() {
@@ -113,53 +107,22 @@ fn sync_refuses_a_cargo_manifest_fifo_without_waiting() {
 #[test]
 #[ignore = "daily"]
 fn bounded_catalog_commands() {
-    for (name, relative, commands) in [
-        (
-            "points",
-            format!("{}/build-data/points.json", "a".repeat(40)),
-            &COMMANDS[..2],
-        ),
-        (
-            "old",
-            "old/build-data/internals.json".into(),
-            &COMMANDS[1..2],
-        ),
-        (
-            "internals",
-            format!("{}/build-data/internals.json", "a".repeat(40)),
-            &COMMANDS[..2],
-        ),
-    ] {
-        let f = Fixture::new(name);
-        f.manifest("[[inject]]\nid='listen'\nat='lower::run'\nkind='head'\nwith='listen'\n");
-        let cache = f.0.join(".sunrise/cache");
-        let current = cache.join("a".repeat(40)).join("build-data");
-        fs::create_dir_all(&current).unwrap();
-        fs::write(cache.join("a".repeat(40)).join("build"), "a".repeat(40)).unwrap();
-        let header = r#""schema":1,"build":{"commit":"c"}"#;
-        fs::write(
-            current.join("internals.json"),
-            format!(r#"{{{header},"internals":[]}}"#),
-        )
-        .unwrap();
-        fs::write(
-            current.join("points.json"),
-            format!(r#"{{{header},"sites":[]}}"#),
-        )
-        .unwrap();
-        let path = cache.join(relative);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        large(&path, 256 << 20);
-        let before = fs::read(f.0.join("sunrise-mod.toml")).unwrap();
-        for args in commands {
-            let error = f.run(args);
-            assert!(
-                error.contains(path.file_name().unwrap().to_str().unwrap())
-                    && error.contains("268435456"),
-                "{error}"
-            );
-            assert_eq!(fs::metadata(&path).unwrap().len(), (256 << 20) + 1);
-            assert_eq!(fs::read(f.0.join("sunrise-mod.toml")).unwrap(), before);
-        }
-    }
+    const LIMIT: u64 = 256 << 20;
+    let f = Fixture::new("internals-catalog");
+    f.manifest("");
+    let cache = f.0.join(".sunrise/cache").join("a".repeat(40));
+    let data = cache.join("build-data");
+    fs::create_dir_all(&data).unwrap();
+    fs::write(cache.join("build"), "a".repeat(40)).unwrap();
+    let catalog = data.join("internals.json");
+    large(&catalog, LIMIT);
+    let manifest = f.0.join("sunrise-mod.toml");
+    let before = fs::read(&manifest).unwrap();
+    let error = f.run(&["internals", "add", "lower::run"]);
+    assert!(
+        error.contains("internals.json") && error.contains(&LIMIT.to_string()),
+        "{error}"
+    );
+    assert_eq!(fs::metadata(&catalog).unwrap().len(), LIMIT + 1);
+    assert_eq!(fs::read(manifest).unwrap(), before);
 }

@@ -38,6 +38,14 @@ The raw injection schema in `crates/sunrise-mod-package/src/manifest.rs` is adap
 Copyright (c) 2026 levzzz, under the MIT license
 (`crates/sunrise-mod-package/HORIZON_MIXINS_LICENSE`).
 
+## Native mod manifest test fixtures
+
+The unmodified `sunrise-mod.toml` files in `crates/sunrise-mod-package/tests/manifests/` are copied under MIT. Their original license notices are in that directory's `licenses/` folder.
+
+- [SuperCapes](https://github.com/Zekrenlight/supercapes/blob/ea187164fac2015417085f211a8bed4c26bac496/sunrise-mod.toml) and [Better Inventory](https://github.com/Zekrenlight/better-inventory/blob/6b8724179bb4b51c51078ecf59e4ca4817a11d47/sunrise-mod.toml), Copyright (c) 2026 Zekrenlight.
+- [Motion Blur](https://github.com/GeorgeDev22/sunrise-motion-blur/blob/45ad09281e00d3a330e61d8ea653a89c25fbae18/sunrise-mod.toml), Copyright (c) 2026 GeorgeDev22.
+- [Sunrise Machine Sample](https://github.com/sunrise-org/sunrise-machine-sample/blob/5852480d6a3ce2d38b7097a4e281fdfaf413bfb6/sunrise-mod.toml), Copyright (c) 2026 the Horizon Veinminer, Horizon native mod and Sunrise contributors.
+
 ## Code removed for its license
 
 Sunrise once shipped three pieces of code under MIT that came from projects whose licenses don't allow that. All

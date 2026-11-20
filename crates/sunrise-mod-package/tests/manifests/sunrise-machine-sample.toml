@@ -1,0 +1,13 @@
+id = "machine_sample"
+name = "Machine Sample"
+version = "0.1.0"
+description = "Original content for the native machine sample"
+authors = []
+api = "0.2"
+side = "both"
+capabilities = ["registries"]
+
+[native]
+game = "26.3"
+sunrise = "dd672e6511b31b3170e9922ce1746b6a8d385299"
+mixins = "e59da9094f0c2fdda6c627fe9eff22dec6a906f0"

@@ -154,7 +154,7 @@ pub struct Asset {
 pub enum Kind {
     /// `surface.json`: what an API-only mod can name.
     Surface,
-    /// `build-data.tar.xz`: `points.json`, `internals.json`, `loops.json`, `functions.json`.
+    /// `build-data.tar.xz`: `internals.json`, `loops.json`, `functions.json`.
     BuildData,
     /// The API crates with their generated code written out.
     ApiSource,
