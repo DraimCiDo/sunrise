@@ -1,21 +1,12 @@
 use super::*;
-use crate::game::native_entity_refs::tests::{with_game, with_game_attachment};
-use mod_api::{AttachmentQueries, AttachmentQueriesMut, AttachmentType};
+use crate::game::native_entity_refs::tests::with_game_attachment;
+use mod_api::{AttachmentQueries, AttachmentQueriesMut};
 use sunrise_core::nbt::Tag;
-
-static VALUE: AttachmentType<i32> = AttachmentType {
-    namespace: "test",
-    name: "mana",
-    default: || 0,
-    codec: None,
-    copy_on_death: false,
-    sync: false,
-};
 
 fn with_fixture(test: impl FnOnce(&mut Game<'_>, mod_api::AttachmentKey<i32>)) {
     with_game_attachment(
         "test",
-        || mod_api::AttachmentDescriptor::new("test:mana", VALUE.default),
+        || mod_api::AttachmentDescriptor::new("test:mana", || 0),
         test,
     );
 }
@@ -55,9 +46,9 @@ fn saved_mob_binding_survives_store_back_and_retires_at_sweep() {
         let id = game.load_mob(mob(uuid), None).unwrap();
         // Check residency before a typed read decodes the saved entry.
         let index = game.attachment_indexes[&Dim::Overworld].clone();
-        let key = ("test".into(), "mana".into());
-        assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
-        VALUE.set(game, Holder::Entity(id), 7).unwrap();
+        let name = ("test".into(), "mana".into());
+        assert_eq!(index.lock().unwrap().snapshot(&name).len(), 1);
+        key.set(game, Holder::Entity(id), 7).unwrap();
         let old = game.query_mut(&key).unwrap();
         let row = old.iter().next().unwrap().unwrap();
         let work = index.lock().unwrap().work_count();
@@ -66,8 +57,8 @@ fn saved_mob_binding_survives_store_back_and_retires_at_sweep() {
         assert!(game.mobs[0].attachment_lifetime.is_bound());
         let after = index.lock().unwrap().work_count();
         assert_eq!(after, work);
-        assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
-        assert_eq!(VALUE.get(game, Holder::Entity(id)), Ok(7));
+        assert_eq!(index.lock().unwrap().snapshot(&name).len(), 1);
+        assert_eq!(key.get(game, Holder::Entity(id)), Ok(7));
         assert_eq!(
             game.query(&key)
                 .unwrap()
@@ -80,7 +71,7 @@ fn saved_mob_binding_survives_store_back_and_retires_at_sweep() {
         );
         let entity = game.entity(id).unwrap();
         assert!(game.entity_discard(entity));
-        assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
+        assert_eq!(index.lock().unwrap().snapshot(&name).len(), 1);
         game.native_removals_flush();
         game.world
             .chunks
@@ -88,7 +79,7 @@ fn saved_mob_binding_survives_store_back_and_retires_at_sweep() {
         game.tickets.update(None);
         game.tick_creature_entities().unwrap();
         assert!(game.mobs.is_empty());
-        assert!(index.lock().unwrap().snapshot(&key).is_empty());
+        assert!(index.lock().unwrap().snapshot(&name).is_empty());
         assert_eq!(
             row.set(game, 9),
             Err(mod_api::AttachmentRowError::StaleHolder)
@@ -106,20 +97,20 @@ fn saved_mob_binding_tracks_serialized_transfer_and_parked_levels() {
         let uuid = [21, 22, 23, 24];
         let id = game.load_mob(mob(uuid), None).unwrap();
         let source = game.attachment_indexes[&Dim::Overworld].clone();
-        let key = ("test".into(), "mana".into());
-        assert_eq!(source.lock().unwrap().snapshot(&key).len(), 1);
-        VALUE.set(game, Holder::Entity(id), 11).unwrap();
+        let name = ("test".into(), "mana".into());
+        assert_eq!(source.lock().unwrap().snapshot(&name).len(), 1);
+        key.set(game, Holder::Entity(id), 11).unwrap();
         let batch = game.query_mut(&key).unwrap();
         let row = batch.iter().next().unwrap().unwrap();
         game.enter_level(Dim::Nether).unwrap();
-        assert_eq!(source.lock().unwrap().snapshot(&key).len(), 1);
+        assert_eq!(source.lock().unwrap().snapshot(&name).len(), 1);
         game.enter_level(Dim::Overworld).unwrap();
-        assert_eq!(VALUE.get(game, Holder::Entity(id)), Ok(11));
+        assert_eq!(key.get(game, Holder::Entity(id)), Ok(11));
         // Serialized portals discard the source owner before destination load.
         let state = game.take_transferred_entity_state(id);
         game.mobs.retain(|m| m.id != id);
         game.detach_entity(id);
-        assert!(source.lock().unwrap().snapshot(&key).is_empty());
+        assert!(source.lock().unwrap().snapshot(&name).is_empty());
         game.enter_level(Dim::Nether).unwrap();
         let moved = game
             .load_mob_transferred(mob(uuid), None, Some(state))
@@ -129,11 +120,11 @@ fn saved_mob_binding_tracks_serialized_transfer_and_parked_levels() {
             game.attachment_indexes[&Dim::Nether]
                 .lock()
                 .unwrap()
-                .snapshot(&key)
+                .snapshot(&name)
                 .len(),
             1
         );
-        assert_eq!(VALUE.get(game, Holder::Entity(moved)), Ok(11));
+        assert_eq!(key.get(game, Holder::Entity(moved)), Ok(11));
         assert_eq!(
             row.set(game, 12),
             Err(mod_api::AttachmentRowError::StaleHolder)
@@ -144,7 +135,7 @@ fn saved_mob_binding_tracks_serialized_transfer_and_parked_levels() {
             game.attachment_indexes[&Dim::Nether]
                 .lock()
                 .unwrap()
-                .snapshot(&key)
+                .snapshot(&name)
                 .is_empty()
         );
     });
@@ -157,23 +148,23 @@ fn saved_mob_binding_rebinds_retained_id_with_a_new_generation() {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
         let id = game.load_mob(mob([25, 26, 27, 28]), None).unwrap();
-        VALUE.set(game, Holder::Entity(id), 13).unwrap();
+        key.set(game, Holder::Entity(id), 13).unwrap();
         let batch = game.query_mut(&key).unwrap();
         let row = batch.iter().next().unwrap().unwrap();
         let holder = game.entity(id).unwrap();
         let source = game.attachment_indexes[&Dim::Overworld].clone();
-        let key = ("test".into(), "mana".into());
+        let name = ("test".into(), "mana".into());
         // The retained-owner route retires before carrying the value to arrival.
         let mut owner = game.mobs.remove(0);
         owner.attachment_lifetime.retire();
-        assert!(source.lock().unwrap().snapshot(&key).is_empty());
+        assert!(source.lock().unwrap().snapshot(&name).is_empty());
         game.enter_level(Dim::Nether).unwrap();
         game.rebind_transferred_entity(id, &mut owner);
         game.mobs.push(owner);
         let current = game.attachment_indexes[&Dim::Nether]
             .lock()
             .unwrap()
-            .snapshot(&key);
+            .snapshot(&name);
         assert_eq!(current.len(), 1);
         assert_eq!(current[0].holder, AttachmentHolder::Entity(holder));
         assert_eq!(current[0].entry.read(&VALUE), Ok(&13));
@@ -187,7 +178,7 @@ fn saved_mob_binding_rebinds_retained_id_with_a_new_generation() {
             game.attachment_indexes[&Dim::Nether]
                 .lock()
                 .unwrap()
-                .snapshot(&key)
+                .snapshot(&name)
                 .is_empty()
         );
     });
@@ -207,10 +198,10 @@ fn mob_first_store_binds_and_nested_rollback_retires_authority() {
         tag.remove(&sunrise_mod_runtime::attachments::ATTACHMENTS_KEY.into());
         let id = game.load_mob(Tag::Compound(tag), None).unwrap();
         let holder = Holder::Entity(id);
-        assert_eq!(VALUE.get_existing(game, holder), Ok(None));
+        assert_eq!(key.get_existing(game, holder), Ok(None));
         assert!(!game.mobs[0].attachment_lifetime.is_bound());
         let result: Result<(), AttachmentError> = game.transaction(|host, _| {
-            VALUE.set(host, holder, 7)?;
+            key.set(host, holder, 7)?;
             let index = host.attachment_indexes[&Dim::Overworld].clone();
             assert_eq!(
                 index
@@ -221,13 +212,13 @@ fn mob_first_store_binds_and_nested_rollback_retires_authority() {
                 1
             );
             let inner: Result<(), AttachmentError> = host.transaction(|host, _| {
-                VALUE.set(host, holder, 8)?;
+                key.set(host, holder, 8)?;
                 Err(AttachmentError::MissingHolder)
             });
             assert!(inner.is_err());
-            assert_eq!(VALUE.get_existing(host, holder), Ok(Some(7)));
+            assert_eq!(key.get_existing(host, holder), Ok(Some(7)));
             let committed: Result<(), AttachmentError> = host.transaction(|host, _| {
-                VALUE.set(host, holder, 9)?;
+                key.set(host, holder, 9)?;
                 Ok(())
             });
             committed?;
@@ -244,7 +235,7 @@ fn mob_first_store_binds_and_nested_rollback_retires_authority() {
                 .snapshot(&("test".into(), "mana".into()))
                 .is_empty()
         );
-        VALUE.set(game, holder, 11).unwrap();
+        key.set(game, holder, 11).unwrap();
         assert!(game.mobs[0].attachment_lifetime.is_bound());
         assert_eq!(
             game.query(&key)
@@ -263,7 +254,7 @@ fn mob_first_store_binds_and_nested_rollback_retires_authority() {
 #[ignore = "daily"]
 fn mob_taken_store_refuses_without_writing_and_missing_store_refuses() {
     use mod_api::AttachmentError;
-    with_game(|game| {
+    with_fixture(|game, key| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
         let uuid = [81, 82, 83, 84];
@@ -274,7 +265,7 @@ fn mob_taken_store_refuses_without_writing_and_missing_store_refuses() {
         let id = game.load_mob(Tag::Compound(tag), None).unwrap();
         let taken = game.mobs.lift();
         assert_eq!(
-            VALUE.set(game, Holder::Entity(id), 1),
+            key.set(game, Holder::Entity(id), 1),
             Err(AttachmentError::HolderBusy)
         );
         assert!(
@@ -287,10 +278,10 @@ fn mob_taken_store_refuses_without_writing_and_missing_store_refuses() {
             taken,
             sunrise_client::join_seq::RestoreOrder::SurvivorsFirst,
         );
-        assert_eq!(VALUE.get_existing(game, Holder::Entity(id)), Ok(None));
+        assert_eq!(key.get_existing(game, Holder::Entity(id)), Ok(None));
         for id in [0, u32::MAX] {
             assert_eq!(
-                VALUE.set(game, Holder::Entity(id), 1),
+                key.set(game, Holder::Entity(id), 1),
                 Err(AttachmentError::MissingHolder)
             );
         }
@@ -300,14 +291,14 @@ fn mob_taken_store_refuses_without_writing_and_missing_store_refuses() {
 #[test]
 #[ignore = "daily"]
 fn tnt_with_real_lifetime_accepts_first_store() {
-    with_game(|game| {
+    with_fixture(|game, key| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
         game.summon_with_nbt("minecraft:tnt", [0.5, 70.0, 0.5], "{}")
             .unwrap();
         game.lan_assign_ids();
         let id = game.tnts[0].id;
-        assert_eq!(VALUE.set(game, Holder::Entity(id), 7), Ok(()));
+        assert_eq!(key.set(game, Holder::Entity(id), 7), Ok(()));
     });
 }
 
@@ -328,7 +319,7 @@ fn mob_inner_first_binding_commit_outer_abort_invalidates_retained_row() {
         let mut retained = None;
         let result: Result<(), AttachmentError> = game.transaction(|host, _| {
             let inner: Result<(), AttachmentError> = host.transaction(|host, _| {
-                VALUE.set(host, holder, 13)?;
+                key.set(host, holder, 13)?;
                 retained = Some(host.query_mut(&key).unwrap());
                 Ok(())
             });
@@ -344,11 +335,11 @@ fn mob_inner_first_binding_commit_outer_abort_invalidates_retained_row() {
             row.set(game, 99),
             Err(mod_api::AttachmentRowError::StaleHolder)
         );
-        VALUE.set(game, holder, 17).unwrap();
+        key.set(game, holder, 17).unwrap();
         assert_eq!(
             row.set(game, 99),
             Err(mod_api::AttachmentRowError::StaleHolder)
         );
-        assert_eq!(VALUE.get_existing(game, holder), Ok(Some(17)));
+        assert_eq!(key.get_existing(game, holder), Ok(Some(17)));
     });
 }

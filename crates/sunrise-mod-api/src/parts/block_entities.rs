@@ -266,19 +266,11 @@ pub mod tests {
         }
     }
     /// The gold a `doubler:hoard` block entity holds, kept beside it.
-    pub const HOARD: AttachmentType<u32> = AttachmentType {
-        namespace: "test",
-        name: "hoard",
-        default: || 0,
-        codec: None,
-        copy_on_death: false,
-        sync: false,
-    };
     /// How many times a `doubler:hoard` was asked about its removal.
     pub static HOARD_ASKED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     /// The block entity of type `doubler:hoard`, held by block `test:hoard`: when it is
-    /// removed it gives back the gold its `HOARD` counts.
-    pub(crate) struct Hoard(pub(crate) BlockKey);
+    /// removed it gives back the gold its attachment counts.
+    pub(crate) struct Hoard(pub(crate) BlockKey, pub(crate) AttachmentKey<u32>);
     #[mod_api::sunrise_part]
     impl BlockPart for Hoard {}
     #[mod_api::sunrise_part]
@@ -305,7 +297,8 @@ pub mod tests {
         ) {
             HOARD_ASKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let BlockPos { x, y, z } = event.pos;
-            if let Ok(Some(count @ 1..)) = HOARD.get_existing(level, Holder::BlockEntity([x, y, z]))
+            if let Ok(Some(count @ 1..)) =
+                self.1.get_existing(level, Holder::BlockEntity([x, y, z]))
             {
                 event.drops.push(Some(crate::parts::items::tests::stack(
                     "minecraft:gold_ingot",

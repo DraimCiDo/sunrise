@@ -1,6 +1,6 @@
 use super::*;
 use crate::game::native_entity_refs::tests::{with_game, with_game_attachment};
-use mod_api::{AttachmentQueries, AttachmentQueriesMut, AttachmentType};
+use mod_api::{AttachmentQueries, AttachmentQueriesMut};
 use std::collections::HashSet;
 use sunrise_core::nbt::Tag;
 use sunrise_mod_runtime::attachments::{ATTACHMENTS_KEY, AttachmentCodec, AttachmentError};
@@ -54,8 +54,8 @@ fn saved_spit_and_bullet_query_before_access_and_round_trip() {
             game.world.loaded_entities.push(((0, 0), vec![tag.into()]));
             game.spawn_loaded_entities();
             let index = game.attachment_indexes[&Dim::Overworld].clone();
-            let key = ("saved_projectile".into(), "value".into());
-            let batch = index.lock().unwrap().snapshot(&key);
+            let name = ("saved_projectile".into(), "value".into());
+            let batch = index.lock().unwrap().snapshot(&name);
             assert_eq!(batch.len(), 1, "{kind} before attachment access");
             assert_eq!(batch[0].entry.read(&PROJECTILE_VALUE), Ok(&37), "{kind}");
             let AttachmentHolder::Entity(entity) = batch[0].holder else {
@@ -74,14 +74,14 @@ fn saved_spit_and_bullet_query_before_access_and_round_trip() {
                 .clone();
             assert!(game.entity_discard(entity));
             game.native_removals_flush();
-            assert!(index.lock().unwrap().snapshot(&key).is_empty());
+            assert!(index.lock().unwrap().snapshot(&name).is_empty());
             // Reload from the serialized data, not a retained in-memory map.
             game.entity_attachments.remove(&entity.id());
             game.world
                 .loaded_entities
                 .push(((0, 0), vec![saved.into()]));
             game.spawn_loaded_entities();
-            let restored = index.lock().unwrap().snapshot(&key);
+            let restored = index.lock().unwrap().snapshot(&name);
             assert_eq!(restored.len(), 1, "{kind} after reload");
             assert_eq!(
                 restored[0].entry.read(&PROJECTILE_VALUE),
@@ -97,19 +97,10 @@ fn saved_spit_and_bullet_query_before_access_and_round_trip() {
     });
 }
 
-static VALUE: AttachmentType<i32> = AttachmentType {
-    namespace: "saved_entity",
-    name: "value",
-    default: || 0,
-    codec: None,
-    copy_on_death: false,
-    sync: false,
-};
-
 fn with_fixture(test: impl FnOnce(&mut Game<'_>, mod_api::AttachmentKey<i32>)) {
     with_game_attachment(
         "saved_entity",
-        || mod_api::AttachmentDescriptor::new("saved_entity:value", VALUE.default),
+        || mod_api::AttachmentDescriptor::new("saved_entity:value", || 0),
         test,
     );
 }
@@ -180,15 +171,15 @@ fn saved_entity_loaders_publish_and_retire_the_authoritative_owner() {
                 "snowball" => game.load_throwable(tag, Some(uuid), None),
                 _ => unreachable!(),
             }
-            let key = ("saved_entity".into(), "value".into());
+            let name = ("saved_entity".into(), "value".into());
             let index = game.attachment_indexes[&Dim::Overworld].clone();
-            let saved = index.lock().unwrap().snapshot(&key);
+            let saved = index.lock().unwrap().snapshot(&name);
             assert_eq!(saved.len(), 1, "{kind} before typed access");
             let AttachmentHolder::Entity(entity) = saved[0].holder else {
                 panic!("not entity");
             };
             assert_ne!(entity.id(), 0, "{kind}");
-            VALUE.set(game, Holder::Entity(entity.id()), 19).unwrap();
+            key.set(game, Holder::Entity(entity.id()), 19).unwrap();
             let old = game.query_mut(&key).unwrap();
             let row = old.iter().next().unwrap().unwrap();
             let work = index.lock().unwrap().work_count();
@@ -213,14 +204,10 @@ fn saved_entity_loaders_publish_and_retire_the_authoritative_owner() {
                 work,
                 "{kind} store_back"
             );
-            assert_eq!(
-                VALUE.get(game, Holder::Entity(entity.id())),
-                Ok(19),
-                "{kind}"
-            );
+            assert_eq!(key.get(game, Holder::Entity(entity.id())), Ok(19), "{kind}");
             game.enter_level(Dim::Nether).unwrap();
             assert_eq!(
-                index.lock().unwrap().snapshot(&key).len(),
+                index.lock().unwrap().snapshot(&name).len(),
                 1,
                 "{kind} parked"
             );
@@ -228,7 +215,7 @@ fn saved_entity_loaders_publish_and_retire_the_authoritative_owner() {
             assert!(game.entity_discard(entity), "{kind}");
             game.native_removals_flush();
             assert!(
-                index.lock().unwrap().snapshot(&key).is_empty(),
+                index.lock().unwrap().snapshot(&name).is_empty(),
                 "{kind} sweep"
             );
             assert_eq!(
@@ -251,7 +238,7 @@ fn saved_binding_family_first_stores_publish_to_queries() {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
         let index = game.attachment_indexes[&Dim::Overworld].clone();
-        let key = ("saved_entity".into(), "value".into());
+        let name = ("saved_entity".into(), "value".into());
         macro_rules! family {
             ($kind:literal, $nbt:literal, $($field:ident).+) => {{
                 game.summon_with_nbt(concat!("minecraft:", $kind), [0.5, 70.0, 0.5], $nbt)
@@ -261,11 +248,11 @@ fn saved_binding_family_first_stores_publish_to_queries() {
                 let holder = Holder::Entity(id);
                 let entity = game.entity(id).unwrap();
                 assert!(
-                    index.lock().unwrap().snapshot(&key).is_empty(),
+                    index.lock().unwrap().snapshot(&name).is_empty(),
                     "{} publishes before a store",
                     $kind
                 );
-                VALUE.set(game, holder, 7).unwrap();
+                key.set(game, holder, 7).unwrap();
                 {
                     let query = game.query(&key).unwrap();
                     let rows: Vec<_> = query.iter().map(|row| row.unwrap()).collect();
@@ -276,7 +263,7 @@ fn saved_binding_family_first_stores_publish_to_queries() {
                 assert!(game.entity_discard(entity), "{} discard", $kind);
                 game.native_removals_flush();
                 assert!(
-                    index.lock().unwrap().snapshot(&key).is_empty(),
+                    index.lock().unwrap().snapshot(&name).is_empty(),
                     "{} sweep",
                     $kind
                 );
@@ -294,7 +281,7 @@ fn saved_binding_family_first_stores_publish_to_queries() {
             .unwrap();
         game.lan_assign_ids();
         let id = game.tnts[0].id;
-        VALUE.set(game, Holder::Entity(id), 9).unwrap();
+        key.set(game, Holder::Entity(id), 9).unwrap();
         assert!(
             game.query(&key).unwrap().iter().next().is_none(),
             "unindexed family"

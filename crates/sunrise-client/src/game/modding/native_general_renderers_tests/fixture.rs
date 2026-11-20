@@ -1,7 +1,7 @@
 //! The general entity renderer used by the integrated scene.
 use mod_api::{
-    AttachmentCodec, AttachmentError, AttachmentType, BlockEntityDrawContext, EntityRenderState,
-    EntityRenderer, EntityRenderers, GeneralEntityCategory, GeneralSavePolicy, Registrar, Tag,
+    AttachmentCodec, AttachmentError, BlockEntityDrawContext, EntityRenderState, EntityRenderer,
+    EntityRenderers, GeneralEntityCategory, GeneralSavePolicy, Registrar, Tag,
 };
 
 pub const KIND: &str = "general_render_fixture:render_probe";
@@ -14,19 +14,10 @@ const FUEL_CODEC: mod_api::AttachmentCodec<i32> = AttachmentCodec {
     },
 };
 
-pub static FUEL: AttachmentType<i32> = AttachmentType {
-    namespace: "general_render_fixture",
-    name: "render_fuel",
-    default: || 0,
-    codec: Some(FUEL_CODEC),
-    copy_on_death: false,
-    sync: true,
-};
-
 pub fn register(registrar: &mut dyn Registrar) {
     registrar
         .register_attachment_type(
-            mod_api::AttachmentDescriptor::new("general_render_fixture:render_fuel", FUEL.default)
+            mod_api::AttachmentDescriptor::new("general_render_fixture:render_fuel", || 0)
                 .serialize(FUEL_CODEC)
                 .sync(),
         )

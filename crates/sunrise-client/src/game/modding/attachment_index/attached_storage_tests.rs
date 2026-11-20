@@ -4,19 +4,11 @@ use super::*;
 use crate::game::api_values::TryIntoApi;
 use crate::game::native_entity_refs::tests::with_game_attachment;
 use mod_api::{
-    AttachedEnergy, AttachedItems, AttachmentType, EnergyHandler, HostTransaction, ITEM_STACKS,
-    ItemResource, ResourceHandler, ServerHost, StackList,
+    AttachedEnergy, AttachedItems, EnergyHandler, HostTransaction, ITEM_STACKS, ItemResource,
+    ResourceHandler, ServerHost,
 };
 use sunrise_client::{chunk::Chunk, items::ItemStack};
 
-static ITEMS: AttachmentType<StackList<ItemResource>> = AttachmentType {
-    namespace: "storage_test",
-    name: "items",
-    default: Vec::new,
-    codec: Some(ITEM_STACKS),
-    copy_on_death: false,
-    sync: false,
-};
 const CHUNK: Holder = Holder::Chunk([2, 3]);
 
 fn chunk_game(game: &mut Game<'_>) {
@@ -31,25 +23,24 @@ fn chunk_game(game: &mut Game<'_>) {
 #[ignore = "daily"]
 fn attached_items_are_undone_by_an_abort_and_saved_by_their_codec() {
     let descriptor = || {
-        mod_api::AttachmentDescriptor::new("storage_test:items", ITEMS.default)
-            .serialize(ITEM_STACKS)
+        mod_api::AttachmentDescriptor::new("storage_test:items", Vec::new).serialize(ITEM_STACKS)
     };
     with_game_attachment("storage_test", descriptor, |game, items| {
         chunk_game(game);
         let dirt = ItemResource::of(&ItemStack::new("minecraft:dirt", 1).try_into_api().unwrap());
-        let slots = AttachedItems::new(items, CHUNK, 9, 64, |_| true).unwrap();
+        let slots = AttachedItems::new(items.clone(), CHUNK, 9, 64, |_| true).unwrap();
         let host: &mut dyn ServerHost = game;
         let aborted =
             host.transaction(|host, tx| Err::<(), _>(slots.insert_at(host, tx, 4, &dirt, 10)));
         assert_eq!(aborted, Err(10));
-        assert_eq!(ITEMS.has(host, CHUNK), Ok(false));
+        assert_eq!(items.has(host, CHUNK), Ok(false));
         let went =
             host.transaction(|host, tx| Ok::<_, ()>(slots.insert_at(host, tx, 4, &dirt, 10)));
         assert_eq!(went, Ok(10));
         assert_eq!(slots.amount(host, 4), 10);
         // What the save writes reads back to the same index.
-        let held = ITEMS.get_existing(host, CHUNK).unwrap().unwrap();
-        let codec = ITEMS.codec.as_ref().unwrap();
+        let held = items.get_existing(host, CHUNK).unwrap().unwrap();
+        let codec = ITEM_STACKS;
         let reloaded = (codec.decode)(&(codec.encode)(&held).unwrap()).unwrap();
         assert_eq!(reloaded[4], Some((dirt, 10)));
         assert!(reloaded[..4].iter().all(Option::is_none));

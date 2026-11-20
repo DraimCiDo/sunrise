@@ -1,22 +1,15 @@
 use super::*;
 use crate::game::native_entity_refs::tests::with_client_game;
-use mod_api::{AttachmentCodec, AttachmentType, Host};
+use mod_api::{AttachmentCodec, Host};
 use sunrise_mod_runtime::attachments::AttachmentSync;
 use sunrise_protocol::attachment_sync::{Message, encode};
 
-const VALUE: AttachmentType<i32> = AttachmentType {
-    namespace: "mirror",
-    name: "value",
-    default: || 73,
-    codec: Some(AttachmentCodec {
-        encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
-        decode: |c| match c.get(&"n".into()) {
-            Some(Tag::Int(n)) => Ok(*n),
-            _ => Err(mod_api::AttachmentError::Decode),
-        },
-    }),
-    copy_on_death: false,
-    sync: true,
+const VALUE_CODEC: AttachmentCodec<i32> = AttachmentCodec {
+    encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
+    decode: |c| match c.get(&"n".into()) {
+        Some(Tag::Int(n)) => Ok(*n),
+        _ => Err(mod_api::AttachmentError::Decode),
+    },
 };
 fn values(game: &Game<'_>, key: &mod_api::AttachmentKey<i32>) -> Vec<i32> {
     let host: &dyn Host = game;
@@ -51,8 +44,8 @@ fn synced_client_queries_follow_replacement_retirement_and_level_changes() {
     mod_platform::testing::with_attachment_fixture(
         "mirror",
         || {
-            mod_api::AttachmentDescriptor::new("mirror:value", VALUE.default)
-                .serialize(VALUE.codec.unwrap())
+            mod_api::AttachmentDescriptor::new("mirror:value", || 73)
+                .serialize(VALUE_CODEC)
                 .sync()
         },
         |issued| {
@@ -79,12 +72,10 @@ fn synced_client_queries_follow_replacement_retirement_and_level_changes() {
                 );
                 client(game).logged_in = true;
                 assert!(values(game, &key).is_empty());
-                let host: &mut dyn Host = game;
-                VALUE.set(host.attachments(), Holder::Level, 73).unwrap();
+                key.set(game, Holder::Level, 73).unwrap();
                 assert_eq!(values(game, &key), [73]);
                 client(game).attachments.clear();
-                let host: &mut dyn Host = game;
-                assert_eq!(VALUE.get(host.attachments(), Holder::Level), Ok(73));
+                assert_eq!(key.get(game, Holder::Level), Ok(73));
                 assert_eq!(values(game, &key), [73]);
                 client(game).attachments.clear();
                 sync(game, Holder::Level, 41);

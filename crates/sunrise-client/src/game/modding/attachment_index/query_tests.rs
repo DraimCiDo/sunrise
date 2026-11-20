@@ -1,22 +1,13 @@
 //! Observable host query semantics through real holder writes and transaction journals.
 use super::*;
 use crate::game::native_entity_refs::tests::with_game_attachment;
-use mod_api::{AttachmentQueries, AttachmentQueriesMut, AttachmentType, HostTransaction};
+use mod_api::{AttachmentQueries, AttachmentQueriesMut, HostTransaction};
 use sunrise_client::chunk::Chunk;
-
-static VALUE: AttachmentType<u32> = AttachmentType {
-    namespace: "query_test",
-    name: "value",
-    default: || 0,
-    codec: None,
-    copy_on_death: false,
-    sync: false,
-};
 
 fn with_fixture(test: impl FnOnce(&mut Game<'_>, mod_api::AttachmentKey<u32>)) {
     with_game_attachment(
         "query_test",
-        || mod_api::AttachmentDescriptor::new("query_test:value", VALUE.default),
+        || mod_api::AttachmentDescriptor::new("query_test:value", || 0),
         test,
     );
 }
@@ -39,10 +30,10 @@ fn query_snapshot_dimension_and_stale_writes() {
         game.world
             .chunks
             .insert((2, 3), Arc::new(Chunk::empty(2, 3)));
-        VALUE.set(game, Holder::Chunk([2, 3]), 10).unwrap();
+        key.set(game, Holder::Chunk([2, 3]), 10).unwrap();
         let batch = game.query_mut(&key).unwrap();
         let row = batch.iter().next().unwrap().unwrap();
-        VALUE.set(game, Holder::Chunk([2, 3]), 11).unwrap();
+        key.set(game, Holder::Chunk([2, 3]), 11).unwrap();
         assert_eq!(*row.value(), 10);
         assert_eq!(values(game, &key), [11]);
         game.enter_level(Dim::Nether).unwrap();
@@ -54,7 +45,7 @@ fn query_snapshot_dimension_and_stale_writes() {
         game.world
             .chunks
             .insert((2, 3), Arc::new(Chunk::empty(2, 3)));
-        VALUE.set(game, Holder::Chunk([2, 3]), 20).unwrap();
+        key.set(game, Holder::Chunk([2, 3]), 20).unwrap();
         assert_eq!(values(game, &key), [20]);
         game.enter_level(Dim::Overworld).unwrap();
         assert_eq!(values(game, &key), [11]);
@@ -94,7 +85,7 @@ fn query_writes_join_transaction_journal_without_implicit_commit() {
         game.world
             .chunks
             .insert((2, 3), Arc::new(Chunk::empty(2, 3)));
-        VALUE.set(game, Holder::Chunk([2, 3]), 10).unwrap();
+        key.set(game, Holder::Chunk([2, 3]), 10).unwrap();
         let batch = game.query_mut(&key).unwrap();
         let row = batch.iter().next().unwrap().unwrap();
         let aborted: Result<(), ()> = game.transaction(|host, _| {

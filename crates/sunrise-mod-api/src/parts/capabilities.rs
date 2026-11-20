@@ -236,24 +236,6 @@ pub mod tests {
         }
     }
 
-    pub(crate) const ROBOT_ENERGY: AttachmentType<u32> = AttachmentType {
-        namespace: "test",
-        name: "energy",
-        default: || 0,
-        codec: None,
-        copy_on_death: false,
-        sync: false,
-    };
-    /// A fluid attachment type for the tests.
-    pub const ROBOT_FLUID: AttachmentType<u32> = AttachmentType {
-        namespace: "test",
-        name: "fluid",
-        default: || 0,
-        codec: None,
-        copy_on_death: false,
-        sync: false,
-    };
-
     /// A second test mod, sharing `CHEMICALS` and `Chemical` with the first, as a mod depending
     /// on another's `[api]` crate does: its vats answer the same capability.
     pub(crate) struct Chemist;

@@ -1,8 +1,9 @@
 //! The attachment and its save/load edits used by the region writer tests.
 use mod_api::{
-    AttachmentCodec, AttachmentError, AttachmentKey, AttachmentType, ChunkDiskData, ChunkDiskHost,
-    Compound, Tag,
+    AttachmentCodec, AttachmentError, AttachmentKey, ChunkDiskData, ChunkDiskHost, Compound, Tag,
 };
+
+use sunrise_mod_runtime::attachments::AttachmentType;
 
 pub const VALUE: AttachmentType<i32> = AttachmentType {
     namespace: "chunk_disk_fixture",
