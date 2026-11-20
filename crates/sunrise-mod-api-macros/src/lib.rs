@@ -1,6 +1,5 @@
 //! Derive hook subscriptions from a trait implementation.
 mod payload;
-mod point;
 mod wire;
 
 /// Derive a typed payload's value codec from its fields.
@@ -344,23 +343,6 @@ pub fn sunrise_part(_attribute: TokenStream, input: TokenStream) -> TokenStream 
     expand(parse_macro_input!(input as ItemImpl), false)
 }
 
-/// `#[point(side = "server" | "client" | "both", name = "…", slot = N, free, api(…), mirror(…))]`
-/// on a function: an injection point (#589), where mods listen through the API. The staging pass
-/// that builds the prebuilt game puts it on each replaceable function with an API record, with
-/// the function's replacement cell (`slot`); a function without a record is refused by this
-/// attribute, naming it. The source tree carries none. The function's head is its cell's one load
-/// and a branch, the same check a mixin build's copy is installed through: while a mod listens
-/// at the head or the return, the cell holds the point's dispatcher, which runs the head
-/// listeners, the body (or the installed copy) and the return listeners. An API listener gets the side's host (on a `Game` method) and a record holding a copy of every
-/// parameter as an API value (an engine type `mirror(…)` names as its `mod_api` mirror): the
-/// function runs with the record's by-value and `&T` values, and a `&mut T` parameter's place
-/// gets the record's value back. A type or const parameter is refused, naming it (lifetimes are
-/// allowed): the cell holds one function pointer, which can't stand for every instantiation.
-#[proc_macro_attribute]
-pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
-    point::expand(attribute.into(), parse_macro_input!(input as ImplItemFn)).into()
-}
-
 /// `#[sunrise_loop(name = "…", side = "server" | "client")]` on a published loop's entry function
 /// (`[[native.loop]]`): a marker the staging pass lists in the prebuilt game's `loops.json`,
 /// generating no code. The entry's body is one call of its generic loop function with the empty
@@ -393,8 +375,9 @@ pub fn sunrise_loop(attribute: TokenStream, input: TokenStream) -> TokenStream {
     input
 }
 
-/// Marks a provided trait method computed from the trait's other methods.
-/// A method without a default body is refused.
+/// Marks a provided trait method that a mod computes from the trait's other methods: the wasm
+/// boundary gives it no call of its own, so its default body runs wherever the trait object lives
+/// and only the methods it calls cross. A method without a default body is refused.
 #[proc_macro_attribute]
 pub fn computed_in_mod(attribute: TokenStream, input: TokenStream) -> TokenStream {
     let method = parse_macro_input!(input as syn::TraitItemFn);
@@ -426,7 +409,8 @@ pub fn __subscriptions(_attribute: TokenStream, input: TokenStream) -> TokenStre
 
 /// `if_installed!(host, other_mod, { other_mod::call(); })`: runs the block only where the optional
 /// dependency `other_mod` is installed. A native mod is built with the Cargo feature `other_mod`
-/// only when that dependency is installed.
+/// only when it is; a wasm mod is built with it and asks the game at the call, since an absent
+/// library's functions trap. One guard for both builds.
 #[proc_macro]
 pub fn if_installed(input: TokenStream) -> TokenStream {
     let IfInstalled { host, id, block } = parse_macro_input!(input as IfInstalled);
