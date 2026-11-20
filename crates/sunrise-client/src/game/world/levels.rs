@@ -1847,12 +1847,17 @@ mod tests {
                         queue_unencodable_entity_record(&game.save);
                     }
                 }
+                game.message = None;
                 let error = game
                     .save_game()
                     .unwrap_err()
                     .downcast::<RecordSaveFailures>()
                     .unwrap()
                     .to_string();
+                assert!(
+                    game.message.is_none(),
+                    "a partial save must not show success"
+                );
                 for (_, folder, _) in folders.iter().filter(|(dim, _, _)| *dim != Dim::End) {
                     assert!(
                         error.contains(&format!("{} entities 2,0:", folder.display())),

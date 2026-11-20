@@ -264,7 +264,13 @@ impl Game<'_> {
                             }
                             Ok(players)
                         }
-                        chunks => Ok(chunks? && players),
+                        chunks => {
+                            let finished = chunks? && players;
+                            if finished {
+                                self.message = Some(("Saved the game".into(), Instant::now()));
+                            }
+                            Ok(finished)
+                        }
                     }
                 }
             }
