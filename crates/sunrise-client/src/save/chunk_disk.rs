@@ -8,8 +8,6 @@ pub(super) struct DiskRuntime {
     /// Chunks whose load listener failed: their stored record is kept as it was read and no
     /// save listener runs for them for the rest of the session.
     save_suppressed: Mutex<HashSet<(i32, i32)>>,
-    /// Chunks whose captured save did not reach disk; the game marks them dirty again.
-    failed_saves: Mutex<Vec<(i32, i32)>>,
     world: WorldEpoch,
     dimension: mod_api::Identifier,
     resources: Arc<sunrise_world::native_load_context::WorldgenContext>,
@@ -95,7 +93,11 @@ impl DiskRecord {
 
     // Readers may wait for the owning writer, but never execute save callbacks.
     pub(super) fn read(&self) -> Option<Arc<NamedTag>> {
-        self.encoded.wait().as_ref().ok().cloned().flatten()
+        match self.encoded.wait() {
+            Ok(tag) => tag.clone(),
+            // Keep the unsaved snapshot readable so a later load can retry it.
+            Err(_) => self.original.tag(),
+        }
     }
 }
 
@@ -114,19 +116,6 @@ pub(super) fn encode_record(record: &Record) -> std::io::Result<Option<Arc<Named
         Some(record) => record.encode(),
         None => Ok(record.tag_for_write()),
     }
-}
-
-pub(super) fn prepare_batch(batch: &[QueuedWrite]) -> std::io::Result<()> {
-    // Coalescing may skip a disk write, never the callback of a captured record.
-    let mut refusal = None;
-    for job in batch {
-        if let Some(record) = job.record.disk_job()
-            && let Err(error) = record.encode()
-        {
-            refusal.get_or_insert(error);
-        }
-    }
-    refusal.map_or(Ok(()), Err)
 }
 
 fn replace_entries(tag: &mut NamedTag, entries: Compound) -> std::io::Result<()> {
@@ -158,7 +147,6 @@ impl SaveDir {
         }
         let _ = self.disk.set(Arc::new(DiskRuntime {
             save_suppressed: Mutex::default(),
-            failed_saves: Mutex::default(),
             world,
             dimension,
             resources,
@@ -302,39 +290,5 @@ impl SaveDir {
             self.save_poi(chunks, true)?;
             Ok(chunks.len())
         })())
-    }
-}
-
-/// Remember the chunks of a failed write so the game can mark them dirty again.
-pub(super) fn note_failed(batch: &[QueuedWrite]) {
-    for job in batch {
-        if let Some(record) = job.record.disk_job()
-            && let Ok(mut failed) = record.runtime.failed_saves.lock()
-        {
-            failed.push(job.key);
-        }
-    }
-}
-
-impl SaveDir {
-    /// Chunks whose subscribed save was refused or failed, once each. The
-    /// caller marks them modified again, so dirty state is never lost to a
-    /// save that did not complete. Empty without a subscriber.
-    pub fn take_failed_chunk_saves(&self) -> Vec<(i32, i32)> {
-        self.disk.get().map_or_else(Vec::new, |runtime| {
-            runtime
-                .failed_saves
-                .lock()
-                .map_or_else(|_| Vec::new(), |mut failed| std::mem::take(&mut *failed))
-        })
-    }
-
-    pub(super) fn note_refused_saves(&self, folder: Folder, keys: &[(i32, i32)]) {
-        if folder == Folder::Region
-            && let Some(runtime) = self.disk.get()
-            && let Ok(mut failed) = runtime.failed_saves.lock()
-        {
-            failed.extend_from_slice(keys);
-        }
     }
 }

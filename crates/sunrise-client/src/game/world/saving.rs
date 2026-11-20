@@ -249,7 +249,12 @@ impl Game<'_> {
                 }
                 Stage::Writes => {
                     let players = self.finish_player_autosaves(false)?;
-                    Ok(self.save.writes_finished()? && players)
+                    let chunks = if save.close {
+                        self.save.writes_finished_for_shutdown()?
+                    } else {
+                        self.save.writes_finished()?
+                    };
+                    Ok(chunks && players)
                 }
             }
         })();
@@ -406,9 +411,31 @@ impl Game<'_> {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum LevelSave {
+    Async,
+    Wait,
+    Shutdown,
+}
+
+impl LevelSave {
+    pub(super) fn from_wait(wait: bool) -> Self {
+        if wait { Self::Wait } else { Self::Async }
+    }
+
+    pub(super) fn waits(self) -> bool {
+        !matches!(self, Self::Async)
+    }
+}
+
 impl Game<'_> {
     /// Save the level in place: its changed chunks, its entities and its raids.
     pub(super) fn save_level(&mut self, wait: bool) -> Result<()> {
+        self.save_level_with(LevelSave::from_wait(wait))
+    }
+
+    pub(super) fn save_level_with(&mut self, mode: LevelSave) -> Result<()> {
+        let wait = mode.waits();
         self.admit_level_save()?;
         self.requeue_failed_chunk_saves();
         // No save holds a player vehicle: a mob a mod seated on a player gets off first.
@@ -445,8 +472,10 @@ impl Game<'_> {
         }
         self.save_entities(false)?;
         self.save_raids();
-        if wait {
-            self.save.flush()?;
+        match mode {
+            LevelSave::Async => {}
+            LevelSave::Wait => self.save.flush()?,
+            LevelSave::Shutdown => self.save.flush_for_shutdown()?,
         }
         if mod_api::__private::listened(mod_api::HookId::LevelSave) {
             self.native_level_save(self.dim.id());

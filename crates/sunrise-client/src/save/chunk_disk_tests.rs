@@ -361,6 +361,123 @@ fn unload_then_reload_reads_saved_8_in_a_fresh_holder() {
     fs::remove_dir_all(path).unwrap();
 }
 
+#[test]
+fn a_refused_save_keeps_its_disk_record_without_skipping_its_neighbour() {
+    let (registry, biomes) = super::loot_tests::fixture();
+    let registry = Box::leak(Box::new(registry));
+    let biomes = Arc::new(biomes);
+    let path = tempfile::tempdir().unwrap();
+    let open = || {
+        SaveDir::new(
+            path.path().to_path_buf(),
+            LevelShape::OVERWORLD,
+            Some(Default::default()),
+        )
+    };
+    let old = Arc::new(chunk(7));
+    mod_platform::testing::with_mods(Vec::new().into(), || {
+        open().save(&[old], registry, &biomes).unwrap();
+    });
+    let read_disk = || {
+        RegionFile::open(path.path().join("region/r.0.-1.mca"))
+            .unwrap()
+            .read(ChunkPos::new(2, -3))
+            .unwrap()
+            .unwrap()
+    };
+    let before = read_disk();
+    let mods = vec![mod_api::ModEntry::new(
+        "chunk_disk_fixture",
+        Box::new(refuses_9::Refuses9),
+    )]
+    .into();
+    mod_platform::testing::with_mods(mods, || {
+        let save = open();
+        context(&save);
+        let mut neighbour = chunk(11);
+        neighbour.x = 3;
+        save.save_later(
+            &[Arc::new(chunk(9)), Arc::new(neighbour)],
+            registry,
+            &biomes,
+        )
+        .unwrap();
+        let error = save.flush().unwrap_err().to_string();
+        assert!(
+            error.contains("region 2,-3: chunk disk callback refused"),
+            "{error}"
+        );
+        assert!(!error.contains("3,-3"), "{error}");
+        let after = read_disk();
+        assert_eq!(after.compressed, before.compressed);
+        assert_eq!(after.timestamp, before.timestamp);
+        assert_eq!(
+            value(&mut open().load(3, -3, registry, &biomes).unwrap()),
+            11
+        );
+    });
+}
+
+mod refuses_9 {
+    use super::*;
+
+    #[derive(Default)]
+    pub struct Refuses9;
+
+    #[mod_api::sunrise_mod]
+    impl Hooks for Refuses9 {
+        fn chunk_data_save(&self, _: &dyn ChunkDiskHost, event: &mut ChunkDataSaveEvent<'_>) {
+            if event.data.get(&fixture::VALUE).unwrap() == 9 {
+                let broken = mod_api::AttachmentType {
+                    codec: Some(mod_api::AttachmentCodec {
+                        encode: |_| Err(mod_api::AttachmentError::Encode),
+                        decode: |_| Ok(9),
+                    }),
+                    ..fixture::VALUE
+                };
+                let _ = event.data.set(&broken, 9);
+            }
+        }
+    }
+}
+
+#[test]
+fn an_unencodable_record_can_be_retried_without_a_disk_listener() {
+    let path = tempfile::tempdir().unwrap();
+    mod_platform::testing::with_mods(Vec::new().into(), || {
+        let save = SaveDir::new(path.path().to_path_buf(), LevelShape::OVERWORLD, None);
+        let key = (2, -3);
+        let invalid = (0..=sunrise_core::nbt::DISK_WRITE_NESTING_GUARD)
+            .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
+        let record = |tag| {
+            (
+                key,
+                Some(NamedTag {
+                    name: "".into(),
+                    tag,
+                }),
+            )
+        };
+        let error = save
+            .write_records("region", vec![record(invalid)], true)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("depth limit exceeded"), "{error}");
+        assert_eq!(save.take_failed_chunk_saves(), [key]);
+        let valid = Tag::compound([
+            ("DataVersion", Tag::Int(DATA_VERSION)),
+            ("marker", Tag::Int(2)),
+        ]);
+        save.write_records("region", vec![record(valid)], true)
+            .unwrap();
+        assert!(save.take_failed_chunk_saves().is_empty());
+        assert_eq!(
+            save.raw_chunk(key.0, key.1).unwrap().tag.get("marker"),
+            Some(&Tag::Int(2))
+        );
+    });
+}
+
 #[cfg(unix)]
 #[test]
 fn disk_write_failure_keeps_old_disk_7_and_snapshot_8_for_recovery() {
@@ -390,7 +507,8 @@ fn disk_write_failure_keeps_old_disk_7_and_snapshot_8_for_recovery() {
         context(&save);
         save.save_later(&[Arc::new(chunk(7))], registry, &biomes)
             .unwrap();
-        // The close path reports the failure instead of treating the save as durable.
+        // A failure to write the file itself still fails shutdown and explicit saves.
+        assert!(save.flush_for_shutdown().is_err());
         assert!(save.flush().is_err());
         assert_eq!(saves.load(Ordering::Relaxed), 1);
         // The chunk is marked for another attempt instead of silently clean.

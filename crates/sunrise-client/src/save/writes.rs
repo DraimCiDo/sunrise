@@ -41,6 +41,10 @@ pub(super) struct Outstanding {
     count: Mutex<usize>,
     chunks: AtomicUsize,
     pub(super) error: Mutex<Option<String>>,
+    /// Record encoding failures, kept until a newer record reaches disk at the same position.
+    record_errors: Mutex<BTreeMap<(&'static str, i32, i32), std::io::Error>>,
+    /// Terrain records the game needs to mark dirty again, with or without a disk callback.
+    failed_saves: Mutex<Vec<(i32, i32)>>,
     done: Condvar,
     /// What the folder's writes make stale: the portal blocks a search read from saved chunks.
     portals: saved_portals::SavedPortals,
@@ -83,7 +87,11 @@ impl SaveDir {
                     Ok(records) => records,
                     Err(error) => {
                         // A refused capture must leave its chunks dirty.
-                        self.note_refused_saves(folder, &keys);
+                        if folder == Folder::Region
+                            && let Ok(mut failed) = self.outstanding.failed_saves.lock()
+                        {
+                            failed.extend(keys);
+                        }
                         return Err(error);
                     }
                 }
@@ -193,34 +201,68 @@ impl SaveDir {
                         };
                         let resolved: Vec<_> = batch
                             .iter()
-                            .filter(|job| newest(&job.key, job.seq))
                             .filter_map(|job| {
+                                let newest = newest(&job.key, job.seq);
+                                // Coalescing skips the old write, not its captured disk callback.
+                                // For current records, compress_record sees the cached outcome.
+                                if job.record.disk_job().is_some()
+                                    && let Err(error) = chunk_disk::encode_record(&job.record)
+                                    && !newest
+                                {
+                                    let (x, z) = job.key;
+                                    crate::chunk_io::report_save_failure(&root, x, z, &error);
+                                }
+                                if !newest {
+                                    return None;
+                                }
                                 Some((job.key, resolve_poi(&root, cache, job.key, &job.record)?))
                             })
                             .collect();
                         let records: Vec<_> = resolved.iter().map(|(k, r)| (*k, r)).collect();
-                        let result = (|| -> Result<()> {
-                            chunk_disk::prepare_batch(&batch)?;
-                            write_region_records(&root, cache, folder, &records)
-                        })();
-                        if let Err(e) = &result {
-                            chunk_disk::note_failed(&batch);
-                            let message = format!("failed to write {folder} files: {e}");
-                            log::warn!("Sunrise: {message}");
-                            *outstanding.error.lock().unwrap() = Some(message);
-                            for job in &batch {
-                                crate::chunk_io::report_save_failure(
-                                    &root, job.key.0, job.key.1, e,
+                        match write_region_records(&root, cache, folder, &records) {
+                            Ok(failed) => {
+                                if let Ok(mut pending) = pending.lock() {
+                                    for job in &batch {
+                                        let key = (kind, job.key.0, job.key.1);
+                                        if !failed.contains_key(&job.key)
+                                            && pending.get(&key).is_some_and(|p| p.0 == job.seq)
+                                        {
+                                            pending.remove(&key);
+                                        }
+                                    }
+                                }
+                                if kind == Folder::Region && !failed.is_empty() {
+                                    outstanding
+                                        .failed_saves
+                                        .lock()
+                                        .unwrap()
+                                        .extend(failed.keys().copied());
+                                }
+                                let mut errors = outstanding.record_errors.lock().unwrap();
+                                for &((x, z), _) in &records {
+                                    errors.remove(&(folder, x, z));
+                                }
+                                errors.extend(
+                                    failed
+                                        .into_iter()
+                                        .map(|((x, z), error)| ((folder, x, z), error)),
                                 );
                             }
-                        }
-                        if result.is_ok()
-                            && let Ok(mut pending) = pending.lock()
-                        {
-                            for job in &batch {
-                                let key = (kind, job.key.0, job.key.1);
-                                if pending.get(&key).is_some_and(|p| p.0 == job.seq) {
-                                    pending.remove(&key);
+                            Err(e) => {
+                                if kind == Folder::Region {
+                                    outstanding
+                                        .failed_saves
+                                        .lock()
+                                        .unwrap()
+                                        .extend(records.iter().map(|(key, _)| *key));
+                                }
+                                let message = format!("failed to write {folder} files: {e}");
+                                log::warn!("Sunrise: {message}");
+                                *outstanding.error.lock().unwrap() = Some(message);
+                                for job in &batch {
+                                    crate::chunk_io::report_save_failure(
+                                        &root, job.key.0, job.key.1, &e,
+                                    );
                                 }
                             }
                         }
@@ -239,8 +281,26 @@ impl SaveDir {
             .expect("spawn region writer");
         Writer { send, thread }
     }
-    /// Wait until every queued write is on disk.
+    /// Take the terrain positions to mark dirty again after unsuccessful writes.
+    pub fn take_failed_chunk_saves(&self) -> Vec<(i32, i32)> {
+        self.outstanding
+            .failed_saves
+            .lock()
+            .map_or_else(|_| Vec::new(), |mut failed| std::mem::take(&mut *failed))
+    }
+
+    /// Wait until every queued write is on disk, or report what could not be saved.
     pub fn flush(&self) -> Result<()> {
+        self.flush_writes(true)
+    }
+
+    /// Wait for all writes at shutdown. Individual encoding failures are already logged;
+    /// a failure to write or sync the storage itself is still an error.
+    pub fn flush_for_shutdown(&self) -> Result<()> {
+        self.flush_writes(false)
+    }
+
+    fn flush_writes(&self, report_record_errors: bool) -> Result<()> {
         let mut count = self
             .outstanding
             .count
@@ -253,7 +313,7 @@ impl SaveDir {
                 .wait(count)
                 .map_err(|_| "writer poisoned")?;
         }
-        self.write_result()
+        self.write_result(report_record_errors)
     }
     /// Wait until at most `low` chunk records are still queued, without waiting
     /// for all of them; a save pass resuming at half the cap keeps the writer fed
@@ -277,33 +337,57 @@ impl SaveDir {
                 .wait(count)
                 .map_err(|_| "writer poisoned")?;
         }
-        self.write_result()
+        // A bad record must not block submitting new records (including retries).
+        self.write_result(false)
     }
     /// `ChunkMap.activeChunkWrites`: chunk records, excluding entity/POI IO.
     pub fn active_chunk_writes(&self) -> usize {
         self.outstanding.chunks.load(Ordering::Relaxed)
     }
-    /// Poll durability without holding up the event loop. Errors remain visible
-    /// to every waiter, including a later synchronous shutdown.
+    /// Poll durability without holding up the event loop.
     pub fn writes_finished(&self) -> Result<bool> {
+        self.poll_writes(true)
+    }
+
+    /// Poll a closing save without escalating individual encoding failures.
+    pub fn writes_finished_for_shutdown(&self) -> Result<bool> {
+        self.poll_writes(false)
+    }
+
+    fn poll_writes(&self, report_record_errors: bool) -> Result<bool> {
         let count = self
             .outstanding
             .count
             .lock()
             .map_err(|_| "writer poisoned")?;
-        self.write_result()?;
+        self.write_result(report_record_errors && *count == 0)?;
         Ok(*count == 0)
     }
-    fn write_result(&self) -> Result<()> {
-        match &*self
+    fn write_result(&self, report_record_errors: bool) -> Result<()> {
+        if let Some(error) = &*self
             .outstanding
             .error
             .lock()
             .map_err(|_| "writer poisoned")?
         {
-            Some(error) => Err(error.clone().into()),
-            None => Ok(()),
+            return Err(error.clone().into());
         }
+        if report_record_errors {
+            let errors = self
+                .outstanding
+                .record_errors
+                .lock()
+                .map_err(|_| "writer poisoned")?;
+            if !errors.is_empty() {
+                use std::fmt::Write;
+                let mut message = String::from("failed to encode chunk records:");
+                for ((folder, x, z), error) in errors.iter() {
+                    let _ = write!(message, " {folder} {x},{z}: {error};");
+                }
+                return Err(message.into());
+            }
+        }
+        Ok(())
     }
 }
 

@@ -1,0 +1,1 @@
+sunrise-client game::server_lifecycle::tests::integrated_stop_finishes_after_an_unencodable_record lib daily resources

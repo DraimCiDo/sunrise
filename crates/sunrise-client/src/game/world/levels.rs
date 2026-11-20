@@ -1743,7 +1743,7 @@ impl Game<'_> {
 
     /// Save every parked level (`MinecraftServer.saveAllChunks`); the level
     /// in place is the caller's to save.
-    pub(super) fn save_parked_levels(&mut self, wait: bool) -> Result<()> {
+    pub(super) fn save_parked_levels(&mut self, mode: super::saving::LevelSave) -> Result<()> {
         if self.levels.parked.is_empty() {
             return Ok(());
         }
@@ -1751,7 +1751,7 @@ impl Game<'_> {
         let dims: Vec<Dim> = self.levels.parked.keys().copied().collect();
         for dim in dims {
             self.enter_level(dim)?;
-            self.save_level(wait)?;
+            self.save_level_with(mode)?;
         }
         self.enter_level(back)
     }
@@ -2114,7 +2114,8 @@ mod tests {
             assert!(game.levels.parked[&end].streaming.commanded().is_empty());
             // An early final save can run after the world is adopted but
             // before ticket activation. The originals on disk must survive.
-            game.save_parked_levels(false).unwrap();
+            game.save_parked_levels(crate::game::saving::LevelSave::Async)
+                .unwrap();
             game.prepare_levels().unwrap();
             assert!(
                 saw_end.load(Ordering::Relaxed),

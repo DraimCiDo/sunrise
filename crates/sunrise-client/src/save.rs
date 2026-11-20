@@ -2055,25 +2055,32 @@ fn cached_region(
 /// then points to it; the region's other chunks are not touched. `None`
 /// clears a chunk. The chunks are encoded and compressed before their region
 /// is locked for the writes (`compress_records`), and each region is flushed
-/// to the disk once.
+/// to the disk once. An unencodable record is skipped, leaving its old slot alone.
 fn write_region_records(
     root: &Path,
     cache: &RegionCache,
     folder: &str,
     records: &[((i32, i32), &Record)],
-) -> Result<()> {
+) -> Result<BTreeMap<(i32, i32), std::io::Error>> {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as u32);
     let compressed = compress_records(records, timestamp);
     type RegionWrite<'a> = (ChunkPos, &'a Record, Option<CompressedWrite>);
     let mut by_region: BTreeMap<(i32, i32), Vec<RegionWrite<'_>>> = BTreeMap::new();
+    let mut failed = BTreeMap::new();
     for (&((x, z), source), record) in records.iter().zip(compressed) {
-        let record = record?;
-        by_region
-            .entry((x >> 5, z >> 5))
-            .or_default()
-            .push((ChunkPos::new(x, z), source, record));
+        match record {
+            Ok(record) => by_region.entry((x >> 5, z >> 5)).or_default().push((
+                ChunkPos::new(x, z),
+                source,
+                record,
+            )),
+            Err(error) => {
+                crate::chunk_io::report_save_failure(root, x, z, &error);
+                failed.insert((x, z), error);
+            }
+        }
     }
     for ((rx, rz), list) in by_region {
         let path = region_path(root, folder, rx, rz);
@@ -2108,7 +2115,7 @@ fn write_region_records(
             }
         }
     }
-    Ok(())
+    Ok(failed)
 }
 
 fn write_chunk_record(
@@ -9951,7 +9958,11 @@ mod tests {
             Folder::Entities => &save.entity_regions,
             Folder::Poi => &save.poi_regions,
         };
-        super::write_region_records(&save.root, cache, folder, &[((0, 0), &record)]).unwrap();
+        assert!(
+            super::write_region_records(&save.root, cache, folder, &[((0, 0), &record)])
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -10095,13 +10106,16 @@ mod tests {
                 ("sections", Tag::List(Vec::new())),
             ]),
         }));
-        super::write_region_records(
-            &nether.root,
-            &nether.regions,
-            "region",
-            &[((1, 0), &current)],
-        )
-        .unwrap();
+        assert!(
+            super::write_region_records(
+                &nether.root,
+                &nether.regions,
+                "region",
+                &[((1, 0), &current)],
+            )
+            .unwrap()
+            .is_empty()
+        );
         assert!(nether.is_old_chunk(0, 0));
         assert!(!nether.is_old_chunk(1, 0));
         assert!(!nether.is_old_chunk(2, 0));

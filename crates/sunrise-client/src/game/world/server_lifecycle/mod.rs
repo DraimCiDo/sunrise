@@ -221,7 +221,7 @@ impl Game<'_> {
         self.exclude_interrupted_players(crashed, |m| log::warn!("{m}"));
         let saved = match catch_unwind(AssertUnwindSafe(|| {
             if self.world_adopted && self.session_lock.is_some() {
-                self.save_game()
+                self.save_game_with_mode(super::saving::LevelSave::Shutdown)
             } else {
                 Ok(())
             }
@@ -246,7 +246,7 @@ impl Game<'_> {
         {
             result = Err(shutdown_panic(payload.as_ref()).into());
         }
-        match catch_unwind(AssertUnwindSafe(|| self.save.flush())) {
+        match catch_unwind(AssertUnwindSafe(|| self.save.flush_for_shutdown())) {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
                 if result.is_ok() {

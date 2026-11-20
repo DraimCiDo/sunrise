@@ -21,6 +21,50 @@ struct StoppedProbe {
     save: Arc<sunrise_client::save::SaveDir>,
 }
 
+#[test]
+#[ignore = "daily"]
+fn integrated_stop_finishes_after_an_unencodable_record() {
+    use sunrise_client::save::{LevelShape, SaveDir, SessionLock};
+    use sunrise_core::nbt::{DISK_WRITE_NESTING_GUARD, Tag};
+
+    let root = tempfile::tempdir().unwrap();
+    with_mods(Vec::new().into(), || {
+        with_game(|game| {
+            game.world_root = root.path().to_path_buf();
+            game.save = Arc::new(SaveDir::new(
+                game.world_root.clone(),
+                LevelShape::OVERWORLD,
+                Some(Default::default()),
+            ));
+            game.session_lock = Some(SessionLock::acquire(root.path()).unwrap());
+            game.world_adopted = true;
+            game.level.name = "saved on exit after record failure".into();
+            let invalid = (0..=DISK_WRITE_NESTING_GUARD)
+                .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
+            game.save
+                .save_entities_later(vec![((2, -3), vec![invalid])])
+                .unwrap();
+            let error = game.save.flush().unwrap_err().to_string();
+            assert!(
+                error.contains("entities 2,-3: ") && error.contains("depth limit exceeded"),
+                "{error}"
+            );
+
+            // An Err here reaches the client through Integrated::stop and makes quitting fatal.
+            game.run_server_lifecycle(false, |_, began| {
+                *began = true;
+                Ok(())
+            })
+            .unwrap();
+            assert!(game.session_lock.is_none());
+            assert!(
+                root.path().join("level.dat").is_file(),
+                "the rest of the world must still save"
+            );
+        });
+    });
+}
+
 /// Exercise the real stop/save paths, not just direct calls to hook dispatch.
 #[test]
 #[ignore = "daily"]
