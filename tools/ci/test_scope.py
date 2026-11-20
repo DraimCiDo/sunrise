@@ -58,6 +58,7 @@ READERS = {
     "sunrise-client-core": ["crates/sunrise-client/assets/sunrise/lang"],
     "sunrise-client-render": [
         "crates/sunrise-client/assets/sunrise/lang", "crates/sunrise-client/assets/sunrise/textures/gui",
+        "tools/light_storage_scenario.txt", "tools/light_storage_witness.txt",
     ],
     # The daily Character comparator reads the original public-JDK API helper.
     "sunrise-core": ["tools/JavaCharacterTables.java"],

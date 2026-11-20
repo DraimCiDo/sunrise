@@ -28,7 +28,7 @@ impl Game<'_> {
             None => {
                 let own = self.translate_with_fallback(&tab.title, &tab.title);
                 self.translate_with_fallback(
-                    &format!("itemGroup.{}", tab.id.replace(':', ".")),
+                    &sunrise_client::creative::mod_item_group_key(&tab.id),
                     &own,
                 )
             }

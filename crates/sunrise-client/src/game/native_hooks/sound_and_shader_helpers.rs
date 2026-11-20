@@ -42,7 +42,7 @@ pub(in crate::game) fn mod_sound_ok(
 
 /// Whether `play_local_sound` takes this sound: a sound event's id (`sound_id`, as
 /// `native_play_sound` takes), a finite position, a volume and pitch at or above 0, a repeat
-/// gap that isn't negative, and a start a minute away at most.
+/// gap that isn't negative, valid effects, and a start a minute away at most.
 pub(super) fn local_sound_ok(sound: &SoundPlay, after: u32) -> bool {
     sound_id(&sound.identifier)
         && sound
@@ -54,6 +54,7 @@ pub(super) fn local_sound_ok(sound: &SoundPlay, after: u32) -> bool {
         && sound.pitch.is_finite()
         && sound.pitch >= 0.0
         && sound.delay >= 0
+        && sound.effects.valid()
         && after <= 1200
 }
 

@@ -207,5 +207,13 @@ A client without this mod predicts vanilla here; the server corrects it.
   contents) and the item slots a mod gives an item. A hopper filling a shulker box doesn't ask. A `true` for a
   shulker box lets shulker boxes nest: that is the mod's choice, bounded by the NBT readers' depth limit.
 
-Global events cover the rest of these menus: `grindstone_place` and `grindstone_take` change a grindstone's result
-after it is made, and `MenuPart::menu_slot_rules` answers per menu type and slot.
+`grindstone_place` can replace the result when the inputs change. A cancel or refusal leaves no
+result. `grindstone_take` can replace the two inputs and the experience award. Cancelling a take
+keeps the click that took the result but skips the input replacement and experience. Refusing a
+take (for example, because the backing block changed or the answer is invalid) instead restores
+the click, including the result, cursor, inventory and any dropped item. Both cancel and refusal
+undo the listener's writes. An accepted take is still tentative until the enclosing transaction
+commits.
+
+`MenuPart::menu_slot_rules` answers per menu type and slot, including for a replacement from
+`item_stacked_on_other`.

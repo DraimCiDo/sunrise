@@ -718,9 +718,16 @@ impl TryIntoEngine for mod_api::ItemCost {
     type Engine = sunrise_client::merchant::ItemCost;
     type Error = StackWriteError;
     fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
-        Ok(Self::Engine {
-            stack: self.stack.try_into_engine(items)?,
-        })
+        // ItemCost's codec uses a positive Java int, not the normal stack's count limit.
+        let maximum = i32::MAX as u32;
+        if self.stack.count() > maximum {
+            return Err(StackWriteError::CountExceeded { maximum });
+        }
+        let stack = self.stack.try_into_engine_preserving_count(items)?;
+        if &*stack.item == "minecraft:air" {
+            return Err(StackWriteError::EmptyEngineStack);
+        }
+        Ok(Self::Engine { stack })
     }
 }
 impl TryIntoApi for sunrise_client::merchant::MerchantOffer {
@@ -742,21 +749,54 @@ impl TryIntoApi for sunrise_client::merchant::MerchantOffer {
         Ok(offer)
     }
 }
+#[derive(Debug)]
+pub(super) enum OfferWriteError {
+    NonFinitePrice,
+    Stack(StackWriteError),
+}
+
+impl From<StackWriteError> for OfferWriteError {
+    fn from(error: StackWriteError) -> Self {
+        Self::Stack(error)
+    }
+}
+
+/// A collect answer and a MerchantRef write admit offers through the same check. All i32
+/// fields fit `MerchantOffer.CODEC`; their arithmetic follows Java wrapping in the engine.
+pub(super) fn checked_merchant_offer(
+    offer: &mod_api::MerchantOffer,
+    items: &Items,
+) -> Result<sunrise_client::merchant::MerchantOffer, OfferWriteError> {
+    if !offer.price_multiplier.is_finite() {
+        return Err(OfferWriteError::NonFinitePrice);
+    }
+    let result = offer.result.try_into_engine(items)?;
+    if &*result.item == "minecraft:air" {
+        return Err(StackWriteError::EmptyEngineStack.into());
+    }
+    Ok(sunrise_client::merchant::MerchantOffer {
+        base_cost_a: offer.base_cost_a.try_into_engine(items)?,
+        cost_b: offer.cost_b.try_into_engine(items)?,
+        result,
+        uses: offer.uses,
+        max_uses: offer.max_uses,
+        reward_exp: offer.reward_exp,
+        special_price_diff: offer.special_price_diff,
+        demand: offer.demand,
+        price_multiplier: offer.price_multiplier,
+        xp: offer.xp,
+    })
+}
+
 impl TryIntoEngine for mod_api::MerchantOffer {
     type Engine = sunrise_client::merchant::MerchantOffer;
     type Error = StackWriteError;
     fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
-        Ok(Self::Engine {
-            base_cost_a: self.base_cost_a.try_into_engine(items)?,
-            cost_b: self.cost_b.try_into_engine(items)?,
-            result: self.result.try_into_engine(items)?,
-            uses: self.uses,
-            max_uses: self.max_uses,
-            reward_exp: self.reward_exp,
-            special_price_diff: self.special_price_diff,
-            demand: self.demand,
-            price_multiplier: self.price_multiplier,
-            xp: self.xp,
+        checked_merchant_offer(self, items).map_err(|error| match error {
+            // MerchantRef's existing write API returns StackWriteError; the decision coordinator
+            // uses the typed offer refusal directly.
+            OfferWriteError::NonFinitePrice => StackWriteError::InvalidMaximum,
+            OfferWriteError::Stack(error) => error,
         })
     }
 }
@@ -1299,19 +1339,20 @@ impl super::Game<'_> {
         pos: [i32; 3],
         value: &mut crate::menu::GrindstonePlace,
         cancel: &mut bool,
-    ) {
+    ) -> Result<(), crate::game::transactions::decision::InvalidReason> {
         let Ok(mut api) = value.try_into_api() else {
-            return;
+            return Ok(());
         };
         let original = api.clone();
         self.native_grindstone_place(player, entity, pos, &mut api, cancel);
         if api == original {
-            return;
+            return Ok(());
         }
-        match api.try_into_engine(self.items()) {
-            Ok(result) => *value = result,
-            Err(_) => *cancel = true,
-        }
+        // An answer that is no stack is refused, never read as a cancel.
+        *value = api
+            .try_into_engine(self.items())
+            .map_err(|_| crate::game::transactions::decision::InvalidReason::Count)?;
+        Ok(())
     }
     pub(in crate::game) fn api_grindstone_take(
         &mut self,
@@ -1320,19 +1361,20 @@ impl super::Game<'_> {
         pos: [i32; 3],
         value: &mut crate::menu::GrindstoneTake,
         cancel: &mut bool,
-    ) {
+    ) -> Result<(), crate::game::transactions::decision::InvalidReason> {
         let Ok(mut api) = value.try_into_api() else {
-            return;
+            return Ok(());
         };
         let original = api.clone();
         self.native_grindstone_take(player, entity, pos, &mut api, cancel);
         if api == original {
-            return;
+            return Ok(());
         }
-        match api.try_into_engine(self.items()) {
-            Ok(result) => *value = result,
-            Err(_) => *cancel = true,
-        }
+        // An answer that is no stack is refused, never read as a cancel.
+        *value = api
+            .try_into_engine(self.items())
+            .map_err(|_| crate::game::transactions::decision::InvalidReason::Count)?;
+        Ok(())
     }
     pub(in crate::game) fn api_anvil_craft_pre(
         &mut self,
@@ -2911,6 +2953,10 @@ pub(in crate::game) fn register_game_keys(ids: impl IntoIterator<Item = String>)
             .map(|def| sunrise_client_core::potions::namespaced(def.id)),
         |id| sunrise_client_core::potions::effect(id).map(|def| def.index),
     )
+    .unwrap();
+    mod_api::__private::validate_effect_part_owners(|id| {
+        sunrise_client_core::potions::effect(id)?.owner
+    })
     .unwrap();
     if let Some(types) = sunrise_client_core::block_entity_types::current() {
         // Registration just replaced the mod snapshot, but the process-wide engine

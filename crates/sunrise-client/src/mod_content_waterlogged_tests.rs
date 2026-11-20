@@ -91,16 +91,15 @@ fn declared_waterlogged_blocks_keep_their_class_and_gain_liquid_defaults() {
         ("kelp_plant", "already holds water"),
         ("bubble_column", "already holds water"),
         ("lava", "standalone liquid block"),
+        ("oak_stairs", "already on"),
     ] {
         let json = format!(
             r#"{{"template":"minecraft:{template}","item":false,"state_properties":{{"waterlogged":{{"type":"boolean"}}}},"default_state":{{"waterlogged":"true"}}}}"#
         );
+        let file = "data/wet/sunrise/block/aquatic/plant.json";
         let rejected = folder_mod(
             &scratch.join(format!("refused-{template}")),
-            &[
-                ("sunrise-mod.toml", &manifest("wet", "")),
-                ("data/wet/sunrise/block/plant.json", &json),
-            ],
+            &[("sunrise-mod.toml", &manifest("wet", "")), (file, &json)],
         );
         let error = resource_root_fixture(
             &base,
@@ -111,7 +110,8 @@ fn declared_waterlogged_blocks_keep_their_class_and_gain_liquid_defaults() {
         .unwrap_err()
         .to_string();
         assert!(
-            error.contains("wet:plant")
+            error.starts_with(&format!("{file}:"))
+                && error.contains("wet:aquatic/plant")
                 && error.contains("state_properties.waterlogged")
                 && error.contains(&format!("minecraft:{template}"))
                 && error.contains(reason),

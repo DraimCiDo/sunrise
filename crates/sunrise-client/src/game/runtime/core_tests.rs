@@ -954,8 +954,8 @@ fn selecting_creative_tabs_does_not_drop_the_carried_stack_on_release() {
     let mut creative = Creative::from_json(&serde_json::json!({
         "schema": 4, "item_features": {}, "potion_features": {},
         "tabs": [
-            {"id":"minecraft:building_blocks","type":"CATEGORY","build":[]},
-            {"id":"minecraft:inventory","type":"INVENTORY","build":[]}
+            {"id":"minecraft:building_blocks","title":"Building Blocks","type":"CATEGORY","build":[]},
+            {"id":"minecraft:inventory","title":"Survival Inventory","type":"INVENTORY","build":[]}
         ]
     }))
     .unwrap();

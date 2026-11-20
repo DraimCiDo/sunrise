@@ -714,7 +714,9 @@ impl Settings {
             ) {
                 log::warn!("Sunrise: {file} is not saved: {e}");
             }
-            self.mods.save(&crate::logging::shared_dir(dir));
+            if let Err(e) = self.mods.save(&crate::logging::shared_dir(dir)) {
+                log::warn!("Sunrise: {} is not saved: {e}", crate::mod_list::FILE);
+            }
         }
     }
     /// Sets the picked shader pack, for the pack list and the toggle key alike: an empty pick

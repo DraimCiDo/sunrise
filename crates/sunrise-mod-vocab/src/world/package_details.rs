@@ -32,7 +32,7 @@ pub enum DependencyOrder {
 #[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DependencyKind {
-    /// A required dependency; code packages also require a physical API library.
+    /// A required dependency. Between code packages it also requires a physical API library.
     Required,
     /// An optional dependency, checked when present.
     Optional,
