@@ -5279,10 +5279,6 @@ mod tests {
         }
     }
 
-    /// The Mods page is NeoForge's list screen: no switches, a footer of folder and
-    /// Back, and Config on the selected native mod. Positions are the layout at 480x240:
-    /// 150 px buttons 4 px apart, centred 27 px above the bottom; the sidebar at x 41 with its
-    /// list at y 32 and 28 px rows; the panel at x 188 with its buttons at y 182, 84 px apart.
     #[test]
     fn a_custom_config_request_needs_no_generated_settings_and_does_not_push_a_page() {
         let atlas = atlas();
@@ -5315,6 +5311,10 @@ mod tests {
         );
     }
 
+    /// The Mods page is NeoForge's list screen: no switches, a footer of folder and
+    /// Back, and Config on the selected native mod. Positions are the layout at 480x240:
+    /// 150 px buttons 4 px apart, centred 27 px above the bottom; the sidebar at x 41 with its
+    /// list at y 32 and 28 px rows; the panel at x 188 with its buttons at y 182, 84 px apart.
     #[test]
     fn the_mods_page_opens_the_folder_and_a_native_mods_settings() {
         let atlas = atlas();

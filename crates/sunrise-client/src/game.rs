@@ -1780,6 +1780,7 @@ struct Game<'a> {
     native_net: native_net::NativeNet,
     /// The mod whose own screen is open (`Screen::Mod`).
     native_mod_screen: Option<String>,
+    /// Active Config session, whose parent Mods list stays in `ui.options`.
     config_screen: Option<mod_api::ConfigScreenSession>,
     /// Meshed sections waiting for an upload budget (Sunrise settings).
     pending_uploads: Vec<((i32, i32, i32), sunrise_client::mesher::SectionMesh)>,
