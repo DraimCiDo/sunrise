@@ -122,6 +122,8 @@ pub enum AttachmentError {
         package_id: String,
         attachment_id: String,
     },
+    /// The issued attachment key does not belong to the installed registration.
+    StaleKey,
 }
 
 /// NBT key reserved for server-owned attachment maps.

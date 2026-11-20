@@ -97,8 +97,10 @@ impl EntityPartState for Robot {
         &self.charge
     }
 }
-// CHARGE is an AttachmentType<u32> for mymod:charge.
-r.register_attachment_type("mymod:charge", false)?;
+// CHARGE is an AttachmentType<u32> for mymod:charge with CHARGE_CODEC.
+r.register_attachment_type(
+    AttachmentDescriptor::new("mymod:charge", CHARGE.default).serialize(CHARGE_CODEC),
+)?;
 r.entity_part_with_state("mymod:robot", Robot { charge: CHARGE })?;
 
 // In a Robot Part hook:

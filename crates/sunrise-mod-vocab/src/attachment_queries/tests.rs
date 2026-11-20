@@ -97,11 +97,14 @@ fn all_scoped_variants_write_and_remove_the_exact_storage_target() {
         ),
         (AttachmentHolder::Level(level), Holder::Level),
     ];
+    let registration = crate::__private::check_attachment_descriptor(
+        AttachmentDescriptor::new("mapping:value", VALUE.default).into(),
+        "mapping",
+        "value",
+    )
+    .unwrap();
     crate::parts::install_input(crate::parts::installation::InstalledInput {
-        attachment_types: HashMap::from([(
-            "mapping".into(),
-            HashMap::from([("value".into(), false)]),
-        )]),
+        attachment_types: HashMap::from([("mapping", HashMap::from([("value", registration)]))]),
         ..Default::default()
     });
     let mut host = Store::default();

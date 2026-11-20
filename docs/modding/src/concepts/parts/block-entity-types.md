@@ -108,7 +108,10 @@ impl BlockEntityPartState for Press {
         &self.progress
     }
 }
-r.register_attachment_type("mymod:press_progress", false)?;
+r.register_attachment_type(
+    AttachmentDescriptor::new("mymod:press_progress", PROGRESS.default)
+        .serialize(PROGRESS_CODEC),
+)?;
 r.block_entity_part_with_state(&press, Press { progress: PROGRESS })?;
 
 // In its tick, where the block entity is out of the world and `block_entity` finds nothing:

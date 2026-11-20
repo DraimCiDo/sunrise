@@ -14,7 +14,8 @@ pub(crate) struct Installed {
     pub(crate) recipe_book_filters: HashMap<String, crate::RecipeBookFilterLook>,
     pub(crate) game_rule_categories: Vec<String>,
     pub(crate) game_rules: Vec<crate::GameRuleDecl>,
-    pub(crate) attachment_types: HashMap<String, HashMap<String, bool>>,
+    pub(crate) attachment_types:
+        HashMap<&'static str, HashMap<&'static str, crate::RegisteredAttachment>>,
     pub(crate) custom_stats: Vec<String>,
     pub(crate) entity_tick_each: crate::parts::EntityTickEach,
     pub(crate) game_rule_slots: Vec<u32>,

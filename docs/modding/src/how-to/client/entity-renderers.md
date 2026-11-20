@@ -61,7 +61,14 @@ row's identity, age, pose and a frozen snapshot of its synced attachments
 ([attachments](../../concepts/attachments.md)).
 
 ```rust,ignore
-static FUEL: AttachmentType<i32> = /* declared with sync: true */;
+static FUEL: AttachmentType<i32> = /* a synced render read, using FUEL_CODEC */;
+
+fn register(registrar: &mut dyn Registrar) -> Result<(), String> {
+    registrar.register_attachment_type(
+        AttachmentDescriptor::new("example:fuel", FUEL.default).serialize(FUEL_CODEC).sync(),
+    )?;
+    Ok(())
+}
 
 struct Missile;
 impl EntityRenderer for Missile {

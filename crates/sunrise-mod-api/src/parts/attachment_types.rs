@@ -20,46 +20,69 @@ pub fn attachment_declarations() -> &'static dyn crate::AttachmentDeclarations {
 }
 
 impl AttachmentTypesRegistrar for PartRegistrar {
-    fn register_attachment_type(&mut self, id: &str, has_sync_codec: bool) -> Result<(), String> {
+    fn submit_attachment(
+        &mut self,
+        descriptor: ErasedAttachmentDescriptor,
+    ) -> Result<RegisteredAttachment, String> {
+        let id = descriptor.id();
         let result = (|| {
-            // A new registration epoch can be collected while the previous immutable
-            // snapshot remains installed. Only the live registrar scope authorizes
-            // that pass; world callers have no registrar scope.
+            // Only the active registration scope can collect a new epoch while
+            // the previous immutable snapshot remains installed.
             if mod_vocab::__private::parts_installation::parts_installed()
                 && !REGISTERING_KEYS.with_borrow(Option::is_some)
             {
                 return Err("declarations are frozen".to_owned());
             }
-            let identifier = crate::Identifier::parse_namespaced(id)
-                .ok_or("explicit lowercase namespaced id required")?;
+            let invalid = "explicit lowercase namespaced id required";
+            let (namespace, name) = id
+                .split_once(':')
+                .filter(|(namespace, name)| !namespace.is_empty() && !name.is_empty())
+                .ok_or(invalid)?;
+            crate::Identifier::from_parts(namespace, name).map_err(|_| invalid)?;
             if self
                 .attachment_types
-                .get(identifier.namespace())
-                .is_some_and(|types| types.contains_key(identifier.path()))
+                .get(namespace)
+                .is_some_and(|types| types.contains_key(name))
             {
-                return Err(format!(
-                    "already declared by package {}",
-                    identifier.namespace()
-                ));
+                return Err(format!("already declared by package {namespace}"));
             }
-            if identifier.namespace() != self.mod_id {
+            if namespace != self.mod_id {
                 return Err(format!(
-                    "namespace belongs to package {}, not {}",
-                    identifier.namespace(),
+                    "namespace belongs to package {namespace}, not {}",
                     self.mod_id
                 ));
             }
+            let registered =
+                check_attachment_descriptor(descriptor, namespace, name).map_err(|error| {
+                    match error {
+                        crate::AttachmentError::InvalidCopyPolicy => {
+                            "copy-on-death requires a codec"
+                        }
+                        crate::AttachmentError::InvalidSyncPolicy => "sync requires a codec",
+                        _ => "invalid attachment descriptor",
+                    }
+                })?;
             self.attachment_types
-                .entry(identifier.namespace().into())
+                .entry(namespace)
                 .or_default()
-                .insert(identifier.path().into(), has_sync_codec);
-            Ok(())
+                .insert(name, registered.clone());
+            Ok(registered)
         })();
         result.map_err(|reason| {
             let message = format!("package {} attachment {id}: {reason}", self.mod_id);
             self.refused.push(message.clone());
             message
         })
+    }
+
+    fn lookup_attachment(&self, id: &str) -> Result<RegisteredAttachment, crate::AttachmentError> {
+        id.split_once(':')
+            .and_then(|(namespace, name)| self.attachment_types.get(namespace)?.get(name))
+            .cloned()
+            .ok_or_else(|| crate::AttachmentError::Undeclared {
+                package_id: self.mod_id.into(),
+                attachment_id: id.into(),
+            })
     }
 }
 
@@ -69,14 +92,10 @@ impl PartRegistrar {
     pub(crate) fn validate_attachment_admission(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
         for (caller, namespace, name) in &self.attachment_uses {
-            if mod_vocab::__private::validate_declared_attachment(
-                Some(&self.attachment_types),
-                caller,
-                namespace,
-                name,
-                false,
-            )
-            .is_err()
+            if !self
+                .attachment_types
+                .get(namespace.as_str())
+                .is_some_and(|types| types.contains_key(name.as_str()))
             {
                 errors.push(format!(
                     "package {caller} attachment {namespace}:{name}: undeclared attachment use"
@@ -93,7 +112,7 @@ impl PartRegistrar {
             if let Some(types) = self.attachment_types.get(package.id()) {
                 for name in types
                     .iter()
-                    .filter(|(_, sync)| **sync)
+                    .filter(|(_, record)| record.is_synced())
                     .map(|(name, _)| name)
                     .collect::<std::collections::BTreeSet<_>>()
                 {
@@ -121,7 +140,22 @@ mod tests {
             _ => Err(crate::AttachmentError::Decode),
         },
     };
+    #[derive(Default)]
     struct Store(crate::Attachments);
+    impl crate::Host for Store {}
+    mod_api::impl_host_areas!(Store, except(mod_state));
+    impl crate::ModStateHost for Store {
+        fn attachment_query(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> Result<crate::AttachmentBatch, crate::AttachmentError> {
+            Ok(sunrise_mod_runtime::attachments::AttachmentBatch::empty().into())
+        }
+        fn attachments(&mut self) -> &mut dyn crate::AttachmentStore {
+            self
+        }
+    }
     impl crate::AttachmentHost for Store {
         fn validate_attachment(
             &self,
@@ -144,8 +178,9 @@ mod tests {
         let mut registrar = PartRegistrar::new("b");
         assert_eq!(
             (&mut registrar as &mut dyn crate::Registrar)
-                .register_attachment_type(crate::AttachmentDescriptor::new("a:mana", || 37u32)),
-            Err("package b attachment a:mana: namespace belongs to package a, not b".into())
+                .register_attachment_type(crate::AttachmentDescriptor::new("a:mana", || 37u32))
+                .err(),
+            Some("package b attachment a:mana: namespace belongs to package a, not b".into())
         );
         assert!(registrar.attachment_types.is_empty());
     }
@@ -222,7 +257,11 @@ mod tests {
                     .unwrap();
             }
         }
-        let packages = [crate::ModEntry::new("a", Box::new(Owner))];
+        let mana = Arc::new(OnceLock::new());
+        let packages = [
+            crate::ModEntry::new("a", Box::new(Owner)),
+            crate::ModEntry::new("b", Box::new(ServerUser(mana.clone()))),
+        ];
         crate::__private::install_parts(&packages, &crate::parts::tests::rule_schema(), |_| false)
             .unwrap();
         let _caller = crate::content::crash::enter_native_mod(crate::content::crash::ModCall {
@@ -230,19 +269,18 @@ mod tests {
             hook: "test",
             part: None,
         });
-        let key = crate::AttachmentType {
-            namespace: "a",
+        let mut store = Store::default();
+        assert_eq!(
+            mana.get().unwrap().get(&mut store, crate::Holder::Level),
+            Ok(37)
+        );
+        let missing = crate::AttachmentType {
+            namespace: "test_pkg",
             name: "mana",
-            default: || 37u32,
+            default: || 0u32,
             codec: None,
             copy_on_death: false,
             sync: false,
-        };
-        let mut store = Store(crate::Attachments::default());
-        assert_eq!(key.get(&mut store, crate::Holder::Level), Ok(37));
-        let missing = crate::AttachmentType {
-            namespace: "test_pkg",
-            ..key
         };
         let error = crate::AttachmentError::Undeclared {
             package_id: "b".into(),
@@ -260,6 +298,82 @@ mod tests {
             sunrise_mod_runtime::attachments::AttachmentBatch::empty().into();
         assert_eq!(batch.query(&missing).err(), Some(error));
     }
+    #[test]
+    fn a_key_from_the_previous_install_cannot_run_its_default_or_mutate() {
+        struct Owner {
+            issued: Arc<OnceLock<crate::AttachmentKey<u32>>>,
+            default: fn() -> u32,
+        }
+        impl crate::Hooks for Owner {
+            fn subscribed(&self) -> &'static [Option<crate::HookId>] {
+                &[]
+            }
+            fn register(
+                &self,
+                registrar: &mut dyn crate::Registrar,
+                _: &crate::RegistrationContext,
+            ) {
+                let key = registrar
+                    .register_attachment_type(crate::AttachmentDescriptor::new(
+                        "a:mana",
+                        self.default,
+                    ))
+                    .unwrap();
+                assert!(self.issued.set(key).is_ok());
+            }
+        }
+        let install = |default: fn() -> u32| {
+            let issued = Arc::new(OnceLock::new());
+            let mods = [crate::ModEntry::new(
+                "a",
+                Box::new(Owner {
+                    issued: issued.clone(),
+                    default,
+                }),
+            )];
+            crate::__private::install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false)
+                .unwrap();
+            issued.get().unwrap().clone()
+        };
+        let mut store = Store::default();
+        let holder = crate::Holder::Level;
+        let old = install(|| panic!("stale attachment evaluated its default"));
+        assert_eq!(old.has(&mut store, holder), Ok(false));
+        let current = install(|| 91);
+        assert_eq!(old.id(), current.id());
+        assert_eq!(
+            old.get(&mut store, holder),
+            Err(crate::AttachmentError::StaleKey)
+        );
+        assert_eq!(
+            old.set(&mut store, holder, 44),
+            Err(crate::AttachmentError::StaleKey)
+        );
+        assert_eq!(current.get_existing(&mut store, holder), Ok(None));
+        assert_eq!(current.get(&mut store, holder), Ok(91));
+        assert_eq!(current.set(&mut store, holder, 18), Ok(()));
+        assert_eq!(current.get(&mut store, holder), Ok(18));
+    }
+
+    #[test]
+    fn a_descriptor_that_needs_a_codec_refuses_install_even_if_ignored() {
+        let mut registrar = PartRegistrar::new("a");
+        let r: &mut dyn crate::Registrar = &mut registrar;
+        let _ =
+            r.register_attachment_type(crate::AttachmentDescriptor::new("a:sync", || 0u32).sync());
+        let _ = r.register_attachment_type(
+            crate::AttachmentDescriptor::new("a:copy", || 0u32).copy_on_death(),
+        );
+        assert!(registrar.attachment_types.is_empty());
+        assert_eq!(
+            super::super::install_registrar(registrar, &crate::parts::tests::rule_schema()),
+            Err(vec![
+                "package a attachment a:sync: sync requires a codec".into(),
+                "package a attachment a:copy: copy-on-death requires a codec".into(),
+            ])
+        );
+    }
+
     #[test]
     fn synced_attachment_is_named_to_server_package_admission() {
         let mut registrar = PartRegistrar::new("test_pkg");
@@ -301,10 +415,28 @@ mod tests {
                 .unwrap();
         }
     }
-    struct ServerUser;
+    struct ServerUser(Arc<OnceLock<crate::AttachmentKey<u32>>>);
     impl crate::Hooks for ServerUser {
         fn subscribed(&self) -> &'static [Option<crate::HookId>] {
             &[]
+        }
+        fn register(&self, registrar: &mut dyn crate::Registrar, _: &crate::RegistrationContext) {
+            assert_eq!(
+                registrar.attachment_key::<i32>("a:mana").err(),
+                Some(crate::AttachmentError::TypeMismatch)
+            );
+            assert_eq!(
+                registrar.attachment_key::<u32>("a:missing").err(),
+                Some(crate::AttachmentError::Undeclared {
+                    package_id: "b".into(),
+                    attachment_id: "a:missing".into(),
+                })
+            );
+            assert!(
+                self.0
+                    .set(registrar.attachment_key::<u32>("a:mana").unwrap())
+                    .is_ok()
+            );
         }
     }
     #[test]
@@ -315,9 +447,10 @@ mod tests {
                 package("b", crate::Side::Server),
             ],
             || {
+                let mana = Arc::new(OnceLock::new());
                 let mods = [
                     crate::ModEntry::new("a", Box::new(SyncedOwner)),
-                    crate::ModEntry::new("b", Box::new(ServerUser)),
+                    crate::ModEntry::new("b", Box::new(ServerUser(mana.clone()))),
                 ];
                 crate::__private::install_parts(&mods, &crate::parts::tests::rule_schema(), |_| {
                     false
@@ -330,28 +463,16 @@ mod tests {
                         hook: "test",
                         part: None,
                     });
-                let key = crate::AttachmentType {
-                    namespace: "a",
-                    name: "mana",
-                    default: || 37u32,
-                    codec: Some(crate::AttachmentCodec {
-                        encode: |n| Ok([("n".into(), crate::Tag::Long(i64::from(*n)))].into()),
-                        decode: |saved| match saved.get(&"n".into()) {
-                            Some(crate::Tag::Long(n)) => {
-                                u32::try_from(*n).map_err(|_| crate::AttachmentError::Decode)
-                            }
-                            _ => Err(crate::AttachmentError::Decode),
-                        },
-                    }),
-                    copy_on_death: false,
-                    sync: true,
-                };
+                let mut store = Store::default();
+                let key = mana.get().unwrap();
+                assert_eq!(key.get(&mut store, crate::Holder::Level), Ok(37));
                 assert_eq!(
-                    key.get(
-                        &mut Store(crate::Attachments::default()),
-                        crate::Holder::Level
-                    ),
-                    Ok(37)
+                    store.0.take_sync_changes(),
+                    vec![sunrise_mod_runtime::attachments::AttachmentSync {
+                        namespace: "a".into(),
+                        name: "mana".into(),
+                        value: Some([("n".into(), crate::Tag::Long(37))].into()),
+                    }]
                 );
             },
         );
@@ -366,7 +487,7 @@ mod tests {
             || {
                 let mods = [
                     crate::ModEntry::new("a", Box::new(SyncedOwner)),
-                    crate::ModEntry::new("b", Box::new(ServerUser)),
+                    crate::ModEntry::new("b", Box::new(ServerUser(Arc::default()))),
                 ];
                 assert_eq!(crate::__private::install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false), Err(vec!["package a attachment a:mana: a side = \"server\" package cannot declare a synced attachment".into()]));
                 assert!(!mod_vocab::__private::parts_installation::parts_installed());
@@ -386,7 +507,7 @@ mod tests {
                             .sync(),
                     )
                     .unwrap();
-                assert_eq!((&mut conflict as &mut dyn crate::Registrar).register_attachment_type(crate::AttachmentDescriptor::new("a:mana", || 37u32)), Err("package test_pkg attachment a:mana: namespace belongs to package a, not test_pkg".into()));
+                assert_eq!((&mut conflict as &mut dyn crate::Registrar).register_attachment_type(crate::AttachmentDescriptor::new("a:mana", || 37u32)).err(), Some("package test_pkg attachment a:mana: namespace belongs to package a, not test_pkg".into()));
                 assert_eq!(super::super::install_registrar(conflict, &crate::parts::tests::rule_schema()), Err(vec!["package test_pkg attachment a:mana: namespace belongs to package a, not test_pkg".into()]));
                 let mut missing = PartRegistrar::new("test_pkg");
                 (&mut missing as &mut dyn crate::Registrar)
@@ -434,8 +555,9 @@ mod tests {
         registrar.mod_id = "b";
         assert_eq!(
             (&mut registrar as &mut dyn crate::Registrar)
-                .register_attachment_type(crate::AttachmentDescriptor::new("a:mana", || 37u32)),
-            Err("package b attachment a:mana: already declared by package a".into())
+                .register_attachment_type(crate::AttachmentDescriptor::new("a:mana", || 37u32))
+                .err(),
+            Some("package b attachment a:mana: already declared by package a".into())
         );
     }
 }

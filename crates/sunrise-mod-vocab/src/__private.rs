@@ -172,7 +172,7 @@ pub fn client_requirement(id: &str) -> Option<String> {
     if let Some(types) = installed.attachment_types.get(id)
         && let Some(name) = types
             .iter()
-            .filter(|(_, sync)| **sync)
+            .filter(|(_, record)| record.is_synced())
             .map(|(name, _)| name)
             .min()
     {

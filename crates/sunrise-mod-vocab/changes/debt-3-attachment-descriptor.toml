@@ -14,9 +14,52 @@ ids = [
     "method:EntityPartState::state_existing",
     "method:EntityPartState::edit_state",
     "fn:edit_part_state",
+    "trait:Registrar",
+    "trait:AttachmentTypesRegistrar",
+    "method:AttachmentTypesRegistrar::register_attachment_type",
+    "method:AttachmentTypesRegistrar::submit_attachment",
+    "method:AttachmentTypesRegistrar::lookup_attachment",
+    "handle:Registrar::register_attachment_type",
+    "handle:Registrar::attachment_key",
+    "type:AttachmentDescriptor",
+    "handle:AttachmentDescriptor::new",
+    "handle:AttachmentDescriptor::serialize",
+    "handle:AttachmentDescriptor::sync",
+    "handle:AttachmentDescriptor::copy_on_death",
+    "type:ErasedAttachmentDescriptor",
+    "handle:ErasedAttachmentDescriptor::id",
+    "type:RegisteredAttachment",
+    "handle:RegisteredAttachment::is_synced",
+    "type:AttachmentKey",
+    "handle:AttachmentKey::id",
+    "handle:AttachmentKey::get",
+    "handle:AttachmentKey::has",
+    "handle:AttachmentKey::get_existing",
+    "handle:AttachmentKey::set",
+    "handle:AttachmentKey::remove",
+    "handle:AttachmentKey::sync_data",
+    "type:AttachmentError",
+    "type:AttachmentError.StaleKey",
 ]
-why = "The Part instance supplies the attachment key at registration and in its hooks, so the key no longer has to be a type-wide static. Saved names, holder checks and transaction behavior are unchanged."
+why = "Register the attachment's name, type, default, codec and policies together, so all consumers of an issued key use the owner's callbacks. Keys from past installations are refused even when their name and Rust type match. The Part instance supplies its state key instead of a type-wide static. Saved names, holder checks and transaction behavior are unchanged."
 migrate = """\
+    Replace `r.register_attachment_type("mod:counter", synced)` with \
+    `let counter = r.register_attachment_type(AttachmentDescriptor::new("mod:counter", default))?`. \
+    Use the same full saved name and default function. Move `codec: Some(codec)` into \
+    `.serialize(codec)` on the descriptor. Add `.sync()` for `synced = true` or `.copy_on_death()` \
+    for `copy_on_death: true`; both require the codec. Store the returned `AttachmentKey<T>` \
+    on the consuming mod or Part. For ordinary attachment access, use `counter.get(host, holder)`, \
+    `counter.has(host, holder)`, `counter.get_existing(host, holder)`, `counter.set(host, holder, value)`, \
+    `counter.remove(host, holder)` and `counter.sync_data(host, holder)` in place of calling those methods \
+    on a static `AttachmentType<T>`. Pass the hook host rather than its raw storage adapter. \
+    For another package's attachment, declare a dependency and replace a locally assembled typed key \
+    with `r.attachment_key::<T>("owner:counter")?` in your registration after the owner. \
+    Handle `TypeMismatch` for a wrong Rust type and `Undeclared` for a missing name. \
+    If an operation returns `AttachmentError::StaleKey`, discard the key and obtain one during the \
+    current installation's registration pass; do not retry with the stale key. \
+    The object-safe registrar operations are `submit_attachment(descriptor.into())` and \
+    `lookup_attachment(id)`, returning an opaque `RegisteredAttachment`; use the typed inherent \
+    methods above when the value type is known. \
     Replace `const DATA` on `BlockEntityPartState` or `EntityPartState` with \
     `fn state_key(&self) -> &AttachmentType<Self::Data>` returning a borrow of the Part's key field. \
     Initialize that field in the Part passed to `block_entity_part_with_state` or `entity_part_with_state`; \

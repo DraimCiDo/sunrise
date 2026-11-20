@@ -1117,7 +1117,7 @@ impl crate::wire::Wire for crate::AttachmentRowError {
 }
 #[allow(unreachable_patterns, unused_variables)]
 impl crate::wire::Wire for crate::AttachmentError {
-    layout_fields!("tag" => u32, "0:MissingHolder" => (), "1:TypeMismatch" => (), "2:Decode" => (), "3:Encode" => (), "4:InvalidNamespace" => (), "5:InvalidCopyPolicy" => (), "6:InvalidSyncPolicy" => (), "7:HolderBusy" => (), "8:UnsupportedHolder" => &'static str, "9:Undeclared.package_id" => String, "9:Undeclared.attachment_id" => String);
+    layout_fields!("tag" => u32, "0:MissingHolder" => (), "1:TypeMismatch" => (), "2:Decode" => (), "3:Encode" => (), "4:InvalidNamespace" => (), "5:InvalidCopyPolicy" => (), "6:InvalidSyncPolicy" => (), "7:HolderBusy" => (), "8:UnsupportedHolder" => &'static str, "9:Undeclared.package_id" => String, "9:Undeclared.attachment_id" => String, "10:StaleKey" => ());
     const MIN: usize = 4;
     fn put(&self, out: &mut crate::wire::Writer) {
         out.put(&match self {
@@ -1129,6 +1129,7 @@ impl crate::wire::Wire for crate::AttachmentError {
             Self::InvalidCopyPolicy => 5u32,
             Self::InvalidSyncPolicy => 6u32,
             Self::HolderBusy => 7u32,
+            Self::StaleKey => 10u32,
             Self::UnsupportedHolder(kind) => {
                 out.put(&8u32);
                 out.put(kind);
@@ -1166,6 +1167,7 @@ impl crate::wire::Wire for crate::AttachmentError {
                 package_id: input.take()?,
                 attachment_id: input.take()?,
             },
+            10 => Self::StaleKey,
             tag => return Err(crate::wire::WireError::Tag(tag)),
         })
     }

@@ -6,9 +6,9 @@
 use super::*;
 use crate::game::native_entity_refs::tests::with_game;
 use mod_api::{
-    AttachmentCodec, AttachmentError, AttachmentType, EntityPart, EntityTickListenedEvent,
-    EntityTickPreEvent, Flow, GeneralEntityCategory, GeneralEntityTickEvent, GeneralSavePolicy,
-    Holder, Hooks, HostSide, Registrar, ServerHost,
+    AttachmentCodec, AttachmentDescriptor, AttachmentError, AttachmentKey, AttachmentType,
+    EntityPart, EntityTickListenedEvent, EntityTickPreEvent, Flow, GeneralEntityCategory,
+    GeneralEntityTickEvent, GeneralSavePolicy, Holder, Hooks, HostSide, Registrar, ServerHost,
 };
 use std::sync::{Arc, Mutex};
 use sunrise_core::nbt::{Compound, Tag};
@@ -55,6 +55,7 @@ enum OnTick {
 /// per-instance state — two rows of one type share this one part, and their
 /// counters live apart in their attachments.
 struct Counter {
+    key: AttachmentKey<i32>,
     trace: Trace,
     events: Events,
     /// Panics on this row's first tick only, after its write: the
@@ -74,8 +75,8 @@ impl EntityPart for Counter {
         event: &mut GeneralEntityTickEvent<'_>,
     ) {
         let holder = Holder::Entity(event.entity.id());
-        let value = COUNTER.get(host, holder).unwrap() + 1;
-        COUNTER.set(host, holder, value).unwrap();
+        let value = self.key.get(host, holder).unwrap() + 1;
+        self.key.set(host, holder, value).unwrap();
         if self.panicking_on() == Some(event.entity.id())
             && !self.fired.swap(true, std::sync::atomic::Ordering::Relaxed)
         {
@@ -125,11 +126,12 @@ struct Declare {
 #[mod_api::__subscriptions]
 impl Hooks for Declare {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type(
-            mod_api::AttachmentDescriptor::new("mymod:counter", COUNTER.default)
-                .serialize(COUNTER_CODEC),
-        )
-        .unwrap();
+        let key = r
+            .register_attachment_type(
+                AttachmentDescriptor::new("mymod:counter", COUNTER.default)
+                    .serialize(COUNTER_CODEC),
+            )
+            .unwrap();
         for (path, save) in [("robot", true), ("ghost", false)] {
             r.declare_general_entity(
                 path,
@@ -154,6 +156,7 @@ impl Hooks for Declare {
         r.entity_part(
             "mymod:robot",
             Counter {
+                key,
                 trace: self.trace.clone(),
                 events: self.events.clone(),
                 panic_on: self.panic_on.clone(),

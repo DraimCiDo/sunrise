@@ -26,6 +26,11 @@ static VALUE: AttachmentType<u32> = AttachmentType {
     sync: false,
 };
 
+fn register(registrar: &mut dyn Registrar) -> Result<(), String> {
+    registrar.register_attachment_type(AttachmentDescriptor::new("example:value", VALUE.default))?;
+    Ok(())
+}
+
 fn total(host: &dyn Host) -> Result<u32, AttachmentRowError> {
     let batch = host.query(&VALUE).map_err(AttachmentRowError::Value)?;
     let mut total = 0;

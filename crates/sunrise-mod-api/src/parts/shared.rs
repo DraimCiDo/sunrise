@@ -50,7 +50,7 @@ pub struct PartRegistrar {
     pub(crate) game_rule_categories: Vec<String>,
     pub(crate) game_rules: Vec<crate::GameRuleDecl>,
     pub(crate) attachment_uses: Vec<(String, String, String)>,
-    pub(crate) attachment_types: HashMap<String, HashMap<String, bool>>,
+    pub(crate) attachment_types: HashMap<&'static str, HashMap<&'static str, RegisteredAttachment>>,
     pub(crate) custom_stats: Vec<String>,
     /// The entity types each named to `entity_tick_each`, in order: `None` for every type.
     pub(crate) entity_tick_each: Vec<Option<String>>,

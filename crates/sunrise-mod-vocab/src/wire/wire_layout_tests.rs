@@ -943,6 +943,11 @@ fn every_attachment_error_and_write_case_has_declared_tag_type() {
         },
         (9u32, "test_pkg".to_owned(), "test_pkg:mana".to_owned()),
     );
+    fields(AttachmentError::StaleKey, (10u32,));
+    assert_eq!(
+        Reader::new(&10u32.to_le_bytes()).take::<AttachmentError>(),
+        Ok(AttachmentError::StaleKey)
+    );
     fields(AttachmentRowError::HolderBusy, (2u32,));
     fields(
         AttachmentRowError::UnsupportedHolder("dragonpart"),

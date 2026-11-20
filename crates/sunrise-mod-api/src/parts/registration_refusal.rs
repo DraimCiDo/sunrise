@@ -4,6 +4,7 @@ use super::*;
 impl PartRegistrar {
     pub(crate) fn registration_checkpoint(&self) -> impl FnOnce(&mut Self) + use<> {
         let parts = self.parts.clone();
+        // Clone references to the same checked records; rollback must not reissue earlier keys.
         let attachment_types = self.attachment_types.clone();
         let tags = self.tags.clone();
         let keys = self.registry_keys.borrow().clone();
