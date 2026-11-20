@@ -124,15 +124,6 @@ pub(super) fn row(row: toml::Table) -> Result<Inject, toml::de::Error> {
     row.try_into()
 }
 
-impl Kind {
-    pub fn slot(self) -> SlotKind {
-        match self {
-            Self::Head | Self::Replace => SlotKind::Head,
-            Self::Return => SlotKind::Return,
-        }
-    }
-}
-
 impl Inject {
     pub(super) fn check_all(entries: &[Self], mod_id: &str, code: bool) -> Result<(), InjectError> {
         let mut ids = std::collections::HashSet::new();
@@ -143,7 +134,7 @@ impl Inject {
                 fix,
             };
             if !code {
-                return Err(invalid("inject", "declare [native] or [wasm]"));
+                return Err(invalid("inject", "declare [native]"));
             }
             if entry.id.trim().is_empty() || !ids.insert(&entry.id) {
                 return Err(invalid("id", "use a nonempty, unique inject id"));
@@ -172,34 +163,6 @@ impl Inject {
         }
         Ok(())
     }
-}
-
-/// Compiled listener forms; replace uses Head with forced cancellation or a result.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SlotKind {
-    Head,
-    Return,
-}
-
-/// Resolved catalog places; calls use resolved paths, not source text.
-#[derive(Clone, Debug)]
-pub struct Place {
-    pub at: String,
-    pub hash: String,
-    pub slots: Vec<SlotKind>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Target {
-    Native,
-    Wasm,
-}
-
-/// The package and resolved declaration; resolving a callee is not a routing operation.
-pub struct Entry<'a> {
-    pub inject: &'a Inject,
-    pub target: Target,
-    pub mod_id: &'a str,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -269,43 +232,9 @@ impl fmt::Display for InjectError {
 }
 impl std::error::Error for InjectError {}
 
-/// The compiled slot a validated entry attaches to, against a resolved catalog and without I/O.
-/// A place or kind with no slot is refused on every target: nothing here rebuilds the game.
-/// Native and wasm use the same API records.
-pub fn route(entry: Entry<'_>, slots: &[Place]) -> Result<SlotKind, InjectError> {
-    let inject = entry.inject;
-    let id = format!("{}:{}", entry.mod_id, inject.id);
-    let Some(place) = slots.iter().find(|p| p.at == inject.at) else {
-        return Err(InjectError::Missing {
-            id,
-            at: inject.at.clone(),
-        });
-    };
-    // An absent hash follows the catalog routed against: the pinned game's own.
-    if let Some(old) = inject.hash.as_ref().filter(|hash| **hash != place.hash) {
-        return Err(InjectError::Changed {
-            id,
-            at: inject.at.clone(),
-            old: old.clone(),
-            new: place.hash.clone(),
-        });
-    }
-    if place.slots.contains(&inject.kind.slot()) {
-        return Ok(inject.kind.slot());
-    }
-    Err(InjectError::NoSlot {
-        id,
-        reason: NoSlotReason::NoApiRecord,
-        declaration: inject.at.clone(),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn inject() -> Inject {
-        toml::from_str("id='listen'\nat='game::tick'\nkind='head'\nwith='listen'").unwrap()
-    }
     #[test]
     fn only_api_function_kinds_parse() {
         for kind in Kind::ALL {
@@ -328,50 +257,6 @@ mod tests {
         ] {
             assert!(serde_json::from_value::<Kind>(serde_json::json!(kind)).is_err());
         }
-    }
-    #[test]
-    fn routing_checks_catalog_presence_and_signature() {
-        let mut i = inject();
-        let places = [Place {
-            at: i.at.clone(),
-            hash: "new".into(),
-            slots: vec![SlotKind::Head],
-        }];
-        assert_eq!(
-            route(
-                Entry {
-                    inject: &i,
-                    target: Target::Wasm,
-                    mod_id: "mod"
-                },
-                &places
-            )
-            .unwrap(),
-            SlotKind::Head
-        );
-        i.hash = Some("old".into());
-        assert!(matches!(
-            route(
-                Entry {
-                    inject: &i,
-                    target: Target::Native,
-                    mod_id: "mod"
-                },
-                &places
-            ),
-            Err(InjectError::Changed { .. })
-        ));
-        assert!(matches!(
-            route(
-                Entry {
-                    inject: &i,
-                    target: Target::Native,
-                    mod_id: "mod"
-                },
-                &[]
-            ),
-            Err(InjectError::Missing { .. })
-        ));
     }
 }
 

@@ -13,14 +13,14 @@ const COMMANDS: &[Command] = &[
     Command {
         name: "new",
         everyday: true,
-        usage: "new <path> [--name \"Name\"] [--template content|native|wasm [--sunrise <build>]]",
-        summary: "Makes a mod project in <path>; a native or wasm one is pinned to the current Nightly's SDK unless --sunrise names another build.",
+        usage: "new <path> [--name \"Name\"] [--template content|native [--sunrise <build>]]",
+        summary: "Makes a mod project in <path>; a native one is pinned to the current Nightly's SDK unless --sunrise names another build.",
     },
     Command {
         name: "build",
         everyday: true,
-        usage: "build [--update-lock | --wasm [--catalog <points.json>] [--with <mod>]…]",
-        summary: "Packs the mod into target/sunrise-mod/<id>.smod; a native mod is compiled too, and --wasm builds a wasm mod's mod.wasm first.",
+        usage: "build [--update-lock]",
+        summary: "Packs the mod into target/sunrise-mod/<id>.smod; a native mod is compiled first.",
     },
     Command {
         name: "run",
@@ -31,14 +31,14 @@ const COMMANDS: &[Command] = &[
     Command {
         name: "check",
         everyday: true,
-        usage: "check [--uses] [--wasm] [--native] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json]",
-        summary: "Checks the mod in this folder, or a file as the registry would; --uses lists what the mod uses of its pinned build, and the Rust code is checked for the project's own target (--wasm or --native asks for the other).",
+        usage: "check [--uses] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json]",
+        summary: "Checks the mod in this folder, or a file as the registry would; --uses lists what the mod uses of its pinned build, and a native mod's Rust code is checked on this computer.",
     },
     Command {
         name: "update",
         everyday: true,
         usage: "update [--sunrise <build>] [--accept <inject id>]…",
-        summary: "Repins a native or wasm mod to another game build (the current Nightly unless --sunrise names one) and reports what that breaks, refusing a changed [[inject]] target unless --accept names it; a content mod pins no build.",
+        summary: "Repins a native mod to another game build (the current Nightly unless --sunrise names one) and reports what that breaks, refusing a changed [[inject]] target unless --accept names it; a content mod pins no build.",
     },
     Command {
         name: "hooks",
@@ -49,7 +49,7 @@ const COMMANDS: &[Command] = &[
     Command {
         name: "publish",
         everyday: false,
-        usage: "publish [--out <dir>] [--registry <checkout>] [--summary <text>] [--owner <login>]… [--categories a,b] [--tags a,b] [--changelog <text>] [--key <public key> --signature <file.minisig>] [--wasm]",
+        usage: "publish [--out <dir>] [--registry <checkout>] [--summary <text>] [--owner <login>]… [--categories a,b] [--tags a,b] [--changelog <text>] [--key <public key> --signature <file.minisig>]",
         summary: "Builds the mod, then writes its registry entry, the staged file and the pull request text into a folder; it uploads nothing.",
     },
     Command {
@@ -63,12 +63,6 @@ const COMMANDS: &[Command] = &[
         everyday: false,
         usage: "internals sync | internals add <path>… [--kind <kind>]",
         summary: "Writes the game internals a native mod names into sunrise-mod.toml, found by checking its code or taken from the pinned build's catalog.",
-    },
-    Command {
-        name: "wasm-std",
-        everyday: false,
-        usage: "wasm-std <out.wasm> [--catalog <points.json>]",
-        summary: "Writes the standard library member the game ships for wasm mods.",
     },
     Command {
         name: "sdk",

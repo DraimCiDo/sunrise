@@ -8,9 +8,7 @@ const OTHER_BUILD: &str = "cccccccccccccccccccccccccccccccccccccccc";
 fn surface(functions: &[(&str, &str)]) -> mod_surface::Surface {
     let functions: Vec<_> = functions
         .iter()
-        .map(|(id, hash)| {
-            serde_json::json!({"id": id, "hash": hash, "signature": "fn f()", "wasm": true})
-        })
+        .map(|(id, hash)| serde_json::json!({"id": id, "hash": hash, "signature": "fn f()"}))
         .collect();
     serde_json::from_value(serde_json::json!({
         "schema": mod_surface::SCHEMA, "hash": "s", "functions": functions,

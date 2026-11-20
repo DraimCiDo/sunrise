@@ -7,18 +7,11 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use sunrise_mod_package::{Manifest, manifest::MANIFEST, sdk::Index};
+use sunrise_mod_package::sdk::Index;
 use sunrise_native_build::{contract, library_record::Library, prebuilt::Route, rust::Unpacked};
 
 /// Names the cache's folder instead of the platform's.
 const CACHE_ENV: &str = "SUNRISE_MOD_CACHE";
-
-/// Whether `dir`'s package is a native mod.
-pub(crate) fn is_native(dir: &Path) -> Result<bool, String> {
-    let path = dir.join(MANIFEST);
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok(Manifest::parse(&text)?.native.is_some())
-}
 
 /// The per-user cache folder: `SUNRISE_MOD_CACHE`, else the platform's cache folder.
 pub(crate) fn cache_dir() -> Result<PathBuf, String> {

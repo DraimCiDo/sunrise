@@ -200,31 +200,6 @@ fn a_nightly_name_is_only_nightly_or_a_dated_one() {
 }
 
 #[test]
-fn the_pin_is_the_native_tables_or_the_cargo_metadata() {
-    let project = tempfile::tempdir().unwrap();
-    let write = |name: &str, text: &str| fs::write(project.path().join(name), text).unwrap();
-    let header = "id='m'\nname='m'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n";
-    write(MANIFEST, header);
-    write("Cargo.toml", "[package]\nname='m'\nversion='1.0.0'\n");
-    assert!(
-        pin(project.path())
-            .unwrap_err()
-            .contains("[package.metadata.sunrise] sdk")
-    );
-    repin(project.path(), BUILD).unwrap();
-    assert_eq!(pin(project.path()).unwrap(), BUILD);
-    let other = "89abcdef0123456789abcdef0123456789abcdef";
-    write(
-        MANIFEST,
-        &format!("{header}[native]\ngame='26.3'\nsunrise='{BUILD}'\nmixins='{BUILD}'\n"),
-    );
-    fs::create_dir_all(project.path().join(DIR)).unwrap();
-    repin(project.path(), other).unwrap();
-    assert_eq!(pin(project.path()).unwrap(), other);
-    assert!(!project.path().join(DIR).exists());
-}
-
-#[test]
 fn a_project_inside_a_game_checkout_builds_against_it_and_a_pinned_one_does_not() {
     let dir = tempfile::tempdir().unwrap();
     let write = |path: &Path, text: &str| {
