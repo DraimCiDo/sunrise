@@ -1,7 +1,9 @@
 //! One resident machine-progress update at each production mod ticker call.
 use super::{super::Game, Recorder, world::FLOOR};
+use std::sync::Arc;
 use sunrise_client::{
     Result,
+    chunk::Chunk,
     containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields},
 };
 use sunrise_core::nbt::Tag;
@@ -26,7 +28,12 @@ impl Game<'_> {
             _ => return Err(format!("invalid block-entity tick benchmark mode: {mode}").into()),
         };
         let name = format!("mod.block_entity_view_v1.{mode}");
-        self.hot_level(7, 2)?;
+        // This workload calls the ticker directly, so no streaming or forced chunk tickets
+        // are needed. Use the normal mod world with the one chunk holding all the machines.
+        self.world = Game::world_for_mods(self.res.facts().air, 7);
+        self.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
         let stone = self
             .pack
             .assets
