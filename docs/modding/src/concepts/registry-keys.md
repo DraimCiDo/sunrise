@@ -57,13 +57,11 @@ request `.id(host)` explicitly. `UnspawnedMobRef::kind` keeps its separate scope
 
 ## Block states
 
-`BlockState` is a small owned value with private fields, not a tint-specific snapshot or an
-engine numeric ID. `state.block()` reads its `BlockKey`; `state.ordinal()` reads its local
-ordinal. Property operations take explicit metadata: retain `let metadata = host.block_states()`
-and call `state.property(&metadata, "facing")` or `state.with(&metadata, "facing", "east")`.
-`BlockState::of(&metadata, key, constraints)` starts from the published default and applies the
-supplied `StateConstraint`s. Changes return a new value and never mutate the original.
-Unknown keys, ordinals and property combinations return typed `BlockStateError`s.
+`BlockState` is a small `Copy` value with private fields, not an engine numeric ID.
+`state.block()` reads its `BlockKey`; `state.ordinal()` reads its local ordinal. Pass the value
+itself to metadata queries; there is no separate record to convert to. See
+[Block-state facts](../how-to/world/block-state-facts.md) for reading properties, changing a
+property on a copy and constructing a state from a block's default.
 
 `SceneBlock::new(pos, state, entity)` and `StructureTemplateBlock::new(pos, state, nbt)`
 use this owned `BlockState`, including all properties. Structure reads preserve vanilla palette
@@ -79,12 +77,21 @@ Use `host.block_state_default(key)` for a block's default state and
 `host.block_in_tag(key, tag)` for membership in a string tag name. On a restricted
 level host, `schedule_block_tick(pos, key, delay)` also takes a `BlockKey`.
 
-`host.block_states().states_of(key)` returns `Option<BlockStateRange>` in immutable
-local ordinal order. It returns `None` before metadata is published, for an unknown block,
-or without a game-backed host. Its iterator yields owned `BlockState`s; it is not a span of world
-numeric IDs. `BlockStateRange::new(first, count)` returns a typed error if the span would
-exceed the `u16` ordinal domain, and decoded transport spans obey the same check. Membership
-checks both the block key and the ordinal. A zero-count span is empty.
+`host.block_states().states_of(key)` returns `Option<BlockStateRange>` in local ordinal order.
+It returns `None` before metadata is published, for an unknown block, or without a game-backed
+host. Its iterator yields owned `BlockState`s; it is not a span of world numeric IDs. To look up
+an existing local `ordinal`, use:
+
+```rust,ignore
+use mod_api::HostBlockStates;
+
+let state = host.block_states().states_of(key)
+    .and_then(|range| range.iter().nth(usize::from(ordinal)));
+```
+
+An ordinal outside the range returns `None`. `BlockStateRange::new(first, count)` returns a typed
+error if the span would exceed the `u16` ordinal domain, and decoded ranges obey the same check.
+Membership checks both the block key and the ordinal. A zero-count span is empty.
 
 A restricted `LevelHost::block_state(pos)` read returns `Option<BlockState>`. A successful
 engine read retains its vanilla result: unloaded or out-of-height reads that produce air return

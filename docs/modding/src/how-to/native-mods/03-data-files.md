@@ -40,13 +40,17 @@ any other file causes the archive to be refused ([the manifest](../../reference/
 file type, up to 64 MiB a file, 256 MiB and 256 files in all. They are not pack data and no reload touches them;
 a missing, extra or mismatched file refuses the package by name ([`[runtime]`](../../reference/manifest.md)).
 
-The game hashes each file once, when the package opens, and keeps those bytes: your registration hook reads them with
-`cx.runtime_files()`, a handle you may keep and use from any thread. `files.names()` lists them, `files.file("nav.bin")`
-returns the checked bytes (or `None` for a name your manifest does not list: a mod reads only its own package's files),
-and `files.file_path("nav.bin")`, for native code that wants to map or compile a large file without a copy, returns where
-it sits on disk. A
-package installed as a `.smod` archive has no path (`NotAFolder`), and a later edit of a folder is yours to guard
-against. A mod whose package declares no `[runtime]` gets `RuntimeFilesError::NoRuntimeFiles`.
+The game hashes each file once, when the package opens, and retains the verified bytes. Get the handle with
+`cx.runtime_files()` in registration; you can keep it and use it from any thread. A mod can read only its own
+package's files. A package with no `[runtime]` returns `RuntimeFilesError::NoRuntimeFiles`.
+
+- `files.names()` borrows the listed names in name order as `&[String]`.
+- `files.file("nav.bin")` returns `Option<&[u8]>`: parse the borrowed bytes directly, or use `.to_vec()` only
+  when the bytes must outlive the handle. An unlisted name returns `None`.
+- `files.file_path("nav.bin")` borrows the exact disk path as `&Path`; use `.to_path_buf()` if you must keep
+  the path after dropping the handle. An unlisted name returns `RuntimePathError::NotListed`; a listed
+  file in a `.smod` archive returns `RuntimePathError::NotAFolder`. This is a live path: opening it after
+  a disk edit may read different bytes. Use `files.file()` when you need the verified snapshot.
 
 Although the archive accepts `build.rs`, a native build refuses it unless you disable it with
 `build = false` in Cargo's `[package]` table and remove build dependencies.

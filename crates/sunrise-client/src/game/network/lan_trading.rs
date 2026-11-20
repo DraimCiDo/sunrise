@@ -112,7 +112,7 @@ impl Game<'_> {
             state.session.update_special_prices();
         }
         let title = self.merchant_display_name(&state);
-        if !self.guest_may_open(conn, "minecraft:merchant", None) {
+        if self.guest_may_open(conn, "minecraft:merchant", None) != Some(true) {
             self.merchant_closed(&mut state);
             return;
         }

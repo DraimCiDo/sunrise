@@ -649,8 +649,8 @@ impl Game<'_> {
             return n;
         }
         let inventory = 36;
-        if let Some(shown) = self.native_screen_slot_count() {
-            return inventory + shown;
+        if let Some(screen) = self.shown_native_screen() {
+            return screen.visible_slots().count();
         }
         let container = match self.container_kind() {
             Some(BlockEntity::Chest(_)) => self.open_container_size(),
@@ -706,11 +706,10 @@ impl Game<'_> {
         if let Some(v) = self.station_slots().or_else(|| self.mount_slots()) {
             return v;
         }
-        let mut v: Vec<usize> = (0..36).collect();
-        if let Some(shown) = self.native_screen_slots() {
-            v.extend(shown);
-            return v;
+        if let Some(screen) = self.shown_native_screen() {
+            return screen.visible_slots().collect();
         }
+        let mut v: Vec<usize> = (0..36).collect();
         match self.container_kind() {
             Some(BlockEntity::Chest(_)) => {
                 v.extend((0..self.open_container_size()).map(|i| 300 + i))

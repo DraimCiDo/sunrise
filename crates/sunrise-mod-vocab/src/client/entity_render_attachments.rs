@@ -113,14 +113,21 @@ impl EntityRenderAttachments {
 }
 
 impl Wire for Snapshot {
-    crate::wire::layout_fields!("fields" => Vec<(String, String, Vec<u8>)>);
+    crate::wire::layout_fields!(
+        ordinary_only "ordered-render-attachment-nbt:v1";
+        "fields" => Vec<(String, String, Vec<u8>)>,
+    );
     const MIN: usize = 4;
 
     fn put(&self, out: &mut Writer) {
-        out.put_bytes(&self.bytes);
+        if out.ordinary_only() {
+            out.put_bytes(&self.bytes);
+        }
     }
 
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        // The embedded vanilla NBT reader does not use Wire's allocation budget.
+        input.ordinary_only()?;
         input.bounded(RENDER_FRAME_BYTES, |payload| {
             let bytes = payload.rest();
             let count = payload.take_len(FIELD_PREFIX_BYTES)?;
@@ -156,6 +163,20 @@ impl Wire for Snapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attachment_snapshots_use_only_the_ordinary_wire_reader() {
+        let bytes = [0; 4]; // zero entries is a valid snapshot, without any NBT to parse.
+        let snapshot = Reader::decode::<Snapshot>(&bytes).unwrap();
+        assert!(matches!(
+            crate::decode_payload::<Snapshot>(&bytes),
+            Err(WireError::Invalid(_))
+        ));
+        assert!(matches!(
+            crate::encode_payload(&snapshot, bytes.len()),
+            Err(WireError::Invalid(_))
+        ));
+    }
 
     #[test]
     fn attachment_snapshot_wire_decode_refuses_more_than_one_render_frame() {

@@ -75,6 +75,34 @@ pub(in crate::game) fn with_guests_at(
     });
 }
 
+/// Add a fixture menu to both the hub's protocol registry and the mod API's menu keys.
+pub(in crate::game) fn register_test_menu(
+    game: &mut super::Game<'_>,
+    id: &str,
+) -> mod_api::MenuKey {
+    use sunrise_client::lan::data::SyncData;
+    use sunrise_protocol::registry::Ids;
+
+    let current = game.lan.as_ref().unwrap().hub.sync_data();
+    let mut sync = SyncData::empty();
+    sync.builtin = current.builtin.clone();
+    sync.dynamic = current.dynamic.clone();
+    sync.recipes = current.recipes.clone();
+    sync.tags = current.tags.clone();
+    let mut names = sync.builtin.get("minecraft:menu").unwrap().names.clone();
+    names.push(id.to_owned());
+    mod_api::__private::resolve_menus(names.iter().map(String::as_str)).unwrap();
+    sync.builtin
+        .registries
+        .insert("minecraft:menu".into(), Ids::from_names(names));
+    game.with_advancement_hub(|hub, owners| hub.reload_resources(Arc::new(sync), owners))
+        .unwrap();
+    mod_api::__private::menu_keys()
+        .into_iter()
+        .find(|key| mod_api::__private::menu_key_id(*key).as_deref() == Some(id))
+        .unwrap()
+}
+
 #[test]
 #[ignore = "daily"]
 fn player_dimensions_validate_identity_on_both_server_roles() {

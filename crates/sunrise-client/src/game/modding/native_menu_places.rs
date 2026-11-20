@@ -369,9 +369,9 @@ impl Game<'_> {
         let Some((backed_window, count, locked)) = self.menu_places_of(conn) else {
             return false;
         };
-        let Some((size, hidden)) = self.lan.as_ref().and_then(|lan| {
+        let Some((size, total, hidden)) = self.lan.as_ref().and_then(|lan| {
             let open = lan.hub.guest(conn)?.menu.as_ref()?;
-            Some((open.size, open.hidden.clone()))
+            Some((open.size, open.slot_count(), open.hidden.clone()))
         }) else {
             return false;
         };
@@ -390,7 +390,7 @@ impl Game<'_> {
             return false;
         };
         let pickup = mode == 0 && matches!(button, 0 | 1);
-        if !(pickup || mode == 1) || (count..size).contains(&at) || at >= size + 36 {
+        if !(pickup || mode == 1) || (count..size).contains(&at) || at >= total {
             return false;
         }
         // Backing handles can still address hidden slots; an engine click cannot.
@@ -404,7 +404,7 @@ impl Game<'_> {
             if pickup {
                 click_pickup(host, menu, at, button == 1);
             } else {
-                click_quick_move(host, menu, at, size, count, &hidden);
+                click_quick_move(host, menu, at, size, total - size, count, &hidden);
             }
         }
         if self.refresh_menu_places(conn, uuid, menu)
@@ -467,6 +467,7 @@ fn click_quick_move(
     menu: MenuRef,
     at: usize,
     size: usize,
+    player_slots: usize,
     count: usize,
     hidden: &[usize],
 ) {
@@ -475,7 +476,7 @@ fn click_quick_move(
         return;
     };
     let (first, len, reverse) = match at < size {
-        true => (size, 36, true),
+        true => (size, player_slots, true),
         false => (0, count, false),
     };
     let _ = host.transaction(|host, tx| {
@@ -1039,12 +1040,14 @@ mod tests {
             sunrise_client::containers::with_mod_menu_types(
                 [(
                     SATCHEL_MENU.into(),
+                    "test".into(),
                     9,
                     0,
                     Vec::new(),
                     Vec::new(),
                     None,
                     None,
+                    true,
                 )],
                 || {
                     super::super::native_entity_refs::tests::with_game_role(
@@ -1088,6 +1091,7 @@ mod tests {
                 player,
                 key,
                 sunrise_client::text::Text::literal("satchel"),
+                Vec::new(),
                 Vec::new(),
                 Some(pos),
                 MenuReplace::CloseFirst,

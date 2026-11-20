@@ -5,6 +5,7 @@ Call `host.disconnect(reason)` through `ClientHost` to leave the joined server o
 ## Holding outgoing play packets
 
 Call `host.hold_packets()` to start an ordered hold and receive its opaque `HoldId`.
+Keep the issued ID locally to release or discard the hold; it has no `Wire` encoding.
 While a hold is active, another `hold_packets()` returns
 `HoldError::Limit { packets: 256, bytes: 1_048_576 }` and leaves the first hold intact.
 Uncancelled packets from `client_packet_send` queue in creation order;
@@ -56,19 +57,25 @@ and keep-alive checks still apply.
 ## Typed payloads
 
 A typed payload sends a value of your own type on a registered channel. Its body is the value's
-`PayloadCodec` encoding (vanilla's network encoding), with nothing around it, so a peer reads it
-as an ordinary registered payload.
+[Wire](../../concepts/wire-types.md) encoding, with no extra envelope. Wire uses
+little-endian numbers and lengths; it is not the vanilla packet codec. Use a raw channel
+when another implementation requires a specific byte format.
 
-Derive `PayloadCodec` for the value, register it in `Hooks::register`, and keep the token the
+Use owned `String` fields, not static strings or interned level keys: the network codec never
+interns incoming text. The registrar also refuses Wire forms that allocate outside the shared
+budget, such as `Identifier`, `SpawnerKey`, `CustomSpawners`, `ModelPart`, JSON values and `Text`,
+even in nested fields. Send bounded owned fields and convert explicitly where you need those types.
+
+Derive `Wire` for the value, register it in `Hooks::register`, and keep the token the
 registrar returns:
 
 ```rust,ignore
 use mod_api::*;
 use std::sync::OnceLock;
 
-#[derive(PayloadCodec)]
+#[derive(Wire)]
 struct Counter {
-    counter: VarInt,
+    counter: i32,
 }
 
 static REPLY: OnceLock<ToClient<Counter>> = OnceLock::new();
@@ -78,13 +85,13 @@ fn register(r: &mut dyn Registrar) {
     let mut view = payloads.registrar("1");
     // The server answers each counter with the next one.
     view.play_to_server_typed::<Counter>(PayloadId("example:count".into()), |value, cx| {
-        let counter = value.counter.0.checked_add(1).ok_or("counter is too large")?;
-        let next = Counter { counter: VarInt(counter) };
+        let counter = value.counter.checked_add(1).ok_or("counter is too large")?;
+        let next = Counter { counter };
         REPLY.get().unwrap().reply(cx, &next).map(drop).map_err(|e| format!("{e:?}"))
     });
     let reply = view.play_to_client_typed::<Counter>(
         PayloadId("example:count_reply".into()),
-        |value, _| Ok(log::info!("server counted {}", value.counter.0)),
+        |value, _| Ok(log::info!("server counted {}", value.counter)),
     );
     let _ = REPLY.set(reply);
 }
@@ -128,8 +135,12 @@ fn register(r: &mut dyn Registrar) {
   it is published when the root transaction commits, and an abort publishes nothing.
 - **Schema negotiation.** The derive gives the value type a schema fingerprint (field types in
   order, variant positions; not names), and it is part of the negotiated version. A peer whose
-  type has another shape is refused at join when the payload is required; when both sides
-  declared it `optional()`, it is absent and a send returns `UnsupportedPeer`.
+  type has another encoding is refused at join when the payload is required; when both sides
+  declared it `optional()`, it is absent and a send returns `UnsupportedPeer`. A body that kept
+  its encoding (for example, a record of `u8` and `bool`) still negotiates with the old codec.
+  The fingerprint describes the negotiated encoding, not what a field or variant means.
+  If you reorder fields or variants that have the same encoding, or reuse a position for a
+  different meaning, bump the registrar's application version even if the fingerprint is unchanged.
 - **Named errors.** `PayloadSendError::StaleToken` for a token the registrar did not hand out
   as it claims (forged, from another load, read as another type, or its mod off);
   `EncodeFailed` for a value the peer could not decode (a bound or the allocation budget),

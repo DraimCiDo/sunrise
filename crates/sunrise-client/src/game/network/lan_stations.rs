@@ -105,7 +105,7 @@ impl Game<'_> {
             return true;
         }
         // The mods may stop the menu; the click is spent.
-        if !self.guest_may_open(conn, menu_type, Some(station.pos)) {
+        if self.guest_may_open(conn, menu_type, Some(station.pos)) != Some(true) {
             return true;
         }
         // ServerPlayer.openMenu closes the menu that was open.
@@ -542,7 +542,8 @@ impl Game<'_> {
     /// `LecternBlock.openScreen` for a guest: `minecraft:lectern` over the
     /// block entity, with its book and page.
     pub(super) fn lan_open_lectern(&mut self, conn: u32, key: (i32, i32, i32)) {
-        if !self.guest_may_open(conn, "minecraft:lectern", Some([key.0, key.1, key.2])) {
+        if self.guest_may_open(conn, "minecraft:lectern", Some([key.0, key.1, key.2])) != Some(true)
+        {
             return;
         }
         // ServerPlayer.openMenu closes the menu that was open.

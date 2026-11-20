@@ -205,4 +205,16 @@ pub trait MenusBackendMut {
     /// inventory menu, which is never closed. A client closes its own screen with `close`.
     #[access(WorldOnly)]
     fn menu_close_container(&mut self, menu: MenuRef) -> bool;
+    /// Side: server.
+    /// Set a data slot of the owning mod's current blockless menu (`DataSlot.set`).
+    /// Returns true only if the value changed. Publishes the final signed `i32` at
+    /// root commit (immediately outside a transaction); an abort restores it silently.
+    /// Stale handles, unsupported menus, other mods and undeclared indices are refused.
+    #[access(WorldOnly)]
+    fn menu_set_data_slot(
+        &mut self,
+        menu: MenuRef,
+        index: usize,
+        value: i32,
+    ) -> Result<bool, MenuDataRefusal>;
 }

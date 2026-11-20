@@ -2,8 +2,8 @@
 //! Queries consume owned API block states, never world numeric IDs. Both sides read the
 //! game's published tables; definitions are copied out and property values are borrowed.
 use crate::{
-    BlockKey, BlockMetadata, BlockSoundType, BlockState, BlockStateError, BlockStateRange,
-    BlockStateRecord, Host, LevelReadError, host::block_states::BlockStatesBackend,
+    BlockKey, BlockMetadata, BlockSoundType, BlockState, BlockStateError, BlockStateRange, Host,
+    LevelReadError, host::block_states::BlockStatesBackend,
 };
 
 /// One property and its legal values in a state definition.
@@ -138,19 +138,19 @@ impl<'a> BlockStates<'a> {
 struct NoBlockTables;
 
 impl BlockStatesBackend for NoBlockTables {
-    fn block_weathering_age(&self, _: BlockStateRecord) -> Option<WeatheringAge> {
+    fn block_weathering_age(&self, _: BlockState) -> Option<WeatheringAge> {
         None
     }
-    fn block_next_weathering_stage(&self, _: BlockStateRecord) -> Option<BlockState> {
+    fn block_next_weathering_stage(&self, _: BlockState) -> Option<BlockState> {
         None
     }
-    fn block_previous_weathering_stage(&self, _: BlockStateRecord) -> Option<BlockState> {
+    fn block_previous_weathering_stage(&self, _: BlockState) -> Option<BlockState> {
         None
     }
-    fn block_state_waxed(&self, _: BlockStateRecord) -> Option<BlockState> {
+    fn block_state_waxed(&self, _: BlockState) -> Option<BlockState> {
         None
     }
-    fn block_state_unwaxed(&self, _: BlockStateRecord) -> Option<BlockState> {
+    fn block_state_unwaxed(&self, _: BlockState) -> Option<BlockState> {
         None
     }
     fn block_metadata_name(&self, _: BlockKey) -> Result<&str, BlockStateError> {
@@ -158,24 +158,24 @@ impl BlockStatesBackend for NoBlockTables {
     }
     fn block_metadata_property(
         &self,
-        _: BlockStateRecord,
+        _: BlockState,
         _: &str,
     ) -> Result<Option<&str>, BlockStateError> {
         Err(BlockStateError::Unavailable)
     }
     fn block_metadata_with(
         &self,
-        _: BlockStateRecord,
+        _: BlockState,
         _: &str,
         _: &str,
-    ) -> Result<BlockStateRecord, BlockStateError> {
+    ) -> Result<BlockState, BlockStateError> {
         Err(BlockStateError::Unavailable)
     }
     fn block_metadata_of(
         &self,
         _: BlockKey,
         _: &[StateConstraint],
-    ) -> Result<BlockStateRecord, BlockStateError> {
+    ) -> Result<BlockState, BlockStateError> {
         Err(BlockStateError::Unavailable)
     }
     fn block_state_replaceable(&self, _: BlockState) -> Option<bool> {
@@ -248,7 +248,7 @@ impl BlockStatesBackend for NoBlockTables {
     fn fluid_type_properties(&self, _: crate::FluidKey) -> Option<crate::FluidTypeProperties> {
         None
     }
-    fn fluid_legacy_block(&self, _: crate::FluidState) -> Option<crate::BlockStateId> {
+    fn fluid_legacy_block(&self, _: crate::FluidState) -> Option<BlockState> {
         None
     }
     fn fluid_state_validate(
@@ -264,26 +264,22 @@ impl BlockMetadata for BlockStates<'_> {
     fn name(&self, block: BlockKey) -> Result<&str, BlockStateError> {
         self.backend.block_metadata_name(block)
     }
-    fn property(
-        &self,
-        state: BlockStateRecord,
-        name: &str,
-    ) -> Result<Option<&str>, BlockStateError> {
+    fn property(&self, state: BlockState, name: &str) -> Result<Option<&str>, BlockStateError> {
         self.backend.block_metadata_property(state, name)
     }
     fn with(
         &self,
-        state: BlockStateRecord,
+        state: BlockState,
         name: &str,
         value: &str,
-    ) -> Result<BlockStateRecord, BlockStateError> {
+    ) -> Result<BlockState, BlockStateError> {
         self.backend.block_metadata_with(state, name, value)
     }
     fn of(
         &self,
         block: BlockKey,
         properties: &[StateConstraint],
-    ) -> Result<BlockStateRecord, BlockStateError> {
+    ) -> Result<BlockState, BlockStateError> {
         self.backend.block_metadata_of(block, properties)
     }
 }
@@ -293,36 +289,35 @@ impl BlockStates<'_> {
     /// doesn't implement weathering, including waxed copper; ask `unwaxed`
     /// first to get the age of a waxed block's underlying stage.
     pub fn weathering_age(&self, state: BlockState) -> Option<WeatheringAge> {
-        self.backend.block_weathering_age((&state).into())
+        self.backend.block_weathering_age(state)
     }
 
     /// `WeatheringCopper.getNext`: the next weathering stage, retaining
     /// compatible state properties. None if no such stage or state exists.
     /// Reads the host's loaded oxidation maps before the vanilla chain.
     pub fn next_weathering_stage(&self, state: BlockState) -> Option<BlockState> {
-        self.backend.block_next_weathering_stage((&state).into())
+        self.backend.block_next_weathering_stage(state)
     }
 
     /// `WeatheringCopper.getPrevious`: the previous weathering stage,
     /// retaining compatible state properties. None if no such stage or state
     /// exists. Reads the host's loaded oxidation maps before the vanilla chain.
     pub fn previous_weathering_stage(&self, state: BlockState) -> Option<BlockState> {
-        self.backend
-            .block_previous_weathering_stage((&state).into())
+        self.backend.block_previous_weathering_stage(state)
     }
 
     /// `HoneycombItem.getWaxed`: the waxed counterpart, retaining compatible
     /// state properties. None if the state does not have one or is unknown.
     /// Reads the host's loaded waxables map before vanilla's.
     pub fn waxed(&self, state: BlockState) -> Option<BlockState> {
-        self.backend.block_state_waxed((&state).into())
+        self.backend.block_state_waxed(state)
     }
 
     /// `HoneycombItem.WAX_OFF_BY_BLOCK`: the unwaxed counterpart, retaining
     /// compatible state properties. None if the state does not have one or
     /// is unknown. Reads the host's loaded waxables map before vanilla's.
     pub fn unwaxed(&self, state: BlockState) -> Option<BlockState> {
-        self.backend.block_state_unwaxed((&state).into())
+        self.backend.block_state_unwaxed(state)
     }
 
     /// `BlockState.canBeReplaced()`: whether placing a block where `state` stands replaces it
@@ -455,7 +450,7 @@ mod tests {
     #[test]
     fn a_host_without_a_game_answers_none() {
         let facts = Double.block_states();
-        let state: BlockState = BlockStateRecord::new(crate::BlockKey(0), 0).into();
+        let state: BlockState = crate::__private::block_state_from_ordinal(crate::BlockKey(0), 0);
         assert_eq!(facts.replaceable(state), None);
         assert_eq!(facts.destroy_speed(state), None);
         assert_eq!(

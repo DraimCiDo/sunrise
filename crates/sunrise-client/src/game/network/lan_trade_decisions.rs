@@ -15,7 +15,7 @@ use std::{cell::RefCell, collections::HashMap};
 use sunrise_client::{
     advancements::Advancement,
     items::ItemStack,
-    lan::conn::transaction_packets::{Packets, Scope},
+    lan::conn::transaction_packets::Scope,
     menu::{Input, Menu, RuleAnswers, StackedOutcome, StoredRules},
     merchant::Event,
 };
@@ -107,7 +107,6 @@ impl Journal {
 }
 
 pub(in crate::game) enum Effect {
-    Packets(Packets),
     Orb([f64; 3], u32),
     Drops(u32, Vec<sunrise_client::items::ItemStack>),
     Reward(u128, Advancement),
@@ -630,10 +629,8 @@ impl Game<'_> {
     }
     pub(in crate::game) fn commit_merchant_effect(&mut self, effect: Effect) {
         match effect {
-            Effect::Packets(packets) => packets.publish(),
             Effect::Notice(uuid, name, mob) => {
-                // A completed trade cannot be undone, and its captured success packets
-                // still have to reach the client even if the notification fails.
+                // A completed trade cannot be undone if the notification fails.
                 if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     self.native_player_trade(uuid, &name, mob);
                 }))

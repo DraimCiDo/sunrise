@@ -50,6 +50,8 @@ pub(in crate::game) use entities::{Announcement, ArrivalRollback};
 mod scratch;
 
 type Pos = (i32, i32, i32);
+/// The last pending value at this depth for a connection, menu generation and data index.
+type MenuDataJournal = BTreeMap<(u32, u64, u16), i32>;
 type ComposterRandoms =
     HashMap<(mod_api::DimensionKey, (i32, i32)), HashMap<Pos, sunrise_core::random::LegacyRandom>>;
 
@@ -222,6 +224,7 @@ pub(super) struct Level {
     stations: HashMap<(u32, decision::MenuId), super::lan_stations::GuestStation>,
     /// Each guest's menu storage before this transaction first wrote it, by connection.
     menus: HashMap<u32, KeptMenus>,
+    menu_data: MenuDataJournal,
     /// The scoreboard before this transaction first wrote it (`journal_scoreboard`), whole.
     board: Option<sunrise_client::scoreboard::Scoreboard>,
     /// Each entity's, player's, chunk's and the level's attachment map before this transaction
@@ -247,6 +250,7 @@ pub(super) struct Level {
     /// Merchant takes keep their session, mob, statistics and criterion progress together.
     pub(in crate::game) trades: super::lan_trade_decisions::Journal,
     pub(in crate::game) packets: Option<sunrise_client::lan::conn::transaction_packets::Scope>,
+    captured_packets: Vec<sunrise_client::lan::conn::transaction_packets::Packets>,
     action: Option<decision::ActiveAction>,
     /// The scratch stacks (`ItemPlace::Scratch`), live: kept by the outermost transaction only.
     scratch: HashMap<u64, scratch::Scratch>,
@@ -611,9 +615,7 @@ impl Game<'_> {
             && commit
             && let Some(packets) = scope.finish()
         {
-            level.after.push(After::Trade(Box::new(
-                super::lan_trade_decisions::Effect::Packets(packets),
-            )));
+            level.captured_packets.push(packets);
         }
         let mut merchant_corrections = std::mem::take(&mut level.trades.refused_clicks);
         if !commit {
@@ -716,6 +718,8 @@ impl Game<'_> {
                 for (conn, kept) in level.menus {
                     outer.menus.entry(conn).or_insert(kept);
                 }
+                outer.menu_data.extend(level.menu_data);
+                outer.captured_packets.extend(level.captured_packets);
                 for (holder, kept) in level.attachments {
                     outer.attachments.entry(holder).or_insert(kept);
                 }
@@ -1438,6 +1442,32 @@ impl Game<'_> {
             }
         }
     }
+    pub(in crate::game) fn pending_menu_data(&self, key: (u32, u64, u16)) -> Option<i32> {
+        self.transactions
+            .iter()
+            .rev()
+            .find_map(|level| level.menu_data.get(&key).copied())
+    }
+
+    pub(in crate::game) fn journal_menu_data(&mut self, key: (u32, u64, u16), value: i32) -> bool {
+        let Some(level) = self.transactions.last_mut() else {
+            return false;
+        };
+        level.menu_data.insert(key, value);
+        true
+    }
+
+    fn commit_menu_data(&mut self, journal: MenuDataJournal) {
+        let Some(host) = &mut self.lan else { return };
+        for ((conn, generation, index), value) in journal {
+            host.hub.update_guest(conn, |guest| {
+                if guest.menu_generation == generation {
+                    guest.set_menu_data(index, value);
+                }
+            });
+        }
+    }
+
     fn root_commit(&mut self, level: Level) {
         // Storage is final. Publish save marks before any callback can unwind or start a save.
         for (dim, chunk) in level.save_chunks {
@@ -1450,10 +1480,16 @@ impl Game<'_> {
                 world.modified.insert(chunk);
             }
         }
-        // A deferred listener may read a new map or create one of its own.
+        // Captured packets and deferred listeners can refer to a new map.
         for (id, data) in level.new_maps {
             self.publish_map(id, data);
         }
+        // Publish captured opens and resends before the final menu deltas, so a
+        // snapshot taken before commit cannot overwrite a newer value.
+        for packets in level.captured_packets {
+            packets.publish();
+        }
+        self.commit_menu_data(level.menu_data);
         // A menu callback removed its detached block entity. Its accepted remainder is
         // spilled separately; replaying removal with the rollback copy would duplicate items.
         let detached: std::collections::HashSet<_> = level

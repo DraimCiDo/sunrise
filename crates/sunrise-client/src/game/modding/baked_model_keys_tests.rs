@@ -4,8 +4,8 @@ use super::model_baking_completed_tests::reload;
 use super::native_entity_refs::tests::with_client_game;
 use mod_api::__private::{ModPhase, PhaseOwner};
 use mod_api::{
-    BakedModelKey, BakedModelView, BlockStateRecord, ClientHost, Hooks, ModEntry,
-    ModelBakingCompletedEvent, ModelError, ModelRef,
+    BakedModelKey, BakedModelView, ClientHost, Hooks, ModEntry, ModelBakingCompletedEvent,
+    ModelError, ModelRef,
 };
 use mod_platform::testing::with_mods;
 use std::sync::{Arc, Mutex};
@@ -36,8 +36,11 @@ impl Hooks for Reader {
             .map(|key| assets.baked_model(*key))
             .collect();
         read.invalid_keys.push([
-            assets.block_state_models(BlockStateRecord::new(stone.block(), u16::MAX).into()),
-            assets.block_state_models(BlockStateRecord::new(unknown, 0).into()),
+            assets.block_state_models(mod_api::__private::block_state_from_ordinal(
+                stone.block(),
+                u16::MAX,
+            )),
+            assets.block_state_models(mod_api::__private::block_state_from_ordinal(unknown, 0)),
         ]);
         read.log_keys.push(["x", "y"].map(|axis| {
             let state = host
@@ -47,8 +50,11 @@ impl Hooks for Reader {
         }));
         read.models.push([
             assets.block_state_model(stone),
-            assets.block_state_model(BlockStateRecord::new(stone.block(), u16::MAX).into()),
-            assets.block_state_model(BlockStateRecord::new(unknown, 0).into()),
+            assets.block_state_model(mod_api::__private::block_state_from_ordinal(
+                stone.block(),
+                u16::MAX,
+            )),
+            assets.block_state_model(mod_api::__private::block_state_from_ordinal(unknown, 0)),
         ]);
         read.keys.push(keys);
         read.views.push(views);

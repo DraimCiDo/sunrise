@@ -4196,6 +4196,7 @@ name = "sunrise-bots"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+ "sunrise-core",
  "sunrise-protocol",
 ]
 
@@ -4747,7 +4748,6 @@ dependencies = [
  "subtle",
  "sunrise-assets",
  "sunrise-core",
- "sunrise-mod-api-macros",
  "sunrise-mod-surface",
  "sunrise-mod-vocab",
  "sunrise-shader-api",

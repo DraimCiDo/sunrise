@@ -1,19 +1,5 @@
 //! Derive hook subscriptions from a trait implementation.
-mod payload;
 mod wire;
-
-/// Derive a typed payload's value codec from its fields.
-///
-/// `#[payload(crate = ::mod_vocab)]` selects the contract crate for
-/// lower-layer crates. The default is `::mod_api`.
-/// For mutually recursive types, `#[payload(bound = "T: ::mod_api::PayloadCodec")]`
-/// replaces inferred predicates; use `#[payload(bound = "")]` when none are needed.
-#[proc_macro_derive(PayloadCodec, attributes(payload))]
-pub fn derive_payload_codec(input: TokenStream) -> TokenStream {
-    payload::expand(syn::parse_macro_input!(input as syn::DeriveInput))
-        .unwrap_or_else(syn::Error::into_compile_error)
-        .into()
-}
 
 /// Derive the canonical owned-value encoding.
 ///
@@ -256,7 +242,9 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
 /// Generate the panicking defaults of a host area from each method's access declaration.
 /// The same declarations drive game forwarders in the build-time API generator. A backend trait
 /// may carry `#[table_backend("path")]`: the game answers its reads from the borrowed view at
-/// `path`, which implements the trait, and `Game` forwards to it.
+/// `path`, which implements the trait, and `Game` forwards to it. Methods can opt out of
+/// generated value conversion in either direction with `#[forward_api_inputs]` or
+/// `#[forward_api_output]` when the implementation accepts or returns the API types directly.
 #[proc_macro_attribute]
 pub fn host_area(_attribute: TokenStream, input: TokenStream) -> TokenStream {
     let mut area = parse_macro_input!(input as syn::ItemTrait);
@@ -303,6 +291,8 @@ pub fn host_area(_attribute: TokenStream, input: TokenStream) -> TokenStream {
             !attr.path().is_ident("static_call")
                 && !attr.path().is_ident("service")
                 && !attr.path().is_ident("read_stack")
+                && !attr.path().is_ident("forward_api_inputs")
+                && !attr.path().is_ident("forward_api_output")
         });
         let operation = method.sig.ident.to_string();
         let label = format!("{union}::{operation}");

@@ -148,15 +148,15 @@ fn vanilla_trees_keep_their_depth_on_a_small_stack() {
             let mut out = Writer::new();
             out.put(&text);
             assert_eq!(out.error(), None);
-            let mut form = crate::text::TextForm::try_from(&text).unwrap();
-            let mut extra =
-                crate::text::TextNode::new(crate::text::TextNodeContent::Literal(String::new()));
-            extra.parent = Some(511);
-            form.nodes.push(extra);
-            let mut invalid = Writer::new();
-            invalid.put(&form);
+            // Append a complete row without the encoder's depth check.
+            let mut invalid = out.bytes().to_vec();
+            invalid[..4].copy_from_slice(&513u32.to_le_bytes());
+            invalid.extend([1, 255, 1, 0, 0]); // Parent row 511.
+            invalid.extend([0; 4 + 4 + 4 + 11]); // Child relation, empty literal, unset styles.
+            invalid.extend([10, 0, 0, 0, 0, 0, 0, 0]); // Empty style metadata compound.
+            invalid.extend([10, 0, 0, 0, 0, 0, 0, 0]); // Empty component metadata compound.
             assert!(matches!(
-                Reader::decode::<Text>(invalid.bytes()),
+                Reader::decode::<Text>(&invalid),
                 Err(WireError::Invalid(_))
             ));
             // Drop is outside Wire's ownership; intentionally discard a deep tree iteratively.

@@ -6,8 +6,9 @@ use std::sync::Arc;
 mod data;
 pub use data::ChunkDiskData;
 
+// no wire: identifies the representation of an in-process chunk disk job.
 /// Which serialized chunk representation owns a disk job.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ChunkDiskKind {
     /// A completed chunk.
@@ -16,8 +17,9 @@ pub enum ChunkDiskKind {
     Proto,
 }
 
+// no wire: identifies the phase of an in-process chunk disk job.
 /// The boundary at which a disk job runs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ChunkDiskPhase {
     /// After decoding, before residency publication.
@@ -26,11 +28,12 @@ pub enum ChunkDiskPhase {
     Save,
 }
 
+// no wire: captured context for an in-process chunk disk callback.
 /// Identity captured by the existing world and chunk residency owner.
-/// This value grants no live lookup or write authority.
-#[derive(Clone, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
+/// Borrow it from [`ChunkDiskHost::job`]; it grants no live lookup or write authority.
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct ChunkDiskContextWire {
+pub struct ChunkDiskContext {
     /// The existing world's lifetime, never a second chunk generation.
     pub world: WorldEpoch,
     /// The owning dimension's resource identifier.
@@ -43,7 +46,7 @@ pub struct ChunkDiskContextWire {
     pub phase: ChunkDiskPhase,
 }
 
-impl ChunkDiskContextWire {
+impl ChunkDiskContext {
     /// Capture the existing world identity and the disk record's coordinates.
     pub fn new(
         world: WorldEpoch,
@@ -62,8 +65,9 @@ impl ChunkDiskContextWire {
     }
 }
 
+// no wire: local refusal of an in-process chunk disk job.
 /// Why a chunk disk job refused, with the failing mod and attachment when known.
-#[derive(Clone, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ChunkDiskFailure {
     /// The listener's owner; empty for input validation before dispatch.
@@ -78,8 +82,8 @@ pub struct ChunkDiskFailure {
 /// `ServerHost`: live handle methods refuse, and world writes do not compile.
 /// Registry and settings reads use the owning resource generation's snapshot.
 pub trait ChunkDiskHost: Host {
-    /// Captured world, dimension, chunk, representation and phase.
-    fn job(&self) -> ChunkDiskContextWire;
+    /// Borrow the captured world, dimension, chunk, representation and phase.
+    fn job(&self) -> &ChunkDiskContext;
     /// Immutable registry names in ID order.
     fn registry(&self, name: &str) -> Option<Arc<[String]>>;
 }
@@ -90,13 +94,13 @@ pub trait ChunkDiskHost: Host {
 #[doc(hidden)]
 #[non_exhaustive]
 pub struct OwningChunkDisk<'a> {
-    job: &'a ChunkDiskContextWire,
+    job: &'a ChunkDiskContext,
     resources: &'a dyn WorldgenHost,
 }
 
 impl<'a> OwningChunkDisk<'a> {
     /// Bind the captured identity to immutable resource-generation reads.
-    pub fn new(job: &'a ChunkDiskContextWire, resources: &'a dyn WorldgenHost) -> Self {
+    pub fn new(job: &'a ChunkDiskContext, resources: &'a dyn WorldgenHost) -> Self {
         Self { job, resources }
     }
 }
@@ -117,8 +121,8 @@ impl prelude::ConfigHost for OwningChunkDisk<'_> {
     }
 }
 impl ChunkDiskHost for OwningChunkDisk<'_> {
-    fn job(&self) -> ChunkDiskContextWire {
-        self.job.clone()
+    fn job(&self) -> &ChunkDiskContext {
+        self.job
     }
     fn registry(&self, name: &str) -> Option<Arc<[String]>> {
         self.resources.registry(name)

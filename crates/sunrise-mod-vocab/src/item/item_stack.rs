@@ -29,6 +29,10 @@ impl Components {
     pub fn as_nbt(&self) -> &Compound {
         &self.patch
     }
+
+    pub(crate) fn into_nbt(self) -> Compound {
+        self.patch
+    }
 }
 impl From<Compound> for Components {
     fn from(patch: Compound) -> Self {

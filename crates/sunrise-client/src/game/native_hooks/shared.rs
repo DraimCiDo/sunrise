@@ -665,6 +665,7 @@ pub(super) struct OpenNativeScreen {
     /// The mod block whose menu it is; none for a menu opened without one.
     block: Option<String>,
     screen: mod_api::Screen,
+    mod_type: Option<&'static sunrise_client::containers::ModMenuType>,
     data: Vec<i32>,
     extra: Option<sunrise_protocol::menu_extra::Message>,
 }
@@ -739,6 +740,20 @@ impl SlotMoves {
     }
 }
 
+impl Game<'_> {
+    /// The registered layout resolved for this client's window, including while it opens.
+    pub(in crate::game) fn native_screen_menu_type(
+        &self,
+        window: i32,
+        name: &str,
+    ) -> Option<&'static sunrise_client::containers::ModMenuType> {
+        self.mod_screen
+            .as_ref()
+            .filter(|screen| screen.window == window && screen.menu == name)?
+            .mod_type
+    }
+}
+
 impl OpenNativeScreen {
     /// How many slot moves changed a position, so a layout built before the
     /// last one is rebuilt.
@@ -761,18 +776,38 @@ impl OpenNativeScreen {
     }
     /// Data slot `id` of window `window`'s menu: false for another window's
     /// (an old or replaced one), which this screen leaves alone.
-    fn set_data(&mut self, window: i32, id: i16, value: i16) -> bool {
+    fn set_data(&mut self, window: i32, index: usize, value: i32) -> bool {
         if window != self.window {
             return false;
         }
-        // A menu's data slot ids are small; a bad one is dropped.
-        if let Ok(i @ 0..256) = usize::try_from(id) {
-            if self.data.len() <= i {
-                self.data.resize(i + 1, 0);
+        let count = self.mod_type.map_or(256, |kind| kind.data_slots);
+        if index < count {
+            if self.data.len() <= index {
+                self.data.resize(index + 1, 0);
             }
-            self.data[i] = i32::from(value);
+            self.data[index] = value;
         }
         true
+    }
+
+    fn player_slots(&self) -> usize {
+        self.mod_type
+            .map_or(36, sunrise_client::containers::ModMenuType::player_slots)
+    }
+
+    fn visible_container_slots(&self) -> impl Iterator<Item = usize> + '_ {
+        self.screen
+            .slots
+            .iter()
+            .enumerate()
+            .filter_map(|(i, slot)| {
+                self.slot_moves.position(i, slot.as_ref()?.position)?;
+                Some(300 + i)
+            })
+    }
+
+    pub(super) fn visible_slots(&self) -> impl Iterator<Item = usize> + '_ {
+        (0..self.player_slots()).chain(self.visible_container_slots())
     }
 }
 
@@ -2624,13 +2659,13 @@ impl Game<'_> {
     }
     /// A data slot of window `window`'s menu (`ContainerSetData`); false
     /// when no mod screen is showing for that window.
-    pub(super) fn native_screen_data(&mut self, window: i32, id: i16, value: i16) -> bool {
+    pub(super) fn native_screen_data(&mut self, window: i32, index: usize, value: i32) -> bool {
         if self.shown_native_screen().is_none() {
             return false;
         }
         self.mod_screen
             .as_mut()
-            .is_some_and(|s| s.set_data(window, id, value))
+            .is_some_and(|s| s.set_data(window, index, value))
     }
     /// Where the open mod screen puts container slot `slot` this frame: where
     /// a mod last moved it, else where the screen declared it; None once a mod
@@ -2682,30 +2717,10 @@ impl Game<'_> {
     }
     /// The container slots the open mod screen shows this frame (300.. ids).
     pub(super) fn native_screen_slots(&self) -> Option<Vec<usize>> {
-        let s = self.shown_native_screen()?;
-        let shown = s.screen.slots.iter().enumerate();
         Some(
-            shown
-                .filter(|(i, p)| {
-                    p.as_ref()
-                        .is_some_and(|p| s.slot_moves.position(*i, p.position).is_some())
-                })
-                .map(|(i, _)| 300 + i)
+            self.shown_native_screen()?
+                .visible_container_slots()
                 .collect(),
-        )
-    }
-    /// How many of those slots `native_screen_slots` lists, without building
-    /// it (`Game::slot_count` asks every frame).
-    pub(super) fn native_screen_slot_count(&self) -> Option<usize> {
-        let s = self.shown_native_screen()?;
-        let shown = s.screen.slots.iter().enumerate();
-        Some(
-            shown
-                .filter(|(i, p)| {
-                    p.as_ref()
-                        .is_some_and(|p| s.slot_moves.position(*i, p.position).is_some())
-                })
-                .count(),
         )
     }
     /// The first row of the player's inventory on the open mod screen.
@@ -2739,8 +2754,7 @@ impl Game<'_> {
                 h - 2.0,
                 rgba(198, 198, 198, 255),
             );
-            let container = self.native_screen_slots().unwrap_or_default();
-            for i in (0..36).chain(container) {
+            for i in s.visible_slots() {
                 let (x, y) = self.slot_position(i);
                 let (x, y) = (ox + x - 1.0, oy + y - 1.0);
                 batch.fill(atlas, x, y, 18.0, 18.0, rgba(55, 55, 55, 255));
@@ -2785,12 +2799,14 @@ impl Game<'_> {
             let [x, y] = s.screen.title_label.unwrap_or([8.0, 6.0]);
             batch.text_styled(atlas, &title, ox + x, oy + y, grey, false);
         }
-        let inventory = self.translate_with_fallback("container.inventory", "Inventory");
-        let [x, y] = s
-            .screen
-            .inventory_label
-            .unwrap_or([8.0, s.screen.height - 94.0]);
-        batch.text(atlas, &inventory, ox + x, oy + y, grey, false);
+        if s.player_slots() != 0 {
+            let inventory = self.translate_with_fallback("container.inventory", "Inventory");
+            let [x, y] = s
+                .screen
+                .inventory_label
+                .unwrap_or([8.0, s.screen.height - 94.0]);
+            batch.text(atlas, &inventory, ox + x, oy + y, grey, false);
+        }
         true
     }
     /// Puts back a mod block entity taken out for a call, unless the call

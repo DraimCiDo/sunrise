@@ -27,6 +27,7 @@ fn empty_slot_draws_icon_but_a_filled_slot_does_not() {
                     })],
                     ..Default::default()
                 },
+                mod_type: None,
                 data: Vec::new(),
                 extra: None,
             });

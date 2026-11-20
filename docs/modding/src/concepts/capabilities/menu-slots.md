@@ -374,7 +374,7 @@ changes nothing and says why with a `MenuSlotBackRefusal`:
 - `PlaceUnresolved { index }`: `places[index]` names no storage now.
 
 ```rust,ignore
-let window = player.open_mod_menu(host, backpack_menu, title, Vec::new(), None, MenuReplace::CloseFirst)?;
+let window = player.open_mod_menu(host, backpack_menu, title, Vec::new(), Vec::new(), None, MenuReplace::CloseFirst)?;
 if let Some(window) = window {
     let places = (0..27).map(|slot| MenuSlotPlace::HeldItem { hand: Hand::Main, slot }).collect();
     if let Err(refusal) = player.back_mod_menu_slots(host, window, places) {

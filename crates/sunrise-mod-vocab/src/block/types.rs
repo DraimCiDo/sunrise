@@ -7,13 +7,6 @@ use crate::*;
 // exhaustive: its field is private, so only registration creates a key
 pub struct BlockKey(pub(crate) u32);
 
-/// A block state as the game's state table numbers it (`Block.BLOCK_STATE_REGISTRY`'s id): what
-/// worldgen providers and fluid queries answer. Valid for the running game only; never save it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-// exhaustive: a state id is its number
-#[derive(sunrise_mod_api_macros::Wire)]
-pub struct BlockStateId(pub u32);
-
 /// A block entity type requested at registration. Its slot remains stable for the process.
 // no wire: decoding validates the u32 slot with BlockEntityTypeKey::from_slot on the host.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

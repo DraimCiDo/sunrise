@@ -320,8 +320,9 @@ mod tests {
             "kept names stay"
         );
     }
+    use sunrise_core::vanilla_bytes::Writer;
     use sunrise_protocol::{
-        buf::{Codec, Reader, Writer},
+        buf::{Codec, Reader},
         packets::play::CommandNode,
     };
 

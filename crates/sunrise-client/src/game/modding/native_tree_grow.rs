@@ -89,9 +89,7 @@ impl RandomSource for Random<'_> {
 mod tests {
     use super::*;
     use crate::game::api_values::{block_state, resolve_block_definitions};
-    use mod_api::{
-        BlockKey, BlockPart, BlockStateRecord, Hooks, ModEntry, Mods, OnTreeGrowEvent, WorldgenHost,
-    };
+    use mod_api::{BlockKey, BlockPart, Hooks, ModEntry, Mods, OnTreeGrowEvent, WorldgenHost};
     use std::collections::{BTreeMap, HashMap};
     use std::sync::{Arc, Mutex, PoisonError};
     use sunrise_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
@@ -155,7 +153,9 @@ mod tests {
             event: &mut OnTreeGrowEvent<'_>,
         ) -> Option<Option<BlockState>> {
             event.random.next_int_bound(4);
-            Some(Some(BlockStateRecord::new(self.0, 0).into()))
+            Some(Some(mod_api::__private::block_state_from_ordinal(
+                self.0, 0,
+            )))
         }
     }
     struct Soil;
@@ -299,7 +299,7 @@ mod tests {
         let index = block_state::current().unwrap();
         let grass = index.to_api(GRASS).unwrap();
         let coarse = index.to_api(COARSE_DIRT).unwrap();
-        let missing = BlockStateRecord::new(coarse.block(), u16::MAX).into();
+        let missing = mod_api::__private::block_state_from_ordinal(coarse.block(), u16::MAX);
         assert_eq!(placed(&index, grass, Some(missing)), None);
         assert_eq!(placed(&index, grass, None), Some(None));
         assert_eq!(placed(&index, grass, Some(coarse)), Some(Some(COARSE_DIRT)));

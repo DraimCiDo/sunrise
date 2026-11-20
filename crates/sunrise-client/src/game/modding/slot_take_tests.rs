@@ -222,7 +222,9 @@ impl Hooks for TakeMod {
 fn pot_type(slots: usize, crafting: Option<ModCrafting>) -> &'static ModMenuType {
     Box::leak(Box::new(ModMenuType {
         id: MENU,
+        owner: "take",
         slots,
+        player_inventory: true,
         data_slots: 0,
         results: vec![RESULT],
         inputs: Vec::new(),

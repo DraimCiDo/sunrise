@@ -125,7 +125,7 @@ impl Game<'_> {
             .as_ref()
             .and_then(|host| host.hub.guest(conn))
             .is_none_or(|g| g.dead)
-            || !self.guest_may_open(conn, MENU, None)
+            || self.guest_may_open(conn, MENU, None) != Some(true)
         {
             return false;
         }

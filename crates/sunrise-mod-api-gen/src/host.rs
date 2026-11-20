@@ -485,9 +485,17 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                     ) {
                         return Err(format!("{name}: unknown access level {level}"));
                     }
-                    let read_stack = entry.attrs.iter().any(|a| a.path().is_ident("read_stack"));
-                    let (setup, args, checked_write) =
-                        boundary_arguments(&entry.sig, name, read_stack)?;
+                    let keeps_api_inputs = entry
+                        .attrs
+                        .iter()
+                        .any(|a| a.path().is_ident("forward_api_inputs"));
+                    let (setup, args, checked_write) = if keeps_api_inputs {
+                        (String::new(), signature_args(&entry.sig, name)?, false)
+                    } else {
+                        let read_stack =
+                            entry.attrs.iter().any(|a| a.path().is_ident("read_stack"));
+                        boundary_arguments(&entry.sig, name, read_stack)?
+                    };
                     let static_call = entry.attrs.iter().any(|a| a.path().is_ident("static_call"));
                     let view_args = args.clone();
                     let args = if static_call {
@@ -506,14 +514,16 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                     } else {
                         format!("{target}::{name}({args})")
                     };
-                    let crosses_output = match &entry.sig.output {
-                        syn::ReturnType::Type(_, ty) => boundary_value(ty),
-                        syn::ReturnType::Default => false,
+                    let keeps_api_output = entry
+                        .attrs
+                        .iter()
+                        .any(|a| a.path().is_ident("forward_api_output"));
+                    let converted_output = match &entry.sig.output {
+                        syn::ReturnType::Type(_, ty) if !keeps_api_output => Some(ty.as_ref()),
+                        _ => None,
                     };
-                    let text_output = match &entry.sig.output {
-                        syn::ReturnType::Type(_, ty) => text_value(ty),
-                        syn::ReturnType::Default => false,
-                    };
+                    let crosses_output = converted_output.is_some_and(boundary_value);
+                    let text_output = converted_output.is_some_and(text_value);
                     let text_result = result_error(&entry.sig.output)
                         .is_some_and(|error| outer_type(error, "TextFormError"));
                     let call = if text_output {
@@ -528,9 +538,10 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                         // Writes with converted Text arguments call an infallible engine
                         // body. Read backends return Result so converting API-owned
                         // aggregate fields can refuse without losing a boundary error.
-                        let text_input = entry.sig.inputs.iter().any(
-                            |arg| matches!(arg, syn::FnArg::Typed(arg) if text_value(&arg.ty)),
-                        );
+                        let text_input = !keeps_api_inputs
+                            && entry.sig.inputs.iter().any(
+                                |arg| matches!(arg, syn::FnArg::Typed(arg) if text_value(&arg.ty)),
+                            );
                         let read = entry
                             .sig
                             .receiver()

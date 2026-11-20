@@ -3,9 +3,9 @@
 //! reads the same facts in a level callback as through a `Host`.
 use super::{Game, PackResources, Resources, WorldRest, api_values::TryIntoEngine};
 use mod_api::{
-    BlockKey, BlockSoundType, BlockStateRange, BlockStateRecord, FluidDefinition, FluidKey,
-    FluidState, FluidStateError, FluidTypeProperties, StateConstraint, StateMatchError,
-    StateProperty, WeatheringAge,
+    BlockKey, BlockSoundType, BlockState, BlockStateRange, FluidDefinition, FluidKey, FluidState,
+    FluidStateError, FluidTypeProperties, StateConstraint, StateMatchError, StateProperty,
+    WeatheringAge,
 };
 use sunrise_client::items::ItemStack;
 use sunrise_world::fluid::FluidKind;
@@ -98,14 +98,10 @@ impl<'a> BlockTables<'a> {
     /// `FluidState.createLegacyBlock` for `state`, through the one table the engine converts
     /// fluid states with. None for a state no fluid can be in: no world form, an amount above
     /// 8, a zero amount for anything but the empty fluid, or a source that isn't full.
-    pub(in crate::game) fn fluid_legacy_block(
-        &self,
-        state: FluidState,
-    ) -> Option<mod_api::BlockStateId> {
+    /// The host forwarder converts this engine ID through the checked block-state index.
+    pub(in crate::game) fn fluid_legacy_block(&self, state: FluidState) -> Option<BlockStateId> {
         let engine = super::native_block_states::engine_fluid_state(state)?;
-        Some(mod_api::BlockStateId(
-            self.res.behaviours().legacy_block(engine).0,
-        ))
+        Some(self.res.behaviours().legacy_block(engine))
     }
 
     /// Validate fluid constraints against the exported property definition.
@@ -141,18 +137,12 @@ impl<'a> BlockTables<'a> {
         Ok(())
     }
 
-    /// Convert the canonical ordinal before reading the published weathering tables.
-    fn weathering_state(&self, state: BlockStateRecord) -> Option<(&WorldRest, BlockStateId)> {
-        Some((
-            self.res.rest.get()?,
-            mod_api::BlockState::from(state).try_into_engine(&()).ok()?,
-        ))
+    /// Require published weathering tables before resolving the API state to its engine ID.
+    fn weathering_state(&self, state: BlockState) -> Option<(&WorldRest, BlockStateId)> {
+        Some((self.res.rest.get()?, state.try_into_engine(&()).ok()?))
     }
 
-    pub(in crate::game) fn block_weathering_age(
-        &self,
-        state: BlockStateRecord,
-    ) -> Option<WeatheringAge> {
+    pub(in crate::game) fn block_weathering_age(&self, state: BlockState) -> Option<WeatheringAge> {
         let (rest, state) = self.weathering_state(state)?;
         Some(match rest.behaviours.weathering_age(state)? {
             0 => WeatheringAge::Unaffected,
@@ -165,7 +155,7 @@ impl<'a> BlockTables<'a> {
 
     pub(in crate::game) fn block_next_weathering_stage(
         &self,
-        state: BlockStateRecord,
+        state: BlockState,
     ) -> Option<BlockStateId> {
         let (rest, state) = self.weathering_state(state)?;
         rest.behaviours.weathering_next(state)
@@ -173,24 +163,18 @@ impl<'a> BlockTables<'a> {
 
     pub(in crate::game) fn block_previous_weathering_stage(
         &self,
-        state: BlockStateRecord,
+        state: BlockState,
     ) -> Option<BlockStateId> {
         let (rest, state) = self.weathering_state(state)?;
         rest.behaviours.weathering_previous(state)
     }
 
-    pub(in crate::game) fn block_state_waxed(
-        &self,
-        state: BlockStateRecord,
-    ) -> Option<BlockStateId> {
+    pub(in crate::game) fn block_state_waxed(&self, state: BlockState) -> Option<BlockStateId> {
         let (_, state) = self.weathering_state(state)?;
         self.honeycomb_waxed(state)
     }
 
-    pub(in crate::game) fn block_state_unwaxed(
-        &self,
-        state: BlockStateRecord,
-    ) -> Option<BlockStateId> {
+    pub(in crate::game) fn block_state_unwaxed(&self, state: BlockState) -> Option<BlockStateId> {
         let (rest, state) = self.weathering_state(state)?;
         if let Some(unwaxed) = rest.behaviours.mapped_unwaxed(state) {
             return Some(unwaxed);
@@ -372,17 +356,17 @@ impl<'a> BlockTables<'a> {
     }
     pub(in crate::game) fn block_metadata_property(
         &self,
-        state: mod_api::BlockStateRecord,
+        state: BlockState,
         name: &str,
     ) -> Result<Option<&'static str>, mod_api::BlockStateError> {
         mod_api::BlockMetadata::property(super::api_values::block_metadata_table()?, state, name)
     }
     pub(in crate::game) fn block_metadata_with(
         &self,
-        state: mod_api::BlockStateRecord,
+        state: BlockState,
         name: &str,
         value: &str,
-    ) -> Result<mod_api::BlockStateRecord, mod_api::BlockStateError> {
+    ) -> Result<BlockState, mod_api::BlockStateError> {
         mod_api::BlockMetadata::with(
             super::api_values::block_metadata_table()?,
             state,
@@ -394,7 +378,7 @@ impl<'a> BlockTables<'a> {
         &self,
         block: mod_api::BlockKey,
         properties: &[mod_api::StateConstraint],
-    ) -> Result<mod_api::BlockStateRecord, mod_api::BlockStateError> {
+    ) -> Result<BlockState, mod_api::BlockStateError> {
         mod_api::BlockMetadata::of(
             super::api_values::block_metadata_table()?,
             block,

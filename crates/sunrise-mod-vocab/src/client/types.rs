@@ -105,9 +105,9 @@ pub enum MappingError {
 ///
 /// Fields beyond the type id are exposed only for custom payloads. This is
 /// plain mod API data, not the game's decoded protocol enum.
+// no wire: this is a local envelope for already-encoded vanilla packet bytes.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
-#[derive(sunrise_mod_api_macros::Wire)]
 pub struct ClientPacket {
     /// The protocol type, such as `minecraft:ping` or `minecraft:custom_payload`.
     /// An id outside the protocol's packet table is reported as `sunrise:unknown`.

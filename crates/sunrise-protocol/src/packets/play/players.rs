@@ -4,11 +4,12 @@
 use super::ChatTypeBound;
 use crate::{
     Result,
-    buf::{Byte, BytesN, Codec, List, Long, Nbt, Opt, Reader, Str, StrN, Uuid, VarInt, Writer},
+    buf::{Byte, BytesN, Codec, List, Long, Nbt, Opt, Reader, Str, StrN, Uuid, VarInt},
     packet,
     packets::login::Property,
 };
 use sunrise_core::nbt::Tag;
+use sunrise_core::vanilla_bytes::Writer;
 
 /// MessageSignature.Packed: an index into the last-seen cache or a full signature.
 pub struct PackedSignature;

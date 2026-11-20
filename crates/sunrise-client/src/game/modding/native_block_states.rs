@@ -551,49 +551,45 @@ mod tests {
     #[test]
     #[ignore = "daily"]
     fn legacy_blocks_follow_the_liquid_levels() {
-        use mod_api::{Host, HostFluidStates};
+        use mod_api::{BlockMetadata, Host, HostBlockStates, HostFluidStates};
         super::super::native_entity_refs::tests::with_game(|game| {
             let host: &dyn Host = game;
             let service = host.fluid_states();
-            // A mod may edit the copy it is given, so any amount and source flag can reach the
-            // service: start from the engine's state and overwrite them.
+            let metadata = host.block_states();
             let state = |id: &str, amount, falling, source| {
-                let kind = FluidKind::from_name(id).unwrap_or(FluidKind::Water);
-                let _ = EngineFluidState::new(kind, 1, falling);
-                let mut state =
-                    mod_api::__private::fluid_state(host.fluid_key(id).unwrap(), 1, falling, false);
-                (state.amount, state.source) = (amount, source);
-                state
+                mod_api::__private::fluid_state(
+                    host.fluid_key(id).unwrap(),
+                    amount,
+                    falling,
+                    source,
+                )
             };
             let block = |state: FluidState| {
-                let id = service.legacy_block(state)?;
-                game.pack.assets.registry.state(BlockStateId(id.0)).cloned()
-            };
-            let liquid = |name: &str, level: &str| {
-                Some(BlockState {
-                    name: name.into(),
-                    properties: [("level".to_owned(), level.to_owned())].into(),
-                })
+                let state = service.legacy_block(state)?;
+                Some((
+                    metadata.name(state.block()).unwrap(),
+                    state.property(&metadata, "level").unwrap(),
+                ))
             };
             assert_eq!(
                 block(state("minecraft:water", 8, false, true)),
-                liquid("minecraft:water", "0")
+                Some(("minecraft:water", Some("0")))
             );
             assert_eq!(
                 block(state("minecraft:flowing_water", 3, false, false)),
-                liquid("minecraft:water", "5")
+                Some(("minecraft:water", Some("5")))
             );
             assert_eq!(
                 block(state("minecraft:flowing_lava", 3, true, false)),
-                liquid("minecraft:lava", "13")
+                Some(("minecraft:lava", Some("13")))
             );
             assert_eq!(
                 block(state("minecraft:flowing_water", 1, false, false)),
-                liquid("minecraft:water", "7")
+                Some(("minecraft:water", Some("7")))
             );
             assert_eq!(
-                block(state("minecraft:empty", 0, false, false)).map(|s| s.name),
-                Some("minecraft:air".into())
+                block(state("minecraft:empty", 0, false, false)),
+                Some(("minecraft:air", None))
             );
             for refused in [
                 state("minecraft:flowing_water", 9, false, false),
@@ -835,7 +831,7 @@ mod tests {
 #[cfg(test)]
 mod facts_tests {
     use crate::game::api_values::TryIntoApi;
-    use mod_api::{BlockStateRecord, HostBlockStates};
+    use mod_api::HostBlockStates;
 
     #[test]
     #[ignore = "daily"]
@@ -870,7 +866,7 @@ mod facts_tests {
             assert_eq!(facts.unwaxed(waxed), Some(exposed));
             assert_eq!(facts.unwaxed(exposed), None);
 
-            let invalid = BlockStateRecord::new(exposed.block(), u16::MAX).into();
+            let invalid = mod_api::__private::block_state_from_ordinal(exposed.block(), u16::MAX);
             assert_eq!(facts.weathering_age(invalid), None);
             assert_eq!(facts.next_weathering_stage(invalid), None);
             assert_eq!(facts.waxed(invalid), None);
@@ -974,7 +970,7 @@ mod facts_tests {
                 Some((stone, 1))
             );
             // A forged local ordinal refuses at the generated Game crossing.
-            let invalid = BlockStateRecord::new(stone.block(), u16::MAX).into();
+            let invalid = mod_api::__private::block_state_from_ordinal(stone.block(), u16::MAX);
             assert_eq!(facts.destroy_speed(invalid), None);
             assert_eq!(facts.sound(invalid), None);
         });

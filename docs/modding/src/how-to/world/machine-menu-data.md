@@ -248,15 +248,37 @@ or changing levels stops every sound. Add particles from the same tick with `hos
 unconnected/wrong-level player, and `Err(BlockEntityError::Stale)` means the entity
 does not resolve. It never opens a replacement through an old handle.
 
-To open a content mod menu type with no block (a backpack item's use, an entity, a command),
-call `player.open_mod_menu(host, menu, title, extra, pos, replace)` (NeoForge's
+## Blockless status menus
+
+To open a content mod menu type with no block (from an item, an entity or a command),
+call `player.open_mod_menu(host, menu, title, extra, data, pos, replace)` (NeoForge's
 `openMenu(provider, extraDataWriter)`). `menu` is the type's `MenuKey`. `extra`, at most
-32 KiB, is what the client's `host.screen_extra_data()` returns while the screen is open. `pos`, when given, is what `screen_pos()` returns; otherwise it returns
-`None`. The type's container slots show empty, and their clicks reach `native_menu_clicked`,
-as `open_menu`'s do. It returns the window id, or `Ok(None)` when a mod cancelled the open.
-It refuses with an `OpenMenuError`: `NotModMenu`, `PlayerUnavailable` (stale, fake, or a
-vanilla client), `TooLarge`, or `Title` when the title could not cross; a cancelled or
-refused open closes nothing.
+32 KiB, is one-time context available through the client's `host.screen_extra_data()`;
+`pos` is an optional hint returned by `screen_pos()`. Neither is live data or block backing.
+The menu's declared container slots, if any, start empty. Opening returns the window id or
+`Ok(None)` when vetoed. Invalid type, connection or client support, opening bytes, data count or
+title returns `OpenMenuError`. Neither a refused nor a cancelled open closes the old menu.
+
+For a slotless status screen, declare `data/mymod/sunrise/menu/status.json` as
+`{ "slots": 0, "player_inventory": false, "data_slots": 2 }` and attach a `MenuPart`
+to `mymod:status`. Open it with two signed values, in index order:
+
+```rust,ignore
+player.open_mod_menu(
+    host, status, Text::translate("mymod.status", vec![]),
+    vec![], vec![-80_000, 7], None, MenuReplace::CloseFirst,
+)?;
+```
+
+The initial values are sent after the new window opens. In `screen_draw`, read
+`event.data.get(index)`; the values are not available before they arrive. The owning mod
+gets the live `MenuRef` from `player.container_menu(host)` or the open event and calls, for
+example, `menu.set_data_slot(host, 0, 120_000)?`. It returns `true` for a changed value,
+`false` for a repeat, and refuses unsupported, stale or foreign menus and undeclared indices.
+Updates go only to this player and this window. Within a transaction, another write sees the
+pending value, but a full resend only includes committed values. Commit sends the final changed
+values and abort discards pending writes. Closing or replacing the menu discards its data.
+Buttons and validity still use `menu_button` and `menu_still_valid`; neither needs a slot.
 
 The menu the player had open closes on the server first, as a close does: its `removed`, one
 `player_container_close`, and the cursor stack and crafting grids back to the inventory. Then

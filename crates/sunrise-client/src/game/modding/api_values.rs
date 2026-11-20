@@ -93,7 +93,7 @@ pub(crate) fn default_state(
 ) -> Option<sunrise_world::registry::BlockStateId> {
     use mod_api::BlockMetadata;
     let metadata = mod_api::__private::block_definitions()?;
-    let value = mod_api::BlockState::from(metadata.of(block, &[]).ok()?);
+    let value = metadata.of(block, &[]).ok()?;
     block_state::current().ok()?.to_engine(value).ok()
 }
 
@@ -1504,8 +1504,9 @@ mod attribute_boundary_tests {
     fn a_servers_stack_takes_the_mods_answer_on_first_equip() {
         use std::sync::Arc;
         use sunrise_client::living_attributes::LivingAttributes;
+        use sunrise_core::vanilla_bytes::Writer;
         use sunrise_items::equipment::{CHEST, Equipment};
-        use sunrise_protocol::buf::{Codec, Reader, Writer};
+        use sunrise_protocol::buf::{Codec, Reader};
         use sunrise_protocol::item::{Slot, component};
         use sunrise_protocol::registry::{Builtin, Dynamic, Ids};
         use sunrise_world::{attribute_map::ValueKind, attributes::entity::Catalog};

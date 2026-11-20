@@ -1095,10 +1095,10 @@ impl Game<'_> {
     /// Draw the screen of mod menu type `menu` (`block` as in
     /// `native_screen`) at `origin` (its top left, GUI pixels),
     /// over a plain panel with its slots' frames and under the items and
-    /// labels, from the menu's data slots `data` (the block entity's `data`
-    /// on the server): data slots are 16-bit on the wire as in vanilla (a
-    /// bigger value wraps), and `data` is empty until the server's first
-    /// values arrive, so read it with `get`. Draw with `native_sprite`, `native_fill` and
+    /// labels, from the menu's data slots `data`. Block-backed data is 16-bit
+    /// on the wire as in vanilla; blockless mod-menu data preserves full `i32`
+    /// values. `data` is empty until the first values arrive; read with `get`.
+    /// Draw with `native_sprite`, `native_fill` and
     /// `native_text`.
     pub(in crate::game) fn native_screen_draw(&self, call: mod_api::__private::ScreenDrawCall<'_>) {
         self.fire_screen_draw(call);
@@ -1472,7 +1472,7 @@ impl Game<'_> {
     /// The player's state is swapped in for the call, as for
     /// `native_run_mod_command`, so `native_acting_player`, `native_tell` and
     /// the item helpers reach them. Not heard: a menu a mod opens
-    /// (`open_menu`), the inventory screen, and the editors (sign,
+    /// (`open_menu`, unlike `open_mod_menu`), the inventory screen, and the editors (sign,
     /// book, command block). Server-side, for every player of the world.
     pub(in crate::game) fn native_container_opened(
         &mut self,

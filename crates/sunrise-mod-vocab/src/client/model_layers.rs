@@ -367,8 +367,6 @@ struct PartNode {
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 #[serde(try_from = "MeshDefinitionData")]
 // exhaustive: private fields; use the builder to create the tree
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(via = String)]
 pub struct MeshDefinition {
     parts: Vec<PartNode>,
 }

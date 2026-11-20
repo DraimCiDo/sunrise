@@ -177,12 +177,6 @@
       "canonical_path": "crate::world::criteria::CriterionTestError"
     },
     {
-      "name": "DataLoadOrigin",
-      "path": "crate::world::phase::DataLoadOrigin",
-      "hash": "62bed09fc036dc1a",
-      "canonical_path": "crate::world::phase::DataLoadOrigin"
-    },
-    {
       "name": "DataMapError",
       "path": "crate::world::data_maps::DataMapError",
       "hash": "3c338ccd2a00316e",
@@ -448,22 +442,10 @@
       "canonical_path": "crate::world::types::LightLayer"
     },
     {
-      "name": "LoadAccess",
-      "path": "crate::world::phase::LoadAccess",
-      "hash": "37e043538dddbbc7",
-      "canonical_path": "crate::world::phase::LoadAccess"
-    },
-    {
       "name": "LogicalSide",
       "path": "crate::item::menu::LogicalSide",
       "hash": "159ff71dd6275675",
       "canonical_path": "crate::item::menu::LogicalSide"
-    },
-    {
-      "name": "LoopSide",
-      "path": "crate::world::phase::LoopSide",
-      "hash": "803b4f3ff2293bb8",
-      "canonical_path": "crate::world::phase::LoopSide"
     },
     {
       "name": "MainHand",
@@ -494,12 +476,6 @@
       "path": "crate::world::types::MobCategory",
       "hash": "663292b422d610b3",
       "canonical_path": "crate::world::types::MobCategory"
-    },
-    {
-      "name": "ModPhase",
-      "path": "crate::world::phase::ModPhase",
-      "hash": "21ca5a351846af43",
-      "canonical_path": "crate::world::phase::ModPhase"
     },
     {
       "name": "ModelError",
@@ -548,12 +524,6 @@
       "path": "crate::client::pack_finders::PackType",
       "hash": "bd912057dc38cc2a",
       "canonical_path": "crate::client::pack_finders::PackType"
-    },
-    {
-      "name": "PackageKind",
-      "path": "crate::world::phase::PackageKind",
-      "hash": "b7d360283d1348c5",
-      "canonical_path": "crate::world::phase::PackageKind"
     },
     {
       "name": "ParticleBlend",
@@ -897,7 +867,12 @@
     "crate::content::payloads::PayloadDirection",
     "crate::content::payloads::PayloadPhase",
     "crate::content::payloads::PeerPolicy",
-    "crate::item::item_stack::StackError"
+    "crate::item::item_stack::StackError",
+    "crate::world::phase::DataLoadOrigin",
+    "crate::world::phase::LoadAccess",
+    "crate::world::phase::LoopSide",
+    "crate::world::phase::ModPhase",
+    "crate::world::phase::PackageKind"
   ],
   "manual_contract_changes": {
     "AttachmentError": {

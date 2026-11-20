@@ -11,6 +11,7 @@ fn mod_screen_data_is_its_windows_only() {
         menu: "gtmod:menu".into(),
         block: Some("gtmod:machine".into()),
         screen: mod_api::Screen::default(),
+        mod_type: None,
         data: Vec::new(),
         extra: None,
     };

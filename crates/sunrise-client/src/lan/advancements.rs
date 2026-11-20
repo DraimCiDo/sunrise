@@ -13,7 +13,8 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     path::Path,
 };
-use sunrise_protocol::buf::{Codec, Writer};
+use sunrise_core::vanilla_bytes::Writer;
+use sunrise_protocol::buf::Codec;
 
 #[derive(Clone)]
 pub struct ServerAdvancements {

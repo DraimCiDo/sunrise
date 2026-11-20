@@ -48,6 +48,7 @@ pub mod ticks;
 pub mod trading;
 pub mod use_animation;
 pub mod uuid;
+pub mod vanilla_bytes;
 pub mod version;
 
 pub use level_key::LevelKey;

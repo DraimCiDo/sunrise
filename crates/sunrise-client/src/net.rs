@@ -446,8 +446,9 @@ impl Session {
         packet: mod_api::ServerboundPlayPacket,
     ) -> std::result::Result<PreparedPacket, mod_api::SendPacketError> {
         use mod_api::SendPacketError;
+        use sunrise_core::vanilla_bytes::Writer;
         use sunrise_protocol::{
-            buf::{Codec, Ident, Reader, Writer},
+            buf::{Codec, Ident, Reader},
             packets::custom_payload,
         };
         let id = match packet.id.namespace() {
@@ -1356,8 +1357,10 @@ fn configure(
                 reply(crate::viewed_levels_net::answer(&p.data).map_err(Reason::plain)?)?
             }
             cfg::Clientbound::CustomPayload(p) if crate::menu_extra_net::asked(&p) => {
-                reply(crate::menu_extra_net::answer(&p.data).map_err(Reason::plain)?)?;
-                registries.menu_extra_revision = sunrise_protocol::menu_extra::REVISION;
+                let (revision, answer) =
+                    crate::menu_extra_net::answer(&p.data).map_err(Reason::plain)?;
+                reply(answer)?;
+                registries.menu_extra_revision = revision;
             }
             cfg::Clientbound::CustomPayload(p) if p.channel == crate::datapack_net::CHANNEL => {
                 crate::datapack_net::accept_chunk(&p.data).map_err(Reason::plain)?;
@@ -1395,7 +1398,7 @@ fn configure(
                                 .map_err(|error| Reason::plain(error.to_string()))?,
                         }))?;
                     }
-                    let mut w = sunrise_protocol::buf::Writer::new();
+                    let mut w = ::sunrise_core::vanilla_bytes::Writer::new();
                     w.string("sunrise");
                     reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
                         channel: "minecraft:brand".into(),
@@ -1555,7 +1558,7 @@ fn send_identity(
     c: &mut Connection,
     identity: &sunrise_hooks::ClientIdentity,
 ) -> Result<(), sunrise_protocol::Error> {
-    let mut brand = sunrise_protocol::buf::Writer::new();
+    let mut brand = ::sunrise_core::vanilla_bytes::Writer::new();
     brand.string(&identity.brand);
     let brand = ("minecraft:brand", brand.data);
     for (channel, data) in std::iter::once(brand).chain(
@@ -1813,7 +1816,7 @@ mod tests {
                 )
             });
             let mut server = Connection::local(server);
-            let mut brand = sunrise_protocol::buf::Writer::new();
+            let mut brand = ::sunrise_core::vanilla_bytes::Writer::new();
             brand.string("sunrise");
             server
                 .send(
@@ -1881,7 +1884,7 @@ mod tests {
                     )
                 });
                 let mut server = Connection::local(server);
-                let mut brand = sunrise_protocol::buf::Writer::new();
+                let mut brand = ::sunrise_core::vanilla_bytes::Writer::new();
                 brand.string("vanilla");
                 let mut to_client = vec![cfg::Clientbound::CustomPayload(cfg::CustomPayload {
                     channel: "minecraft:brand".into(),
@@ -2045,7 +2048,7 @@ mod tests {
                 cfg::Serverbound::Pong(cfg::Ping { id: 17 }),
                 "an unidentified server received a mod announcement"
             );
-            let mut brand = sunrise_protocol::buf::Writer::new();
+            let mut brand = ::sunrise_core::vanilla_bytes::Writer::new();
             brand.string(server_brand);
             server
                 .send(
@@ -2657,7 +2660,7 @@ mod tests {
         for expected in [
             cfg::Serverbound::CustomPayload(cfg::CustomPayload {
                 channel: "sunrise:menu_extra".into(),
-                data: sunrise_protocol::menu_extra::answer(),
+                data: sunrise_protocol::menu_extra::answer(sunrise_protocol::menu_extra::REVISION),
             }),
             cfg::Serverbound::FinishConfiguration(Empty),
         ] {
@@ -3117,7 +3120,7 @@ mod tests {
     #[test]
     fn server_brand_payload_is_decoded_and_invalid_or_unrelated_payloads_are_ignored() {
         let (send, events) = event_channel();
-        let mut writer = sunrise_protocol::buf::Writer::new();
+        let mut writer = ::sunrise_core::vanilla_bytes::Writer::new();
         writer.string("vanilla");
         let mut payload = cfg::CustomPayload {
             channel: "minecraft:brand".into(),

@@ -1,6 +1,6 @@
 //! Read-only fluid-state definitions from the owning host's loaded registry.
 use crate::{
-    Backend, BackendRef, BlockStateId, FluidKey, FluidState, Host, StateConstraint, StateProperty,
+    Backend, BackendRef, BlockState, FluidKey, FluidState, Host, StateConstraint, StateProperty,
 };
 
 /// A registered fluid's world-state definition, or an identity used only in tanks.
@@ -108,12 +108,12 @@ impl FluidStates<'_> {
     pub fn type_properties(&self, fluid: FluidKey) -> Option<FluidTypeProperties> {
         self.backend?.fluid_type_properties(fluid)
     }
-    /// `FluidState.createLegacyBlock`: the block state that holds `state` in the world, a water
-    /// or lava block of the matching level, a mod's world fluid's block, or air for the empty
-    /// fluid. None for a state no fluid can be in (a tank-only fluid, an amount above 8, a zero
-    /// amount for anything but the empty fluid, a source that isn't full) and without a resolved
-    /// registry.
-    pub fn legacy_block(&self, state: FluidState) -> Option<BlockStateId> {
+    /// `FluidState.createLegacyBlock`: the canonical block state that holds `state` in the world.
+    /// A water or lava state keeps its level; a mod's world fluid uses its block, and the empty
+    /// fluid uses air. Returns `None` without a resolved registry or for a state no fluid can be
+    /// in (tank-only, an amount above 8, a zero amount for anything but empty, or a source that
+    /// isn't full).
+    pub fn legacy_block(&self, state: FluidState) -> Option<BlockState> {
         self.backend?.fluid_legacy_block(state)
     }
     /// Validate partial constraints in input order, without matching a particular state.

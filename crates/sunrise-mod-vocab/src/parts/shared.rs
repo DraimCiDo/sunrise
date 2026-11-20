@@ -662,8 +662,7 @@ mod lookup_context_tests {
             || {
                 super::super::install_input(super::super::installation::InstalledInput::default());
                 TEST_PART_LOOKUPS.set(0);
-                let state =
-                    crate::BlockState::from(crate::BlockStateRecord::new(crate::BlockKey(0), 0));
+                let state = crate::__private::block_state_from_ordinal(crate::BlockKey(0), 0);
                 let mut answer = false;
                 crate::dispatch_should_check_weak_power(
                     &Level,

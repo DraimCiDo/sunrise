@@ -1805,7 +1805,7 @@ mod tests {
             assert!(!write(
                 game,
                 [0, 64, 0],
-                mod_api::BlockStateRecord::new(api_stone.block(), u16::MAX).into(),
+                mod_api::__private::block_state_from_ordinal(api_stone.block(), u16::MAX),
                 flags
             ));
             assert_eq!(game.world.chunks.len(), chunks);

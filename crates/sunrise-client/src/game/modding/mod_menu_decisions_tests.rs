@@ -3,7 +3,7 @@
 //! hook is fired inside an action savepoint, its answer is validated once and applied once, and a
 //! refusal (stale, invalid, a failing listener) changes nothing and undoes every write the
 //! listener made. The fixtures need prepared resources.
-use crate::game::native_guest_turn_tests::with_guests;
+use crate::game::native_guest_turn_tests::{register_test_menu, with_guests};
 use mod_api::{
     BlockEntityPart, Flow, Hooks, ITEMS, ItemPlace, ItemResource, MenuButtonEvent,
     MenuClickedEvent, MenuQuickMoveEvent, MenuSlotTakeEvent, ModEntry, Mods, Registrar, ServerHost,
@@ -197,6 +197,7 @@ impl Hooks for Mod {
         let kind = r.block_entity_type("depot").blocks(&[]).build();
         r.block_entity_part(&kind, Part).unwrap();
         r.menu_part(DEPOT_MENU, Part);
+        r.menu_part(STATUS_MENU, Part);
     }
     fn menu_clicked(&self, host: &mut dyn ServerHost, event: &mut MenuClickedEvent) {
         DISPATCHES.set(DISPATCHES.get() + 1);
@@ -330,6 +331,7 @@ fn open_native_menu(game: &mut crate::game::Game<'_>) -> i32 {
         sent: Vec::new(),
         drag: None,
         sent_data: Vec::new(),
+        blockless_data: Vec::new(),
         hidden: Vec::new(),
         mod_type: None,
         registry_id: "test:native".into(),
@@ -616,7 +618,9 @@ fn a_handled_cross_block_move_commits_only_if_its_take_returns() {
         with_guests(|game| {
             let kind = Box::leak(Box::new(ModMenuType {
                 id: "minecraft:generic_9x1",
+                owner: "minecraft",
                 slots: 9,
+                player_inventory: true,
                 data_slots: 0,
                 results: Vec::new(),
                 inputs: Vec::new(),
@@ -682,6 +686,7 @@ fn a_replaced_block_entity_makes_an_admitted_quick_move_stale() {
 
 /// A content mod's menu type, the one the depot's container opens (`depot_container`).
 const DEPOT_MENU: &str = "movemod:depot_menu";
+const STATUS_MENU: &str = "movemod:status_menu";
 
 /// Makes the depot at `POS` a mod container whose menu is `DEPOT_MENU`, so `mod_menu_at(POS)`
 /// names it.
@@ -709,9 +714,67 @@ fn depot_container(game: &mut crate::game::Game<'_>) {
 
 #[test]
 #[ignore = "daily"]
+fn a_quick_move_cannot_reach_a_player_slot_omitted_from_the_menu() {
+    sunrise_client::containers::with_mod_menu_types(
+        [(
+            "minecraft:generic_9x1".into(),
+            "movemod".into(),
+            9,
+            0,
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+            false,
+        )],
+        || {
+            with_mod(|| {
+                with_guests(|game| {
+                    let window = open_depot(game);
+                    game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                        guest.inventory[9] = Some(ItemStack::new("minecraft:stone", 10));
+                    });
+                    script(Script {
+                        take: true,
+                        ..Script::default()
+                    });
+                    game.lan_guest_packet(12, container_click(window, 9, 1));
+                    assert_eq!(DISPATCHES.get(), 0);
+                    assert_eq!(inventory(game, 9), 10);
+                })
+            })
+        },
+    );
+}
+
+#[test]
+#[ignore = "daily"]
 fn a_code_opened_menus_button_reaches_a_blocks_menu_button_only_for_its_menu_type() {
-    let depot_menu = [(DEPOT_MENU.into(), 9, 0, Vec::new(), Vec::new(), None, None)];
-    sunrise_client::containers::with_mod_menu_types(depot_menu, || {
+    let menus = [
+        (
+            DEPOT_MENU.into(),
+            "movemod".into(),
+            9,
+            0,
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+            true,
+        ),
+        (
+            STATUS_MENU.into(),
+            "movemod".into(),
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+            false,
+        ),
+    ];
+    sunrise_client::containers::with_mod_menu_types(menus, || {
         with_mod(|| {
             with_guests(|game| {
                 let button = |game: &mut crate::game::Game<'_>, window, id| {
@@ -777,14 +840,30 @@ fn a_code_opened_menus_button_reaches_a_blocks_menu_button_only_for_its_menu_typ
                 );
                 assert_eq!(BUTTONS.get(), 2);
                 assert_eq!(BUTTON_ENTITIES.get(), 2);
-                // A code-opened native menu of this type routes by its live menu owner. The
-                // coincidental position is not entity backing; only Slots::Block lends an entity.
-                let window = open_native_menu(game);
+                // A slotless, code-opened menu routes by its live menu owner. A position hint
+                // does not lend an entity; only Slots::Block does.
                 game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
-                    let menu = guest.menu.as_mut().unwrap();
-                    menu.pos = Some(POS);
-                    menu.registry_id = DEPOT_MENU.into();
+                    guest.brand = "sunrise".into();
+                    guest.sender.menu_extra_rev = sunrise_protocol::menu_extra::LIVE_DATA_REVISION;
                 });
+                let player = game.player(12).unwrap();
+                let key = register_test_menu(game, STATUS_MENU);
+                let window = player
+                    .open_mod_menu(
+                        game,
+                        key,
+                        mod_api::Text::literal("Status"),
+                        vec![],
+                        vec![],
+                        Some([POS.0, POS.1, POS.2]),
+                        mod_api::MenuReplace::InPlace,
+                    )
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    player.container_menu(game).unwrap().slot_count(game),
+                    Some(0)
+                );
                 button(game, window, 3);
                 assert_eq!(
                     BUTTONS.get(),
@@ -819,7 +898,7 @@ fn a_code_opened_menus_button_reaches_a_blocks_menu_button_only_for_its_menu_typ
                     "another menu type reaches no block's menu_button"
                 );
                 game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
-                    guest.menu.as_mut().unwrap().registry_id = DEPOT_MENU.into();
+                    guest.menu.as_mut().unwrap().registry_id = STATUS_MENU.into();
                     guest.carried = Some(ItemStack::new("minecraft:diamond", 2));
                 });
                 SCRIPT.with(|script| {

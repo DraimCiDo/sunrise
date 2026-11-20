@@ -60,7 +60,7 @@ fn checked_records_have_declared_field_bytes() {
         (FluidStack::new(FluidKey::from_slot(0).unwrap(), 1),),
     );
     let block = BlockKey::from_slot(0).unwrap();
-    let state: BlockState = BlockStateRecord::new(block, 9).into();
+    let state: BlockState = crate::__private::block_state_from_ordinal(block, 9);
     fields(state, (block, 9u16));
     fields(BlockStateRange::new(state, 3).unwrap(), (state, 3u32));
     fields(
@@ -402,113 +402,7 @@ fn decode<T: Wire, F: Wire>(value: T) -> F {
 }
 
 #[test]
-fn registration_and_attribute_records_have_declared_field_bytes() {
-    fields(
-        PackageInfo::new(
-            "example".into(),
-            "1.2.3".into(),
-            PackageKind::Code,
-            Side::Both,
-            vec!["example".into()],
-            vec![PackageDependency::new(
-                "library".into(),
-                "^1".into(),
-                crate::DependencyKind::Optional,
-                crate::DependencyOrder::After,
-                crate::Side::Both,
-                None,
-                None,
-            )],
-        ),
-        (
-            "example".to_owned(),
-            "1.2.3".to_owned(),
-            PackageKind::Code,
-            Side::Both,
-            vec!["example".to_owned()],
-            // Nested tuples flatten into one field list.
-            (
-                vec![PackageDependency::new(
-                    "library".into(),
-                    "^1".into(),
-                    crate::DependencyKind::Optional,
-                    crate::DependencyOrder::After,
-                    crate::Side::Both,
-                    None,
-                    None,
-                )],
-                PackageDetails::default(),
-            ),
-        ),
-    );
-    fields(PropertyValue::Integer(3), (1u32, 3i64));
-    let dependency = PackageDependency::new(
-        "library".into(),
-        "^1".into(),
-        crate::DependencyKind::Optional,
-        crate::DependencyOrder::After,
-        crate::Side::Both,
-        None,
-        None,
-    );
-    fields(
-        dependency.clone(),
-        (
-            "library".to_owned(),
-            "^1".to_owned(),
-            crate::DependencyKind::Optional,
-            crate::DependencyOrder::After,
-            crate::Side::Both,
-            (None::<String>, None::<String>),
-        ),
-    );
-    // Independently check actual enum discriminants, not just a round trip
-    // through the same enum codec: Optional = 1, After = 0, Both = 1.
-    let mut bytes = Writer::new();
-    bytes.put(&dependency);
-    let raw = Reader::decode::<(
-        String,
-        String,
-        u32,
-        u32,
-        u32,
-        (Option<String>, Option<String>),
-    )>(bytes.bytes())
-    .unwrap();
-    assert_eq!(
-        raw,
-        (
-            "library".to_owned(),
-            "^1".to_owned(),
-            1u32,
-            0u32,
-            1u32,
-            (None::<String>, None::<String>)
-        )
-    );
-    let details = PackageDetails {
-        name: "Example".into(),
-        icon_path: Some("icon.png".into()),
-        properties: [("ratio".into(), PropertyValue::Float(0.5))].into(),
-        ..Default::default()
-    };
-    fields(
-        details.clone(),
-        (
-            (
-                "Example".to_owned(),
-                String::new(),
-                Vec::<String>::new(),
-                String::new(),
-                None::<String>,
-            ),
-            (
-                None::<String>,
-                Some("icon.png".to_owned()),
-                details.properties.clone(),
-            ),
-        ),
-    );
+fn spawner_and_attribute_records_have_declared_field_bytes() {
     let spawners = vec![
         SpawnerEntry::Builtin(SpawnerKind::Cat),
         SpawnerEntry::Mod(SpawnerKey::new("example:spawn").unwrap()),
@@ -686,8 +580,6 @@ fn newtype_widths_and_unit_enum_tags_match_their_encodings() {
     fields(crate::__private::biome_id(11), (11u32,));
     fields(crate::__private::mod_color_resolver(13), (13u32,));
     fields(BlockUpdateFlags(17), (17u32,));
-    fields(PackageKind::Code, (0u32,));
-    fields(Side::Both, (1u32,));
     fields(Reduction::Armor, (1u8,));
     fields(SpawnerKind::Patrol, (1u32,));
     fields(Direction::North, (2u32,));
@@ -831,7 +723,7 @@ fn every_direction_and_equipment_case_has_declared_tag_type() {
 }
 
 #[test]
-fn every_reduction_spawner_package_and_neighbour_case_has_declared_tag_type() {
+fn reduction_spawner_side_dimension_and_neighbour_cases_keep_their_tags() {
     for (value, tag) in [
         (Reduction::Invulnerability, 0u8),
         (Reduction::Armor, 1),
@@ -851,10 +743,9 @@ fn every_reduction_spawner_package_and_neighbour_case_has_declared_tag_type() {
     ] {
         fields(value, (tag,));
     }
-    fields(PackageKind::Code, (0u32,));
-    fields(PackageKind::Content, (1u32,));
     fields(Side::Client, (0u32,));
     fields(Side::Both, (1u32,));
+    fields(Side::Server, (2u32,));
     fields(LevelDimension::Overworld, (0u32,));
     fields(LevelDimension::Nether, (1u32,));
     fields(LevelDimension::End, (2u32,));

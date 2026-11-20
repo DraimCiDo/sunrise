@@ -170,7 +170,7 @@ pub(super) fn emit<'a>(
             }
         }
         // Some callers must distinguish engine-selected inactivity from a listener reply.
-        // Keep that signal in the engine call, not in the event or its Wire layout.
+        // Keep that signal in the engine call, not in the event.
         let inert_signal = hook.inert.as_deref() == Some("signal");
         if inert_signal
             && (!in_game
@@ -682,13 +682,8 @@ pub(super) fn emit<'a>(
             (true, false) => ("<'a>", "<'_>"),
             (false, false) => ("", ""),
         };
-        let wire_form = if generics.is_empty() {
-            "#[derive(sunrise_mod_api_macros::Wire)]"
-        } else {
-            "// no wire: borrowed event crosses as call arguments."
-        };
         let event_struct = format!(
-            "/// Built by the game and passed to the listener.\n#[non_exhaustive]\n#[allow(missing_docs)]\n{wire_form}\npub struct {event_type}{generics} {{\n{fields}}}\n"
+            "/// An in-process callback record built by the game and passed to the listener.\n#[non_exhaustive]\n#[allow(missing_docs)]\npub struct {event_type}{generics} {{\n{fields}}}\n"
         );
         if is_render {
             render_dispatch.push_str(&event_struct);

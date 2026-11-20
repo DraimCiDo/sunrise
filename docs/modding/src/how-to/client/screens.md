@@ -71,7 +71,7 @@ an offer, buy anything, or send packets; the server still decides every trade.
 
 ## Frame coordinates
 
-`screen_draw` and `screen_tooltip` version 3 carry `pointer: [i32; 2]`
+`screen_draw` version 4 and `screen_tooltip` version 3 carry `pointer: [i32; 2]`
 and `gui_size: [i32; 2]`, the current frame's absolute pointer and window size
 in scaled GUI pixels. Pointer components truncate toward zero, including outside
 the panel. Both carry `origin: [f32; 2]`, the panel's top-left; tooltip `at`

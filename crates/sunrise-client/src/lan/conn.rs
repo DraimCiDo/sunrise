@@ -1191,7 +1191,7 @@ fn login_and_configure(
         cfg::Clientbound::CustomPayload(cfg::CustomPayload {
             channel: "minecraft:brand".into(),
             data: {
-                let mut w = sunrise_protocol::buf::Writer::new();
+                let mut w = ::sunrise_core::vanilla_bytes::Writer::new();
                 // MinecraftServer.getServerModName: "vanilla" there; a modded
                 // server names itself, and Sunrise's says "sunrise", as its client does.
                 w.string("sunrise");
@@ -2692,7 +2692,7 @@ mod tests {
         login_profile(&mut c, "Owner");
         c.send(&login::Serverbound::LoginAcknowledged(sunrise_protocol::packets::Empty).encode())
             .unwrap();
-        let mut brand = sunrise_protocol::buf::Writer::new();
+        let mut brand = ::sunrise_core::vanilla_bytes::Writer::new();
         brand.string("sunrise");
         c.send(
             &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
@@ -2774,7 +2774,7 @@ mod tests {
                 &login::Serverbound::LoginAcknowledged(sunrise_protocol::packets::Empty).encode(),
             )
             .unwrap();
-            let mut brand = sunrise_protocol::buf::Writer::new();
+            let mut brand = ::sunrise_core::vanilla_bytes::Writer::new();
             brand.string("sunrise");
             c.send(
                 &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
@@ -2976,7 +2976,7 @@ mod tests {
         login_profile(&mut c, "Owner");
         c.send(&login::Serverbound::LoginAcknowledged(sunrise_protocol::packets::Empty).encode())
             .unwrap();
-        let mut data = sunrise_protocol::buf::Writer::new();
+        let mut data = ::sunrise_core::vanilla_bytes::Writer::new();
         data.string("vanilla");
         c.send(
             &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
@@ -3033,7 +3033,7 @@ mod tests {
         login_profile(&mut c, "Owner");
         c.send(&login::Serverbound::LoginAcknowledged(sunrise_protocol::packets::Empty).encode())
             .unwrap();
-        let mut brand = sunrise_protocol::buf::Writer::new();
+        let mut brand = ::sunrise_core::vanilla_bytes::Writer::new();
         brand.string("sunrise");
         c.send(
             &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
@@ -3103,7 +3103,7 @@ mod tests {
         assert!(cfg::Serverbound::decode(id, &config(32_767)[1..]).is_ok());
         assert!(cfg::Serverbound::decode(id, &config(32_768)[1..]).is_err());
         let suggestion = |len: usize| {
-            let mut w = sunrise_protocol::buf::Writer::new();
+            let mut w = ::sunrise_core::vanilla_bytes::Writer::new();
             w.varint(7);
             w.string(&"a".repeat(len));
             play::Serverbound::Unknown(COMMAND_SUGGESTION, w.data)

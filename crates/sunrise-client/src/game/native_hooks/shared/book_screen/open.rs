@@ -81,6 +81,10 @@ impl Game<'_> {
         self.clear_mod_book_placement_screen();
         self.mod_screen = None;
         if let Some((block, mut screen)) = self.opened_screen(menu, target) {
+            let mod_type = sunrise_client::containers::mod_menu_type(menu);
+            if let Some(kind) = mod_type {
+                screen.slots.truncate(kind.slots);
+            }
             // Check sprite identifiers once at the client declaration boundary.
             for slot in screen.slots.iter_mut().flatten() {
                 if let Some(icon) = &slot.no_item_icon
@@ -103,6 +107,7 @@ impl Game<'_> {
                 menu: menu.to_owned(),
                 block,
                 screen,
+                mod_type,
                 data: Vec::new(),
                 extra,
             });

@@ -79,6 +79,8 @@ pub struct Menu {
     /// The data slots the client was last sent (ContainerSetData), a furnace's
     /// progress; None until sent, so any first value goes out.
     pub sent_data: Vec<Option<i16>>,
+    /// Committed live data owned by this blockless mod menu window, not a block entity.
+    pub blockless_data: Vec<i32>,
     /// Container slots the menu does not have: a mod's screen hides them, so
     /// no click or quick move reaches them (`Slot` positions are the screen's).
     pub hidden: Vec<usize>,
@@ -126,6 +128,15 @@ pub fn asks_still_valid(mod_type: Option<&crate::containers::ModMenuType>, menu:
 }
 
 impl Menu {
+    pub fn player_slots(&self) -> usize {
+        self.mod_type
+            .map_or(36, crate::containers::ModMenuType::player_slots)
+    }
+
+    pub fn slot_count(&self) -> usize {
+        self.size + self.player_slots()
+    }
+
     /// `AbstractContainerMenu.stillValid` of this menu for the guest: its
     /// slots' own answer (`Slots::still_valid`), which the parts on its mod
     /// menu type may change (`menu_still_valid`). A mod menu with no backing
@@ -2061,7 +2072,9 @@ pub(crate) mod tests {
         );
         let t: &'static ModMenuType = Box::leak(Box::new(ModMenuType {
             id: "test:station",
+            owner: "test",
             slots: 5,
+            player_inventory: true,
             data_slots: 0,
             results: vec![],
             inputs: Vec::new(),
@@ -2085,6 +2098,7 @@ pub(crate) mod tests {
             sent: Vec::new(),
             drag: None,
             sent_data: Vec::new(),
+            blockless_data: Vec::new(),
             hidden: Vec::new(),
             mod_type: Some(t),
             registry_id: "test:station".into(),
@@ -2190,7 +2204,9 @@ pub(crate) mod tests {
         );
         let t: &'static ModMenuType = Box::leak(Box::new(ModMenuType {
             id: "test:station",
+            owner: "test",
             slots: 6,
+            player_inventory: true,
             data_slots: 0,
             results: vec![],
             inputs: Vec::new(),
@@ -2210,6 +2226,7 @@ pub(crate) mod tests {
             sent: Vec::new(),
             drag: None,
             sent_data: Vec::new(),
+            blockless_data: Vec::new(),
             hidden: Vec::new(),
             mod_type: Some(t),
             craft: None,
@@ -3369,6 +3386,7 @@ pub(crate) mod tests {
             sent: Vec::new(),
             drag: None,
             sent_data: Vec::new(),
+            blockless_data: Vec::new(),
             hidden: Vec::new(),
             mod_type: None,
             registry_id: "test:chest".into(),

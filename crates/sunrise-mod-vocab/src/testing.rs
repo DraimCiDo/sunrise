@@ -481,7 +481,7 @@ impl crate::prelude::LevelBlocksBackend for FakeHost {
     /// The named block's first state: the fake keeps no properties.
     fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<crate::BlockState> {
         let block = crate::prelude::LevelBlocksBackend::level_block(self, level, pos)?;
-        Some(crate::BlockStateRecord::new(block, 0).into())
+        Some(crate::__private::block_state_from_ordinal(block, 0))
     }
 }
 impl crate::prelude::LevelTickingBackend for FakeHost {

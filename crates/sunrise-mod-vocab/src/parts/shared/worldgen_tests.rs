@@ -36,7 +36,7 @@ fn with_no_part_subscribed_a_worldgen_dispatch_looks_nothing_up() {
     let mut soil = None;
     crate::world::ground::native_on_tree_grow(
         &OwningWorldgen::new(&|_| None, &|_, _| None, &|_, _, _| None),
-        BlockState::from(BlockStateRecord::new(BlockKey(0), 0)),
+        crate::__private::block_state_from_ordinal(BlockKey(0), 0),
         [0, 63, 0],
         &mut Draws,
         &mut soil,

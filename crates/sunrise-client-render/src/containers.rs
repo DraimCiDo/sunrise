@@ -33,7 +33,11 @@ pub fn mod_container_insert_allowed(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModMenuType {
     pub id: &'static str,
+    /// Package ID, which need not match the menu's namespace.
+    pub owner: &'static str,
     pub slots: usize,
+    /// Whether this menu appends the player's main inventory and hotbar.
+    pub player_inventory: bool,
     pub data_slots: usize,
     pub results: Vec<usize>,
     /// Validated container indices marked as machine inputs in the client layout.
@@ -45,6 +49,14 @@ pub struct ModMenuType {
 }
 
 impl ModMenuType {
+    pub fn player_slots(&self) -> usize {
+        if self.player_inventory { 36 } else { 0 }
+    }
+
+    pub fn slot_count(&self) -> usize {
+        self.slots + self.player_slots()
+    }
+
     /// Whether this menu slot belongs to its own block or crafting result, not a linked
     /// container or the player.
     pub fn owns_slot(&self, slot: usize) -> bool {
@@ -87,9 +99,10 @@ impl ModCrafting {
 
 static MOD_MENU_TYPES: std::sync::OnceLock<Vec<ModMenuType>> = std::sync::OnceLock::new();
 
-/// One menu type as [`register_mod_menu_types`] takes it: `(id, slots, data
-/// slots, results, inputs, crafting, links)`.
+/// One menu type as [`register_mod_menu_types`] takes it: `(id, owner, slots, data
+/// slots, results, inputs, crafting, links, player inventory)`.
 pub type ModMenuTypeEntry = (
+    String,
     String,
     usize,
     usize,
@@ -97,20 +110,25 @@ pub type ModMenuTypeEntry = (
     Vec<usize>,
     Option<ModCrafting>,
     Option<ModLinks>,
+    bool,
 );
 
 fn menu_types(menus: impl IntoIterator<Item = ModMenuTypeEntry>) -> Vec<ModMenuType> {
     menus
         .into_iter()
         .map(
-            |(id, slots, data_slots, results, inputs, crafting, links)| ModMenuType {
-                id: Box::leak(id.into_boxed_str()),
-                slots,
-                data_slots,
-                results,
-                inputs,
-                crafting,
-                links,
+            |(id, owner, slots, data_slots, results, inputs, crafting, links, player_inventory)| {
+                ModMenuType {
+                    id: Box::leak(id.into_boxed_str()),
+                    owner: Box::leak(owner.into_boxed_str()),
+                    slots,
+                    player_inventory,
+                    data_slots,
+                    results,
+                    inputs,
+                    crafting,
+                    links,
+                }
             },
         )
         .collect()

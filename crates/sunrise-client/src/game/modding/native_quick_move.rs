@@ -105,11 +105,11 @@ impl Game<'_> {
         let Some(g) = host.hub.guest(conn) else {
             return false;
         };
-        let Some(menu) = g
-            .menu
-            .as_ref()
-            .filter(|m| p.container != 0 && m.window == p.container)
-        else {
+        let Some(menu) = g.menu.as_ref().filter(|m| {
+            p.container != 0
+                && m.window == p.container
+                && usize::try_from(p.slot).is_ok_and(|slot| slot < m.slot_count())
+        }) else {
             return false;
         };
         let Slots::Block(pos) = menu.slots else {

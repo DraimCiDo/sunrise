@@ -4,10 +4,11 @@
 pub trait Hooks {
     /// Draw the screen of mod menu type `menu` at `origin` (its top left, GUI
     /// pixels), over a plain panel with its slots' frames and under the items
-    /// and labels, from the menu's data slots `data` (the block entity's
-    /// `data` on the server): data slots are 16-bit on the wire as in vanilla
-    /// (a bigger value wraps), and `data` is empty until the server's first
-    /// values arrive, so read it with `get`. Draw with `event.draw.sprite`,
+    /// and labels, from the open window's data slots `data`. A block-backed
+    /// menu still carries the block entity's values as vanilla signed shorts;
+    /// a blockless menu carries the full signed `i32` from its opener and
+    /// `MenuRef::set_data_slot`. Data is empty until the server's first values
+    /// arrive, so read it with `get`. Draw with `event.draw.sprite`,
     /// `event.draw.fill` and `event.draw.text`.
     /// `block` is the mod block whose menu it is, as in `screen`.
     /// `pos` is the open menu's block position, as reported by the server
@@ -21,7 +22,7 @@ pub trait Hooks {
     /// `origin` is the panel's top-left in the same coordinates. The pointer may
     /// be outside the panel; use these frame values rather than caching a size.
     #[hook(
-        version = 3,
+        version = 4,
         side = "client",
         contract = "listen",
         scope = "menu",

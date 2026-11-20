@@ -30,12 +30,15 @@ with no engine snapshot returns `RegistrationReadError::Unavailable`.
 
 A mod that does slow work while the game starts shows it on the startup loading screen
 (NeoForge's `StartupNotificationManager` and `ProgressMeter`). `RegistrationContext::progress(label,
-steps)` opens a bar under the game's stage bar and returns `Result<StartupProgress, StartupProgressError>` (handle `TooManyBars` when 64 bars are already open): `step()`, `set(n)` and
-`label(text)` move it, and dropping it removes the bar. The mod may keep the handle past
-`register` and step it or call `bar.message(text)` from a worker thread or from `client_setup`.
-`RegistrationContext::message(text)` shows a line for a few seconds. The newest four bars and the
-last three lines are drawn, each cut to one line. A dedicated server logs each label, line and
-tenth of a bar's steps instead.
+steps)` opens a bar under the game's stage bar and returns `Result<StartupProgress, StartupProgressError>`.
+It returns `TooManyBars` when 64 bars are already open. The returned bar is owned and `Send + Sync`:
+call `step()`, `set(n)` and `label(text)` to update it, and drop it to remove it. A mod can keep the bar
+after registration and update it or call `bar.message(text)` from a worker thread or from `client_setup`.
+
+`RegistrationContext::message(text)` shows a line for a few seconds without opening a bar. Both
+message methods and `bar.label(text)` borrow `text`; the caller need not keep it alive after the call.
+The newest four bars and the last three lines are drawn, each cut to one line. A dedicated server
+logs each label, line and progress in 10% increments instead.
 
 This is part of the startup progress feature, not live rendering of synchronous setup work.
 Bars can be opened through `RegistrationContext`; `client_setup` has no creation context and
@@ -128,6 +131,10 @@ There is no separate common-setup, load-complete or intermod event: registration
 reload cover common setup, client setup is `client_setup`, dedicated setup is `server_about_to_start`,
 and dependencies express intermod ordering. Load complete is the edge after initial Config and before
 `server_about_to_start`, not a hook.
+
+`DataLoadOrigin` and `LoopSide` describe the local load or loop, not data to encode. Read them
+through `DataLoadContext::origin()` and `LoopContext::side()` as before; if a payload needs such
+a fact, map it into a field of your own [Wire record](wire-types.md).
 
 FML's file and path APIs (`ModList` file reads, config full paths, the game directory, update URLs) are
 replaced on purpose; [FML loader APIs and their Sunrise routes](../reference/fml-loader-apis.md) lists each one.

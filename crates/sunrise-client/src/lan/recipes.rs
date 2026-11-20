@@ -9,10 +9,8 @@ use std::{
     path::Path,
     sync::Arc,
 };
-use sunrise_protocol::{
-    buf::Writer,
-    packets::recipes::{HolderSet, SlotDisplay},
-};
+use sunrise_core::vanilla_bytes::Writer;
+use sunrise_protocol::packets::recipes::{HolderSet, SlotDisplay};
 
 /// RecipeManager.RECIPE_PROPERTY_SETS: each set and the ingredients it takes
 /// from a recipe of the given type.

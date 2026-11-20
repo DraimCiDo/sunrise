@@ -42,6 +42,33 @@ pub enum MenuSlotBacking {
     Place(MenuSlotPlace),
 }
 
+// no wire: An in-process refusal from the native menu setter, not a transported payload.
+/// Why [`MenuRef::set_data_slot`] left the menu unchanged.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuDataRefusal {
+    /// This host or menu does not support blockless mod menu data.
+    Unsupported,
+    /// The player or the menu generation is no longer current.
+    Stale,
+    /// The caller does not own the menu type.
+    WrongOwner,
+    /// The index is outside the menu type's declared data slots.
+    InvalidIndex,
+}
+
+impl crate::NoBackend for MenuDataRefusal {
+    fn no_backend() -> Self {
+        Self::Unsupported
+    }
+}
+
+impl crate::AccessRefusal for MenuDataRefusal {
+    fn unavailable() -> Self {
+        Self::Unsupported
+    }
+}
+
 impl MenuRef {
     /// The stack on this menu's cursor, as a place (`ItemAccess.forPlayerCursor`): nothing once
     /// the menu is gone.

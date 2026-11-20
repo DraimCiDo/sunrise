@@ -118,10 +118,18 @@ pub fn entity_types(mods: &[ContentMod]) -> Vec<&EntityType> {
     types
 }
 
-/// the mods' menu types in registry order, by id as effects are.
-pub fn menu_types(mods: &[ContentMod]) -> Vec<&MenuType> {
-    let mut menus: Vec<&MenuType> = mods.iter().flat_map(|m| &m.content.menu_types).collect();
-    menus.sort_by(|a, b| a.id.cmp(&b.id));
+/// The mods' menu types and their owning package IDs, sorted by menu ID.
+pub fn menu_types(mods: &[ContentMod]) -> Vec<(&MenuType, &str)> {
+    let mut menus: Vec<_> = mods
+        .iter()
+        .flat_map(|m| {
+            m.content
+                .menu_types
+                .iter()
+                .map(|menu| (menu, m.id.as_str()))
+        })
+        .collect();
+    menus.sort_by(|(a, _), (b, _)| a.id.cmp(&b.id));
     menus
 }
 
@@ -1767,7 +1775,7 @@ impl<'a> Plan<'a> {
                 .map(|(_, kind)| kind)
                 .collect(),
             block_entity_factories,
-            menu_types: menu_types(mods),
+            menu_types: menu_types(mods).into_iter().map(|(menu, _)| menu).collect(),
             states: names.len(),
             defaults,
             sounds,

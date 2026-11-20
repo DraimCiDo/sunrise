@@ -71,6 +71,7 @@ mod tests {
         MenuType {
             id: "demo:pot".into(),
             slots: 3,
+            player_inventory: true,
             data_slots: 0,
             results: vec![2],
             inputs: Vec::new(),
@@ -94,9 +95,20 @@ mod tests {
         );
         let short = MenuType { slots: 2, ..menu };
         assert!(
-            validate(&[&short], "demo:pot", roles, &screen())
+            validate(&[&short], "demo:pot", roles.clone(), &screen())
                 .unwrap_err()
                 .contains("OutOfRange(2)")
+        );
+        let slotless = MenuType {
+            slots: 0,
+            player_inventory: false,
+            results: vec![],
+            ..short
+        };
+        let error = validate(&[&slotless], "demo:pot", roles, &screen()).unwrap_err();
+        assert!(
+            error.contains("recipe book menu \"demo:pot\"") && error.contains("InvalidSlotCount"),
+            "{error}"
         );
     }
     #[test]

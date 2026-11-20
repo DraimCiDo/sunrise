@@ -29,8 +29,9 @@ mod registry_tests;
 
 use crate::{
     Error, Result,
-    buf::{Codec, Ident, Reader, Writer},
+    buf::{Codec, Ident, Reader},
 };
+use sunrise_core::vanilla_bytes::Writer;
 
 /// Exact application bytes following a namespaced channel identifier.
 #[derive(Clone, Debug, PartialEq)]
@@ -80,6 +81,7 @@ fn uses_registered_payload_codec(channel: &str, play: bool, clientbound: bool) -
         | crate::collider_sync::CHANNEL
         | crate::general_entity::CHANNEL
         | crate::anvil_cost::CHANNEL
+        | crate::menu_extra::DATA_CHANNEL
         | crate::passage_sync::CHANNEL
         | "sunrise:recipe_content"
         | "sunrise:selector_tokens" => play && clientbound,
@@ -234,6 +236,7 @@ mod tests {
             ("sunrise:mod_list", [true, false, false, false]),
             ("sunrise:attachment_sync", [false, false, false, true]),
             ("sunrise:menu_extra", [true, true, false, true]),
+            ("sunrise:menu_data", [false, false, false, true]),
             ("sunrise:anvil_cost", [false, false, false, true]),
             ("sunrise:passage_sync", [false, false, false, true]),
             ("sunrise:passage_cross", [false, false, true, false]),

@@ -4,10 +4,11 @@
 //! them are kept.
 use crate::{
     Result,
-    buf::{Codec, Reader, Writer},
+    buf::{Codec, Reader},
     item::{Slot, Stack, Template},
 };
 use sunrise_core::nbt::Tag;
+use sunrise_core::vanilla_bytes::Writer;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {

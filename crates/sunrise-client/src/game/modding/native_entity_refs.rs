@@ -1941,7 +1941,7 @@ pub(super) mod tests {
             // A source that is no block state: refused, not a panic.
             let known: mod_api::BlockState = cake.try_into_api().unwrap();
             let unknown: mod_api::BlockState =
-                mod_api::BlockStateRecord::new(known.block(), u16::MAX).into();
+                mod_api::__private::block_state_from_ordinal(known.block(), u16::MAX);
             assert_eq!(
                 level.update_neighbors(game, [10, 64, 5], unknown, Neighbours),
                 Err(mod_api::LevelWriteError::InvalidState(
@@ -4315,7 +4315,7 @@ pub(super) mod tests {
         use crate::game::api_values::TryIntoApi;
         let api_stone: mod_api::BlockState = stone.try_into_api().unwrap();
         let invalid: mod_api::BlockState =
-            mod_api::BlockStateRecord::new(api_stone.block(), u16::MAX).into();
+            mod_api::__private::block_state_from_ordinal(api_stone.block(), u16::MAX);
         assert_eq!(
             level.set_block(&mut game, [0, 64, 0], invalid, BlockUpdateFlags::NONE),
             Err(mod_api::LevelWriteError::InvalidState(

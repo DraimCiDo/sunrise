@@ -1,8 +1,10 @@
 //! Restricted views for registration and data loading.
-/// The owning boundary that starts a data load.
+use std::{collections::BTreeMap, sync::Arc};
+
+/// The owning boundary that starts a data load, as reported by [`DataLoadContext::origin`].
+// no wire: identifies the owner of a local data load.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-#[derive(sunrise_mod_api_macros::Wire)]
 pub enum DataLoadOrigin {
     /// Server data loading, including a reload.
     ServerDataLoad,
@@ -10,22 +12,21 @@ pub enum DataLoadOrigin {
     ClientPreload,
 }
 
-/// The side that owns a resource-generation loop.
+/// The side of the local resource-generation loop, as reported by [`LoopContext::side`].
+// no wire: identifies the owner of a local loop, not an installation or join contract.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-#[derive(sunrise_mod_api_macros::Wire)]
 pub enum LoopSide {
     /// A server loop.
     Server,
     /// A client loop.
     Client,
 }
-use std::{collections::BTreeMap, sync::Arc};
 
 /// The permission boundary of the current owning thread. Only the game advances it.
+// no wire: tracks the owning thread's phase in this process.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-#[derive(sunrise_mod_api_macros::Wire)]
 pub enum ModPhase {
     /// Package discovery, before declarations.
     Packages,
@@ -43,9 +44,9 @@ pub enum ModPhase {
 }
 
 /// A refused engine transition never changes the phase or dispatches a hook.
+// no wire: reports a failed transition to the local phase owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-#[derive(sunrise_mod_api_macros::Wire)]
 pub enum PhaseError {
     /// The token belongs to another thread.
     WrongThread,
@@ -237,9 +238,9 @@ pub fn registration_open() -> bool {
 }
 
 /// The catalog-owned access class of a generated game operation.
+// no wire: the generated phase gate reads this access class in the same process.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-#[derive(sunrise_mod_api_macros::Wire)]
 pub enum LoadAccess {
     /// No extra load access beyond the phase's metadata/settings exceptions.
     WorldOnly,
@@ -311,8 +312,9 @@ fn phase_allows(phase: ModPhase, operation: &str, access: LoadAccess) -> bool {
     }
 }
 
-/// Whether a package contains compiled code or content alone.
-#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq)]
+/// Whether a loaded package contains compiled code or content alone.
+// no wire: describes an entry in the local package inventory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PackageKind {
     /// The package carries compiled code.
@@ -321,8 +323,17 @@ pub enum PackageKind {
     Content,
 }
 
-/// Read-only package metadata available during registration.
-#[derive(sunrise_mod_api_macros::Wire, Clone)]
+/// Read-only metadata from the local package inventory, in dispatch order through [`LoadedMods`].
+/// Read it directly; to send or store package facts, copy the fields you need into your own record.
+///
+/// ```compile_fail,E0277
+/// use mod_api::{PackageInfo, wire::Writer};
+/// fn write_package(writer: &mut Writer, package: &PackageInfo) {
+///     writer.put(package);
+/// }
+/// ```
+// no wire: this snapshot is for inspecting packages in the current process.
+#[derive(Clone)]
 #[non_exhaustive]
 pub struct PackageInfo {
     pub(crate) id: String,
@@ -536,7 +547,7 @@ pub(crate) fn block_entity_covers(kind: &str, block: &str) -> bool {
         .is_some_and(|coverage| coverage(kind, block))
 }
 /// Read-only view of the startup package inventory, shared: cloning it copies no package.
-// no wire: zero-byte phase token: decoding rebinds the installed package inventory rather than transferring entries.
+// no wire: the loader publishes the inventory locally; callers borrow or clone the view.
 #[derive(Clone)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct LoadedMods {
@@ -571,10 +582,10 @@ impl LoadedMods {
     }
 }
 
-/// Why a registration read was refused.
+/// Why a read through [`RegistrationContext`] was refused. Handle this error at the call site.
+// no wire: reports failure of a local registration read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-#[derive(sunrise_mod_api_macros::Wire)]
 pub enum RegistrationReadError {
     /// The engine supplied no registry or settings data to this context.
     Unavailable,
@@ -609,6 +620,9 @@ impl std::error::Error for RegistrationReadError {}
 /// - [`setting`](Self::setting): the settings on disk for the loaded packages when registration
 ///   began. Later writes are not seen.
 ///
+/// In [`Hooks::register`](crate::Hooks::register), this context also records [`warn`](Self::warn)
+/// and [`refuse`](Self::refuse) diagnostics for the mod being registered.
+///
 /// ```compile_fail
 /// use mod_api::{Host, RegistrationContext};
 /// fn game(_: &dyn Host) {}
@@ -632,8 +646,8 @@ pub struct RegistrationContext {
     pub(crate) mods: LoadedMods,
     pub(crate) data: Option<RegistrationData>,
     pub(crate) declaration_refusals: std::sync::Mutex<Vec<crate::__private::DeclarationRefusal>>,
-    pub(crate) self_refusal: std::sync::Mutex<Option<String>>,
-    pub(crate) warnings: std::sync::Mutex<Vec<crate::LoadingMessage>>,
+    pub(crate) diagnostics:
+        Option<Arc<std::sync::Mutex<crate::__private::RegistrationDiagnostics>>>,
     pub(crate) instance_dir: Option<crate::InstanceDirectory>,
     /// The game's startup screen, for [`progress`](Self::progress) and
     /// [`message`](Self::message); none without a game.
@@ -650,8 +664,7 @@ impl RegistrationContext {
             mods: LoadedMods::new(),
             data,
             declaration_refusals: Default::default(),
-            self_refusal: Default::default(),
-            warnings: Default::default(),
+            diagnostics: None,
             instance_dir,
             startup: crate::world::startup_progress::installed(),
             runtime,
@@ -1099,6 +1112,7 @@ fn phase_authority_advances_without_a_platform_backend() {
 fn the_registration_context_lists_installed_packages_with_their_details() {
     let details = crate::PackageDetails {
         name: "Machines".to_owned(),
+        properties: BTreeMap::from([("ratio".to_owned(), crate::PropertyValue::Float(0.5))]),
         ..Default::default()
     };
     let packages = vec![
@@ -1112,7 +1126,7 @@ fn the_registration_context_lists_installed_packages_with_their_details() {
                 "base".to_owned(),
                 "^1".to_owned(),
                 crate::DependencyKind::Required,
-                crate::DependencyOrder::After,
+                crate::DependencyOrder::Before,
                 crate::Side::Both,
                 None,
                 None,
@@ -1137,7 +1151,15 @@ fn the_registration_context_lists_installed_packages_with_their_details() {
         let machines = context.mods().get("machines").unwrap();
         assert_eq!(machines.name(), "Machines");
         assert_eq!(machines.kind(), PackageKind::Code);
+        assert_eq!(
+            machines.property("ratio"),
+            Some(&crate::PropertyValue::Float(0.5))
+        );
         assert!(machines.depends_on("base"));
+        assert_eq!(
+            machines.dependencies()[0].order(),
+            crate::DependencyOrder::Before
+        );
         let base = context.mods().get("base").unwrap();
         assert_eq!(base.kind(), PackageKind::Content);
         assert!(context.mods().get("missing").is_none());

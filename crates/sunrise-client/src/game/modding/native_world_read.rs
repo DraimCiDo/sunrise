@@ -841,7 +841,7 @@ mod tests {
             use super::super::api_values::TryIntoApi;
             let stone = stone.try_into_api().unwrap();
             let slab = slab.try_into_api().unwrap();
-            let invalid = mod_api::BlockStateRecord::new(stone.block(), u16::MAX).into();
+            let invalid = mod_api::__private::block_state_from_ordinal(stone.block(), u16::MAX);
             let parsed = game
                 .block_state_id("minecraft:oak_slab[waterlogged=true]")
                 .try_into_api()

@@ -38,15 +38,18 @@ pub trait PlayerMenusBackendMut {
     /// block (`ServerPlayer.openMenu(provider, extraDataWriter)`): an item's use, an entity,
     /// a command. The menu replaces the one they had open. Its container slots show empty
     /// and their clicks go to the mods (`native_menu_clicked`), as `open_menu`'s do. `extra`
-    /// (at most 32 KiB) is what the client's `screen_extra_data` reads, and `pos`, when
-    /// given, its `screen_pos`. The old menu closes on the server as a close does (its
+    /// (at most 32 KiB) is the one-time context that `screen_extra_data` reads, and `pos`,
+    /// when given, its `screen_pos`. `data` has exactly the menu type's `data_slots` values;
+    /// the client receives them after the new window opens. The menu's owning mod can change
+    /// them with [`MenuRef::set_data_slot`]. The old menu closes on the server as a close does (its
     /// `removed`, `player_container_close`, the cursor stack and crafting grids back to the
     /// inventory) before the new one is built; `replace` says whether the client is first sent
     /// a close for it, as for `open_menu`. `MenuReplace::InPlace` sends none: the client keeps
     /// its screen and mouse until the new screen replaces it. The window id, or Ok(None) when
-    /// a mod cancelled the open. Errors: `NotModMenu`, `PlayerUnavailable` (stale, fake or
-    /// vanilla client), `TooLarge`, or `Title` for a title that could not cross; a cancelled or
-    /// refused open leaves the old menu as it was.
+    /// a mod cancelled the open. Errors: `NotModMenu`, `PlayerUnavailable` (including a
+    /// disconnect in progress or a turn unavailable for the veto), `TooLarge`,
+    /// `DataCountMismatch`, `Title` or `TitleNotEncodable`. A cancelled or refused open
+    /// does not close the old menu.
     #[access(WorldOnly)]
     fn player_open_mod_menu(
         &mut self,
@@ -54,6 +57,7 @@ pub trait PlayerMenusBackendMut {
         menu: MenuKey,
         title: Text,
         extra: Vec<u8>,
+        data: Vec<i32>,
         pos: Option<[i32; 3]>,
         replace: MenuReplace,
     ) -> Result<Option<i32>, OpenMenuError>;

@@ -1,7 +1,7 @@
 //! The chunk writer's isolated mod attachment callback boundary.
 //! Server code captures encoded envelopes; only workers execute mod code.
 use super::*;
-use mod_api::{ChunkDiskContextWire, ChunkDiskJob, ChunkDiskKind, ChunkDiskPhase, WorldEpoch};
+use mod_api::{ChunkDiskContext, ChunkDiskJob, ChunkDiskKind, ChunkDiskPhase, WorldEpoch};
 use sunrise_mod_runtime::attachments::Attachments;
 
 pub(super) struct DiskRuntime {
@@ -22,7 +22,7 @@ impl DiskRuntime {
         kind: ChunkDiskKind,
         phase: ChunkDiskPhase,
     ) -> Option<ChunkDiskJob> {
-        let context = ChunkDiskContextWire::new(
+        let context = ChunkDiskContext::new(
             self.world,
             self.dimension.clone(),
             [chunk.x, chunk.z],

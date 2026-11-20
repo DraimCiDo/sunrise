@@ -530,6 +530,14 @@ impl Game<'_> {
         for (i, stack) in before.iter().enumerate() {
             menu.set_slot(&env, i, stack.clone());
         }
+        // A number-key swap uses the backing inventory, not the displayed slots.
+        // Keep all 36 slots available, including room for a swap's overflow.
+        let inventory_omitted = matches!(kind, Kind::Mod(layout) if !layout.player_inventory);
+        if inventory_omitted {
+            for (slot, stack) in self.inventory.iter().take(36).enumerate() {
+                menu.set_player_item(slot, stack.clone());
+            }
+        }
         // The off hand is part of the inventory even when the menu has no slot for it.
         let offhand_mapped = game_of.contains(&Some(504));
         if !offhand_mapped {
@@ -648,6 +656,11 @@ impl Game<'_> {
         for (i, stack) in after.into_iter().enumerate() {
             if let Some(g) = game_of[i] {
                 *self.slot_mut(g) = stack;
+            }
+        }
+        if inventory_omitted {
+            for (slot, stack) in self.inventory.iter_mut().take(36).enumerate() {
+                *stack = menu.player_item(slot).cloned();
             }
         }
         self.carried = carried;

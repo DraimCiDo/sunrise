@@ -310,6 +310,7 @@ impl Game<'_> {
         // inventory moves the focus and closes the container in one press).
         self.pad_clear_focus();
         self.recipe_ui.reset_screen();
+        self.mod_screen = None;
         if let Some(r) = self.remote.as_mut() {
             r.menu.set(None);
             r.set_menu_title(None);
@@ -393,9 +394,14 @@ impl Game<'_> {
     }
     /// ClientboundOpenScreenPacket for the menus Sunrise draws.
     pub(in crate::game) fn remote_open_screen(&mut self, p: play::OpenScreen) {
-        // A new RecipeBookComponent owns fresh ghost slots and an overlay,
-        // even when the server replaces a menu without a close packet.
-        self.recipe_ui.reset_screen();
+        if self.remote.as_ref().and_then(|r| r.menu.as_ref()).is_some() {
+            // An in-place open has no intervening ContainerClose packet. Drop
+            // the replaced menu's local state, not the screen or pointer grab.
+            self.remote_close_local();
+        } else {
+            self.recipe_ui.reset_screen();
+            self.mod_screen = None;
+        }
         let menu = self
             .remote
             .as_ref()
@@ -552,6 +558,7 @@ impl Game<'_> {
     /// `ClientPacketListener.handleMountScreenOpen`: a horse's or llama's
     /// inventory; for another entity the window is closed again.
     pub(in crate::game) fn remote_open_mount(&mut self, p: play::MountScreenOpen) {
+        self.mod_screen = None;
         let columns = usize::try_from(p.columns).unwrap_or(0).min(5);
         let record = |game: &mut Self| {
             if let Some(r) = game.remote.as_mut() {

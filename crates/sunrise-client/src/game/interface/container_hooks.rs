@@ -677,7 +677,9 @@ mod tests {
     fn a_mod_menus_result_past_slot_199_is_a_result() {
         let menu = ModMenuType {
             id: "test:big",
+            owner: "test",
             slots: 201,
+            player_inventory: true,
             data_slots: 0,
             results: vec![200],
             inputs: Vec::new(),
