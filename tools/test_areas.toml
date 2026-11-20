@@ -130,12 +130,15 @@ about = "the light engine and dynamic light"
 paths = [
   "crates/sunrise-client-render/src/light.rs", "crates/sunrise-client-render/src/dynamic_light.rs",
   "crates/sunrise-client-render/src/hdr_light.wgsl", "crates/sunrise-client/src/game/world/dynamic_light_emission*",
+  "crates/sunrise-client-render/src/light_border.rs", "crates/sunrise-client-render/src/light_storage_tests.rs",
+  "tools/light_storage_scenario.txt", "tools/light_storage_witness.txt",
 ]
 cargo = [
   { package = "sunrise-client-render", target = "lib", filter = "light::" },
+  { package = "sunrise-client-render", target = "lib", filter = "light_storage_tests::" },
   { package = "sunrise-client", target = "lib", filter = "game::dynamic_light_emission" },
 ]
-harnesses = ["light"]
+harnesses = ["light", "light_storage"]
 lan = ["light"]
 
 [[area]]

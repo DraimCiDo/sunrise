@@ -499,19 +499,19 @@ pub enum LightLayer {
     Sky,
 }
 
-/// The feature flags a world enables (`FeatureFlagSet`, `LevelReader.enabledFeatures`), each
-/// as its id (`minecraft:vanilla`, `minecraft:redstone_experiments`), shared with the world.
-/// A world that names none enables `minecraft:vanilla` alone, as vanilla's default does.
+/// The effective feature flags a world enables (`FeatureFlagSet`, `LevelReader.enabledFeatures`),
+/// each as its id (`minecraft:vanilla`, `minecraft:redstone_experiments`), shared with the world.
 /// Getting and reading it allocates nothing.
-// no wire: encodes the effective iter() list, which synthesizes minecraft:vanilla for empty backing storage; a structural derive would encode zero flags.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct FeatureFlags(pub(crate) Arc<[String]>);
+pub struct FeatureFlags {
+    flags: Arc<[String]>,
+}
 
 impl FeatureFlags {
-    /// The flags of a world's `enabled_features` list; an empty list is vanilla's default.
-    pub fn new(ids: Arc<[String]>) -> Self {
-        Self(ids)
+    /// Wrap the world's effective flag ids as-is. An empty set contains no flags.
+    pub fn new(flags: Arc<[String]>) -> Self {
+        Self { flags }
     }
     /// `FeatureFlagSet.contains`: whether the flag `flag` (`minecraft:redstone_experiments`, or
     /// `redstone_experiments`) is enabled.
@@ -522,23 +522,20 @@ impl FeatureFlags {
     }
     /// The enabled flag ids.
     pub fn iter(&self) -> impl Iterator<Item = &str> {
-        let ids = &self.0;
-        ids.iter()
-            .map(String::as_str)
-            .chain(ids.is_empty().then_some("minecraft:vanilla"))
+        self.flags.iter().map(String::as_str)
     }
 }
 
-/// The flags as their IDs.
+/// Copy the world's effective flag ids into an owned list.
 impl From<&FeatureFlags> for Vec<String> {
     fn from(flags: &FeatureFlags) -> Self {
-        flags.0.to_vec()
+        flags.flags.to_vec()
     }
 }
 
 impl From<Vec<String>> for FeatureFlags {
     fn from(ids: Vec<String>) -> Self {
-        Self(ids.into())
+        Self::new(ids.into())
     }
 }
 
@@ -1400,15 +1397,11 @@ pub trait LevelHost {
     /// no skylight always returns false. Returns None without a light view. Never loads chunks;
     /// available only on the owning game thread, never in worker-thread hook bodies.
     ///
-    /// Vanilla's light storage includes padding above and below build height. Sky light is full
-    /// above the highest stored section and in columns with no stored sections. A missing
-    /// section below a stored one repeats that next section's bottom row. Unloaded border
-    /// sections can retain the last light on a server; they have no full sky on a client.
-    ///
-    /// **Known gap ([#2761](https://github.com/sunrise-org/sunrise/issues/2761)):** In skylit
-    /// dimensions, Sunrise reads the resident column's allocated sections, with full sky above
-    /// them and in every missing column, and darkness below them, instead of tracking vanilla's
-    /// padding and unloaded border.
+    /// Stored light can include padding above and below build height, and layers an unloaded
+    /// column retains beside a loaded one. Missing sky light uses the bottom row of the nearest
+    /// stored sky layer above it, or 15 if there is none. The engine does not yet compute new light
+    /// in padding sections (#3494) or refresh unloaded borders when a block edit changes whether
+    /// a section is empty (#3495).
     fn can_see_sky(&self, _pos: [i32; 3]) -> Option<bool> {
         None
     }
@@ -1528,8 +1521,8 @@ pub trait LevelHost {
         unimplemented!("LevelHost::state_with_property")
     }
     /// The stored light of one layer at `pos` (`BlockAndLightGetter.getBrightness`), 0 to 15.
-    /// It reads the game's own light query: above the build height the sky is 15 and below it 0,
-    /// and a chunk that isn't loaded reads as full sky and no block light. It never loads a chunk.
+    /// It reads published light, including stored padding and retained border layers (see
+    /// [`Self::can_see_sky`]). Missing block light is zero. It never loads a chunk.
     fn brightness(&self, _layer: LightLayer, _pos: [i32; 3]) -> i32 {
         unimplemented!("LevelHost::brightness")
     }

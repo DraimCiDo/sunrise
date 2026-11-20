@@ -69,7 +69,8 @@ impl TryFrom<u32> for EntityTypeKey {
 
 /// A playing sound's channel, for `play_sound_source` and
 /// `play_streaming_source`: an id only, to tell sounds apart across the two
-/// hooks. It gives no control over the channel.
+/// hooks. It gives no control over the channel: a sound's effects are set through
+/// `play_sound` (`SoundPlay::effects`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 #[derive(sunrise_mod_api_macros::Wire)]

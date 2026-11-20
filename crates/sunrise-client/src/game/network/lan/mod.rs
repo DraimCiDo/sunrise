@@ -1211,11 +1211,7 @@ impl Game<'_> {
             &self.res.core.item_data,
             &self.pack_files(),
         )?;
-        let features = if self.level.enabled_features.is_empty() {
-            vec!["minecraft:vanilla".to_owned()]
-        } else {
-            self.level.enabled_features.to_vec()
-        };
+        let features = self.enabled_feature_ids().to_vec();
         // A world whose packs change biomes sends its own biome registry.
         let packed = self.world_biomes.clone().filter(|b| b.has_packs());
         if packed.is_some()

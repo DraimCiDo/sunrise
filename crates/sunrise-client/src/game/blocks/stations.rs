@@ -964,6 +964,7 @@ impl Game<'_> {
     /// (`ExperienceOrb.award`), then level event 1042, the grindstone's sound
     /// for everyone around.
     pub(super) fn grindstone_taken(&mut self, pos: [i32; 3], amount: i32) {
+        self.journal_level_random();
         let xp = stations::grindstone_xp_roll(amount, &mut self.world.random);
         self.grindstone_award(pos, xp);
     }
@@ -973,7 +974,7 @@ impl Game<'_> {
         if xp > 0 {
             self.spawn_orbs(pos.map(|v| f64::from(v) + 0.5), xp);
         }
-        self.level_event_at(1042, pos, 0);
+        self.after_commit(super::transactions::After::GrindstoneEvent(pos));
     }
     fn play_at(&mut self, sound: &str, pos: [i32; 3], volume: f32, pitch: f32) {
         let at = [

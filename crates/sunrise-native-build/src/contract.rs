@@ -316,7 +316,11 @@ fn compile(
         .collect();
     let declared: Vec<Vec<dependencies::Dependency>> = mods
         .iter()
-        .map(|bundle| dependencies::from_manifest(&bundle.manifest.dependencies, side))
+        .map(|bundle| {
+            dependencies::build_dependencies(&bundle.manifest, side, |id| {
+                mods.iter().any(|project| project.manifest.id == id)
+            })
+        })
         .collect();
     let inputs: Vec<_> = mods
         .iter()

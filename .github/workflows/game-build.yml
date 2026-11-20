@@ -5,13 +5,18 @@ name: game build
 # macos-x64-intel on native Intel (#1602) and windows-arm64-native on ARM64. With BLACKSMITH=off every leg builds on
 # GitHub's runners, and Windows ARM64 natively on windows-11-vs2026-arm; windows-arm64-native starts the packaged
 # programs in either configuration. Called by nightly-build.yml (the Nightly
-# and snapshots), always from main's copy of this file: the caller's commit, never the one being built. It holds no secrets: signing the checksums is the callers' own job,
+# and snapshots), once for shared exporters and then separately for launcher platforms and musl. It always runs
+# from main's copy: the caller's commit, never the one being built. It holds no secrets: signing is the caller's job,
 # which never runs what this one built. Linux artifacts always build on Ubuntu 22.04; optional Dyna runners
 # compile portable Java exporter classes and smoke the downloaded hosted Linux artifact with private data.
 # See docs/release-flow.md.
 on:
   workflow_call:
     inputs:
+      part:
+        description: exporters (shared inputs), game (launcher and server platforms), or musl (manual download)
+        type: string
+        required: true
       ref:
         description: The commit to build
         type: string
@@ -45,6 +50,7 @@ permissions:
   contents: read
 jobs:
   exporters:
+    if: inputs.part == 'exporters'
     # Compiles our Java exporters against the pinned Minecraft jars; only our classes leave the runner. An untrusted
     # build uses Dyna's runner (NIGHTLY_EXPORTERS_RUNNER), which keeps the prepared jars; a trusted one never shares
     # a machine with pull requests' jobs, so it uses GitHub's, where vanilla-data.sh fetches the jars.
@@ -117,14 +123,14 @@ jobs:
           retention-days: 3
 
   build:
-    needs: exporters
+    if: inputs.part == 'game'
     name: build ${{ matrix.name }}
-    # Windows ARM64 and musl stay optional. Snapshots also leave Intel macOS optional: only the SDK's
+    # Windows ARM64 stays optional. Snapshots also leave Intel macOS optional: only the SDK's
     # platforms are required there. Nightlies and releases retain their existing Intel macOS requirement.
     # Optional failed legs still run; signing omits their absent archives, and snapshot notes name them.
     # continue-on-error covers a failure only: a leg that times out or is cancelled ends `cancelled`, and so does
     # this job's result. The legs job below decides from the legs that finished, so callers wait on it instead.
-    continue-on-error: ${{ (github.repository == 'sunrise-org/sunrise' && matrix.mac == true) || matrix.name == 'windows-arm64' || matrix.name == 'linux-musl' || (inputs.kind == 'snapshot' && matrix.name == 'macos-x64') }}
+    continue-on-error: ${{ (github.repository == 'sunrise-org/sunrise' && matrix.mac == true) || matrix.name == 'windows-arm64' || (inputs.kind == 'snapshot' && matrix.name == 'macos-x64') }}
     strategy:
       fail-fast: false
       matrix:
@@ -132,18 +138,12 @@ jobs:
           - name: linux
             os: ubuntu-22.04
             blacksmith: blacksmith-16vcpu-ubuntu-2204
+            musl: false
             dir: sunrise-linux-x86_64
             asset: sunrise-linux-x86_64.tar.gz
             # The server build too: packaging/server/install.sh installs it on Linux.
             server_dir: sunrise-server-linux-x86_64
             server_asset: sunrise-server-linux-x86_64.tar.gz
-          - name: linux-musl
-            os: ubuntu-22.04
-            blacksmith: blacksmith-16vcpu-ubuntu-2204
-            musl: true
-            target: x86_64-unknown-linux-musl
-            dir: sunrise-linux-musl-x86_64
-            asset: sunrise-linux-musl-x86_64.tar.gz
           - name: windows
             os: windows-latest
             blacksmith: blacksmith-16vcpu-windows-2025
@@ -187,14 +187,14 @@ jobs:
     # for Linux and Windows (ARM64 cross-built there), the 12-vCPU M4 for both Macs. The repository variable
     # BLACKSMITH=off puts every leg back on GitHub's `os`. Every leg is a fresh machine: nothing of a pull
     # request's earlier jobs is on it.
-    runs-on: ${{ vars.BLACKSMITH != 'off' && matrix.blacksmith || matrix.os }}
+    runs-on: &platform-runner ${{ vars.BLACKSMITH != 'off' && matrix.blacksmith || matrix.os }}
     # The fork's cold client + headless builds need both feature variants; keep upstream's limits unchanged.
     # GitHub's macOS runner builds Sunrise's game cold: 60 minutes ran out mid-build (nightly dry run
     # 43813225420), and a timed-out job counts as cancelled, which continue-on-error does not cover, so the
     # whole build stopped before signing. The musl leg, when built in Alpine on a hosted runner, took 53 minutes in
     # nightly dry run 43838074073 and ran out at 60 in nightly 43869408636, cancelling it the same way.
-    timeout-minutes: ${{ github.repository == 'sunrise-org/sunrise' && ((matrix.mac || matrix.musl) && 100 || 60) || (matrix.mac && 60 || 40) }}
-    env:
+    timeout-minutes: &platform-timeout ${{ github.repository == 'sunrise-org/sunrise' && ((matrix.mac || matrix.musl) && 100 || 60) || (matrix.mac && 60 || 40) }}
+    env: &platform-env
       RUSTFLAGS: ${{ matrix.rustflags }}
       # Same Alpine base for the cross-link sysroot and the separate runtime-only check.
       MUSL_IMAGE: alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f
@@ -205,10 +205,10 @@ jobs:
       SUNRISE_NIGHTLY: ${{ inputs.nightly }}
       # Where cargo puts the programs: target/release, or target/<target>/release for another target.
       BIN: ${{ matrix.target && format('target/{0}/release', matrix.target) || 'target/release' }}
-    defaults:
+    defaults: &platform-defaults
       run:
         shell: bash
-    steps:
+    steps: &platform-steps
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
@@ -455,7 +455,8 @@ jobs:
         run: mv "dist/${{ matrix.asset }}" "dist/untested-${{ matrix.asset }}"
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.started_elsewhere && 'untested-' || '' }}${{ matrix.asset }}
+          # The manual download's artifact is outside sign/publish's sunrise-* namespace.
+          name: ${{ matrix.musl && 'musl-archive' || format('{0}{1}', matrix.started_elsewhere && 'untested-' || '', matrix.asset) }}
           path: dist/${{ matrix.started_elsewhere && 'untested-' || '' }}${{ matrix.asset }}
           if-no-files-found: error
           retention-days: 3
@@ -486,10 +487,10 @@ jobs:
       # The leg's last step: legs below counts a leg as built only once this marker exists. A leg built for another
       # CPU gets its marker from the job that started its programs there.
       - name: This leg built
-        if: ${{ !matrix.started_elsewhere }}
+        if: ${{ !matrix.started_elsewhere && !matrix.musl }}
         run: echo built > "$RUNNER_TEMP/leg-${{ matrix.name }}"
       - uses: actions/upload-artifact@v7
-        if: ${{ !matrix.started_elsewhere }}
+        if: ${{ !matrix.started_elsewhere && !matrix.musl }}
         with:
           name: leg-${{ matrix.name }}
           path: ${{ runner.temp }}/leg-${{ matrix.name }}
@@ -516,15 +517,42 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  # Whether the build is complete: every required leg left its marker. An optional leg (build's continue-on-error)
-  # that failed, timed out or was cancelled drops out alike; a cancelled run stops here.
+  # The caller runs this part separately so the manual download never holds the main release. Unlike the optional
+  # legs within `build`, this job reports a real failure to its caller; no required-build marker is needed.
+  musl:
+    if: inputs.part == 'musl'
+    name: build ${{ matrix.name }}
+    strategy:
+      matrix:
+        include:
+          - name: linux-musl
+            os: ubuntu-22.04
+            blacksmith: blacksmith-16vcpu-ubuntu-2204
+            musl: true
+            target: x86_64-unknown-linux-musl
+            dir: sunrise-linux-musl-x86_64
+            asset: sunrise-linux-musl-x86_64.tar.gz
+            # The shared steps accept the same platform fields; none of these apply to this leg.
+            mac: false
+            started_elsewhere: false
+            exe: ''
+            pe_arch: ''
+            rustflags: ''
+            server_dir: ''
+            server_asset: ''
+    runs-on: *platform-runner
+    timeout-minutes: *platform-timeout
+    env: *platform-env
+    defaults: *platform-defaults
+    steps: *platform-steps
+
   # #1602: the Intel macOS archive, built and signed with the others, started on real Intel hardware. It ships only
   # if its programs start here: this job republishes it under the name the sign job collects and leaves the leg's
   # marker. No keychain, secrets or publishing; if it fails, the archive drops out like any optional leg.
   macos-x64-intel:
     name: start the Intel macOS archive on Intel
     needs: build
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.part == 'game' }}
     # Optional where the leg is (build's continue-on-error): a failure here drops x64 without turning the run red;
     # legs decides from the marker.
     continue-on-error: ${{ github.repository == 'sunrise-org/sunrise' || inputs.kind == 'snapshot' }}
@@ -582,7 +610,7 @@ jobs:
   windows-arm64-native:
     name: start the Windows ARM64 archive on ARM64
     needs: build
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.part == 'game' }}
     # Optional as the leg is (build's continue-on-error): a failure here drops ARM64 without turning the run red.
     continue-on-error: true
     runs-on: windows-11-vs2026-arm
@@ -641,7 +669,7 @@ jobs:
 
   legs:
     needs: [build, macos-x64-intel, windows-arm64-native]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.part == 'game' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -657,7 +685,7 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           KIND: ${{ inputs.kind }}
         run: |
-          # The legs build's continue-on-error does not make optional.
+          # The launcher and server legs alone determine whether the game can publish.
           required=(linux windows)
           if [[ "$REPOSITORY" != sunrise-org/sunrise ]]; then
             required+=(macos)
@@ -665,7 +693,7 @@ jobs:
           fi
           missing=()
           for leg in "${required[@]}"; do [[ -d "legs/leg-$leg" ]] || missing+=("$leg"); done
-          for leg in linux linux-musl windows windows-arm64 macos macos-x64; do
+          for leg in linux windows windows-arm64 macos macos-x64; do
             [[ -d "legs/leg-$leg" ]] || echo "::warning::build $leg did not finish"
           done
           if (( ${#missing[@]} )); then echo "::error::required legs did not build: ${missing[*]}"; exit 1; fi

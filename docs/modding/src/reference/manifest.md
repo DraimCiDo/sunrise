@@ -110,16 +110,15 @@ key or alternate optional spelling.
 
 Side is the **installation**, not the logical side executing a hook: an integrated server
 belongs to the client installation, a dedicated server to the server installation.
-Inactive declarations are excluded before missing/version/order checks and code dependency
-selection. A missing required dependency, incompatible installed version or dispatch cycle
-refuses loading; an absent optional dependency is ignored. Content and native manifests
-share the installed-set rule resolver, including mixed content/code relationships.
+Inactive declarations are excluded from code dependency selection at build time and from logical
+missing/version/order checks at startup. A missing required dependency, incompatible installed
+version or dispatch cycle refuses loading; an absent optional dependency is allowed. Content and
+native manifests share the installed-set rule resolver.
 
-**Sunrise addition: physical linking is separate from dispatch policy.** A code package's
-`[dependencies]` also declares real API library requirements. `before`, `none`, and instance
-overrides do not remove Cargo imports, reverse compiler staging, bypass ABI/hash/toolchain
-checks, or manufacture a missing library. Physical libraries still resolve dependency-first
-or refuse by name. Content constraints do not require an API package.
+**Physical linking is separate from dispatch policy.** Native builds wire only supplied code
+packages; a content-only target has no Cargo alias. At startup, the loader and compiled package
+inventory enforce physical requirements. Dispatch order, side filters and instance overrides cannot
+remove those requirements or bypass ABI and build identity checks.
 See [Dependencies between mods](../concepts/dependencies.md).
 
 Top-level `[properties]` holds free-form values other mods read: strings, integers, floats and booleans only,
