@@ -226,8 +226,8 @@ fn sdk_note_scope_ignores_engine_ids_but_checks_api_ids() {
     note(
         dir.path(),
         "changes",
-        "point.toml",
-        "ids = [\"point:game::old_tick\"]\nwhy = \"Tick moved.\"\n",
+        "internal.toml",
+        "ids = [\"internal:fn:game::old_tick\"]\nwhy = \"Tick moved.\"\n",
     );
     note(
         dir.path(),
@@ -258,7 +258,11 @@ fn sdk_note_scope_ignores_engine_ids_but_checks_api_ids() {
     let (code, _, err) = run(dir.path(), &notes);
     assert_eq!(code, 1);
     for refused in [
-        ["point.toml", "point:game::old_tick", "which did not change"],
+        [
+            "internal.toml",
+            "internal:fn:game::old_tick",
+            "which did not change",
+        ],
         ["mixed.toml", "loop:old.tick", "which did not change"],
     ] {
         assert!(
@@ -272,7 +276,7 @@ fn sdk_note_scope_ignores_engine_ids_but_checks_api_ids() {
         dir.path(),
         "changes",
         "api-stale.toml",
-        "ids = [\"point:game::new_tick\", \"fn:keep\"]\nwhy = \"No API change.\"\n",
+        "ids = [\"internal:fn:game::new_tick\", \"fn:keep\"]\nwhy = \"No API change.\"\n",
     );
     let (code, _, err) = run(dir.path(), &publish);
     assert_eq!(code, 1);
@@ -283,7 +287,7 @@ fn sdk_note_scope_ignores_engine_ids_but_checks_api_ids() {
             && err.contains("which did not change"),
         "{err}"
     );
-    assert!(!err.contains("point:game::new_tick"), "{err}");
+    assert!(!err.contains("internal:fn:game::new_tick"), "{err}");
 }
 
 #[test]
