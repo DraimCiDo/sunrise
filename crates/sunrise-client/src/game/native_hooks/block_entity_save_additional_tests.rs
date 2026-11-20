@@ -626,19 +626,10 @@ mod tests {
                     );
                     if kind == "entity-free" {
                         assert!(snapshot.is_none());
-                        assert!(
-                            item.extra
-                                .as_ref()
-                                .and_then(|extra| extra.custom_data())
-                                .is_none()
-                        );
+                        assert!(item.custom_data().is_none());
                         assert_eq!(serial.load(Ordering::Relaxed), before);
                     } else {
-                        let copied = item
-                            .extra
-                            .as_ref()
-                            .and_then(|extra| extra.custom_data())
-                            .unwrap();
+                        let copied = item.custom_data().unwrap();
                         assert_eq!(
                             copied.get(&"serial".into()),
                             Some(&Tag::Int(before)),
