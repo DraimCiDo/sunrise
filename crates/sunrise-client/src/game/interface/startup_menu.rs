@@ -168,6 +168,9 @@ impl StartupMenu {
             game.ui.options = std::mem::take(&mut self.options);
             game.ui.options.resource_error =
                 game.ui.options.resource_error.take().or(resource_error);
+            if let Some(mods) = &mut game.ui.options.mods_screen {
+                mods.update_installed(&game.settings.mods);
+            }
             game.set_screen(Screen::Options);
             game.options_from_title = true;
             game.dragging = self.dragging;
@@ -754,9 +757,12 @@ impl Loading {
                 Event::AccessibilityHelp => {
                     super::packs::open_uri(super::options::ACCESSIBILITY_HELP_LINK)
                 }
-                // Mods' settings pages open only in a running game.
-                // The HUD editor needs a world: its button is inactive here.
-                Event::NativeSettings(_) | Event::NativeSetting(..) | Event::HudEditor => {}
+                // A package cannot offer an action until the game has admitted its code.
+                // Mods' settings pages also need the game; the HUD editor needs a world.
+                Event::ActivateModListAction(_)
+                | Event::NativeSettings(_)
+                | Event::NativeSetting(..)
+                | Event::HudEditor => {}
                 // The startup menu runs before the game opens a control socket,
                 // and before its sound engine (no clicks, no volume previews,
                 // and no music tracks to list or play).

@@ -938,7 +938,7 @@ impl Game<'_> {
                         self.pad_click_at(event_loop, focus.center(), false);
                         self.pad_open_keyboard();
                     }
-                    Kind::Button | Kind::Tab(_) => {
+                    Kind::Button | Kind::ModListAction(_) | Kind::Tab(_) => {
                         self.pad_pointer_to(event_loop, focus.center());
                         self.pad.menu.armed = Some(focus.rect);
                     }
@@ -1723,13 +1723,22 @@ impl Game<'_> {
         self.pad.menu.nudge = None;
         self.pad.menu.anchors = None;
         if self.pad_focus_mode() {
-            let named = layout
-                .focus_name
-                .take()
-                .and_then(|name| named_target(&name, &widgets::last_labelled(), &rects));
-            self.pad.menu.focus = named
-                .or_else(|| self.pad.menu.focus.and_then(|focus| found(focus.rect)))
-                .map(|i| targets[i]);
+            if let Some(focus) = self
+                .pad
+                .menu
+                .focus
+                .filter(|f| matches!(f.kind, Kind::ModListAction(_)))
+            {
+                self.pad_follow_mod_list_action(focus, &targets);
+            } else {
+                let named = layout
+                    .focus_name
+                    .take()
+                    .and_then(|name| named_target(&name, &widgets::last_labelled(), &rects));
+                self.pad.menu.focus = named
+                    .or_else(|| self.pad.menu.focus.and_then(|focus| found(focus.rect)))
+                    .map(|i| targets[i]);
+            }
         } else if self.pad.menu.pos.is_some() && self.pad.menu.held == [false; 2] {
             let at = self.cursor;
             let on = before.iter().find(|r| {
@@ -1751,6 +1760,18 @@ impl Game<'_> {
             resized: None,
         });
         false
+    }
+
+    // The same rectangle or translated label can now belong to another package's button.
+    fn pad_follow_mod_list_action(&mut self, focus: Target, targets: &[Target]) {
+        let next = targets.iter().copied().find(|t| t.kind == focus.kind);
+        if next != Some(focus) {
+            self.pad.menu.armed = None;
+        }
+        if next.is_none() && self.pad.menu.keyboard {
+            self.pad.menu.pos = None;
+        }
+        self.pad.menu.focus = next;
     }
 
     /// What the focused widget is called, when it has a name of its own on this screen.
@@ -1868,6 +1889,13 @@ impl Game<'_> {
             if let Some(i) = opened {
                 self.ui.options.clear_shell_opened_focus();
                 self.pad.menu.focus = Some(targets[i]);
+            } else if let Some(focus) = self
+                .pad
+                .menu
+                .focus
+                .filter(|f| matches!(f.kind, Kind::ModListAction(_)))
+            {
+                self.pad_follow_mod_list_action(focus, targets);
             } else if let Some(focus) = self.pad.menu.focus {
                 let kind = std::mem::discriminant(&focus.kind);
                 let named = self.pad_named_focus(focus, &rects);
@@ -1973,7 +2001,7 @@ impl Game<'_> {
     /// `pad status`: the menu mode, the focused target and every target.
     pub(super) fn pad_menu_status(&self) -> serde_json::Value {
         let kind = |k: Kind| match k {
-            Kind::Button => "button",
+            Kind::Button | Kind::ModListAction(_) => "button",
             Kind::Slider { .. } => "slider",
             Kind::Field => "field",
             Kind::Row => "row",
@@ -2105,7 +2133,13 @@ impl Game<'_> {
             .menu
             .focus
             .filter(|_| self.pad_focus_mode())
-            .and_then(|f| find(f.rect));
+            .and_then(|f| {
+                if matches!(f.kind, Kind::ModListAction(_)) {
+                    targets.iter().copied().find(|t| t.kind == f.kind)
+                } else {
+                    find(f.rect)
+                }
+            });
         if focus.is_none()
             && let Some(clicked) = self.pad.menu.origin.and_then(find)
         {
@@ -2148,7 +2182,14 @@ impl Game<'_> {
                 let focus = self.pad_reveal(focus);
                 self.pad.menu.focus = Some(focus);
                 // AbstractButton.keyPressed: onPress, with its click sound.
-                self.pad_click_at(event_loop, focus.center(), false);
+                if let Kind::ModListAction(id) = focus.kind {
+                    let _ = self.handle_option_events(vec![
+                        Event::ButtonClick,
+                        Event::ActivateModListAction(id),
+                    ]);
+                } else {
+                    self.pad_click_at(event_loop, focus.center(), false);
+                }
             }
             (Act::ToggleSlider, _) => self.pad.menu.slider_edit = !slider_edit,
             (Act::Nudge(sign), Some(focus)) => self.pad_nudge(event_loop, focus, sign),

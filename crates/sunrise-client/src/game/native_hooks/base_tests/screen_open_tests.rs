@@ -272,6 +272,145 @@ fn a_mod_with_no_screen_hook_leaves_set_screen_plain() {
         assert!(game.keys.is_empty());
     });
 }
+#[test]
+#[ignore = "daily"]
+fn mods_actions_route_pointer_and_keyboard_to_the_owner_and_close_to_the_selection() {
+    use mod_api::{ModListActionResult, Registrar, RegistrationContext};
+    use sunrise_client::{
+        mod_list::{Installed, NativePage},
+        options_ui::{Event, Page},
+        widgets,
+    };
+    use winit::event_loop::ControlFlow;
+
+    thread_local! {
+        static PRESSES: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    struct ActionOwner;
+    #[mod_api::__subscriptions]
+    impl Hooks for ActionOwner {
+        fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+            r.register_mod_list_action("details", "gui.done", |_, key| {
+                PRESSES.with_borrow_mut(|presses| presses.push(key.into()));
+                ModListActionResult::OpenScreen
+            })
+            .unwrap();
+        }
+    }
+    struct NoLoop;
+    impl crate::game::event_loop::EventLoopCtl for NoLoop {
+        fn exit(&self) {}
+        fn set_control_flow(&self, _: ControlFlow) {}
+    }
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let answer = Arc::new(Mutex::new(None));
+    let mods = vec![
+        ModEntry::new("action_owner", Box::new(ActionOwner)),
+        ModEntry::new(
+            "screens",
+            Box::new(Probe {
+                log: log.clone(),
+                answer: answer.clone(),
+            }),
+        ),
+    ]
+    .into();
+    with_game_of(mods, |game| {
+        mod_platform::__private::part_tests::install_parts_fixture(mod_api::__private::mods())
+            .unwrap();
+        game.settings.mods.installed = ["action_owner", "screens"]
+            .map(|id| Installed {
+                id: id.into(),
+                title: id.into(),
+                description: String::new(),
+                problem: None,
+                dev: false,
+                native: Some(NativePage::default()),
+            })
+            .into();
+        let draw = |game: &mut Game<'_>| {
+            let mut batch = HudBatch::new([1280, 720], game.settings.gui_scale_inputs());
+            widgets::cover_frame();
+            game.draw_options(&mut batch);
+            widgets::end_frame(widgets::generation() + 1);
+        };
+        let id = mod_api::__private::ModListActionId {
+            owner: "action_owner",
+            key: "details",
+        };
+        let show = |game: &mut Game<'_>, title| {
+            game.open_options_at(title, Page::Mods);
+            draw(game);
+            let screen = game.ui.options.mods_screen.as_mut().unwrap();
+            screen.step(1);
+            assert_eq!(screen.selected_package(), Some("action_owner"));
+            draw(game);
+            assert_eq!(widgets::last_targets().len(), 1);
+        };
+        let assert_parent = |game: &Game<'_>| {
+            assert_eq!(game.screen, Screen::Options);
+            assert_eq!(game.ui.options.page(), Page::Mods);
+            assert_eq!(
+                game.ui
+                    .options
+                    .mods_screen
+                    .as_ref()
+                    .unwrap()
+                    .selected_package(),
+                Some("action_owner")
+            );
+            assert_eq!(game.mod_screen(), None);
+        };
+        show(game, false);
+        take(&log);
+        assert!(game.key_focus_key(&NoLoop, KeyCode::Tab));
+        let focus = game.pad_focus_rect();
+        assert!(focus.is_some());
+        *answer.lock().unwrap() = Some(ScreenOpening::Cancel);
+        assert!(game.key_focus_key(&NoLoop, KeyCode::Enter));
+        assert_parent(game);
+        assert_eq!(game.pad_focus_rect(), focus);
+        assert_eq!(take(&log), ["opening options->mod"]);
+        assert_eq!(PRESSES.with(std::cell::RefCell::take), ["details"]);
+        *answer.lock().unwrap() = None;
+        assert!(game.key_focus_key(&NoLoop, KeyCode::Enter));
+        assert_eq!(game.mod_screen(), Some("action_owner"));
+        assert_eq!(PRESSES.with(std::cell::RefCell::take), ["details"]);
+        let owner = mod_api::__private::enter("action_owner", "fixture");
+        assert_eq!(game.mod_list_action_key(), Ok(Some("details")));
+        drop(owner);
+        let other = mod_api::__private::enter("screens", "fixture");
+        assert_eq!(game.mod_list_action_key(), Ok(None));
+        drop(other);
+        game.key_pressed(KeyCode::Escape, KeyCode::Escape).unwrap();
+        assert_parent(game);
+        game.ui.options.mods_screen.as_mut().unwrap().step(1);
+        game.handle_option_events(vec![Event::ActivateModListAction(id)])
+            .unwrap();
+        assert_eq!(game.screen, Screen::Options);
+        assert!(PRESSES.with_borrow(Vec::is_empty));
+
+        let _setup = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Setup);
+        game.player = None;
+        game.title = Some(game.new_title(Game::game_dir().join("saves")));
+        show(game, true);
+        game.settings.mods.disabled.insert("action_owner".into());
+        game.handle_option_events(vec![Event::ActivateModListAction(id)])
+            .unwrap();
+        assert_parent(game);
+        assert!(PRESSES.with_borrow(Vec::is_empty));
+        game.settings.mods.disabled.clear();
+        game.cursor = widgets::last_targets()[0].center();
+        game.options_mouse(true, false).unwrap();
+        game.options_mouse(false, false).unwrap();
+        assert_eq!(game.mod_screen(), Some("action_owner"));
+        assert_eq!(PRESSES.with(std::cell::RefCell::take), ["details"]);
+        mod_api::prelude::ScreensClientHost::mod_screen_close(game, "action_owner");
+        assert_parent(game);
+        assert!(game.title.is_some());
+    });
+}
+
 fn take(log: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
     std::mem::take(&mut *log.lock().unwrap())
 }
