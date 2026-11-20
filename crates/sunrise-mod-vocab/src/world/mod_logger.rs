@@ -84,7 +84,8 @@ impl ModLogger {
 
     /// Queue a record on the calling thread, with this mod's ID and `level`.
     /// Use `format_args!(...)` to borrow the message. Filtered records do not run their
-    /// formatter. This writes a diagnostic, not chat or a Mods-screen loading warning.
+    /// formatter, and neither do calls made after the writer has stopped. This writes a
+    /// diagnostic, not chat or a Mods-screen loading warning.
     #[track_caller]
     pub fn log(&self, level: LogLevel, message: fmt::Arguments<'_>) -> LogOutcome {
         match (self.id, SINK.get()) {
@@ -97,13 +98,53 @@ impl ModLogger {
 }
 
 impl crate::RegistrationContext {
-    /// Get the native logger for the installed mod receiving this registration callback.
+    /// Get the native logger from the context passed to [`Hooks::register`](crate::Hooks::register).
     /// The manifest ID is already bound; no target or namespace is supplied by the mod.
-    /// A context used without a running native mod (for example by a tool) yields an
-    /// unavailable logger.
+    /// A context not bound to a native registration entry yields an unavailable logger.
     pub fn logger(&self) -> ModLogger {
         ModLogger {
-            id: crate::content::crash::current_native_mod(),
+            id: self.native_mod_id,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::content::crash::{ModCall, enter_native_mod};
+    use crate::{HookId, Hooks, ModEntry};
+
+    #[test]
+    fn registration_logger_uses_the_entry_even_inside_another_mods_crash_scope() {
+        struct Quiet;
+        impl Hooks for Quiet {
+            fn subscribed(&self) -> &'static [Option<HookId>] {
+                &[]
+            }
+        }
+        install_mod_log_sink(
+            |_| true,
+            |id, _, _, _| {
+                assert_eq!(id, "actual_manifest_id");
+                LogOutcome::Queued
+            },
+        );
+        let mods = [ModEntry::new("actual_manifest_id", Box::new(Quiet))];
+        let mut registration = crate::runtime::entered_registration(&mods, "register");
+        let (_, context) = registration.next().unwrap();
+        let _other = enter_native_mod(ModCall {
+            id: "other_mod",
+            hook: "register",
+            part: None,
+        });
+        assert_eq!(
+            crate::content::crash::current_native_mod(),
+            Some("other_mod")
+        );
+        let logger = context.logger();
+        assert_eq!(
+            logger.log(LogLevel::Info, format_args!("ready")),
+            LogOutcome::Queued
+        );
     }
 }

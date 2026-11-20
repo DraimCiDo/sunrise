@@ -1,9 +1,12 @@
+use mod_api::text::TextContent;
 use mod_api::{
     BroadcastMessageEvent, ClientHost, ClientTickPostEvent, Flow, Hooks, Host, HostTransaction,
     LogLevel, LogOutcome, ModLogger, Registrar, RegistrationContext, ServerHost,
     ServerStartedEvent, Text,
 };
 use std::sync::OnceLock;
+
+const MARKER: &str = "mod-logger fixture: ";
 
 #[derive(Default)]
 struct Fixture {
@@ -17,10 +20,7 @@ impl Hooks for Fixture {
         let logger = cx.logger();
         assert!(logger.enabled(LogLevel::Info));
         assert_eq!(
-            logger.log(
-                LogLevel::Info,
-                format_args!("mod-logger fixture: registered {}", 17)
-            ),
+            logger.log(LogLevel::Info, format_args!("{MARKER}registered {}", 17)),
             LogOutcome::Queued,
         );
         assert!(self.logger.set(logger).is_ok());
@@ -30,17 +30,11 @@ impl Hooks for Fixture {
         self.client_once.get_or_init(|| {
             let logger = self.logger.get().unwrap();
             assert_eq!(
-                logger.log(
-                    LogLevel::Warn,
-                    format_args!("mod-logger fixture: client first")
-                ),
+                logger.log(LogLevel::Warn, format_args!("{MARKER}client first")),
                 LogOutcome::Queued,
             );
             assert_eq!(
-                logger.log(
-                    LogLevel::Error,
-                    format_args!("mod-logger fixture: client second")
-                ),
+                logger.log(LogLevel::Error, format_args!("{MARKER}client second")),
                 LogOutcome::Queued,
             );
         });
@@ -51,28 +45,32 @@ impl Hooks for Fixture {
         let logger = self.logger.get().unwrap();
         let result: Result<(), ()> = host.transaction(|_, _| {
             assert_eq!(
-                logger.log(
-                    LogLevel::Warn,
-                    format_args!("mod-logger fixture: before rollback")
-                ),
+                logger.log(LogLevel::Warn, format_args!("{MARKER}before rollback")),
                 LogOutcome::Queued,
             );
             Err(())
         });
         assert_eq!(result, Err(()));
         assert_eq!(
-            logger.log(
-                LogLevel::Error,
-                format_args!("mod-logger fixture: after rollback")
-            ),
+            logger.log(LogLevel::Error, format_args!("{MARKER}after rollback")),
             LogOutcome::Queued,
         );
     }
 
     fn broadcast_message(&self, _: &dyn Host, event: &mut BroadcastMessageEvent<'_>) -> Flow {
-        assert_ne!(
-            *event.line,
-            Text::literal("mod-logger fixture: before rollback")
+        fn append_plain(text: &Text, plain: &mut String) {
+            if let TextContent::Literal(literal) = &text.content {
+                plain.push_str(literal);
+            }
+            for child in &text.children {
+                append_plain(child, plain);
+            }
+        }
+        let mut plain = String::new();
+        append_plain(event.line, &mut plain);
+        assert!(
+            !plain.contains(MARKER),
+            "fixture log leaked to chat: {plain}"
         );
         Flow::Continue
     }

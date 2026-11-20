@@ -14,7 +14,11 @@ use std::collections::{HashMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, mpsc};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local, NaiveDate};
@@ -277,6 +281,18 @@ enum Out {
     Flush(mpsc::SyncSender<()>),
 }
 
+/// Owns the only receiver and clears availability even if its thread unwinds or fails to start.
+struct WriterInbox {
+    receiver: mpsc::Receiver<Out>,
+    file_available: Arc<AtomicBool>,
+}
+
+impl Drop for WriterInbox {
+    fn drop(&mut self) {
+        self.file_available.store(false, Ordering::Relaxed);
+    }
+}
+
 /// The file side of the log, on its own thread: a line costs the thread that logs it a
 /// format and a channel send, never a write that can wait (a full stderr pipe, a slow disk):
 /// written on the game thread, a line could hold the tick for milliseconds while the CPU sat
@@ -289,9 +305,9 @@ struct Writer {
 }
 
 impl Writer {
-    fn run(mut self, out: mpsc::Receiver<Out>) {
+    fn run(mut self, inbox: WriterInbox) {
         let stderr = io::stderr();
-        for msg in out {
+        for msg in &inbox.receiver {
             match msg {
                 Out::Write {
                     date,
@@ -336,7 +352,7 @@ struct Logger {
     /// What the main thread is called in the log: "Render thread", or "Server thread" for the
     /// dedicated server, as in vanilla.
     main_thread: &'static str,
-    file_available: bool,
+    file_available: Arc<AtomicBool>,
     floods: Mutex<Floods>,
 }
 
@@ -521,6 +537,28 @@ impl log::Log for Logger {
 }
 
 impl Logger {
+    fn new(main_thread: &'static str, has_file: bool) -> (Self, WriterInbox) {
+        let (out, receiver) = mpsc::channel();
+        let file_available = Arc::new(AtomicBool::new(has_file));
+        (
+            Self {
+                out,
+                recent: Mutex::default(),
+                main_thread,
+                file_available: Arc::clone(&file_available),
+                floods: Mutex::default(),
+            },
+            WriterInbox {
+                receiver,
+                file_available,
+            },
+        )
+    }
+
+    fn mod_enabled(&self, level: log::Level) -> bool {
+        self.file_available.load(Ordering::Relaxed) && level <= DEFAULT_LEVEL
+    }
+
     fn log_mod(
         &self,
         id: &'static str,
@@ -528,7 +566,7 @@ impl Logger {
         message: std::fmt::Arguments<'_>,
         site: &'static std::panic::Location<'static>,
     ) -> LogOutcome {
-        if !self.file_available {
+        if !self.file_available.load(Ordering::Relaxed) {
             return LogOutcome::Unavailable;
         }
         if level > DEFAULT_LEVEL {
@@ -693,8 +731,7 @@ pub fn init(home: &Path, main_thread: &'static str) {
         }
     };
     let logger = LOGGER.get_or_init(|| {
-        let (out, receive) = mpsc::channel();
-        let mut file_available = file.is_some();
+        let (logger, inbox) = Logger::new(main_thread, file.is_some());
         let writer = Writer {
             file,
             dir,
@@ -702,24 +739,17 @@ pub fn init(home: &Path, main_thread: &'static str) {
         };
         if let Err(e) = std::thread::Builder::new()
             .name("Log writer".into())
-            .spawn(move || writer.run(receive))
+            .spawn(move || writer.run(inbox))
         {
-            file_available = false;
             eprintln!("Sunrise: could not start the log writer: {e}");
         }
-        Logger {
-            out,
-            recent: Mutex::new(VecDeque::new()),
-            main_thread,
-            file_available,
-            floods: Mutex::new(Floods::default()),
-        }
+        logger
     });
     if log::set_logger(logger).is_ok() {
         log::set_max_level(DEFAULT_LEVEL.to_level_filter());
     }
     mod_api::__private::game::install_mod_log_sink(
-        |level| level <= DEFAULT_LEVEL && LOGGER.get().is_some_and(|logger| logger.file_available),
+        |level| LOGGER.get().is_some_and(|logger| logger.mod_enabled(level)),
         |id, level, message, site| {
             LOGGER.get().map_or(LogOutcome::Unavailable, |logger| {
                 logger.log_mod(id, level, message, site)
@@ -856,20 +886,13 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("sunrise-native-log-test-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
-        let (out, receive) = mpsc::channel();
         let writer = Writer {
             file: Some(open_latest(&dir).unwrap().unwrap()),
             dir: dir.clone(),
             date: Local::now().date_naive(),
         };
-        let handle = std::thread::spawn(move || writer.run(receive));
-        let logger = Logger {
-            out,
-            recent: Mutex::new(VecDeque::new()),
-            main_thread: "Render thread",
-            file_available: true,
-            floods: Mutex::new(Floods::default()),
-        };
+        let (logger, inbox) = Logger::new("Render thread", true);
+        let handle = std::thread::spawn(move || writer.run(inbox));
         for (target, level, message) in [
             ("meridian_sunrise::save", log::Level::Warn, "save failed"),
             ("meridian_core::map", log::Level::Info, "map opened"),
@@ -912,14 +935,8 @@ mod tests {
     #[test]
     fn sunrise_stderr_and_external_file_records_stay_separate() {
         use log::Log;
-        let (out, receive) = mpsc::channel();
-        let logger = Logger {
-            out,
-            recent: Mutex::new(VecDeque::new()),
-            main_thread: "Render thread",
-            file_available: true,
-            floods: Mutex::new(Floods::default()),
-        };
+        let (logger, inbox) = Logger::new("Render thread", true);
+        let receive = &inbox.receiver;
         for target in ["sunrise_client::game", "meridian_core", "wgpu_hal::vulkan"] {
             logger.log(
                 &log::Record::builder()
@@ -955,14 +972,7 @@ mod tests {
 
     #[test]
     fn a_level_filtered_mod_record_is_not_formatted_or_queued() {
-        let (out, receive) = mpsc::channel();
-        let logger = Logger {
-            out,
-            recent: Mutex::default(),
-            main_thread: "Render thread",
-            file_available: true,
-            floods: Mutex::default(),
-        };
+        let (logger, inbox) = Logger::new("Render thread", true);
         assert_eq!(
             logger.log_mod(
                 "example",
@@ -972,19 +982,13 @@ mod tests {
             ),
             LogOutcome::Filtered
         );
-        assert!(receive.try_recv().is_err());
+        assert!(inbox.receiver.try_recv().is_err());
     }
 
     #[test]
     fn mod_logging_refuses_a_writer_without_a_log_file() {
-        let (out, receive) = mpsc::channel();
-        let logger = Logger {
-            out,
-            recent: Mutex::default(),
-            main_thread: "Render thread",
-            file_available: false,
-            floods: Mutex::default(),
-        };
+        let (logger, inbox) = Logger::new("Render thread", false);
+        assert!(!logger.mod_enabled(log::Level::Error));
         assert_eq!(
             logger.log_mod(
                 "example",
@@ -994,19 +998,33 @@ mod tests {
             ),
             LogOutcome::Unavailable
         );
-        assert!(receive.try_recv().is_err());
+        assert!(inbox.receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn mod_logging_refuses_a_disconnected_writer_before_filtering_or_formatting() {
+        let (logger, inbox) = Logger::new("Render thread", true);
+        assert!(logger.mod_enabled(log::Level::Error));
+        drop(inbox);
+        assert!(!logger.mod_enabled(log::Level::Error));
+        for level in [log::Level::Error, log::Level::Debug] {
+            assert_eq!(
+                logger.log_mod(
+                    "example",
+                    level,
+                    format_args!("{MustNotFormat}"),
+                    std::panic::Location::caller(),
+                ),
+                LogOutcome::Unavailable
+            );
+        }
+        assert!(logger.recent.lock().unwrap().is_empty());
     }
 
     #[test]
     fn mod_warnings_and_errors_share_a_flood_budget_per_mod_and_call_site() {
-        let (out, receive) = mpsc::channel();
-        let logger = Logger {
-            out,
-            recent: Mutex::default(),
-            main_thread: "Render thread",
-            file_available: true,
-            floods: Mutex::default(),
-        };
+        let (logger, inbox) = Logger::new("Render thread", true);
+        let receive = &inbox.receiver;
         let site = std::panic::Location::caller();
         for _ in 0..100 {
             assert_eq!(
