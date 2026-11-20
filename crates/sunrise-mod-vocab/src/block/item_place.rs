@@ -130,9 +130,7 @@ pub enum ItemPlace {
     /// player only if they have none: into their inventory, or dropped at the root commit when
     /// it is full. Inserting nothing gives nothing. Otherwise it is the place inside.
     ///
-    /// Wrappers may nest to any depth in a mod's own code: reading and writing undo them in a
-    /// loop. One crossing the wasm boundary nests at most 15 wrappers deep (the wire's 32
-    /// levels, two for each); a deeper one is refused there.
+    /// Wrappers may nest to any depth: reading and writing undo them in a loop.
     InfiniteMaterials {
         /// The player's UUID.
         player: u128,
@@ -310,11 +308,6 @@ impl crate::NoBackend for ItemPlaceEditError {
 /// attachments). While its mod is disabled, lookups refuse both reads and writes through its
 /// places; re-enabling the mod makes the same registrations available again.
 pub trait PlaceProvider: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::place_provider::<Self>();
-    }
     /// The stack at `key`, if any.
     fn stack(&self, host: &mut dyn ServerHost, key: u64) -> Option<ItemStack>;
     /// Puts up to `amount` of `resource` at `key`, in transaction `tx`: how much went. What

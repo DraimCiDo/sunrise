@@ -61,11 +61,6 @@ pub fn tooltip_appenders() -> &'static [TooltipAppenderPart] {
 /// What answers an item capability for one item: given where the stack lives, its handler, or
 /// none to leave it to the next provider. A closure is one.
 pub trait ItemCapabilityProvider<T: ?Sized>: Send + Sync {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::item_capability_provider::<Self>();
-    }
     /// The handler for the stack at `at`, or none.
     fn provide(&self, host: &mut dyn ServerHost, at: &ItemPlace) -> Option<Box<T>>;
 }
@@ -169,35 +164,6 @@ pub fn item_listens(hook: HookId, id: &str) -> bool {
     parts(hook, "item routing")
         .for_hook(hook)
         .is_some_and(|table| !table.item(|| Some(id)).is_empty())
-}
-
-/// Prepare the subscribed item parts once, before traversing candidate slots/entities.
-/// The source API stack must retain its address until these leases are dropped.
-// hidden: engine-owned equipment scopes retain transport leases; not a mod callback.
-#[doc(hidden)]
-pub fn prepare_equip_parts(
-    stack: &crate::ItemStack,
-    kinds: &[&str],
-    reads: &[crate::EquipReadRow],
-) -> Result<Vec<Box<dyn std::any::Any>>, crate::wire::WireError> {
-    let parts = parts(HookId::CanEquip, "equip preparation");
-    let Some(table) = parts.for_hook(HookId::CanEquip) else {
-        return Ok(Vec::new());
-    };
-    let mut leases = Vec::new();
-    for part in table.item(|| crate::content::registry_keys::item_id(stack.item())) {
-        if !crate::mod_index_on(part.mod_index) {
-            continue;
-        }
-        if let Some(lease) = part
-            .part
-            .__prepare_equip(stack, kinds, reads)
-            .map_err(crate::wire::WireError::Invalid)?
-        {
-            leases.push(lease);
-        }
-    }
-    Ok(leases)
 }
 
 /// Registrar operations for items.

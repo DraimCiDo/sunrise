@@ -66,39 +66,12 @@ fn installation_refusals(patched: &[(&str, &[&str], bool)]) -> Vec<String> {
     }).collect()
 }
 
-/// Code-runtime services supplied by the platform at startup.
-pub struct CodeRuntime {
-    pub initialize: fn(&[mod_api::PackageInfo]),
-    pub refusal: fn(&str) -> Option<String>,
-    pub startup_refused: fn(&str) -> bool,
-}
-static CODE_RUNTIME: std::sync::OnceLock<CodeRuntime> = std::sync::OnceLock::new();
-pub(crate) fn initialize_code(inventory: &[mod_api::PackageInfo]) {
-    let runtime = CODE_RUNTIME
-        .get()
-        .expect("code initialization requires entry::start");
-    (runtime.initialize)(inventory);
-}
-pub(crate) fn code_startup_refused(id: &str) -> bool {
-    CODE_RUNTIME
-        .get()
-        .is_some_and(|runtime| (runtime.startup_refused)(id))
-}
-pub(crate) fn code_refusal(id: &str) -> Option<String> {
-    CODE_RUNTIME.get().and_then(|runtime| (runtime.refusal)(id))
-}
-
 /// Start the engine with dependency-ordered code supplied by the host.
-pub fn start<G>(
+pub fn start(
     native: sunrise_mod_package::runtime::Runtime,
-    load: impl FnOnce(
-        &sunrise_mod_package::runtime::Runtime,
-        &LaunchArguments,
-    ) -> (Vec<&'static str>, G),
-    code: CodeRuntime,
+    load: impl FnOnce(&sunrise_mod_package::runtime::Runtime, &LaunchArguments),
     startup: Startup,
 ) {
-    let _ = CODE_RUNTIME.set(code);
     let Startup {
         launch,
         options,
@@ -153,7 +126,7 @@ pub fn start<G>(
     // Mods' startup bars and lines (`RegistrationContext::progress`), before they register.
     game::startup_progress::install(side == "server");
     // Mod loading emits refusals; both client and dedicated logs must exist first.
-    let (_ids, _loaded_code) = load(&native, &launch);
+    load(&native, &launch);
     crash::install(home.clone(), side);
     let _ = sunrise_world::loot::types::install(crate::game::loot_types::capture);
     if sunrise_world::native_load_hooks::install(

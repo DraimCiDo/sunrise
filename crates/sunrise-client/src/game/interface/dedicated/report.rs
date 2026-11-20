@@ -240,14 +240,6 @@ impl super::super::mods::ModsState {
                     kind: match package.kind() {
                         mod_api::PackageKind::Content => ModKind::Content,
                         mod_api::PackageKind::Code if native => ModKind::Native,
-                        mod_api::PackageKind::Code
-                            if self.selected.iter().any(|selected| {
-                                selected.package.manifest.id == package.id()
-                                    && selected.package.manifest.wasm.is_some()
-                            }) =>
-                        {
-                            ModKind::Wasm
-                        }
                         _ => ModKind::Unspecified,
                     } as i32,
                     // AdjacentManifest does not expose a compiled crate name.

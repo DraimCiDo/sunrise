@@ -1,4 +1,4 @@
-//! Load-phase condition handlers shared by native and wasm mods.
+//! Load-phase condition handlers.
 use crate::Identifier;
 use std::{collections::BTreeMap, sync::Arc};
 type Entries = BTreeMap<Identifier, (String, Arc<dyn LoadCondition>)>;
@@ -46,11 +46,6 @@ impl From<(Identifier, String)> for ConditionError {
 /// or data map instead logs the error and skips the entire offending file.
 /// Handlers must not mutate published data.
 pub trait LoadCondition: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::load_condition::<Self>();
-    }
     /// Read and validate the raw JSON arguments for one entry.
     fn test(&self, args: &serde_json::Value) -> Result<bool, ConditionError>;
 }
@@ -66,7 +61,7 @@ pub trait LoadConditions {
     ) -> Result<(), ConditionError>;
 }
 impl dyn LoadConditions + '_ {
-    /// Store a concrete handler through the shared native and wasm route.
+    /// Store a concrete load condition handler.
     pub fn register(
         &mut self,
         name: Identifier,

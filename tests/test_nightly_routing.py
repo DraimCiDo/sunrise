@@ -192,6 +192,37 @@ console.log(JSON.stringify(Boolean(eval(s.expression))));
                     if step.get("uses", "").startswith("actions/download-artifact@")]
         self.assertEqual([step["with"]["pattern"] for step in download], ["!cargo-timings-*"])
 
+    def test_musl_is_checked_after_packaging_and_before_upload(self):
+        build = yaml.load(GAME.read_text(), Loader=yaml.BaseLoader)["jobs"]["build"]
+        self.assertRegex(build["env"]["MUSL_IMAGE"], r"^alpine:3\.22@sha256:[0-9a-f]{64}$")
+        musl, = [row for row in build["strategy"]["matrix"]["include"] if row.get("musl") == "true"]
+        self.assertEqual(musl["target"], "x86_64-unknown-linux-musl")
+        self.assertEqual(musl["asset"], "sunrise-linux-musl-x86_64.tar.gz")
+        steps = build["steps"]
+        cross = next(i for i, s in enumerate(steps) if s.get("name") == "Cross-build for musl with glibc-hosted Rust")
+        validate = next(i for i, s in enumerate(steps) if s.get("name") == "Check the packaged musl programs")
+        package = next(i for i, s in enumerate(steps) if s.get("name") == "Package")
+        archive = next(i for i, s in enumerate(steps) if s.get("with", {}).get("if-no-files-found") == "error"
+                       and s["with"]["path"].startswith("dist/") and "matrix.asset" in s["with"]["path"])
+        marker = next(i for i, s in enumerate(steps) if s.get("name") == "This leg built")
+        self.assertLess(cross, package)
+        self.assertLess(package, validate)
+        self.assertLess(validate, archive)
+        self.assertLess(archive, marker)
+        # The checks read the uploaded archive, unpacked, not the folder it was made from.
+        self.assertIn('tar -xzf "dist/${{ matrix.asset }}"', steps[validate]["run"])
+        for step in (steps[cross], steps[validate]):
+            self.assertEqual(step["if"], "matrix.musl")
+            self.assertIn('"$MUSL_IMAGE"', step["run"])
+            # Check the configured version prefixes, not the packages that apk resolves.
+            installs = " ".join(re.findall(r"apk add --no-cache ([^\n]+)", step["run"].replace("\\\n", " "))).split()
+            held = {spec.strip('"') for spec in installs if "~" in spec}
+            runtime = {"musl~1.2.5", "libgcc~14.2.0", "alsa-lib~1.2.14", "eudev-libs~3.2.14"}
+            build_only = {"gcc~14.2.0", "binutils~2.44", "musl-dev~1.2.5", "linux-headers~6.14.2", "alsa-lib-dev~1.2.14",
+                          "eudev-dev~3.2.14"}
+            # The sysroot and startup check configure the same runtime-library prefixes.
+            self.assertEqual(held, runtime | build_only if step is steps[cross] else runtime)
+
     def test_every_shipped_glibc_program_is_checked_by_workflow_owned_tools(self):
         text = GAME.read_text()
         commands = re.findall(r"check_glibc.py ([^\n]+)", text.replace("\\\n", " "))

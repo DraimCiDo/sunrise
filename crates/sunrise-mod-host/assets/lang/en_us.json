@@ -1,9 +1,3 @@
 {
-  "sunrise.mods.screen.title": "Mods",
-  "sunrise.wasm.compile_default": "default for %s threads",
-  "sunrise.wasm.compile_setting": "setting %s",
-  "sunrise.wasm.compile_setting_file": "Cannot read %s from %s: %s",
-  "sunrise.wasm.compile_setting_invalid": "Invalid %s=%s: expected positive finite seconds.",
-  "sunrise.wasm.compile_timeout": "%s: compilation exceeded %s seconds (%s). Increase %s to allow more compile time.",
-  "sunrise.wasm.compile_unavailable": "%s: cannot enforce the %s second compilation budget: %s. Restore a private writable .sunrise-cache/wasm directory and a working compiler executable."
+  "sunrise.mods.screen.title": "Mods"
 }

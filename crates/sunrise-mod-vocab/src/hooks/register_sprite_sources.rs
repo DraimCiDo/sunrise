@@ -57,7 +57,7 @@ it listed: output is write-only.
 the winning copy of a resource (`assets/<namespace>/textures/<path>.png`), `read_stack(path)` every pack's
 copy lowest first, and `list(prefix)` the paths under a prefix. A source can make a sprite from the pixels
 of a texture any pack has, a player's retexture included. It is valid for the one callback it is given to: a reader a source keeps reads nothing
-afterwards and keeps nothing alive. It reads the same on native and wasm, each call crossing to the game.
+afterwards and keeps nothing alive.
 
 Each entry is asked once per atlas each time the client prepares its resources, and the answer is kept
 for everything that reads the atlas, so a source that counts or varies its answers is still seen as one

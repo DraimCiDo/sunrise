@@ -1,2 +1,0 @@
-ids = ["method:LevelHost::block_states", "method:LevelHost::tags"]
-why = "A wasm part can now read the merged tags and the block-state facts through the level view a level callback receives, with the answers a native part gets from the same view. Both were native-only because a level frame lent no import for the game's tables."
