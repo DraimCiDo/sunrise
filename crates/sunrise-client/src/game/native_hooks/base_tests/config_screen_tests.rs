@@ -13,7 +13,10 @@ use sunrise_client::mod_list::Installed;
 use sunrise_client::options_ui::Page;
 use winit::{
     application::ApplicationHandler,
-    event::{DeviceId, ElementState, Ime, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent},
+    event::{
+        DeviceId, ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, TouchPhase,
+        WindowEvent,
+    },
     event_loop::{ActiveEventLoop, EventLoop},
     platform::{pump_events::EventLoopExtPumpEvents, x11::EventLoopBuilderExtX11},
     raw_window_handle::{HasWindowHandle, RawWindowHandle},
@@ -224,7 +227,7 @@ impl EventLoopCtl for NoLoop {
 struct KeyDelivery<'a, 'res> {
     game: &'a mut Game<'res>,
     expected: (KeyCode, ElementState),
-    received: bool,
+    received: Option<KeyEvent>,
 }
 
 impl ApplicationHandler for KeyDelivery<'_, '_> {
@@ -240,8 +243,8 @@ impl ApplicationHandler for KeyDelivery<'_, '_> {
             && (key.physical_key, key.state)
                 == (PhysicalKey::Code(self.expected.0), self.expected.1)
         {
+            self.received = Some(key.clone());
             self.game.window_event(event_loop, id, event);
-            self.received = true;
         }
     }
 }
@@ -323,10 +326,10 @@ fn typed_config_screen_keeps_its_mods_parent_and_owns_input() {
                 let mut delivery = KeyDelivery {
                     game,
                     expected: (code, state),
-                    received: false,
+                    received: None,
                 };
                 let deadline = Instant::now() + Duration::from_secs(3);
-                while !delivery.received {
+                while delivery.received.is_none() {
                     let remaining = deadline.saturating_duration_since(Instant::now());
                     assert!(
                         !remaining.is_zero(),
@@ -334,6 +337,7 @@ fn typed_config_screen_keeps_its_mods_parent_and_owns_input() {
                     );
                     event_loop.pump_app_events(Some(remaining), &mut delivery);
                 }
+                delivery.received.unwrap()
             };
             let input = |game: &mut Game<'_>, event| {
                 game.handle_window_event(
@@ -373,8 +377,9 @@ fn typed_config_screen_keeps_its_mods_parent_and_owns_input() {
                 dev: false,
                 native: None,
             };
-            let exercise = |game: &mut Game<'_>, event_loop: &mut EventLoop<()>, in_world| {
+            let exercise = |game: &mut Game<'_>, event_loop: &mut EventLoop<()>, in_world: bool| {
                 assert_eq!(game.mod_screen(), Some("fixture"));
+                state.lock().unwrap().input.clear(); // The activation click is already released.
                 assert!(
                     game.render_with(|_, frame| {
                         assert_eq!(frame.title, !in_world);
@@ -406,7 +411,7 @@ fn typed_config_screen_keeps_its_mods_parent_and_owns_input() {
                 );
                 input(game, button(ElementState::Released));
                 assert!(!game.left);
-                key(game, event_loop, KeyCode::KeyW, ElementState::Pressed);
+                let mut press = key(game, event_loop, KeyCode::KeyW, ElementState::Pressed);
                 assert!(game.physical_keys.contains(&KeyCode::KeyW));
                 assert!(
                     !game.keys.raw(&KeyCode::KeyW),
@@ -414,7 +419,23 @@ fn typed_config_screen_keeps_its_mods_parent_and_owns_input() {
                 );
                 key(game, event_loop, KeyCode::KeyW, ElementState::Released);
                 let c = if in_world { 'y' } else { 'x' };
-                input(game, WindowEvent::Ime(Ime::Commit(c.to_string())));
+                if in_world {
+                    input(game, WindowEvent::Ime(Ime::Commit(c.to_string())));
+                } else {
+                    // The shape winit delivers for Windows Alt-code text: a press
+                    // with printable text and no physical key.
+                    press.physical_key =
+                        PhysicalKey::Unidentified(winit::keyboard::NativeKeyCode::Unidentified);
+                    press.text = Some(c.to_string().into());
+                    input(
+                        game,
+                        WindowEvent::KeyboardInput {
+                            device_id: DeviceId::dummy(),
+                            event: press,
+                            is_synthetic: false,
+                        },
+                    );
+                }
                 assert_eq!(
                     game.stored_setting("fixture", "show").as_deref(),
                     Some(if in_world { "false" } else { "true" })
@@ -524,6 +545,71 @@ fn typed_config_screen_keeps_its_mods_parent_and_owns_input() {
             let world_parent = game.ui.options.mods_screen.as_ref().unwrap().id();
             activate(game);
             exercise(game, &mut event_loop, true);
+
+            // A dialog remains interactive even though the Config session is retained beneath it.
+            let inputs = (0..12)
+                .map(|index| {
+                    format!(
+                        "{{key:s{index},type:number_range,label:'Slider {index}',start:0,end:1}}"
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            let (dialog, _) = sunrise_core::nbt::parse_snbt(&format!(
+                "{{type:notice,title:'Server dialog',inputs:[{inputs}]}}"
+            ))
+            .unwrap();
+            game.show_dialog(&dialog);
+            assert!(game.dialog_open());
+            let mut frame = 0;
+            let mut first_slider = |game: &mut Game<'_>| {
+                use sunrise_client::widgets::{self, Kind};
+                assert!(game.render_with(|_, _| Ok(true)).unwrap());
+                frame += 1;
+                widgets::end_frame(frame);
+                widgets::last_labelled().into_iter().find_map(|widget| {
+                    let Kind::Slider { value, track } = widget.kind else {
+                        return None;
+                    };
+                    widget
+                        .label
+                        .starts_with("Slider 0")
+                        .then_some((widget.y, value, track))
+                })
+            };
+            let (y, value, [x, width]) = first_slider(game).expect("visible dialog slider");
+            assert_eq!(value, 0.5);
+            input(
+                game,
+                move_to(f64::from(x + width * 0.5), f64::from(y + 10.0)),
+            );
+            input(game, button(ElementState::Pressed));
+            input(game, move_to(f64::from(x + width), f64::from(y + 10.0)));
+            input(game, button(ElementState::Released));
+            assert_eq!(first_slider(game).unwrap().1, 1.0);
+            input(
+                game,
+                WindowEvent::MouseWheel {
+                    device_id: DeviceId::dummy(),
+                    delta: MouseScrollDelta::LineDelta(0.0, -1.0),
+                    phase: TouchPhase::Moved,
+                },
+            );
+            assert!(first_slider(game).is_none_or(|(scrolled_y, _, _)| scrolled_y < y));
+            key(
+                game,
+                &mut event_loop,
+                KeyCode::Escape,
+                ElementState::Pressed,
+            );
+            key(
+                game,
+                &mut event_loop,
+                KeyCode::Escape,
+                ElementState::Released,
+            );
+            assert!(!game.dialog_open());
+
             stale.go_back();
             game.settle_config_screen();
             assert_eq!(game.mod_screen(), Some("fixture"));
