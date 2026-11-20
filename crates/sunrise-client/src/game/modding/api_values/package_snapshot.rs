@@ -134,13 +134,13 @@ impl TryIntoApi for sunrise_mod_package::packages::AdjacentManifest {
 pub(in crate::game) fn install_packages(
     native: &[sunrise_mod_package::packages::AdjacentManifest],
     content: &[sunrise_mod_package::selection::SelectedPackage],
-) -> Result<(), sunrise_engine_slots::PlatformRefusal> {
+) -> Result<(), mod_api::__private::platform::PlatformRefusal> {
     let native: Vec<_> = native.iter().map(|p| p.try_into_api().unwrap()).collect();
     let content: Vec<_> = content
         .iter()
         .map(|p| p.package.try_into_api().unwrap())
         .collect();
-    (sunrise_engine_slots::platform()?.install_packages)(&native, &content);
+    (mod_api::__private::platform::platform()?.install_packages)(&native, &content);
     Ok(())
 }
 

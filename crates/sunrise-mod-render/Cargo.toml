@@ -23,4 +23,3 @@ workspace = true
 
 [dependencies]
 sunrise-mod-api-macros = { path = "../sunrise-mod-api-macros" }
-sunrise-engine-slots = { path = "../sunrise-engine-slots" }

@@ -18,7 +18,6 @@ path = "../sunrise-client/src/client_lib.rs"
 [dependencies]
 sunrise-guest-stack = { path = "../sunrise-guest-stack" }
 sunrise-mod-api-macros = { path = "../sunrise-mod-api-macros" }
-sunrise-engine-slots = { path = "../sunrise-engine-slots" }
 sunrise-hooks = { path = "../sunrise-hooks" }
 sunrise-mod-runtime = { path = "../sunrise-mod-runtime" }
 mod_api = { package = "sunrise-mod-vocab", path = "../sunrise-mod-vocab" }

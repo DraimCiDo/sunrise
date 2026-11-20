@@ -28,7 +28,7 @@ pub fn main() {
     sunrise_mod_host::exit_if_compile_child();
     let startup = sunrise_client::entry::prepare();
     std::hint::black_box(&sunrise_mod_package::holder::CAPABILITY);
-    sunrise_mod_host::main_with(Vec::new(), &[], &[], startup);
+    sunrise_mod_host::main_with(Vec::new(), &[], startup);
 }
 
 /// Establish the executable main thread stack before initialization.

@@ -9,8 +9,6 @@ description = "The mod host above the engine: loading, Host implementations, reg
 
 [dependencies]
 mod-render = { package = "sunrise-mod-render", path = "../sunrise-mod-render" }
-sunrise-engine-slots = { path = "../sunrise-engine-slots" }
-mod-points = { package = "sunrise-mod-points", path = "../sunrise-mod-points" }
 sunrise-guest-stack = { path = "../sunrise-guest-stack" }
 sunrise-client = { path = "../sunrise-client", default-features = false }
 sunrise-hooks = { path = "../sunrise-hooks" }

@@ -20,7 +20,6 @@ mod diagnostics;
 pub mod discover;
 pub mod game_uses;
 pub mod host;
-mod inject;
 pub mod internals;
 pub mod library_record;
 mod mixins_patch;
@@ -37,7 +36,6 @@ mod registry_runtime;
 pub mod registry_rustc;
 mod registry_shared;
 pub mod rust;
-mod slots;
 
 pub use mixins_patch::MixinsIdentity;
 pub use prebuilt::{Refusal, compiling};
