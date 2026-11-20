@@ -8,6 +8,7 @@ use mod_api::client::widgets::{
 };
 use mod_api::content::crash::{ModCall, enter_native_mod};
 use std::cell::RefCell;
+use std::sync::atomic::AtomicU64;
 use sunrise_client::{hud::HudBatch, ui, window::GuiSize};
 use winit::keyboard::KeyCode;
 
@@ -86,14 +87,19 @@ impl Game<'_> {
         } else {
             Vec::new()
         };
-        let mut staged =
-            ScreenWidgetBuild::__new((title || pause).then_some([size.0, size.1]), |text| {
+        // Never reuse a reference from another build or a rolled-back edit.
+        static NEXT_LISTENER: AtomicU64 = AtomicU64::new(0);
+        let mut staged = ScreenWidgetBuild::__new(
+            (title || pause).then_some([size.0, size.1]),
+            &NEXT_LISTENER,
+            |text| {
                 sunrise_client_lib::api_text::to_engine(text).map(|label| {
                     let label: std::sync::Arc<dyn std::any::Any + Send + Sync> =
                         std::sync::Arc::new(label);
                     label
                 })
-            });
+            },
+        );
         for widget in &stock {
             staged.__stock(widget.id, widget.bounds, Some(widget.label.clone()));
         }

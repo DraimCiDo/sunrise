@@ -77,8 +77,6 @@ pub struct ScreenWidgetEntry {
     pub render_label: Option<Arc<dyn Any + Send + Sync>>,
 }
 
-static NEXT_WIDGET: AtomicU64 = AtomicU64::new(0);
-
 type PrepareLabel = fn(&Text) -> Result<Arc<dyn Any + Send + Sync>, crate::text::TextFormError>;
 
 /// Engine-owned staging. Only dispatch can lend an editing view of it.
@@ -87,6 +85,7 @@ pub struct ScreenWidgetBuild {
     entries: Vec<ScreenWidgetEntry>,
     actions: Vec<(&'static str, Arc<str>)>,
     viewport: Option<[f32; 2]>,
+    next_listener: &'static AtomicU64,
     prepare_label: PrepareLabel,
 }
 
@@ -172,7 +171,7 @@ impl ScreenWidgets<'_> {
             }
             _ => return Err(ScreenWidgetError::InvalidAction),
         };
-        let reference = ScreenWidgetRef(NEXT_WIDGET.fetch_add(1, Ordering::Relaxed));
+        let reference = ScreenWidgetRef(self.build.next_listener.fetch_add(1, Ordering::Relaxed));
         self.build.entries.push(ScreenWidgetEntry {
             reference,
             kind,
@@ -204,11 +203,16 @@ impl ScreenWidgets<'_> {
 }
 
 impl ScreenWidgetBuild {
-    pub fn __new(viewport: Option<[f32; 2]>, prepare_label: PrepareLabel) -> Self {
+    pub fn __new(
+        viewport: Option<[f32; 2]>,
+        next_listener: &'static AtomicU64,
+        prepare_label: PrepareLabel,
+    ) -> Self {
         Self {
             entries: Vec::new(),
             actions: Vec::new(),
             viewport,
+            next_listener,
             prepare_label,
         }
     }
@@ -216,7 +220,7 @@ impl ScreenWidgetBuild {
     #[doc(hidden)]
     pub fn __stock(&mut self, id: u8, bounds: [f32; 4], label: Option<Text>) {
         self.entries.push(ScreenWidgetEntry {
-            reference: ScreenWidgetRef(NEXT_WIDGET.fetch_add(1, Ordering::Relaxed)),
+            reference: ScreenWidgetRef(self.next_listener.fetch_add(1, Ordering::Relaxed)),
             kind: ScreenWidgetKind::Button,
             bounds,
             label,
@@ -257,7 +261,9 @@ mod tests {
 
     #[test]
     fn malformed_edits_leave_the_staged_list_unchanged() {
-        let mut staged = ScreenWidgetBuild::__new(Some([320.0, 240.0]), |_| Ok(Arc::new(())));
+        static NEXT_LISTENER: AtomicU64 = AtomicU64::new(0);
+        let mut staged =
+            ScreenWidgetBuild::__new(Some([320.0, 240.0]), &NEXT_LISTENER, |_| Ok(Arc::new(())));
         let mut build = staged.__edit("first");
         let button = |rect| Widget::Button(Button::new(rect, Text::literal("Example")));
         let binding = Some(("settings", press as ScreenWidgetPress));
