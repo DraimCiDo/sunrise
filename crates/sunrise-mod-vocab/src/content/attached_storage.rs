@@ -1,11 +1,11 @@
 //! Stock storage a mod attaches to an entity, a player, a chunk or the level, as NeoForge 26.3
 //! mods keep an `ItemStacksResourceHandler`, a `FluidStacksResourceHandler` or a
-//! `SimpleEnergyHandler` in an attachment: handlers over an [`AttachmentType`] the mod declares,
+//! `SimpleEnergyHandler` in an attachment: handlers over an [`AttachmentKey`] the mod declares,
 //! saved by its codec. Every write is an attachment write, so the game's transaction journal,
 //! which keeps each holder's attachment map, puts it back on an abort.
 use crate::content::registry_keys::{fluid_id, fluid_key, item_id, item_key_by_identifier};
 use crate::{
-    AttachmentCodec, AttachmentError, AttachmentType, Components, Compound, EnergyHandler,
+    AttachmentCodec, AttachmentError, AttachmentKey, Components, Compound, EnergyHandler,
     FluidIdentity, FluidResource, FluidStack, Holder, Identifier, ItemResource, ItemStack,
     ResourceHandler, ServerHost, Tag, Transaction,
 };
@@ -43,7 +43,7 @@ impl StackedResource for FluidResource {}
 // no wire: a mod-side handler, invoked where it was built; never crosses the boundary.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct AttachedStacks<R: 'static> {
-    attachment: &'static AttachmentType<StackList<R>>,
+    attachment: AttachmentKey<StackList<R>>,
     holder: Holder,
     size: usize,
     capacity: u32,
@@ -61,7 +61,7 @@ impl<R: StackedResource> AttachedStacks<R> {
     /// `size` indices of `attachment` on `holder`, each holding up to `capacity` of what `valid`
     /// accepts. Returns `None` if `size` exceeds the codecs' 4096-index limit.
     pub fn new(
-        attachment: &'static AttachmentType<StackList<R>>,
+        attachment: AttachmentKey<StackList<R>>,
         holder: Holder,
         size: usize,
         capacity: u32,
@@ -80,7 +80,7 @@ impl<R: StackedResource> AttachedStacks<R> {
     }
     /// One index (`ItemStackResourceHandler`, a single tank).
     pub fn single(
-        attachment: &'static AttachmentType<StackList<R>>,
+        attachment: AttachmentKey<StackList<R>>,
         holder: Holder,
         capacity: u32,
         valid: fn(&R) -> bool,
@@ -203,7 +203,7 @@ impl<R: StackedResource> ResourceHandler<R> for AttachedStacks<R> {
 // no wire: a mod-side handler, invoked where it was built; never crosses the boundary.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct AttachedEnergy {
-    attachment: &'static AttachmentType<u32>,
+    attachment: AttachmentKey<u32>,
     holder: Holder,
     capacity: u32,
     max_insert: u32,
@@ -214,7 +214,7 @@ impl AttachedEnergy {
     /// `attachment` on `holder`, holding up to `capacity`, at most `max_insert` in and
     /// `max_extract` out per call.
     pub fn new(
-        attachment: &'static AttachmentType<u32>,
+        attachment: AttachmentKey<u32>,
         holder: Holder,
         capacity: u32,
         max_insert: u32,

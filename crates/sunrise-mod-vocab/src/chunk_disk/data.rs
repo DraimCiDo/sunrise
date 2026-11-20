@@ -25,7 +25,7 @@ impl ChunkDiskData {
     /// Read the job's typed value, inserting its default if absent.
     pub fn get<T: Clone + Send + Sync + 'static>(
         &mut self,
-        key: &AttachmentType<T>,
+        key: &AttachmentKey<T>,
     ) -> Result<T, ChunkDiskFailure> {
         self.edit(key, |store| key.get(store, Holder::Level))
     }
@@ -34,7 +34,7 @@ impl ChunkDiskData {
     /// envelopes intact and refuses publication of the entire job.
     pub fn set<T: Clone + Send + Sync + 'static>(
         &mut self,
-        key: &AttachmentType<T>,
+        key: &AttachmentKey<T>,
         value: T,
     ) -> Result<(), ChunkDiskFailure> {
         self.edit(key, |store| key.set(store, Holder::Level, value))
@@ -43,14 +43,14 @@ impl ChunkDiskData {
     /// Remove a snapshot binding through its typed codec.
     pub fn remove<T: Clone + Send + Sync + 'static>(
         &mut self,
-        key: &AttachmentType<T>,
+        key: &AttachmentKey<T>,
     ) -> Result<Option<T>, ChunkDiskFailure> {
         self.edit(key, |store| key.remove(store, Holder::Level))
     }
 
     fn edit<T, R>(
         &mut self,
-        key: &AttachmentType<T>,
+        key: &AttachmentKey<T>,
         apply: impl FnOnce(&mut Attachments) -> Result<R, AttachmentError>,
     ) -> Result<R, ChunkDiskFailure> {
         if let Some(failure) = &self.failure {

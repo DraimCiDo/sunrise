@@ -19,12 +19,12 @@ use std::fmt;
 ///
 /// ```rust,ignore
 /// struct Robot {
-///     charge: AttachmentType<u32>,
+///     charge: AttachmentKey<u32>,
 /// }
 /// impl EntityPartState for Robot {
 ///     type Data = u32;
 ///
-///     fn state_key(&self) -> &AttachmentType<Self::Data> {
+///     fn state_key(&self) -> &AttachmentKey<Self::Data> {
 ///         &self.charge
 ///     }
 /// }
@@ -59,7 +59,7 @@ pub trait EntityPartState: EntityPart + Sized {
     /// This Part instance's attachment key, default and codec. Return the same key throughout
     /// the Part's lifetime; the registrar reads it before attaching the Part. Without a codec
     /// the value lasts for the session only.
-    fn state_key(&self) -> &AttachmentType<Self::Data>;
+    fn state_key(&self) -> &AttachmentKey<Self::Data>;
 
     /// The entity's value, or the default when it has none. Inserts nothing.
     fn state(&self, host: &dyn Host, entity: EntityRef) -> Result<Self::Data, PartStateError> {

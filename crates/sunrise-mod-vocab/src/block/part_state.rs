@@ -17,12 +17,12 @@ use std::{cell::RefCell, fmt, sync::Arc};
 ///
 /// ```rust,ignore
 /// struct Press {
-///     progress: AttachmentType<u32>,
+///     progress: AttachmentKey<u32>,
 /// }
 /// impl BlockEntityPartState for Press {
 ///     type Data = u32;
 ///
-///     fn state_key(&self) -> &AttachmentType<Self::Data> {
+///     fn state_key(&self) -> &AttachmentKey<Self::Data> {
 ///         &self.progress
 ///     }
 /// }
@@ -48,7 +48,7 @@ pub trait BlockEntityPartState: BlockEntityPart + Sized {
     /// This Part instance's attachment key, default and codec. Return the same key throughout
     /// the Part's lifetime; the registrar reads it before attaching the Part. Without a codec
     /// the value lasts for the session only.
-    fn state_key(&self) -> &AttachmentType<Self::Data>;
+    fn state_key(&self) -> &AttachmentKey<Self::Data>;
 
     /// The block entity's value, or the default when it has none. Inserts nothing.
     fn state(&self, host: &dyn Host, entity: BlockEntityRef) -> Result<Self::Data, PartStateError> {
@@ -272,7 +272,7 @@ pub struct PartStateDeclaration {
 
 impl PartStateDeclaration {
     /// The declaration of `key`: what the typed declaration is erased to, for registration.
-    pub fn of<T: 'static>(key: &AttachmentType<T>) -> Self {
+    pub fn of<T: 'static>(key: &AttachmentKey<T>) -> Self {
         Self {
             namespace: key.namespace,
             name: key.name,
@@ -358,7 +358,7 @@ impl PartStateHolder for BlockEntityRef {
     }
 }
 
-fn attachment<T>(key: &AttachmentType<T>, error: AttachmentError) -> PartStateError {
+fn attachment<T>(key: &AttachmentKey<T>, error: AttachmentError) -> PartStateError {
     match error {
         AttachmentError::MissingHolder => PartStateError::Stale,
         error => PartStateError::Attachment {
@@ -373,7 +373,7 @@ fn attachment<T>(key: &AttachmentType<T>, error: AttachmentError) -> PartStateEr
 pub fn read_state<H: PartStateHolder, T: Clone + Send + Sync + 'static>(
     host: &dyn Host,
     entity: H,
-    key: &AttachmentType<T>,
+    key: &AttachmentKey<T>,
 ) -> Result<Option<T>, PartStateError> {
     entity.part_state_holder(host)?;
     host.query(key)
@@ -395,7 +395,7 @@ thread_local! {
 struct Editing;
 
 impl Editing {
-    fn enter<T>(entity: AttachmentHolder, key: &AttachmentType<T>) -> Result<Self, PartStateError> {
+    fn enter<T>(entity: AttachmentHolder, key: &AttachmentKey<T>) -> Result<Self, PartStateError> {
         EDITING.with_borrow_mut(|editing| {
             let this = (entity, key.namespace, key.name);
             if editing.contains(&this) {
@@ -427,7 +427,7 @@ impl Drop for Editing {
 pub fn edit_part_state<H: PartStateHolder, T: Clone + Send + Sync + 'static, R>(
     host: &mut dyn ServerHost,
     entity: H,
-    key: &AttachmentType<T>,
+    key: &AttachmentKey<T>,
     edit: impl FnOnce(&mut dyn ServerHost, &mut T) -> R,
 ) -> Result<R, PartStateError> {
     let _editing = Editing::enter(entity.attachment_holder(), key)?;

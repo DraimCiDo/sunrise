@@ -45,7 +45,7 @@ static SCRATCH: AttachmentType<i32> = AttachmentType {
 
 /// Counts its block entity's ticks in its state.
 struct Press {
-    state_key: AttachmentType<i32>,
+    state_key: mod_api::AttachmentKey<i32>,
 }
 #[mod_api::sunrise_part]
 impl BlockPart for Press {}
@@ -65,7 +65,7 @@ impl BlockEntityPart for Press {
 }
 impl BlockEntityPartState for Press {
     type Data = i32;
-    fn state_key(&self) -> &AttachmentType<i32> {
+    fn state_key(&self) -> &mod_api::AttachmentKey<i32> {
         &self.state_key
     }
 }

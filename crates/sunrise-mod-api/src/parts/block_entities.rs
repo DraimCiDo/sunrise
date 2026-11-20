@@ -706,7 +706,7 @@ pub mod tests {
     };
     #[cfg(test)]
     struct Keeps {
-        state_key: AttachmentType<u32>,
+        state_key: mod_api::AttachmentKey<u32>,
     }
     #[cfg(test)]
     #[mod_api::sunrise_part]
@@ -717,7 +717,7 @@ pub mod tests {
     #[cfg(test)]
     impl BlockEntityPartState for Keeps {
         type Data = u32;
-        fn state_key(&self) -> &AttachmentType<u32> {
+        fn state_key(&self) -> &mod_api::AttachmentKey<u32> {
             &self.state_key
         }
     }

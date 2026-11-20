@@ -1,6 +1,6 @@
 //! Frozen, per-entity attachment data for the submission pass.
 use crate::wire::{Reader, Wire, WireError, Writer};
-use crate::{AttachmentError, AttachmentType};
+use crate::{AttachmentError, AttachmentKey};
 use std::sync::Arc;
 use sunrise_core::nbt::{self, Limits, Tag};
 use sunrise_mod_runtime::attachments::{AttachmentEntry, Attachments};
@@ -98,7 +98,7 @@ impl EntityRenderAttachments {
     /// codec, just as on the synced client holder.
     pub fn get<T: Send + Sync + 'static>(
         &self,
-        key: &AttachmentType<T>,
+        key: &AttachmentKey<T>,
     ) -> Result<Option<&T>, AttachmentError> {
         crate::parts::validate_attachment_use(key.namespace, key.name, key.sync)?;
         self.data

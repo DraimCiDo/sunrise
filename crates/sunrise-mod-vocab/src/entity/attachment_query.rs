@@ -20,7 +20,7 @@ impl AttachmentBatch {
     /// This view borrows only the key, never the host.
     pub fn query<T: Send + Sync + 'static>(
         self,
-        key: &AttachmentType<T>,
+        key: &AttachmentKey<T>,
     ) -> Result<AttachmentQuery<'_, T>, AttachmentError> {
         crate::parts::validate_attachment_use(key.namespace, key.name, key.sync)?;
         self.0.query(key)

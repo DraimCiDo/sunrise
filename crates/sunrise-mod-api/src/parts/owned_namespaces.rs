@@ -30,7 +30,7 @@ mod tests {
 
     /// A Press whose state has no codec: kept for the session by a native mod.
     struct Session {
-        state_key: AttachmentType<u32>,
+        state_key: mod_api::AttachmentKey<u32>,
     }
     #[mod_api::sunrise_part]
     impl BlockPart for Session {}
@@ -46,7 +46,7 @@ mod tests {
     };
     impl BlockEntityPartState for Session {
         type Data = u32;
-        fn state_key(&self) -> &AttachmentType<u32> {
+        fn state_key(&self) -> &mod_api::AttachmentKey<u32> {
             &self.state_key
         }
     }

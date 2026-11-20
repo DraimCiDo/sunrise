@@ -13,7 +13,7 @@ pub trait AttachmentQueries: Host {
     /// Construction never clones or decodes values; iteration decodes lazily.
     fn query<'key, T: Send + Sync + 'static>(
         &self,
-        key: &'key AttachmentType<T>,
+        key: &'key AttachmentKey<T>,
     ) -> Result<AttachmentQuery<'key, T>, AttachmentError> {
         self.attachment_query(key.namespace, key.name)?.query(key)
     }
@@ -27,7 +27,7 @@ pub trait AttachmentQueriesMut: ServerHost {
     /// occurs. Later changes require a fresh query, and stale writes fail.
     fn query_mut<'key, T: Clone + Send + Sync + 'static>(
         &mut self,
-        key: &'key AttachmentType<T>,
+        key: &'key AttachmentKey<T>,
     ) -> Result<AttachmentQueryMut<'key, T>, AttachmentError> {
         Ok(AttachmentQueryMut {
             query: self.query(key)?,
@@ -42,7 +42,7 @@ impl<H: ServerHost + ?Sized> AttachmentQueriesMut for H {}
 #[non_exhaustive]
 pub struct AttachmentQueryMut<'key, T: 'static> {
     query: AttachmentQuery<'key, T>,
-    key: &'key AttachmentType<T>,
+    key: &'key AttachmentKey<T>,
 }
 impl<T: Clone + Send + Sync + 'static> AttachmentQueryMut<'_, T> {
     /// Borrow captured values, decoding saved entries only when visited.
@@ -60,7 +60,7 @@ impl<T: Clone + Send + Sync + 'static> AttachmentQueryMut<'_, T> {
 #[non_exhaustive]
 pub struct AttachmentRowMut<'q, T: 'static> {
     row: runtime::AttachmentRowRef<'q, AttachmentHolder, T>,
-    key: &'q AttachmentType<T>,
+    key: &'q AttachmentKey<T>,
 }
 fn write_error(error: AttachmentError) -> AttachmentRowError {
     match error {

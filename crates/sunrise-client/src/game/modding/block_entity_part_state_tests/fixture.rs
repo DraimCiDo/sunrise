@@ -41,7 +41,7 @@ pub static MARK: AttachmentType<i32> = AttachmentType {
 /// - 1: an edit of an undecodable saved value is refused before its closure runs, then `MARK`
 ///   is set to 1.
 pub struct Counter {
-    state_key: AttachmentType<i32>,
+    state_key: mod_api::AttachmentKey<i32>,
 }
 #[mod_api::sunrise_part]
 impl BlockPart for Counter {}
@@ -80,7 +80,7 @@ impl BlockEntityPart for Counter {
 }
 impl BlockEntityPartState for Counter {
     type Data = i32;
-    fn state_key(&self) -> &AttachmentType<i32> {
+    fn state_key(&self) -> &mod_api::AttachmentKey<i32> {
         &self.state_key
     }
 }

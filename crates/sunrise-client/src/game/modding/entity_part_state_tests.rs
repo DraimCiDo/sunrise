@@ -44,7 +44,7 @@ static SCRATCH: AttachmentType<i32> = AttachmentType {
 
 /// Keeps a charge on each entity of its types.
 struct Charge {
-    state_key: AttachmentType<i32>,
+    state_key: mod_api::AttachmentKey<i32>,
 }
 #[mod_api::sunrise_part]
 impl EntityPart for Charge {
@@ -54,7 +54,7 @@ impl EntityPart for Charge {
 }
 impl EntityPartState for Charge {
     type Data = i32;
-    fn state_key(&self) -> &AttachmentType<i32> {
+    fn state_key(&self) -> &mod_api::AttachmentKey<i32> {
         &self.state_key
     }
 }
