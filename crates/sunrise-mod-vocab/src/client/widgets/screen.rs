@@ -4,15 +4,14 @@ use super::{Widget, char_len, is_allowed_chat_character, utf16_len};
 use crate::{ClientHost, Text};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{any::Any, sync::Arc};
-use sunrise_mod_api_macros::Wire;
 
 /// An opaque reference to a widget in one stock screen build. Removing the
 /// listener, closing the screen or rebuilding it invalidates this reference.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ScreenWidgetRef(u64);
 
 /// The kind of control in a stock screen's listener list.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ScreenWidgetKind {
     /// A pressable button, including an icon or text button.
@@ -23,7 +22,6 @@ pub enum ScreenWidgetKind {
 
 /// Read-only description of one listener. Bounds are absolute GUI pixels.
 #[derive(Clone, Copy, Debug)]
-// no wire: borrows its label from the current native listener list.
 pub struct ScreenWidgetView<'a> {
     /// Reference to pass to [`ScreenWidgets::remove_listener`].
     pub listener: ScreenWidgetRef,
@@ -37,7 +35,7 @@ pub struct ScreenWidgetView<'a> {
 
 /// Why an edit to a screen's listener list was refused. A refusal does not
 /// change the list.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ScreenWidgetError {
     /// This screen does not expose its listeners yet.
@@ -56,12 +54,10 @@ pub enum ScreenWidgetError {
 
 /// A native callback attached to one stock-screen button. The engine passes the
 /// registering mod's action ID and client host on each enabled activation.
-// no wire: holds a native function pointer invoked on the client thread.
 pub type ScreenWidgetPress = fn(&mut dyn ClientHost, &str);
 
 #[doc(hidden)]
 #[derive(Clone)]
-// no wire: stores the native callback and its process-local owner.
 pub struct ScreenWidgetAction {
     pub owner: &'static str,
     pub id: Arc<str>,
@@ -70,7 +66,6 @@ pub struct ScreenWidgetAction {
 
 #[doc(hidden)]
 #[derive(Clone)]
-// no wire: game-side staging record can hold a native callback.
 pub struct ScreenWidgetEntry {
     reference: ScreenWidgetRef,
     kind: ScreenWidgetKind,
@@ -88,7 +83,6 @@ type PrepareLabel = fn(&Text) -> Result<Arc<dyn Any + Send + Sync>, crate::text:
 
 /// Engine-owned staging. Only dispatch can lend an editing view of it.
 #[doc(hidden)]
-// no wire: engine-side staging and native callback bindings.
 pub struct ScreenWidgetBuild {
     entries: Vec<ScreenWidgetEntry>,
     actions: Vec<(&'static str, Arc<str>)>,
@@ -99,7 +93,6 @@ pub struct ScreenWidgetBuild {
 /// The staged widget listeners of an initialized stock screen, available only
 /// during `screen_init_post`. Stock listeners come first and edits from earlier
 /// successful callbacks are visible. Only `title` and `paused` expose listeners.
-// no wire: callback-scoped borrow of stock and native-owned controls.
 pub struct ScreenWidgets<'a> {
     build: &'a mut ScreenWidgetBuild,
     owner: &'static str,
