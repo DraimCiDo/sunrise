@@ -75,8 +75,9 @@ impl<T: Wire> CraftingRecipeCodec<T> {
 
 // no wire: borrowed per-craft reader; its owning loop and callback retain its authority.
 /// The frozen loop view plus the engine's stack-aware default for each input cell.
-/// Only remaining_items receives this view. Tag reads allocate nothing; a default remainder
-/// is an owned stack and may allocate for component data. Reads perform no file I/O.
+/// Only `remaining_items` receives this view. [`LoopContext::items_in_tag`](crate::LoopContext::items_in_tag)
+/// borrows this generation's bound item order; a default remainder is an owned stack and may
+/// allocate for component data. Reads perform no file I/O.
 pub trait CraftingRemainders: crate::LoopContext {
     /// Default remainder for this row-major input cell's original pre-take stack,
     /// components included.

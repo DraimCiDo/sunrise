@@ -39,22 +39,19 @@ counts or vector lengths use default item remainders.
 
 ## Frozen tag reads and default remainders
 
-All three callbacks read the same owning resource generation's authoritative item
-tags with `is_in_tag(item, tag) -> Option<bool>`, `item_count(tag) -> Option<usize>`
-and `item_at(tag, index) -> Option<ItemKey>`. Count and index preserve the server's
-member order without allocating an iterator or member list. Reads allocate
-nothing and do no file I/O. `None` means tags or item keys are not ready (including
-client tags not yet synced); a matcher should then not match. Once loaded, an
-unknown tag returns `Some(false)` membership and `Some(0)` members; an out-of-range
-index returns `None`. Reload/sync publishes a new snapshot, not a mutable live tag
-service, so one callback cannot mix generations.
+All three callbacks read the same resource generation's authoritative item tags.
+Use `is_in_tag(item, tag) -> Option<bool>` for membership, or iterate the borrowed
+`&[ItemKey]` from `items_in_tag(tag)` in the server's tag order. `None` means tags
+or item keys were not ready at publication (including before a client receives
+its server's item tags); a matcher should then not match. Once loaded, a missing
+or empty tag has no members and membership is `Some(false)`. Lookup does not
+allocate or do I/O. Reload and sync publish a new snapshot, so one callback
+cannot mix generations.
 
-`RegistrationContext` does **not** resolve `TagKey`s. Resolve an identifier through
-`host.tags().key(&id)` in a hook that supplies a `Host` (for example `tags_updated`),
-and retain the process-lifetime key in state shared with the registered kind.
-Matching can return false until that state has its key. Keep the key across
-reloads; only the generation's membership changes. Registration-time key
-resolution is not part of this API.
+Keep the process-lifetime `TagKey` in the registered kind's state. Resolve it
+with `Registrar::tag_key` in `register`, or with `host.tags().key(&id)` in a hook
+with a `Host` (for example `tags_updated`). Keep the key across reloads; only the
+generation's membership changes.
 
 `default_remainder(cell)` reads that cell's original, **pre-take** stack and runs
 the caller's existing default rule, including `ItemPart::crafting_remainder` on

@@ -224,13 +224,13 @@ mod tests {
                 let tag =
                     mod_api::__private::tag_key(&Identifier::parse("test:items").unwrap()).unwrap();
                 let stick = mod_api::__private::item_key("minecraft:stick").unwrap();
+                let dirt = mod_api::__private::item_key("minecraft:dirt").unwrap();
                 let item_reads = |game: &super::Game<'_>| {
                     let reader = LoopReader(&game.loop_context);
                     let view = reader.context();
                     (
                         view.is_in_tag(stick, tag),
-                        view.item_count(tag),
-                        view.item_at(tag, 0),
+                        view.items_in_tag(tag).map(<[_]>::to_vec),
                     )
                 };
 
@@ -255,7 +255,7 @@ mod tests {
                     integrated_server: false,
                 };
                 assert_eq!(seen.lock().unwrap()[0].stone_in_block_tag, Some(true));
-                assert_eq!(item_reads(game), (None, None, None));
+                assert_eq!(item_reads(game), (None, None));
 
                 game.handle_packet(C::UpdateTags(UpdateTags {
                     registries: vec![RegistryTags {
@@ -264,19 +264,23 @@ mod tests {
                     }],
                 }))
                 .unwrap();
-                assert_eq!(item_reads(game), (Some(false), Some(0), None));
+                assert_eq!(item_reads(game), (Some(false), Some(vec![])));
 
                 game.handle_packet(C::UpdateTags(update(
                     &builtin,
-                    &[("minecraft:item", "test:items", &["minecraft:stick"])],
+                    &[(
+                        "minecraft:item",
+                        "test:items",
+                        &["minecraft:stick", "minecraft:dirt"],
+                    )],
                 )))
                 .unwrap();
-                assert_eq!(item_reads(game), (Some(true), Some(1), Some(stick)));
+                assert_eq!(item_reads(game), (Some(true), Some(vec![stick, dirt])));
                 assert_eq!(
                     seen.lock().unwrap()[2],
                     Seen {
                         cause: received,
-                        items: names(&["minecraft:stick"]),
+                        items: names(&["minecraft:stick", "minecraft:dirt"]),
                         fluids: Some(1),
                         stone_in_block_tag: Some(true),
                         dirt_in_block_tag: Some(true),
@@ -290,7 +294,7 @@ mod tests {
                     &[("minecraft:block", "test:blocks", &["minecraft:stone"])],
                 )))
                 .unwrap();
-                assert_eq!(item_reads(game), (Some(true), Some(1), Some(stick)));
+                assert_eq!(item_reads(game), (Some(true), Some(vec![stick, dirt])));
 
                 // An update in play replaces the registries it names and keeps the others.
                 game.handle_packet(C::UpdateTags(update(
@@ -301,6 +305,7 @@ mod tests {
                     ],
                 )))
                 .unwrap();
+                assert_eq!(item_reads(game), (Some(false), Some(vec![])));
                 let seen = seen.lock().unwrap();
                 assert_eq!(seen.len(), 5);
                 assert_eq!(

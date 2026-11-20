@@ -49,28 +49,14 @@ impl Game<'_> {
             if self.options.execution_role.is_client() && !self.remote.as_ref()?.has_item_tags {
                 return None;
             }
-            // Match the registry that binds ItemKeys, not the raw pack entries: absent
-            // optional names must not count as members or leave gaps in their indices.
-            let registry: HashSet<&str> = self
+            // Only members in this generation's item registry can be exposed.
+            let registry = self
                 .items()
                 .registry_order
                 .iter()
                 .map(AsRef::as_ref)
                 .collect();
-            Some(
-                items
-                    .item_tag_order
-                    .iter()
-                    .map(|(tag, members)| {
-                        let ordered = members
-                            .iter()
-                            .filter(|id| registry.contains(id.as_str()))
-                            .cloned()
-                            .collect();
-                        (tag.clone(), ordered)
-                    })
-                    .collect(),
-            )
+            mod_api::__private::BoundItemTags::bind(&items.item_tag_order, &registry)
         });
         let context = Arc::make_mut(&mut self.loop_context);
         context.set_recipe_properties(Arc::new(sets));

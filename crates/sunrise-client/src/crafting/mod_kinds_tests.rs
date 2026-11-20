@@ -8,6 +8,7 @@ struct Kind {
     input: mod_api::ItemKey,
     output: mod_api::ItemKey,
     rest: mod_api::ItemKey,
+    byproducts: mod_api::TagKey,
     calls: Calls,
 }
 impl mod_api::CraftingRecipeKind for Kind {
@@ -69,7 +70,8 @@ impl mod_api::CraftingRecipeKind for Kind {
         let mut out = vec![None; grid.cells.len()];
         if *value == 3 {
             out[4] = context.default_remainder(4);
-            let mut custom = mod_api::ItemStack::new(self.rest, 2).unwrap();
+            let &key = context.items_in_tag(self.byproducts)?.first()?;
+            let mut custom = mod_api::ItemStack::new(key, 2)?;
             custom.set_damage(23);
             out[0] = Some(custom);
             assert!(context.default_remainder(5).is_none());
@@ -96,6 +98,7 @@ impl mod_api::Hooks for Mod {
             input: r.item_key("test:input"),
             output: r.item_key("test:output"),
             rest: r.item_key("test:rest"),
+            byproducts: r.tag_key("test:byproducts"),
             calls: self.calls.clone(),
         };
         r.register_crafting_recipe_serializer("literal", kind);
@@ -151,7 +154,17 @@ fn rectangular_kind_mixes_component_aware_defaults_custom_and_empty_cells() {
             )),
             [],
         );
-        let context = load.captured_loop_context(engine::LoopSide::Server);
+        let mut context = load.captured_loop_context(engine::LoopSide::Server);
+        context.set_item_tags(mod_api::__private::BoundItemTags::bind(
+            &[(
+                "test:byproducts".into(),
+                vec!["test:rest".into(), "test:input".into()],
+            )]
+            .into(),
+            &["test:input", "test:output", "test:rest"]
+                .into_iter()
+                .collect(),
+        ));
         let mut grid = vec![None; 9];
         grid[0] = Some(ItemStack::new("test:input", 7));
         let mut input = ItemStack::new("test:input", 3);

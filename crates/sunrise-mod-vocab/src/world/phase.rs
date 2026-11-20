@@ -861,14 +861,11 @@ pub trait LoopContext {
     /// answer `Some(false)`. Reads allocate nothing and perform no file I/O.
     fn is_in_tag(&self, item: crate::ItemKey, tag: crate::TagKey) -> Option<bool>;
 
-    /// Number of authoritative item members, or `None` if the snapshot or item
-    /// keys are unavailable. Unknown tags in a loaded snapshot have zero members.
-    /// Reads allocate nothing and do no I/O.
-    fn item_count(&self, tag: crate::TagKey) -> Option<usize>;
-
-    /// Item member in authoritative order from this same frozen generation.
-    /// None means unavailable data or an out-of-range index. Reads allocate nothing.
-    fn item_at(&self, tag: crate::TagKey, index: usize) -> Option<crate::ItemKey>;
+    /// Borrow the bound item members in authoritative order for this generation.
+    /// `None` means tags or item keys were unavailable at publication. A missing
+    /// or empty tag in a loaded snapshot returns `Some(&[])`. On clients these
+    /// are the server's synced tags, never the local pack's. Reads allocate nothing.
+    fn items_in_tag(&self, tag: crate::TagKey) -> Option<&[crate::ItemKey]>;
 
     /// Whether a mod-created recipe property set accepts an item ID. Unknown
     /// sets/items and vanilla set keys return false. Use this in
@@ -890,23 +887,13 @@ pub trait LoopContext {
     fn mods(&self) -> LoadedMods;
 }
 
+#[path = "loop_item_tags.rs"]
+mod loop_item_tags;
+pub use loop_item_tags::BoundItemTags;
+
 /// Immutable resource-generation reads supplied by an owning loop.
+/// Item tags are bound separately when the generation is published.
 pub trait LoopReader: Sync {
-    /// Authoritative membership, unavailable until this reader has tag inputs.
-    fn item_is_in_tag(&self, item: crate::ItemKey, tag: crate::TagKey) -> Option<bool> {
-        let _ = (item, tag);
-        None
-    }
-    /// Authoritative member count, unavailable until tags and keys are loaded.
-    fn item_count(&self, tag: crate::TagKey) -> Option<usize> {
-        let _ = tag;
-        None
-    }
-    /// An authoritative member in source order, without allocation.
-    fn item_at(&self, tag: crate::TagKey, index: usize) -> Option<crate::ItemKey> {
-        let _ = (tag, index);
-        None
-    }
     /// Mod-created recipe property membership from the owning generation.
     fn mod_recipe_property_contains(&self, set: &str, item: crate::ItemKey) -> bool {
         let _ = (set, item);
@@ -925,15 +912,21 @@ pub trait LoopReader: Sync {
 // exhaustive: its fields are private; only the game builds it
 pub struct OwningLoop<'a> {
     source: &'a dyn LoopReader,
+    item_tags: Option<&'a BoundItemTags>,
     side: LoopSide,
     mods: LoadedMods,
 }
 
 impl<'a> OwningLoop<'a> {
-    /// Borrow a loop's immutable reader at its owning boundary.
-    pub fn new(side: LoopSide, source: &'a dyn LoopReader) -> Self {
+    /// Borrow a loop's immutable reader and its already-bound tags at the owning boundary.
+    pub fn new(
+        side: LoopSide,
+        source: &'a dyn LoopReader,
+        item_tags: Option<&'a BoundItemTags>,
+    ) -> Self {
         Self {
             source,
+            item_tags,
             side,
             mods: LoadedMods::new(),
         }
@@ -942,13 +935,10 @@ impl<'a> OwningLoop<'a> {
 
 impl LoopContext for OwningLoop<'_> {
     fn is_in_tag(&self, item: crate::ItemKey, tag: crate::TagKey) -> Option<bool> {
-        self.source.item_is_in_tag(item, tag)
+        self.item_tags?.contains(tag, item)
     }
-    fn item_count(&self, tag: crate::TagKey) -> Option<usize> {
-        self.source.item_count(tag)
-    }
-    fn item_at(&self, tag: crate::TagKey, index: usize) -> Option<crate::ItemKey> {
-        self.source.item_at(tag, index)
+    fn items_in_tag(&self, tag: crate::TagKey) -> Option<&[crate::ItemKey]> {
+        self.item_tags?.items(tag)
     }
     fn mod_recipe_property_contains(&self, set: &str, item: crate::ItemKey) -> bool {
         self.source.mod_recipe_property_contains(set, item)

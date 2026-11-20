@@ -45,25 +45,10 @@ pub struct LoopReader<'a>(pub &'a engine::LoopContext);
 impl LoopReader<'_> {
     /// Build the API view after the hook's subscription guard.
     pub fn context(&self) -> mod_api::OwningLoop<'_> {
-        mod_api::OwningLoop::new(loop_side(self.0.side()), self)
+        mod_api::OwningLoop::new(loop_side(self.0.side()), self, self.0.item_tags())
     }
 }
 impl mod_api::LoopReader for LoopReader<'_> {
-    fn item_is_in_tag(&self, item: mod_api::ItemKey, tag: mod_api::TagKey) -> Option<bool> {
-        // A requested token has a name even before its completed item table is published.
-        mod_api::__private::item_key("minecraft:air")?;
-        let item = mod_api::__private::item_key_id(item)?;
-        mod_api::__private::with_tag_name(tag, |name| self.0.item_is_in_tag(item, name?))
-    }
-    fn item_count(&self, tag: mod_api::TagKey) -> Option<usize> {
-        mod_api::__private::item_key("minecraft:air")?;
-        mod_api::__private::with_tag_name(tag, |name| Some(self.0.item_tag_members(name?)?.len()))
-    }
-    fn item_at(&self, tag: mod_api::TagKey, index: usize) -> Option<mod_api::ItemKey> {
-        mod_api::__private::with_tag_name(tag, |name| {
-            mod_api::__private::item_key(self.0.item_tag_members(name?)?.get(index)?)
-        })
-    }
     fn mod_recipe_property_contains(&self, set: &str, item: mod_api::ItemKey) -> bool {
         mod_api::__private::item_key_id(item)
             .is_some_and(|name| self.0.mod_recipe_property_contains(set, name))
@@ -113,50 +98,58 @@ mod tests {
             [],
         );
         let mut generation = load.captured_loop_context(engine::LoopSide::Server);
-        let reader = LoopReader(&generation);
-        let view = reader.context();
-        assert!(view.item_count(tag).is_none());
-        generation.set_item_tags(Some(std::collections::HashMap::from([(
-            "test:grain".into(),
-            vec!["minecraft:emerald".into(), "minecraft:diamond".into()],
-        )])));
-        let reader = LoopReader(&generation);
-        let view = reader.context();
-        assert!(view.item_count(tag).is_none(), "keys are not bound yet");
-        assert_eq!(
-            view.is_in_tag(*requested.get().unwrap(), tag),
-            None,
-            "a registration-time token is not a completed item table"
-        );
-        mod_api::__private::resolve_items([
-            "minecraft:air",
-            "minecraft:emerald",
-            "minecraft:diamond",
-        ])
-        .unwrap();
-        let emerald = mod_api::__private::item_key("minecraft:emerald").unwrap();
+        let ids = ["minecraft:air", "minecraft:emerald", "minecraft:diamond"];
+        let registry = ids.into_iter().collect();
+        let tags = std::collections::HashMap::from([
+            (
+                "test:grain".into(),
+                vec![
+                    "minecraft:emerald".into(),
+                    "test:absent".into(),
+                    "minecraft:diamond".into(),
+                    "minecraft:air".into(),
+                ],
+            ),
+            ("test:empty".into(), vec![]),
+            ("test:late".into(), vec!["minecraft:air".into()]),
+        ]);
+        let emerald = *requested.get().unwrap();
+        generation.set_item_tags(mod_api::__private::BoundItemTags::bind(&tags, &registry));
+        let unbound = generation.clone();
+        mod_api::__private::resolve_items(ids).unwrap();
+        let unbound_reader = LoopReader(&unbound);
+        let unbound = unbound_reader.context();
+        assert_eq!(unbound.items_in_tag(tag), None);
+        assert_eq!(unbound.is_in_tag(emerald, tag), None);
+
         let diamond = mod_api::__private::item_key("minecraft:diamond").unwrap();
+        let air = mod_api::__private::item_key("minecraft:air").unwrap();
+        generation.set_item_tags(mod_api::__private::BoundItemTags::bind(&tags, &registry));
         let frozen = generation.clone();
-        generation.set_item_tags(Some(std::collections::HashMap::from([(
-            "test:grain".into(),
-            vec!["minecraft:diamond".into()],
-        )])));
         let old_reader = LoopReader(&frozen);
-        let old_view = old_reader.context();
-        let old: &dyn LoopContext = &old_view;
-        let new_reader = LoopReader(&generation);
-        let new_view = new_reader.context();
-        let new: &dyn LoopContext = &new_view;
-        assert_eq!(old.item_count(tag), Some(2));
-        assert_eq!(old.item_at(tag, 0), Some(emerald));
-        assert_eq!(old.item_at(tag, 1), Some(diamond));
-        assert_eq!(new.item_count(tag), Some(1));
-        assert_eq!(new.item_at(tag, 0), Some(diamond));
+        let old = old_reader.context();
+        let empty = mod_api::__private::tag_key(&mod_api::Identifier::parse("test:empty").unwrap())
+            .unwrap();
+        // A mod can resolve a populated tag's key after the table is published.
+        let late =
+            mod_api::__private::tag_key(&mod_api::Identifier::parse("test:late").unwrap()).unwrap();
+        let ordered = old.items_in_tag(tag).unwrap();
+        assert_eq!(ordered, [emerald, diamond, air]);
+        assert_eq!(old.items_in_tag(late), Some(&[air][..]));
+        assert_eq!(old.items_in_tag(empty), Some(&[][..]));
+        assert_eq!(old.items_in_tag(missing), Some(&[][..]));
         assert_eq!(old.is_in_tag(emerald, tag), Some(true));
+        assert_eq!(old.is_in_tag(emerald, missing), Some(false));
+
+        generation.set_item_tags(mod_api::__private::BoundItemTags::bind(
+            &[("test:grain".into(), vec!["minecraft:diamond".into()])].into(),
+            &registry,
+        ));
+        let new_reader = LoopReader(&generation);
+        let new = new_reader.context();
+        assert_eq!(new.items_in_tag(tag), Some(&[diamond][..]));
         assert_eq!(new.is_in_tag(emerald, tag), Some(false));
-        assert_eq!(new.is_in_tag(emerald, missing), Some(false));
-        assert_eq!(new.item_count(missing), Some(0));
-        assert_eq!(new.item_at(tag, usize::MAX), None);
+        assert_eq!(ordered, [emerald, diamond, air]);
     }
 
     #[test]

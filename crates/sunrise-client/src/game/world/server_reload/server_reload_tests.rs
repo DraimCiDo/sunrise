@@ -297,9 +297,7 @@ fn dedicated_world_open_publishes_crafting_item_tags() {
             let view = reader.context();
             assert_eq!(view.is_in_tag(stick, tag), Some(true));
             assert_eq!(view.is_in_tag(dirt, tag), Some(false));
-            assert_eq!(view.item_count(tag), Some(1));
-            assert_eq!(view.item_at(tag, 0), Some(stick));
-            assert_eq!(view.item_at(tag, 1), None);
+            assert_eq!(view.items_in_tag(tag), Some(&[stick][..]));
         });
     });
 }

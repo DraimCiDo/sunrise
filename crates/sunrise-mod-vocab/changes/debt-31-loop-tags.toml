@@ -1,0 +1,21 @@
+ids = [
+  "method:LoopContext::item_count",
+  "method:LoopContext::item_at",
+  "method:LoopContext::items_in_tag",
+  "method:LoopReader::item_is_in_tag",
+  "method:LoopReader::item_count",
+  "method:LoopReader::item_at",
+]
+why = "A published loop generation now binds its authoritative item tags once and lends their item keys in order. Callbacks no longer look up each member by index or resolve item names on reads."
+migrate = """
+On LoopContext and CraftingRemainders, replace item_count(tag) with \
+items_in_tag(tag).map(|items| items.len()) and item_at(tag, index) with \
+items_in_tag(tag).and_then(|items| items.get(index)).copied(). To visit every \
+member, use if let Some(items) = context.items_in_tag(tag) { for &item in items { /* use item */ } }. \
+None means that the authoritative tags or completed item-key table were unavailable at publication; \
+a missing or empty tag in a loaded table yields an empty slice. Keep using is_in_tag(item, tag) for membership. \
+If you implement LoopContext, implement items_in_tag by borrowing your snapshot instead of implementing the two indexed methods. \
+LoopReader supplies only metadata now: remove item_is_in_tag, item_count and item_at. \
+Engine adapters replace OwningLoop::new(side, reader) with OwningLoop::new(side, reader, bound_tags) \
+and pass None if tags are unavailable.\
+"""

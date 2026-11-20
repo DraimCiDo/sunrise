@@ -58,10 +58,7 @@ mod tests {
         fn is_in_tag(&self, _: crate::ItemKey, _: crate::TagKey) -> Option<bool> {
             None
         }
-        fn item_count(&self, _: crate::TagKey) -> Option<usize> {
-            None
-        }
-        fn item_at(&self, _: crate::TagKey, _: usize) -> Option<crate::ItemKey> {
+        fn items_in_tag(&self, _: crate::TagKey) -> Option<&[crate::ItemKey]> {
             None
         }
         fn side(&self) -> crate::LoopSide {
