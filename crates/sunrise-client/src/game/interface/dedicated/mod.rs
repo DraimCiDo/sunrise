@@ -1315,7 +1315,12 @@ impl Game<'_> {
                         state.pause_when_empty_seconds
                     ),
                 );
-                self.save_game()?;
+                if let Err(error) = self.save_game() {
+                    if !error.is::<sunrise_client::save::RecordSaveFailures>() {
+                        return Err(error);
+                    }
+                    log::warn!("Server paused after a partial save: {error}");
+                }
             }
             if !paused && !auto_save(&state) {
                 // `MinecraftServer.autoSave` keeps its schedule while every level's

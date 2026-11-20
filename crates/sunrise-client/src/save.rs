@@ -27,6 +27,7 @@ mod horizon_names_tests;
 pub mod level_mods;
 mod respawn;
 mod writes;
+pub use writes::RecordSaveFailures;
 use writes::{Outstanding, QueuedWrite, Writer};
 
 use crate::{
@@ -2066,9 +2067,24 @@ fn write_region_records(
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as u32);
     let compressed = compress_records(records, timestamp);
+    write_prepared_region_records(root, cache, folder, timestamp, records, compressed)
+}
+
+fn write_prepared_region_records(
+    root: &Path,
+    cache: &RegionCache,
+    folder: &str,
+    timestamp: u32,
+    records: &[((i32, i32), &Record)],
+    compressed: Vec<compression_pool::Prepared>,
+) -> Result<BTreeMap<(i32, i32), std::io::Error>> {
     type RegionWrite<'a> = (ChunkPos, &'a Record, Option<CompressedWrite>);
     let mut by_region: BTreeMap<(i32, i32), Vec<RegionWrite<'_>>> = BTreeMap::new();
     let mut failed = BTreeMap::new();
+    let mut refuse = |x, z, error| {
+        crate::chunk_io::report_save_failure(root, x, z, &error);
+        failed.insert((x, z), error);
+    };
     for (&((x, z), source), record) in records.iter().zip(compressed) {
         match record {
             Ok(record) => by_region.entry((x >> 5, z >> 5)).or_default().push((
@@ -2076,10 +2092,7 @@ fn write_region_records(
                 source,
                 record,
             )),
-            Err(error) => {
-                crate::chunk_io::report_save_failure(root, x, z, &error);
-                failed.insert((x, z), error);
-            }
+            Err(error) => refuse(x, z, error),
         }
     }
     for ((rx, rz), list) in by_region {
@@ -2096,10 +2109,11 @@ fn write_region_records(
         let mut changed = false;
         for (pos, source, record) in list {
             match record {
-                Some(record) => {
-                    write_chunk_record(&mut region, pos, source, record)?;
-                    changed = true;
-                }
+                Some(record) => match write_chunk_record(&mut region, pos, source, record) {
+                    Ok(()) => changed = true,
+                    Err(ChunkWriteError::Record(error)) => refuse(pos.x, pos.z, error),
+                    Err(ChunkWriteError::Storage(error)) => return Err(error.into()),
+                },
                 None => changed |= region.clear(pos, timestamp)?,
             }
         }
@@ -2118,12 +2132,32 @@ fn write_region_records(
     Ok(failed)
 }
 
+#[derive(Debug)]
+enum ChunkWriteError {
+    Record(std::io::Error),
+    Storage(std::io::Error),
+}
+
+impl From<std::io::Error> for ChunkWriteError {
+    fn from(error: std::io::Error) -> Self {
+        if error
+            .get_ref()
+            .is_some_and(|cause| cause.is::<sunrise_world::region::CompressedChunkLimit>())
+        {
+            // RegionFile rejects an oversized payload before touching its slot.
+            Self::Record(error)
+        } else {
+            Self::Storage(error)
+        }
+    }
+}
+
 fn write_chunk_record(
     region: &mut RegionFile,
     pos: ChunkPos,
     source: &Record,
     CompressedWrite { record, primary }: CompressedWrite,
-) -> std::io::Result<()> {
+) -> std::result::Result<(), ChunkWriteError> {
     let error = match region.write(pos, &record) {
         Ok(()) => {
             if primary {
@@ -2131,27 +2165,27 @@ fn write_chunk_record(
             }
             return Ok(());
         }
-        Err(error) => error,
+        Err(error) => ChunkWriteError::from(error),
     };
-    if !primary
-        || !error
-            .get_ref()
-            .is_some_and(|cause| cause.is::<sunrise_world::region::CompressedChunkLimit>())
-    {
+    let ChunkWriteError::Record(error) = error else {
         return Err(error);
-    }
+    };
     let (compression, timestamp) = (record.compression, record.timestamp);
     drop(record);
-    let Some(stored) = source.without_block_entity_edits() else {
-        return Err(error);
+    let Some(stored) = primary
+        .then(|| source.without_block_entity_edits())
+        .flatten()
+    else {
+        return Err(ChunkWriteError::Record(error));
     };
     log::warn!(
         "block_entity_save_additional: discarding listener edits from chunk {},{}: {error}",
         pos.x,
         pos.z
     );
-    let stored = ChunkRecord::from_nbt(&stored, compression, timestamp, Limits::saved())?;
-    region.write(pos, &stored)
+    let stored = ChunkRecord::from_nbt(&stored, compression, timestamp, Limits::saved())
+        .map_err(ChunkWriteError::Record)?;
+    region.write(pos, &stored).map_err(ChunkWriteError::from)
 }
 
 /// `job(i)` for every `i` below `count`, in order, shared between this thread

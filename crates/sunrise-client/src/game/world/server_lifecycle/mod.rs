@@ -2,7 +2,7 @@
 
 use super::Game;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use sunrise_client::Result;
+use sunrise_client::{Result, save::RecordSaveFailures};
 
 /// What a crash save decided about the players a panic interrupted.
 #[derive(Default)]
@@ -100,9 +100,13 @@ impl Game<'_> {
                 let _ = catch_unwind(AssertUnwindSafe(|| {
                     self.native_lifecycle_close_failed(&text);
                 }));
-                log::error!("Exception stopping the server: {text}");
-                if failure.is_none() {
-                    failure = Some(text);
+                if error.is::<RecordSaveFailures>() {
+                    log::warn!("Server stopped after a partial save: {text}");
+                } else {
+                    log::error!("Exception stopping the server: {text}");
+                    if failure.is_none() {
+                        failure = Some(text);
+                    }
                 }
             }
             Err(payload) => {
@@ -221,7 +225,7 @@ impl Game<'_> {
         self.exclude_interrupted_players(crashed, |m| log::warn!("{m}"));
         let saved = match catch_unwind(AssertUnwindSafe(|| {
             if self.world_adopted && self.session_lock.is_some() {
-                self.save_game_with_mode(super::saving::LevelSave::Shutdown)
+                self.save_game()
             } else {
                 Ok(())
             }
@@ -229,7 +233,8 @@ impl Game<'_> {
             Ok(result) => result,
             Err(payload) => Err(shutdown_panic(payload.as_ref()).into()),
         };
-        result = result.and(saved);
+        let mut refusals = RecordSaveFailures::default();
+        result = result.and(refusals.collect(saved));
         // The save can unwind inside a new player's turn, and `lan_close` writes every player the
         // exclusion does not name.
         self.exclude_interrupted_players(crashed, |m| log::warn!("{m}"));
@@ -246,13 +251,8 @@ impl Game<'_> {
         {
             result = Err(shutdown_panic(payload.as_ref()).into());
         }
-        match catch_unwind(AssertUnwindSafe(|| self.save.flush_for_shutdown())) {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
-                if result.is_ok() {
-                    result = Err(error);
-                }
-            }
+        match catch_unwind(AssertUnwindSafe(|| self.save.flush())) {
+            Ok(saved) => result = result.and(refusals.collect(saved)),
             Err(payload) => {
                 let message = shutdown_panic(payload.as_ref());
                 if result.is_ok() {
@@ -260,6 +260,7 @@ impl Game<'_> {
                 }
             }
         }
+        result = result.and(refusals.finish());
         if result.is_ok()
             && let Err(payload) =
                 catch_unwind(AssertUnwindSafe(|| self.native_lifecycle_world_closed()))

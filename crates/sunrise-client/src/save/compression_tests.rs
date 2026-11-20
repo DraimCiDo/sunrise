@@ -9,9 +9,10 @@ use sunrise_world::region::RegionFile;
 use super::{
     Chunk, ChunkExtras, Compression, Encoding, LevelShape, QueuedWrite, Record,
     compression_pool::{
-        CompressionPool, compress_record, compress_records, compress_records_with_pool,
+        CompressedWrite, CompressionPool, compress_record, compress_records,
+        compress_records_with_pool,
     },
-    write_chunk_record,
+    write_chunk_record, write_prepared_region_records,
 };
 
 #[test]
@@ -98,6 +99,88 @@ fn full_record_overflow_discards_edits_without_losing_current_chunk_data() {
         assert_eq!(
             entities[0].get("stored"),
             if admitted { None } else { Some(&Tag::Int(7)) }
+        );
+    }
+}
+
+#[test]
+fn a_compressed_size_rejection_does_not_skip_healthy_records_in_either_region() {
+    use super::{ChunkRecord, SaveDir};
+    use sunrise_core::nbt::Compound;
+
+    const OVERSIZED: usize = 64 * 1024 * 1024 + 1;
+    let (registry, biomes) = super::loot_tests::fixture();
+    let encoding = Arc::new(Encoding {
+        registry: Box::leak(Box::new(registry)),
+        biomes: Arc::new(biomes),
+        items: Default::default(),
+        tables: None,
+        shape: LevelShape::OVERWORLD,
+    });
+    for with_fallback in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let open = || SaveDir::new(dir.path().to_path_buf(), LevelShape::OVERWORLD, None);
+        let save = open();
+        save.write_records("region", vec![((1, 0), Some(sample_tag(1)))], true)
+            .unwrap();
+        let old = open().raw_chunk(1, 0).unwrap();
+        let mut chunk = Chunk::empty(1, 0);
+        if with_fallback {
+            // Throwing out the block-entity edits still leaves this oversized stored payload.
+            chunk.saved = Some(Arc::new(ChunkExtras {
+                root: Compound::from([("test:stored".into(), Tag::ByteArray(vec![0; OVERSIZED]))]),
+                block_entity_save_edits: Some(Arc::default()),
+                ..Default::default()
+            }));
+        }
+        let bad = Record::Chunk(Arc::new(chunk), encoding.clone(), None);
+        let healthy = Record::Tag(Arc::new(sample_tag(11)));
+        let later = Record::Tag(Arc::new(sample_tag(22)));
+        let records = [((0, 0), &healthy), ((1, 0), &bad), ((32, 0), &later)];
+        // Inject the oversized compression result at the real RegionFile admission boundary.
+        let mut prepared = Vec::new();
+        for record in [&healthy, &later] {
+            prepared.push(compress_record(
+                record,
+                Compression::None,
+                0,
+                Limits::saved(),
+            ));
+        }
+        prepared.insert(
+            1,
+            Ok(Some(CompressedWrite {
+                record: ChunkRecord {
+                    compression: Compression::None,
+                    compressed: vec![0; OVERSIZED],
+                    timestamp: 0,
+                },
+                primary: true,
+            })),
+        );
+        let failed = write_prepared_region_records(
+            &save.root,
+            &save.regions,
+            "region",
+            0,
+            &records,
+            prepared,
+        )
+        .unwrap();
+        let disk = open();
+        assert_eq!(
+            disk.raw_chunk(0, 0).unwrap().tag.get("xPos"),
+            Some(&Tag::Int(11))
+        );
+        assert_eq!(
+            disk.raw_chunk(32, 0).unwrap().tag.get("xPos"),
+            Some(&Tag::Int(22))
+        );
+        assert_eq!(disk.raw_chunk(1, 0), Some(old));
+        assert_eq!(failed.keys().copied().collect::<Vec<_>>(), [(1, 0)]);
+        assert_eq!(
+            failed[&(1, 0)].to_string(),
+            "compressed chunk limit exceeded"
         );
     }
 }

@@ -402,12 +402,7 @@ fn a_refused_save_keeps_its_disk_record_without_skipping_its_neighbour() {
             &biomes,
         )
         .unwrap();
-        let error = save.flush().unwrap_err().to_string();
-        assert!(
-            error.contains("region 2,-3: chunk disk callback refused"),
-            "{error}"
-        );
-        assert!(!error.contains("3,-3"), "{error}");
+        let error = save.flush().unwrap_err();
         let after = read_disk();
         assert_eq!(after.compressed, before.compressed);
         assert_eq!(after.timestamp, before.timestamp);
@@ -415,6 +410,13 @@ fn a_refused_save_keeps_its_disk_record_without_skipping_its_neighbour() {
             value(&mut open().load(3, -3, registry, &biomes).unwrap()),
             11
         );
+        assert_eq!(value(&mut save.load(2, -3, registry, &biomes).unwrap()), 9);
+        let error = error.downcast::<RecordSaveFailures>().unwrap().to_string();
+        assert!(
+            error.contains("region 2,-3: chunk disk callback refused"),
+            "{error}"
+        );
+        assert!(!error.contains("3,-3"), "{error}");
     });
 }
 
@@ -443,38 +445,64 @@ mod refuses_9 {
 
 #[test]
 fn an_unencodable_record_can_be_retried_without_a_disk_listener() {
-    let path = tempfile::tempdir().unwrap();
     mod_platform::testing::with_mods(Vec::new().into(), || {
-        let save = SaveDir::new(path.path().to_path_buf(), LevelShape::OVERWORLD, None);
-        let key = (2, -3);
-        let invalid = (0..=sunrise_core::nbt::DISK_WRITE_NESTING_GUARD)
-            .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
-        let record = |tag| {
-            (
-                key,
-                Some(NamedTag {
-                    name: "".into(),
-                    tag,
-                }),
-            )
-        };
-        let error = save
-            .write_records("region", vec![record(invalid)], true)
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("depth limit exceeded"), "{error}");
-        assert_eq!(save.take_failed_chunk_saves(), [key]);
-        let valid = Tag::compound([
-            ("DataVersion", Tag::Int(DATA_VERSION)),
-            ("marker", Tag::Int(2)),
-        ]);
-        save.write_records("region", vec![record(valid)], true)
-            .unwrap();
-        assert!(save.take_failed_chunk_saves().is_empty());
-        assert_eq!(
-            save.raw_chunk(key.0, key.1).unwrap().tag.get("marker"),
-            Some(&Tag::Int(2))
-        );
+        for consume_failure_before_retry in [true, false] {
+            let path = tempfile::tempdir().unwrap();
+            let open = || SaveDir::new(path.path().to_path_buf(), LevelShape::OVERWORLD, None);
+            let save = open();
+            let key = (2, -3);
+            let neighbour = (3, -3);
+            let other_region = (32, -3);
+            let invalid = (0..=sunrise_core::nbt::DISK_WRITE_NESTING_GUARD)
+                .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
+            let record = |key, tag| {
+                (
+                    key,
+                    Some(NamedTag {
+                        name: "".into(),
+                        tag,
+                    }),
+                )
+            };
+            let valid = |marker| {
+                Tag::compound([
+                    ("DataVersion", Tag::Int(DATA_VERSION)),
+                    ("marker", Tag::Int(marker)),
+                ])
+            };
+            let read = |(x, z)| open().raw_chunk(x, z).unwrap().tag.get("marker").cloned();
+            save.write_records("region", vec![record(key, valid(1))], true)
+                .unwrap();
+            let error = save
+                .write_records(
+                    "region",
+                    vec![
+                        record(key, invalid),
+                        record(neighbour, valid(3)),
+                        record(other_region, valid(4)),
+                    ],
+                    true,
+                )
+                .unwrap_err();
+            assert_eq!(read(key), Some(Tag::Int(1)));
+            assert_eq!(read(neighbour), Some(Tag::Int(3)));
+            assert_eq!(read(other_region), Some(Tag::Int(4)));
+            let error = error.downcast::<RecordSaveFailures>().unwrap().to_string();
+            assert!(
+                error.contains("region 2,-3: ") && error.contains("depth limit exceeded"),
+                "{error}"
+            );
+            if consume_failure_before_retry {
+                assert_eq!(save.take_failed_chunk_saves(), [key]);
+            }
+            save.write_records("region", vec![record(key, valid(2))], true)
+                .unwrap();
+            assert!(
+                save.take_failed_chunk_saves().is_empty(),
+                "a newer durable record cancels the unread failure notice"
+            );
+            assert_eq!(read(key), Some(Tag::Int(2)));
+        }
     });
 }
 
@@ -507,9 +535,8 @@ fn disk_write_failure_keeps_old_disk_7_and_snapshot_8_for_recovery() {
         context(&save);
         save.save_later(&[Arc::new(chunk(7))], registry, &biomes)
             .unwrap();
-        // A failure to write the file itself still fails shutdown and explicit saves.
-        assert!(save.flush_for_shutdown().is_err());
-        assert!(save.flush().is_err());
+        // A failure to write the file itself is not an isolated record refusal.
+        assert!(!save.flush().unwrap_err().is::<RecordSaveFailures>());
         assert_eq!(saves.load(Ordering::Relaxed), 1);
         // The chunk is marked for another attempt instead of silently clean.
         assert_eq!(save.take_failed_chunk_saves(), [(2, -3)]);

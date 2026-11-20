@@ -1,7 +1,44 @@
 //! The writer thread: what a folder queues to be written, and waiting for it to be on disk.
 use super::*;
+use std::{collections::BTreeSet, fmt};
 
 mod saved_portals;
+
+/// A completed save that could not publish some individual records. This is distinct from
+/// storage failures, for which the writer may not have finished the rest of its batch.
+#[derive(Debug, Default)]
+pub struct RecordSaveFailures(BTreeSet<String>);
+
+impl RecordSaveFailures {
+    /// Accumulate refusals without stopping the caller from saving unrelated data.
+    /// Other errors keep their original type and still stop the save.
+    pub fn collect(&mut self, result: Result<()>) -> Result<()> {
+        if let Err(error) = result {
+            self.0.extend(error.downcast::<Self>()?.0);
+        }
+        Ok(())
+    }
+
+    pub fn finish(self) -> Result<()> {
+        if self.0.is_empty() {
+            Ok(())
+        } else {
+            Err(self.into())
+        }
+    }
+}
+
+impl fmt::Display for RecordSaveFailures {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("chunk records not saved:")?;
+        for failure in &self.0 {
+            write!(f, " {failure};")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for RecordSaveFailures {}
 
 /// The background thread that encodes chunks and writes them into the region files, grouped
 /// by folder within each drained pass. Submission order is preserved within each folder.
@@ -44,7 +81,7 @@ pub(super) struct Outstanding {
     /// Record encoding failures, kept until a newer record reaches disk at the same position.
     record_errors: Mutex<BTreeMap<(&'static str, i32, i32), std::io::Error>>,
     /// Terrain records the game needs to mark dirty again, with or without a disk callback.
-    failed_saves: Mutex<Vec<(i32, i32)>>,
+    failed_saves: Mutex<HashMap<(i32, i32), u64>>,
     done: Condvar,
     /// What the folder's writes make stale: the portal blocks a search read from saved chunks.
     portals: saved_portals::SavedPortals,
@@ -90,7 +127,8 @@ impl SaveDir {
                         if folder == Folder::Region
                             && let Ok(mut failed) = self.outstanding.failed_saves.lock()
                         {
-                            failed.extend(keys);
+                            let seq = self.sequence.fetch_add(1, Ordering::Relaxed);
+                            failed.extend(keys.into_iter().map(|key| (key, seq)));
                         }
                         return Err(error);
                     }
@@ -222,21 +260,29 @@ impl SaveDir {
                         match write_region_records(&root, cache, folder, &records) {
                             Ok(failed) => {
                                 if let Ok(mut pending) = pending.lock() {
+                                    let mut retry = (kind == Folder::Region)
+                                        .then(|| outstanding.failed_saves.lock().unwrap());
                                     for job in &batch {
                                         let key = (kind, job.key.0, job.key.1);
-                                        if !failed.contains_key(&job.key)
-                                            && pending.get(&key).is_some_and(|p| p.0 == job.seq)
-                                        {
+                                        if pending.get(&key).is_none_or(|p| p.0 != job.seq) {
+                                            continue;
+                                        }
+                                        if failed.contains_key(&job.key) {
+                                            if let Some(retry) = &mut retry {
+                                                let seq = retry.entry(job.key).or_insert(job.seq);
+                                                *seq = (*seq).max(job.seq);
+                                            }
+                                        } else {
                                             pending.remove(&key);
+                                            if let Some(retry) = &mut retry
+                                                && retry
+                                                    .get(&job.key)
+                                                    .is_some_and(|&seq| seq <= job.seq)
+                                            {
+                                                retry.remove(&job.key);
+                                            }
                                         }
                                     }
-                                }
-                                if kind == Folder::Region && !failed.is_empty() {
-                                    outstanding
-                                        .failed_saves
-                                        .lock()
-                                        .unwrap()
-                                        .extend(failed.keys().copied());
                                 }
                                 let mut errors = outstanding.record_errors.lock().unwrap();
                                 for &((x, z), _) in &records {
@@ -249,12 +295,20 @@ impl SaveDir {
                                 );
                             }
                             Err(e) => {
-                                if kind == Folder::Region {
-                                    outstanding
-                                        .failed_saves
-                                        .lock()
-                                        .unwrap()
-                                        .extend(records.iter().map(|(key, _)| *key));
+                                if kind == Folder::Region
+                                    && let Ok(pending) = pending.lock()
+                                {
+                                    let mut retry = outstanding.failed_saves.lock().unwrap();
+                                    for job in &batch {
+                                        let (x, z) = job.key;
+                                        if pending
+                                            .get(&(kind, x, z))
+                                            .is_some_and(|p| p.0 == job.seq)
+                                        {
+                                            let seq = retry.entry(job.key).or_insert(job.seq);
+                                            *seq = (*seq).max(job.seq);
+                                        }
+                                    }
                                 }
                                 let message = format!("failed to write {folder} files: {e}");
                                 log::warn!("Sunrise: {message}");
@@ -283,24 +337,33 @@ impl SaveDir {
     }
     /// Take the terrain positions to mark dirty again after unsuccessful writes.
     pub fn take_failed_chunk_saves(&self) -> Vec<(i32, i32)> {
-        self.outstanding
+        // This is polled every tick; don't take the pending read/write lock on an empty queue.
+        if self
+            .outstanding
             .failed_saves
             .lock()
-            .map_or_else(|_| Vec::new(), |mut failed| std::mem::take(&mut *failed))
+            .map_or(true, |failed| failed.is_empty())
+        {
+            return Vec::new();
+        }
+        let (Ok(pending), Ok(mut failed)) =
+            (self.pending.lock(), self.outstanding.failed_saves.lock())
+        else {
+            return Vec::new();
+        };
+        failed
+            .drain()
+            .filter(|&((x, z), seq)| {
+                pending
+                    .get(&(Folder::Region, x, z))
+                    .is_none_or(|p| p.0 <= seq)
+            })
+            .map(|(key, _)| key)
+            .collect()
     }
 
     /// Wait until every queued write is on disk, or report what could not be saved.
     pub fn flush(&self) -> Result<()> {
-        self.flush_writes(true)
-    }
-
-    /// Wait for all writes at shutdown. Individual encoding failures are already logged;
-    /// a failure to write or sync the storage itself is still an error.
-    pub fn flush_for_shutdown(&self) -> Result<()> {
-        self.flush_writes(false)
-    }
-
-    fn flush_writes(&self, report_record_errors: bool) -> Result<()> {
         let mut count = self
             .outstanding
             .count
@@ -313,7 +376,7 @@ impl SaveDir {
                 .wait(count)
                 .map_err(|_| "writer poisoned")?;
         }
-        self.write_result(report_record_errors)
+        self.write_result(true)
     }
     /// Wait until at most `low` chunk records are still queued, without waiting
     /// for all of them; a save pass resuming at half the cap keeps the writer fed
@@ -346,21 +409,12 @@ impl SaveDir {
     }
     /// Poll durability without holding up the event loop.
     pub fn writes_finished(&self) -> Result<bool> {
-        self.poll_writes(true)
-    }
-
-    /// Poll a closing save without escalating individual encoding failures.
-    pub fn writes_finished_for_shutdown(&self) -> Result<bool> {
-        self.poll_writes(false)
-    }
-
-    fn poll_writes(&self, report_record_errors: bool) -> Result<bool> {
         let count = self
             .outstanding
             .count
             .lock()
             .map_err(|_| "writer poisoned")?;
-        self.write_result(report_record_errors && *count == 0)?;
+        self.write_result(*count == 0)?;
         Ok(*count == 0)
     }
     fn write_result(&self, report_record_errors: bool) -> Result<()> {
@@ -379,12 +433,14 @@ impl SaveDir {
                 .lock()
                 .map_err(|_| "writer poisoned")?;
             if !errors.is_empty() {
-                use std::fmt::Write;
-                let mut message = String::from("failed to encode chunk records:");
-                for ((folder, x, z), error) in errors.iter() {
-                    let _ = write!(message, " {folder} {x},{z}: {error};");
-                }
-                return Err(message.into());
+                let path = self.root.display();
+                return Err(RecordSaveFailures(
+                    errors
+                        .iter()
+                        .map(|((folder, x, z), error)| format!("{path} {folder} {x},{z}: {error}"))
+                        .collect(),
+                )
+                .into());
             }
         }
         Ok(())

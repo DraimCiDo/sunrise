@@ -173,7 +173,7 @@ pub(super) struct CompressedWrite {
     pub(super) primary: bool,
 }
 
-type Prepared = io::Result<Option<CompressedWrite>>;
+pub(super) type Prepared = io::Result<Option<CompressedWrite>>;
 
 pub(super) fn compress_record(
     record: &Record,

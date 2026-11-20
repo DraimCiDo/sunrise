@@ -37,7 +37,7 @@ use sunrise_client::{
     Result,
     block_entity_anim::BlockEntityAnims,
     random_tick_sections::RandomTickSections,
-    save::SaveDir,
+    save::{RecordSaveFailures, SaveDir},
     streaming::Streaming,
     tick_chunk_membership::TickChunkMembership,
     ticket_levels::{ChunkTickets, PortalTicket},
@@ -1640,7 +1640,15 @@ impl Game<'_> {
             return Ok(());
         }
         for dim in closing {
-            self.close_parked_level(dim)?;
+            if let Err(error) = self.close_parked_level(dim) {
+                if !error.is::<RecordSaveFailures>() {
+                    return Err(error);
+                }
+                log::warn!("Leaving {} open after a partial save: {error}", dim.id());
+                if let Some(level) = self.levels.parked.get_mut(&dim) {
+                    level.idle = 0;
+                }
+            }
         }
         Ok(())
     }
@@ -1743,17 +1751,22 @@ impl Game<'_> {
 
     /// Save every parked level (`MinecraftServer.saveAllChunks`); the level
     /// in place is the caller's to save.
-    pub(super) fn save_parked_levels(&mut self, mode: super::saving::LevelSave) -> Result<()> {
+    pub(super) fn save_parked_levels(&mut self, wait: bool) -> Result<()> {
         if self.levels.parked.is_empty() {
             return Ok(());
         }
         let back = self.dim;
         let dims: Vec<Dim> = self.levels.parked.keys().copied().collect();
-        for dim in dims {
-            self.enter_level(dim)?;
-            self.save_level_with(mode)?;
-        }
-        self.enter_level(back)
+        let mut refusals = RecordSaveFailures::default();
+        let saved = (|| -> Result<()> {
+            for dim in dims {
+                self.enter_level(dim)?;
+                refusals.collect(self.save_level(wait))?;
+            }
+            Ok(())
+        })();
+        saved.and(self.enter_level(back))?;
+        refusals.finish()
     }
 }
 
@@ -1795,6 +1808,102 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn dirty_test_chunk(game: &mut Game<'_>) {
+        let chunk = sunrise_client::chunk::Chunk::with_layout(0, 0, game.world.layout());
+        game.world.chunks.insert((0, 0), Arc::new(chunk));
+        game.world.modified.insert((0, 0));
+    }
+
+    fn queue_unencodable_entity_record(save: &SaveDir) {
+        use sunrise_core::nbt::{DISK_WRITE_NESTING_GUARD, Tag};
+        let invalid =
+            (0..=DISK_WRITE_NESTING_GUARD).fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
+        save.save_entities_later(vec![((2, 0), vec![invalid])])
+            .unwrap();
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn save_all_reports_refusals_after_saving_each_level_and_metadata() {
+        use crate::game::native_entity_refs::tests::with_game;
+        use sunrise_client::save::{Level, LevelShape};
+        mod_platform::testing::with_mods(Vec::new().into(), || {
+            with_game(|game| {
+                let root = tempfile::tempdir().unwrap();
+                game.world_root = root.path().to_path_buf();
+                game.save = Arc::new(SaveDir::new(
+                    game.world_root.clone(),
+                    LevelShape::OVERWORLD,
+                    Some(Default::default()),
+                ));
+                game.level.name = "saved despite two refused records".into();
+                let mut folders = Vec::new();
+                for dim in [Dim::Nether, Dim::End, Dim::Overworld] {
+                    game.enter_level(dim).unwrap();
+                    dirty_test_chunk(game);
+                    folders.push((game.save.root.clone(), game.save.shape));
+                    if dim != Dim::End {
+                        queue_unencodable_entity_record(&game.save);
+                    }
+                }
+                assert_eq!(
+                    game.save_all_reply().translation_key(),
+                    Some("commands.save.failed")
+                );
+                assert_eq!(game.dim, Dim::Overworld);
+                assert_eq!(
+                    Level::read(root.path()).unwrap().name,
+                    "saved despite two refused records"
+                );
+                for (folder, shape) in folders {
+                    assert!(
+                        SaveDir::new(folder.clone(), shape, None)
+                            .raw_chunk(0, 0)
+                            .is_some(),
+                        "{} was not written",
+                        folder.display()
+                    );
+                }
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn an_idle_level_with_a_refused_record_stays_open_without_failing_the_tick() {
+        use crate::game::native_entity_refs::tests::with_game;
+        use sunrise_client::save::LevelShape;
+        mod_platform::testing::with_mods(Vec::new().into(), || {
+            with_game(|game| {
+                let root = tempfile::tempdir().unwrap();
+                game.world_root = root.path().to_path_buf();
+                game.save = Arc::new(SaveDir::new(
+                    game.world_root.clone(),
+                    LevelShape::OVERWORLD,
+                    Some(Default::default()),
+                ));
+                game.enter_level(Dim::Nether).unwrap();
+                dirty_test_chunk(game);
+                queue_unencodable_entity_record(&game.save);
+                let disk = SaveDir::new(game.save.root.clone(), game.save.shape, None);
+                game.enter_level(Dim::Overworld).unwrap();
+                game.levels.parked.get_mut(&Dim::Nether).unwrap().idle = IDLE_TICKS - 1;
+                game.close_idle_levels().unwrap();
+                assert_eq!(game.dim, Dim::Overworld);
+                let nether = &game.levels.parked[&Dim::Nether];
+                assert_eq!(
+                    nether.idle, 0,
+                    "a refusal must not retry idle close on every tick"
+                );
+                assert!(nether.save.flush().unwrap_err().is::<RecordSaveFailures>());
+                assert!(
+                    disk.raw_chunk(0, 0).is_some(),
+                    "the healthy chunk was still saved"
+                );
+            });
+        });
+    }
 
     #[test]
     fn levels_clear_empties_parked_and_heard_open() {
@@ -2114,8 +2223,7 @@ mod tests {
             assert!(game.levels.parked[&end].streaming.commanded().is_empty());
             // An early final save can run after the world is adopted but
             // before ticket activation. The originals on disk must survive.
-            game.save_parked_levels(crate::game::saving::LevelSave::Async)
-                .unwrap();
+            game.save_parked_levels(false).unwrap();
             game.prepare_levels().unwrap();
             assert!(
                 saw_end.load(Ordering::Relaxed),

@@ -1,7 +1,7 @@
 //! The world's save on a timer (`MinecraftServer.computeNextAutosaveInterval`,
 //! `onTickRateChanged`), the players' autosaves, and the world's metadata (level.dat).
-use super::saving::LevelSave;
 use super::*;
+use sunrise_client::save::RecordSaveFailures;
 
 impl Game<'_> {
     pub(super) fn admit_entity_save() -> Result<()> {
@@ -127,10 +127,6 @@ impl Game<'_> {
     /// generated chunk is saved, hundreds at a time, encoded and written on
     /// the region writer meanwhile.
     pub(super) fn save_game_with(&mut self, wait: bool) -> Result<()> {
-        self.save_game_with_mode(LevelSave::from_wait(wait))
-    }
-
-    pub(super) fn save_game_with_mode(&mut self, mode: LevelSave) -> Result<()> {
         if self.remote.is_some() {
             return Ok(());
         }
@@ -141,11 +137,13 @@ impl Game<'_> {
         if dedicated {
             dedicated::events::record_server("saving", serde_json::json!({}));
         }
-        self.save_level_with(mode)?;
-        self.save_parked_levels(mode)?;
+        let mut refusals = RecordSaveFailures::default();
+        refusals.collect(self.save_level(wait))?;
+        refusals.collect(self.save_parked_levels(wait))?;
         self.save_game_metadata()?;
-        let _ = self.finish_player_autosaves(mode.waits());
-        self.native_world_saved(mode.waits());
+        let _ = self.finish_player_autosaves(wait);
+        refusals.finish()?;
+        self.native_world_saved(wait);
         if dedicated {
             dedicated::events::record_server("saved", serde_json::json!({}));
         }

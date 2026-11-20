@@ -27,28 +27,58 @@ fn integrated_stop_finishes_after_an_unencodable_record() {
     use sunrise_client::save::{LevelShape, SaveDir, SessionLock};
     use sunrise_core::nbt::{DISK_WRITE_NESTING_GUARD, Tag};
 
+    struct SaveEvents(Arc<Mutex<Vec<&'static str>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for SaveEvents {
+        fn level_save(&self, _: &mut dyn ServerHost, _: &mut mod_api::LevelSaveEvent<'_>) {
+            self.0.lock().unwrap().push("level saved");
+        }
+        fn world_saved(&self, _: &mut dyn ServerHost, _: &mut mod_api::WorldSavedEvent) {
+            self.0.lock().unwrap().push("world saved");
+        }
+    }
+
     let root = tempfile::tempdir().unwrap();
-    with_mods(Vec::new().into(), || {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![ModEntry::new(
+        "save_events",
+        Box::new(SaveEvents(events.clone())),
+    )]
+    .into();
+    with_mods(mods, || {
         with_game(|game| {
             game.world_root = root.path().to_path_buf();
-            game.save = Arc::new(SaveDir::new(
-                game.world_root.clone(),
-                LevelShape::OVERWORLD,
-                Some(Default::default()),
-            ));
+            let open = || {
+                SaveDir::new(
+                    root.path().to_path_buf(),
+                    LevelShape::OVERWORLD,
+                    Some(Default::default()),
+                )
+            };
+            game.save = Arc::new(open());
             game.session_lock = Some(SessionLock::acquire(root.path()).unwrap());
             game.world_adopted = true;
+            game.save_game().unwrap();
+            assert_eq!(*events.lock().unwrap(), ["level saved", "world saved"]);
+            events.lock().unwrap().clear();
             game.level.name = "saved on exit after record failure".into();
+
+            let slot = (2, -3);
+            let neighbour = (3, -3);
+            let deleted = (4, -3);
+            let entity = |marker| Tag::compound([("marker", Tag::Int(marker))]);
+            game.save
+                .save_entities(vec![(slot, vec![entity(1)]), (deleted, vec![entity(3)])])
+                .unwrap();
             let invalid = (0..=DISK_WRITE_NESTING_GUARD)
                 .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
             game.save
-                .save_entities_later(vec![((2, -3), vec![invalid])])
+                .save_entities_later(vec![
+                    (slot, vec![invalid]),
+                    (neighbour, vec![entity(2)]),
+                    (deleted, vec![]),
+                ])
                 .unwrap();
-            let error = game.save.flush().unwrap_err().to_string();
-            assert!(
-                error.contains("entities 2,-3: ") && error.contains("depth limit exceeded"),
-                "{error}"
-            );
 
             // An Err here reaches the client through Integrated::stop and makes quitting fatal.
             game.run_server_lifecycle(false, |_, began| {
@@ -57,9 +87,22 @@ fn integrated_stop_finishes_after_an_unencodable_record() {
             })
             .unwrap();
             assert!(game.session_lock.is_none());
+            let disk = open();
+            assert_eq!(disk.load_entities(slot.0, slot.1), [entity(1)]);
+            assert_eq!(disk.load_entities(neighbour.0, neighbour.1), [entity(2)]);
+            assert!(disk.load_entities(deleted.0, deleted.1).is_empty());
+            assert_eq!(
+                sunrise_client::save::Level::read(root.path()).unwrap().name,
+                "saved on exit after record failure"
+            );
+            let error = game.save.flush().unwrap_err().to_string();
             assert!(
-                root.path().join("level.dat").is_file(),
-                "the rest of the world must still save"
+                error.contains("entities 2,-3: ") && error.contains("depth limit exceeded"),
+                "{error}"
+            );
+            assert!(
+                events.lock().unwrap().is_empty(),
+                "a partial save must not fire success callbacks"
             );
         });
     });

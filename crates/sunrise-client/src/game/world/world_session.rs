@@ -252,7 +252,7 @@ impl Game<'_> {
         }
         self.lan_close(false);
         self.free_player_beds()?;
-        self.save_game_with_mode(super::saving::LevelSave::Shutdown)?;
+        self.save_game()?;
         self.saved_for_exit = true;
         Ok(())
     }
