@@ -133,6 +133,8 @@ pub struct Layer {
     /// Equipment owns its overlay; other layers inherit the body overlay.
     pub equipment_texture_final: bool,
     pub equipment_overlay: Option<u32>,
+    /// A suppressed submission still participates in first-material CEM texture selection.
+    pub equipment_hidden: bool,
     /// Reload-baked, slot-clipped replacement; never geometry supplied by a frame.
     pub equipment_model: Option<std::sync::Arc<Part>>,
     pub model: Cow<'static, str>,
@@ -608,6 +610,7 @@ pub fn layers(m: &Mob, age: f32) -> Vec<Layer> {
     ) {
         v.push(Layer {
             equipment_overlay: None,
+            equipment_hidden: false,
             equipment_model: None,
             equipment_texture_final: false,
             model: model.into(),
@@ -697,6 +700,7 @@ pub fn layers(m: &Mob, age: f32) -> Vec<Layer> {
         S::Breeze => {
             v.push(Layer {
                 equipment_overlay: None,
+                equipment_hidden: false,
                 equipment_model: None,
                 equipment_texture_final: false,
                 model: "breeze#wind".into(),
@@ -998,6 +1002,7 @@ impl Layer {
             texture: interned(format_args!("{texture}")),
             color,
             equipment_overlay: Some(overlay),
+            equipment_hidden: false,
             equipment_model: None,
             equipment_texture_final: false,
             full_bright: false,
@@ -1359,7 +1364,10 @@ fn draw_normals(
                 let pos = m.transform_point3(glam::Vec3::new(v[0], v[1], v[2]) / 16.0);
                 // The armour glint scrolls the layer's model UV in the shader;
                 // the item path already passed its transformed UV.
-                let glint_uv = if overlay == ARMOR_GLINT {
+                let glint_uv = if matches!(
+                    overlay,
+                    ARMOR_GLINT | sunrise_client_render::gfx::ARMOR_GLINT_ONLY_OVERLAY
+                ) {
                     [v[3], v[4]]
                 } else {
                     [0.0, 0.0]
@@ -1914,6 +1922,7 @@ pub fn drawn_textures(m: &Mob, data: &dyn RenderDataSource) -> Vec<String> {
         for (model, texture, _) in super::warden::emissive_layers(m, 0.0) {
             all_layers.push(Layer {
                 equipment_overlay: None,
+                equipment_hidden: false,
                 equipment_model: None,
                 equipment_texture_final: false,
                 model: model.into(),
@@ -2154,6 +2163,7 @@ fn render_visible(
             if a > 0.0 {
                 all_layers.push(Layer {
                     equipment_overlay: None,
+                    equipment_hidden: false,
                     equipment_model: None,
                     equipment_texture_final: false,
                     model: model.into(),
@@ -2181,14 +2191,17 @@ fn render_visible(
                 && all_layers.iter().all(|layer| {
                     // With improved transparency off, a translucent layer's tag
                     // is the only difference from a plain draw.
-                    (skin.models.tagged && (eyes_layer(m, layer) || !layer.full_bright)
-                        || !layer.full_bright && !translucent_layer(m, layer))
-                        && cem.layer(&layer.model).is_none()
-                        && layer
-                            .equipment_model
-                            .as_ref()
-                            .or_else(|| m.kind.layer(&layer.model))
-                            .is_none_or(|part| skin.supports(part))
+                    layer.equipment_hidden
+                        || (layer.equipment_overlay
+                            != Some(sunrise_client_render::gfx::ARMOR_GLINT_ONLY_OVERLAY)
+                            && (skin.models.tagged && (eyes_layer(m, layer) || !layer.full_bright)
+                                || !layer.full_bright && !translucent_layer(m, layer))
+                            && cem.layer(&layer.model).is_none()
+                            && layer
+                                .equipment_model
+                                .as_ref()
+                                .or_else(|| m.kind.layer(&layer.model))
+                                .is_none_or(|part| skin.supports(part)))
                 })
         }
         None => false,
@@ -2277,6 +2290,9 @@ fn render_visible(
     let mut layer_poses = Poses::pooled();
     let body_keys = [&*model_key, cem_key];
     for (i, layer) in all_layers.iter().enumerate() {
+        if layer.equipment_hidden {
+            continue;
+        }
         let custom = cem.layer(&layer.model);
         // `layer.texture` stays the vanilla name (the villager hats below look for its
         // `/type/` folder).
@@ -2361,7 +2377,9 @@ fn render_visible(
             overlay,
             out,
         );
-        if let Some(glow) = emissive_uv(drawn) {
+        if overlay != sunrise_client_render::gfx::ARMOR_GLINT_ONLY_OVERLAY
+            && let Some(glow) = emissive_uv(drawn)
+        {
             put(
                 &mut skin,
                 &part,

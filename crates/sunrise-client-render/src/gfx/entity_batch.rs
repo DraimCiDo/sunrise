@@ -66,6 +66,8 @@ pub const WATER_MASK_OVERLAY: u32 = 13;
 /// powered wither's armour). The light bytes carry the sprite's origin and the colour bytes its
 /// size (`breaking::stage_light`), the UV the scrolled position in the sprite.
 pub const ENERGY_SWIRL_OVERLAY: u32 = 34;
+/// Armor foil without its color material: additive, with no depth or outline writes.
+pub const ARMOR_GLINT_ONLY_OVERLAY: u32 = 47;
 /// The overlay of entity shadow quads (`RenderTypes.entityShadow`).
 pub const SHADOW_OVERLAY: u32 = 14;
 /// The overlay of translucent-layer particles (`SingleQuadParticle.Layer.translucent`).
@@ -142,7 +144,7 @@ fn material(layer: u32, oit: bool) -> usize {
         11 => 2,
         12 => 3,
         WATER_MASK_OVERLAY => 4,
-        ENERGY_SWIRL_OVERLAY => 5,
+        ENERGY_SWIRL_OVERLAY | ARMOR_GLINT_ONLY_OVERLAY => 5,
         SHADOW_OVERLAY => 6,
         TRANSLUCENT_PARTICLE_OVERLAY => 7,
         TRANSLUCENT_ITEM_OVERLAY | TRANSLUCENT_GLINT_ITEM_OVERLAY => 8,

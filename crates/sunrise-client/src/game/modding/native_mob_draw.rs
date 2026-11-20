@@ -12,7 +12,7 @@ pub use mod_api::game::{MobRender, PlayerRender};
 
 use super::{Game, native_block_entity_draw::BlockEntityDraw};
 use glam::{DVec3, Mat4};
-use mod_api::{EntityRenderState, HiddenParts, HookId, PosedParts};
+use mod_api::{EntityRenderState, HiddenLayers, HiddenParts, HookId, PosedParts, StockLayerMask};
 use std::cell::RefCell;
 use sunrise_client::{
     block_entity_render::diffuse_lights,
@@ -20,6 +20,42 @@ use sunrise_client::{
     mesher::Vertex,
     mobs::{Mob, Species, anim, render, villager},
 };
+
+/// The stock layer capabilities do not depend on today's equipment, visibility or pose.
+fn stock_layers(is_player: bool, species: Species) -> StockLayerMask {
+    use Species::*;
+    let armor = is_player
+        || matches!(
+            species,
+            Giant
+                | Zombie
+                | Husk
+                | Drowned
+                | ZombieVillager
+                | Skeleton
+                | Stray
+                | Bogged
+                | Parched
+                | WitherSkeleton
+                | Piglin
+                | PiglinBrute
+                | ZombifiedPiglin
+        );
+    let illager = matches!(species, Evoker | Illusioner | Pillager | Vindicator);
+    let head = armor
+        || illager
+        || matches!(
+            species,
+            Mannequin | Villager | WanderingTrader | CopperGolem | SulfurCube
+        );
+    let both_hands = armor || illager || matches!(species, Mannequin | Allay | Vex | CopperGolem);
+    let main = both_hands
+        || matches!(
+            species,
+            Villager | WanderingTrader | Witch | Panda | Fox | Dolphin
+        );
+    StockLayerMask::new(is_player, head, main, both_hands, armor)
+}
 
 /// What the frame's entity pass decided about the mods' render hooks: whether any mod listens to
 /// the pair (asked once a frame), and the entities a pre hook canceled.
@@ -166,32 +202,47 @@ impl Game<'_> {
     /// turned with the body, whose geometry is kept. None when one canceled: the entity draws
     /// nothing more this frame and its post hooks aren't asked, but for a player whose living pre
     /// alone canceled, whose `render_player_post` is asked here. Else the parts of the vanilla
-    /// model the hooks hid. `listened` is the frame's [`Game::mob_render_listened`].
+    /// model and the stock layers the hooks hid. `listened` is the frame's [`Game::mob_render_listened`].
     #[allow(clippy::too_many_arguments)]
     pub(super) fn mod_render_pre(
         &self,
         mob: &Mob,
         who: Option<PlayerRender<'_>>,
+        is_player: bool,
         listened: bool,
         partial: f32,
         camera: DVec3,
         light: u32,
         out: &mut Vec<Vertex>,
-    ) -> Option<HiddenParts> {
+    ) -> Option<(HiddenParts, StockLayerMask)> {
         let mut hidden = HiddenParts::default();
         if !listened {
-            return Some(hidden);
+            return Some((hidden, StockLayerMask::default()));
         }
         let local = who.as_ref().is_some_and(|who| who.local);
         let mut canceled = false;
+        let hidden_layers = HiddenLayers::__new(stock_layers(is_player, mob.species()));
         if let Some(who) = &who {
             self.mod_entity_draw(mob, local, partial, camera, light, out, |render, draw| {
-                self.native_render_player_pre(render, who, draw, &mut hidden, &mut canceled);
+                self.native_render_player_pre(
+                    render,
+                    who,
+                    draw,
+                    &mut hidden,
+                    &hidden_layers,
+                    &mut canceled,
+                );
             });
         }
         if !canceled {
             self.mod_entity_draw(mob, local, partial, camera, light, out, |render, draw| {
-                self.native_render_living_pre(render, draw, &mut hidden, &mut canceled);
+                self.native_render_living_pre(
+                    render,
+                    draw,
+                    &mut hidden,
+                    &hidden_layers,
+                    &mut canceled,
+                );
             });
             if canceled && let Some(who) = &who {
                 self.mod_entity_draw(mob, local, partial, camera, light, out, |render, draw| {
@@ -200,7 +251,7 @@ impl Game<'_> {
             }
         }
         if !canceled {
-            return Some(hidden);
+            return Some((hidden, hidden_layers.__mask()));
         }
         let id = render_id(mob.id, local, self.own_entity_id());
         FRAME.with_borrow_mut(|frame| frame.canceled.insert(id));

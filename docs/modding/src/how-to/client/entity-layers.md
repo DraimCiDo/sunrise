@@ -100,3 +100,31 @@ own that don't run layers, so `add` refuses them.
 and player in view each frame, after their layers (NeoForge's `RenderLivingEvent.Post` and
 `RenderPlayerEvent.Post`), for a mod that draws over every entity rather than over one type's renderer
 ([model drawing](model-drawing.md)).
+
+## Hiding a stock layer
+
+Use `event.hidden_layers.hide(selector)` in the client's world `render_player_pre` or
+`render_living_pre` hook. This is separate from `register_entity_layers`, which adds layers and
+is not cancellable, and from `event.hidden`, which hides parts of the body model.
+
+```rust,ignore
+use mod_api::{ArmorLayerPass, ArmorLayerSlot, StockEntityLayer};
+
+// In a pre hook, after selecting the player or mob this applies to:
+let _ = event.hidden_layers.hide(StockEntityLayer::Armor(
+    ArmorLayerSlot::Chest,
+    ArmorLayerPass::Glint,
+));
+```
+
+`Cape`, `Wings`, `HeadItem`, and `HeldItem(Hand::Main)` or `HeldItem(Hand::Off)` suppress
+whole stock layers. `Armor(slot, pass)` suppresses only the chosen `Base`, `Glint`, or `Trim`
+pass. A renderer without the selected layer returns `HideLayerError::Unsupported`; an empty slot
+or a layer that would not draw this frame is not an error. Hiding a cape does not change the
+player's cape texture, wing texture selection, or equipment.
+
+A player's pre hook runs before its living pre hook. Successful hides accumulate, repeated hides
+have no additional effect, and a refused callback cannot discard an earlier listener's edits.
+The mask starts empty for each world draw and does not reach the inventory or creative preview.
+The base model and mod-added layers still draw, in the same order, unless a pre hook cancels the
+whole draw.
