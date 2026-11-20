@@ -432,11 +432,13 @@ fn stock_hides_are_draw_local_and_refused_callbacks_cannot_erase_them() {
         game.player_model.as_mut().unwrap().cape = Some("test:local_cape".into());
         let mut other = mob(game, "minecraft:player", 91, 2.0);
         other.cape = Some("test:remote_cape".into());
-        game.mobs = vec![
+        let mobs = [
             other,
             mob(game, "minecraft:creeper", 92, 4.0),
             mob(game, "minecraft:creeper", 93, -4.0),
         ];
+        game.mobs.clear();
+        game.mobs.extend(mobs);
         let unadorned_mobs = mob_frame(game);
         game.mobs[1].extra.set_slot_id(
             sunrise_items::equipment::HEAD,
