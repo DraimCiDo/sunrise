@@ -28,6 +28,21 @@ impl Game<'_> {
             _ => return Err(format!("invalid block-entity tick benchmark mode: {mode}").into()),
         };
         let name = format!("mod.block_entity_view_v1.{mode}");
+        // The component harness skips world open. Bind the same typed state and Part tables
+        // a playing server would use before starting the ticker workload.
+        self.resolve_parts()?;
+        if listening {
+            let hook = if mode == "snapshot" {
+                mod_api::HookId::BlockEntityTick
+            } else {
+                mod_api::HookId::BlockEntityTickView
+            };
+            if mod_api::__private::block_entity_type_key(kind).is_none()
+                || !mod_api::__private::block_entity_type_listens(hook, kind)
+            {
+                return Err(format!("{name}: no ticker Part bound for {kind}").into());
+            }
+        }
         // This workload calls the ticker directly, so no streaming or forced chunk tickets
         // are needed. Use the normal mod world with the one chunk holding all the machines.
         self.world = Game::world_for_mods(self.res.facts().air, 7);
