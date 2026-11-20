@@ -1,0 +1,7 @@
+ids = [
+  "type:ParticleOptions.legacy_entity_effect",
+  "type:ParticleOptions.legacy_trail_lifetime",
+]
+landed = "6597e0855f562498319f093afcf2ed1ea8d717cb"
+why = "#3354 removes the legacy_entity_effect and legacy_trail_lifetime fields from ParticleOptions. They served only the old protocol adapter, which the game no longer speaks."
+migrate = "Drop both fields wherever a ParticleOptions is built field by field, and rebuild. An entity effect takes its colour and alpha from color, and a trail lasts the duration in trail."

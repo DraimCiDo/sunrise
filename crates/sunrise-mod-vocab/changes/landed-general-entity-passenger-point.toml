@@ -1,0 +1,4 @@
+ids = ["method:GeneralTypesRegistrar::declare_general_entity"]
+landed = "6597e0855f562498319f093afcf2ed1ea8d717cb"
+why = "#3297 lets a general entity type declare its passenger point, so declare_general_entity takes a new passenger_attachment argument after height."
+migrate = "Pass None after height to keep the top centre of the declared box as the passenger point, or Some([x, y, z]) for a vehicle-local point. Rebuild the mod."

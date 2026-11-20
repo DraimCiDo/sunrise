@@ -1,0 +1,4 @@
+ids = ["type:Compound"]
+landed = "6597e0855f562498319f093afcf2ed1ea8d717cb"
+why = "#3041 makes Compound a concrete map that traverses like Java's HashMap, in the order the entries were built and changed, instead of sorted by key. The Wire layout is the same, but the order of the key and value pairs can differ."
+migrate = "Build a Compound with Compound::new() or by collecting key and value pairs. Where an output needs sorted keys, sort it yourself, and do not rely on traversal order."

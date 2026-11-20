@@ -1,0 +1,9 @@
+ids = [
+  "method:Hooks::spawn_change",
+  "type:RespawnData",
+  "type:RespawnData.pos",
+  "type:SpawnChangeEvent",
+]
+landed = "6597e0855f562498319f093afcf2ed1ea8d717cb"
+why = "#3170 keeps the level a world spawn is set in. RespawnData carries the spawn block as a GlobalPos in its position field instead of a bare pos read as the Overworld's, and spawn_change (hook version 2) passes the level's dimension before the position."
+migrate = "Rebuild spawn_change listeners for version 2 and take the new dimension argument. Read respawn_data.position.pos() and respawn_data.position.dimension() instead of respawn_data.pos, and stop copying RespawnData, which is no longer Copy."

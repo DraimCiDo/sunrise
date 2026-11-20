@@ -1,0 +1,11 @@
+ids = [
+  "hook:friction",
+  "hook:friction.entity",
+  "hook:friction.kind",
+  "method:BlockPart::friction",
+  "type:FrictionEvent.entity",
+  "type:FrictionEvent.kind",
+]
+landed = "6597e0855f562498319f093afcf2ed1ea8d717cb"
+why = "#3319 gives the friction hook a read-only level view in place of the loop context, so a listener can read the level around the position, or ask for another state's friction. The hook is now version 2, and each listener sees the original position, state and entity. The entity and kind fields of FrictionEvent are replaced by one optional (id, kind) pair."
+migrate = "Rebuild BlockPart::friction listeners for hook version 2: take the level view instead of the loop context, and read the optional (id, kind) pair from event.entity instead of the old entity and kind fields. Update an [[inject]] at friction to the new hash."
