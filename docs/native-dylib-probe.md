@@ -36,12 +36,11 @@ process exit. Assertions check:
 
 - The shared dependency's static address and counter, with ordered mutations
   through both separately loaded consumers.
-- Actual `mod_points` registry address identity and cross-image/thread writes.
 - Actual `mod_api` crash detail registry writes from the shared dependency, read
   by the executable.
 - Actual `mod_api` native-call TLS, entered by the executable and observed by
   consumers; entered by each consumer and dropped by the executable; isolated
-  from another thread while sharing the global points registry.
+  from another thread.
 - Heap vectors allocated and dropped across executable, dependency and consumer
   boundaries.
 - One allocator. The std runtime library carries its own default-allocator shim,

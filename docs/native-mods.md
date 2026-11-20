@@ -1,6 +1,6 @@
 # Native mods
 
-Native mod docs live in the modding book: [native mods](modding/src/how-to/native-mods.md), [trait mods, Parts and attachments](modding/src/concepts/parts.md), [injections](modding/src/concepts/injections.md) and the [hook notes](https://sunrise-org.github.io/sunrise/reference/hook-notes.html).
+Native mod docs live in the modding book: [native mods](modding/src/how-to/native-mods.md), [trait mods, Parts and attachments](modding/src/concepts/parts.md), [the native route](modding/src/concepts/native-route.md) and the [hook notes](https://sunrise-org.github.io/sunrise/reference/hook-notes.html).
 
 ## Living death version 2
 

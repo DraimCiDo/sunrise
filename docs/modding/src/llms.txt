@@ -2,7 +2,7 @@
 
 > Sunrise is Minecraft: Java Edition 26.3 in Rust. A mod is one `.smod`: content (`assets/`, `data/`) and, for a code mod, a Rust crate built natively by `cargo sunrise-mod build` (and started by `cargo sunrise-mod run`), against the `mod_api` crate (`sunrise-mod-api`).
 
-Rules for code: implement `mod_api::Hooks` at the crate root with `#[mod_api::sunrise_mod]`; prefer a hook or Part method; otherwise an `[[inject]]` listener at a published point; change the game's own code only through the native route (`[[native.mixin]]`, `[[native.loop]]`, `[[native.bridge]]`, `[[native.module]]`). Hook names follow NeoForge 26.3; events are `&mut`; writes take a `ServerHost`. The id and version come only from `sunrise-mod.toml`; ids are `[a-z0-9_]`. A code mod declares `[native]`; unknown manifest fields are refused.
+Rules for code: implement `mod_api::Hooks` at the crate root with `#[mod_api::sunrise_mod]`; prefer a hook or Part method; change the game's own code only through the native route (`[[native.mixin]]`, `[[native.loop]]`, `[[native.bridge]]`, `[[native.module]]`). Hook names follow NeoForge 26.3; events are `&mut`; writes take a `ServerHost`. The id and version come only from `sunrise-mod.toml`; ids are `[a-z0-9_]`. A code mod declares `[native]`; unknown manifest fields are refused.
 
 ## Getting started
 
@@ -19,7 +19,7 @@ Rules for code: implement `mod_api::Hooks` at the crate root with `#[mod_api::su
 - [Load phases and access](https://playsunrise.net/docs/modding/concepts/load-phases)
 - [Parts](https://playsunrise.net/docs/modding/concepts/parts), [Capabilities](https://playsunrise.net/docs/modding/concepts/capabilities), [Attachments](https://playsunrise.net/docs/modding/concepts/attachments), [Transactions](https://playsunrise.net/docs/modding/concepts/transactions)
 - [Registry keys](https://playsunrise.net/docs/modding/concepts/registry-keys), [Wire types](https://playsunrise.net/docs/modding/concepts/wire-types), [Dependencies between mods](https://playsunrise.net/docs/modding/concepts/dependencies)
-- [Injections](https://playsunrise.net/docs/modding/concepts/injections) and [the native route](https://playsunrise.net/docs/modding/concepts/native-route)
+- [The native route](https://playsunrise.net/docs/modding/concepts/native-route)
 
 ## How-to
 

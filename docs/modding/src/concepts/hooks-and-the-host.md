@@ -120,10 +120,9 @@ impl Hooks for Override {
 }
 ```
 
-`priority` is an `i32`, 0 when omitted; mods of equal priority keep dependency order, as `[[inject]]`
-priorities do ([Injections](injections.md#ordering)). Each hook's order is fixed once, when the mods are
-installed. Every cancellable hook's event has a `cancelled` field: a mod without `receive_cancelled` always sees
-`false`, since it is not called once the event is cancelled. A mod that receives cancelled events and sets it back to
+`priority` is an `i32`, 0 when omitted; mods of equal priority keep dependency order. Each hook's order is
+fixed once, when the mods are installed. Every cancellable hook's event has a `cancelled` field: a mod without
+`receive_cancelled` always sees `false`, since it is not called once the event is cancelled. A mod that receives cancelled events and sets it back to
 `false` lets the game's behaviour run, and the mods after it are told again. An event the game hands over already
 cancelled reaches only mods that receive cancelled events. `receive_cancelled` on a hook without a cancel does not
 compile, and `#[listener]` is for a mod's hooks only: a part is called for its own thing, in no order.
@@ -379,9 +378,3 @@ moves. Stack checks are shallow: they compare the item id and the count, not com
 doc names what it checks (`armor_stand_manipulate`, `entity_mount`, `cauldron_level_changed`,
 `hanging_break`, `player_shear_entity`, `living_change_target`). The effect writes on a living handle
 treat a mob that is marked removed but still listed as absent: they return false and change nothing.
-
-## Hooks and injections
-
-A hook is not an injection point: an `[[inject]]` never runs inside a hook's dispatch. A `head` injection that
-cancels the game function which calls a hook keeps that hook from firing at all
-([Injections](injections.md)).

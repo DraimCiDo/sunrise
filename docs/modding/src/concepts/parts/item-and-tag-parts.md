@@ -109,7 +109,7 @@ not asked when Unbreaking already saved the item or for a creative player's tool
 one table lookup. With no part, the vanilla amount applies.
 
 To change wear without attaching a Part to an item, use an enchantment's
-`minecraft:item_damage` effect (the component Unbreaking uses), or an injection.
+`minecraft:item_damage` effect (the component Unbreaking uses).
 A part does not get the wearing entity;
 `host.players().acting_player()` names the player on the paths a player takes.
 

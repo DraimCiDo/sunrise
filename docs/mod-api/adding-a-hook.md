@@ -8,7 +8,7 @@ area filename. Alternatively, a named hook may live in any logical module under 
 area folders, `mod.rs` and `#[path]` modules. Its target must name that module and
 `Game<'_>::native_<name>`. Exactly one matching `Game` method must exist. Outside `native_hooks/`,
 the method must call `dispatch_<name>` itself: placeholders are not filled there. Remove macros,
-`cfg` and `cfg_attr` from that method so injections can patch it. A refusal names the hook and
+`cfg` and `cfg_attr` from that method so native mixins can patch it. A refusal names the hook and
 what to change. These checks run at build time and add no dispatch-time work.
 The build discovers native hook modules automatically; do not add a module list entry. Shared
 support lives in `shared.rs`; `fire.rs` includes generated dispatch entry points, not hook implementations.

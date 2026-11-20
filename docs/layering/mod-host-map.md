@@ -20,10 +20,8 @@ How to read the numbers:
 The [checked state inventory](mod-vocab-state.md) records every production static/TLS declaration
 and its ownership reason. The concrete Parts authoring implementation, diagnostic warning history,
 profiling, resource access and load snapshots live above the engine. Descriptor vocabulary and direct
-installed lookup reads stay below it. The unchanged points machinery is the temporary unsafe/state
-exception pending #2697; the first #2587 PR retains `deny`, not `forbid`, and is only part of that issue.
-The proposals and generated audit counts below describe the original split, not a claim that the
-current vocabulary contains no process state.
+installed lookup reads stay below it. The vocabulary forbids unsafe code.
+The proposals and audit counts below describe the original split, not the current state of each crate.
 The checker's canonical-path membership is case-sensitive by design.
 
 ## Strands and their proposals
@@ -40,10 +38,7 @@ host implemented above the engine: a dev-dependency cycle gives the test build a
 engine↔`mod_api` value conversions (`game/modding/api_values`) are counted with the hook bodies: 117 engine files
 that stay use them.
 
-**Slots (phase 3): engine-owned table.** Eight production references: `entry.rs` (`mod_points::register`, `SlotListener`,
-`PointId`), `game.rs` (`seal`), `build.rs` and the `include!`s of generator output. The engine owns the slot table
-and the "anyone listening?" check; module discovery (`game_modules.rs`, `.game-area` markers) moves to a small engine
-crate both trees share, as agreed with upstream on #2534; `sunrise-mod-api-gen` calls it.
+**Module discovery:** `sunrise-mod-api-gen` uses the `.game-area` markers and `game_modules.rs`.
 
 **Attachments: stay in the engine (phase 4 dropped).** Attachment storage lives in `sunrise-mod-runtime`, which is
 already an engine-layer crate, so moving it buys no layering. `sunrise-world`'s dependency on `sunrise-mod-runtime`
@@ -60,7 +55,7 @@ vocabulary crate.
 
 ## What a script can do
 
-- Phases 1 and 3: a move map (file → destination) is mechanical once each moved file's production references from
+- Phase 1: a move map (file → destination) is mechanical once each moved file's production references from
   files that stay in the engine are handled, and its unit tests have a home: every phase PR lists both. The
   accessors `Game` grows are listed by the scan ("to make public") and named by hand.
 - Hand design: the engine-owned render slots (phase 5) and the vocabulary split.
@@ -74,10 +69,8 @@ answer for `sunrise-mod-api` (non-test files). Summary:
 - **Plain already:** 772 of 944 files (24,619 lines): types, traits and functions with no generator include, no
   `unsafe`, no process state and no crate path besides `sunrise-core`.
 - **Blocker 1, the derive and attribute macros:** 150 files use `sunrise-mod-api-macros` (517 `Wire` derives, 86
-  `host_area`, 1 `__subscriptions`). In 137 of them it is the only blocker. Relayering `sunrise-mod-api-macros` and
-  its one dependency `sunrise-mod-point-shape` to the engine layer clears them.
-- **Blocker 2, the build script:** `build.rs` runs `sunrise-mod-api-gen` (platform, depends on
-  `sunrise-mod-point-shape`). The generator writes the hook vocabulary itself: `mod_api_generated.rs` (events,
+  `host_area`, 1 `__subscriptions`). In 137 of them it is the only blocker. Relayering `sunrise-mod-api-macros` to the engine layer clears them.
+- **Blocker 2, the build script:** `build.rs` runs `sunrise-mod-api-gen`. The generator writes the hook vocabulary itself: `mod_api_generated.rs` (events,
   `HookId`, `Hooks`, Parts traits, the dispatch functions; about 680 types, no `unsafe`, no state),
   `mod_api_generated_host.rs` (the `Host` traits), `wire_generated.rs`, the export lists and `parts_modules.rs`.
 - **Not vocabulary; it stays in `sunrise-mod-api` or goes to the host:** `profiler.rs` (`unsafe`, state), `content/crash.rs` (panic
@@ -93,8 +86,8 @@ answer for `sunrise-mod-api` (non-test files). Summary:
   `sunrise-mod-runtime` attachment types. Both crates sit below the engine, so this doesn't block a split. It is
   the same exposure as today.
 
-**A clean split is possible** with three relayerings (`sunrise-mod-api-macros`, `sunrise-mod-point-shape`,
-`sunrise-mod-api-gen` to the engine layer, or committed generator output instead of the last), the dead
+**A clean split is possible** with `sunrise-mod-api-macros` and `sunrise-mod-api-gen` moved to the engine layer
+(or committed generator output instead of the last), the dead
 `sunrise-mod-package` dependency removed, and the state-bearing files above kept out. The edges it needs:
 `sunrise-mod-vocab` (engine) → `sunrise-core`, `sunrise-mod-runtime`, `sunrise-mod-api-macros`, and as a build
 dependency `sunrise-mod-api-gen`; then `sunrise-mod-api` (platform) → `sunrise-mod-vocab`, re-exporting it, so mods

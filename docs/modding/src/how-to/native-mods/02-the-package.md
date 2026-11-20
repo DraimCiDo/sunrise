@@ -11,7 +11,6 @@ my_mod/
   Cargo.toml             # one crate; Cargo metadata is not mod identity
   Cargo.lock             # registry dependency pins, when needed
   src/lib.rs             # impl Hooks
-  src/frame.rs           # optional injection callback module
 ```
 
 A native source package requires both `Cargo.toml` and `[native]`; inconsistent declarations
@@ -40,9 +39,8 @@ Unknown fields are refused. `icon.png` has no manifest key: when present it must
 nonzero square PNG, at most 512 × 512 pixels and 256 KiB encoded. It is optional for both content
 and code mods; the scaffold does not create one.
 
-Injections belong in the same manifest as top-level `[[inject]]` tables. See [Injections](../../concepts/injections.md)
-for the available forms and fields. To change game code itself, add `[[native.mixin]]` to `sunrise-mod.toml` and
-run `cargo sunrise-mod build`. Neither `internals sync` nor `inject update` is a step of a mixin build.
+To change game code itself, add a [`[[native.mixin]]`](../../concepts/native-route/2-mixins.md) row to
+`sunrise-mod.toml` and run `cargo sunrise-mod build`.
 
 ## What a mixin cannot target
 
