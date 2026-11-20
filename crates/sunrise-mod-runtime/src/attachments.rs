@@ -411,17 +411,59 @@ impl<T> AttachmentType<T> {
             sync: self.sync,
         }
     }
-    fn decode(&self, saved: &Compound) -> Result<T, AttachmentError> {
-        (self.codec.as_ref().ok_or(AttachmentError::Decode)?.decode)(saved)
+    fn bind(&self) -> Result<AttachmentBinding<'_, T>, AttachmentError> {
+        if self.codec.is_none() {
+            if self.copy_on_death {
+                return Err(AttachmentError::InvalidCopyPolicy);
+            }
+            if self.sync {
+                return Err(AttachmentError::InvalidSyncPolicy);
+            }
+        }
+        Ok(AttachmentBinding(self))
     }
-    fn validate_policy(&self) -> Result<(), AttachmentError> {
-        if self.copy_on_death && self.codec.is_none() {
-            return Err(AttachmentError::InvalidCopyPolicy);
-        }
-        if self.sync && self.codec.is_none() {
-            return Err(AttachmentError::InvalidSyncPolicy);
-        }
-        Ok(())
+}
+
+/// An owned attachment type whose copy-on-death and sync requirements were checked at creation.
+/// This does not establish that the type is declared in any particular store.
+// no wire: local proof of a policy check on a descriptor with callback pointers.
+pub struct CheckedAttachmentType<T: 'static> {
+    key: AttachmentType<T>,
+}
+
+impl<T> CheckedAttachmentType<T> {
+    /// Check that any copy-on-death or sync policy is backed by a codec.
+    pub fn new(key: AttachmentType<T>) -> Result<Self, AttachmentError> {
+        key.bind()?;
+        Ok(Self { key })
+    }
+
+    /// Borrow a captured value without inserting a default or modifying the holder.
+    pub fn read<'entry>(&self, entry: &'entry AttachmentEntry) -> Result<&'entry T, AttachmentError>
+    where
+        T: Send + Sync,
+    {
+        entry.read_bound(self.bind())
+    }
+
+    fn bind(&self) -> AttachmentBinding<'_, T> {
+        AttachmentBinding(&self.key)
+    }
+}
+
+// A borrowed descriptor with a checked policy. Snapshot reads bind once before traversal.
+struct AttachmentBinding<'key, T: 'static>(&'key AttachmentType<T>);
+
+impl<T> Copy for AttachmentBinding<'_, T> {}
+impl<T> Clone for AttachmentBinding<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> AttachmentBinding<'_, T> {
+    fn decode(&self, saved: &Compound) -> Result<T, AttachmentError> {
+        (self.0.codec.as_ref().ok_or(AttachmentError::Decode)?.decode)(saved)
     }
 }
 
@@ -441,14 +483,7 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
         store: &mut S,
         holder: Holder,
     ) -> Result<T, AttachmentError> {
-        if let Some(value) = self.get_existing(store, holder)? {
-            return Ok(value);
-        }
-        let value = (self.default)();
-        if !matches!(holder, Holder::OriginalPlayer(_)) {
-            self.keep(store, holder, value.clone(), AttachmentWrite::Default)?;
-        }
-        Ok(value)
+        AttachmentOps::Raw(self).get(store, holder)
     }
     /// Whether a holder carries a value, like NeoForge's `hasData`; never inserts the default.
     pub fn has<S: AttachmentStore + ?Sized>(
@@ -456,8 +491,7 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
         store: &mut S,
         holder: Holder,
     ) -> Result<bool, AttachmentError> {
-        store.validate_attachment(self.namespace, self.name, self.sync)?;
-        store.holds(holder, self.namespace, self.name)
+        AttachmentOps::Raw(self).has(store, holder)
     }
     /// Read a value only if present, like `getExistingData`; a saved value decodes once.
     pub fn get_existing<S: AttachmentStore + ?Sized>(
@@ -465,23 +499,7 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
         store: &mut S,
         holder: Holder,
     ) -> Result<Option<T>, AttachmentError> {
-        store.validate_attachment(self.namespace, self.name, self.sync)?;
-        self.validate_policy()?;
-        if let Some(value) = store.decoded(holder, self.namespace, self.name)? {
-            return value
-                .downcast_ref::<T>()
-                .cloned()
-                .map(Some)
-                .ok_or(AttachmentError::TypeMismatch);
-        }
-        let Some(saved) = store.saved(holder, self.namespace, self.name)? else {
-            return Ok(None);
-        };
-        let value = self.decode(&saved)?;
-        if !matches!(holder, Holder::OriginalPlayer(_)) {
-            self.keep(store, holder, value.clone(), AttachmentWrite::Decoded)?;
-        }
-        Ok(Some(value))
+        AttachmentOps::Raw(self).get_existing(store, holder)
     }
     /// Read the decoded value through `read` without cloning it: what a read of one part of a
     /// large value costs. A saved value that has not decoded yet is not decoded, so `read` sees
@@ -492,10 +510,7 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
         holder: Holder,
         read: impl FnOnce(Option<&T>) -> R,
     ) -> Result<R, AttachmentError> {
-        store.validate_attachment(self.namespace, self.name, self.sync)?;
-        self.validate_policy()?;
-        let value = store.decoded(holder, self.namespace, self.name)?;
-        Ok(read(value.as_ref().and_then(|v| v.downcast_ref::<T>())))
+        AttachmentOps::Raw(self).with_decoded(store, holder, read)
     }
     /// Replace a value on an existing holder. A key already decoded as a different type is
     /// rejected.
@@ -505,14 +520,7 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
         holder: Holder,
         value: T,
     ) -> Result<(), AttachmentError> {
-        store.validate_attachment(self.namespace, self.name, self.sync)?;
-        self.validate_policy()?;
-        if let Some(old) = store.decoded(holder, self.namespace, self.name)?
-            && !old.is::<T>()
-        {
-            return Err(AttachmentError::TypeMismatch);
-        }
-        self.keep(store, holder, value, AttachmentWrite::Set)
+        AttachmentOps::Raw(self).set(store, holder, value)
     }
     /// Remove a value from an existing holder. A saved value that does not decode is removed
     /// too, and its error returned.
@@ -521,12 +529,7 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
         store: &mut S,
         holder: Holder,
     ) -> Result<Option<T>, AttachmentError> {
-        if !self.has(store, holder)? {
-            return Ok(None);
-        }
-        let value = self.get_existing(store, holder);
-        store.discard(holder, self.namespace, self.name, self.sync)?;
-        value
+        AttachmentOps::Raw(self).remove(store, holder)
     }
     /// Send the current value to the clients that see the holder.
     pub fn sync_data<S: AttachmentStore + ?Sized>(
@@ -534,10 +537,191 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
         store: &mut S,
         holder: Holder,
     ) -> Result<(), AttachmentError> {
-        store.validate_attachment(self.namespace, self.name, self.sync)?;
-        self.validate_policy()?;
-        if self.sync {
-            store.queue_sync(holder, self.namespace, self.name)?;
+        AttachmentOps::Raw(self).sync_data(store, holder)
+    }
+}
+
+impl<T: Clone + Send + Sync + 'static> CheckedAttachmentType<T> {
+    /// Read a value, inserting its default if absent except on an original-player snapshot.
+    pub fn get<S: AttachmentStore + ?Sized>(
+        &self,
+        store: &mut S,
+        holder: Holder,
+    ) -> Result<T, AttachmentError> {
+        self.ops().get(store, holder)
+    }
+    /// Check whether a holder carries a saved or decoded value, without inserting a default.
+    pub fn has<S: AttachmentStore + ?Sized>(
+        &self,
+        store: &mut S,
+        holder: Holder,
+    ) -> Result<bool, AttachmentError> {
+        self.ops().has(store, holder)
+    }
+    /// Read a value only if present, decoding a saved value lazily.
+    pub fn get_existing<S: AttachmentStore + ?Sized>(
+        &self,
+        store: &mut S,
+        holder: Holder,
+    ) -> Result<Option<T>, AttachmentError> {
+        self.ops().get_existing(store, holder)
+    }
+    /// Borrow the decoded value without cloning it or decoding a saved value.
+    pub fn with_decoded<S: AttachmentStore + ?Sized, R>(
+        &self,
+        store: &mut S,
+        holder: Holder,
+        read: impl FnOnce(Option<&T>) -> R,
+    ) -> Result<R, AttachmentError> {
+        self.ops().with_decoded(store, holder, read)
+    }
+    /// Replace a value on an existing holder, refusing to replace a different decoded type.
+    pub fn set<S: AttachmentStore + ?Sized>(
+        &self,
+        store: &mut S,
+        holder: Holder,
+        value: T,
+    ) -> Result<(), AttachmentError> {
+        self.ops().set(store, holder, value)
+    }
+    /// Remove a value on an existing holder, even if reading it gives a decode error.
+    pub fn remove<S: AttachmentStore + ?Sized>(
+        &self,
+        store: &mut S,
+        holder: Holder,
+    ) -> Result<Option<T>, AttachmentError> {
+        self.ops().remove(store, holder)
+    }
+    /// Queue the current value for clients if this type syncs.
+    pub fn sync_data<S: AttachmentStore + ?Sized>(
+        &self,
+        store: &mut S,
+        holder: Holder,
+    ) -> Result<(), AttachmentError> {
+        self.ops().sync_data(store, holder)
+    }
+
+    fn ops(&self) -> AttachmentOps<'_, T> {
+        AttachmentOps::Checked(self.bind())
+    }
+}
+
+enum AttachmentOps<'key, T: 'static> {
+    Raw(&'key AttachmentType<T>),
+    Checked(AttachmentBinding<'key, T>),
+}
+
+impl<'key, T: Clone + Send + Sync + 'static> AttachmentOps<'key, T> {
+    fn key(&self) -> &'key AttachmentType<T> {
+        match *self {
+            Self::Raw(key) | Self::Checked(AttachmentBinding(key)) => key,
+        }
+    }
+
+    fn bind<S: AttachmentStore + ?Sized>(
+        &self,
+        store: &mut S,
+    ) -> Result<AttachmentBinding<'key, T>, AttachmentError> {
+        let key = self.key();
+        store.validate_attachment(key.namespace, key.name, key.sync)?;
+        match self {
+            Self::Raw(_) => key.bind(),
+            Self::Checked(binding) => Ok(*binding),
+        }
+    }
+
+    fn get<S: AttachmentStore + ?Sized>(
+        &self,
+        store: &mut S,
+        holder: Holder,
+    ) -> Result<T, AttachmentError> {
+        if let Some(value) = self.get_existing(store, holder)? {
+            return Ok(value);
+        }
+        let value = (self.key().default)();
+        if !matches!(holder, Holder::OriginalPlayer(_)) {
+            self.keep(store, holder, value.clone(), AttachmentWrite::Default)?;
+        }
+        Ok(value)
+    }
+    fn has<S: AttachmentStore + ?Sized>(
+        &self,
+        store: &mut S,
+        holder: Holder,
+    ) -> Result<bool, AttachmentError> {
+        // Presence needs the declaration, not a codec or a valid value policy.
+        let key = self.key();
+        store.validate_attachment(key.namespace, key.name, key.sync)?;
+        store.holds(holder, key.namespace, key.name)
+    }
+    fn get_existing<S: AttachmentStore + ?Sized>(
+        &self,
+        store: &mut S,
+        holder: Holder,
+    ) -> Result<Option<T>, AttachmentError> {
+        let binding = self.bind(store)?;
+        let key = binding.0;
+        if let Some(value) = store.decoded(holder, key.namespace, key.name)? {
+            return value
+                .downcast_ref::<T>()
+                .cloned()
+                .map(Some)
+                .ok_or(AttachmentError::TypeMismatch);
+        }
+        let Some(saved) = store.saved(holder, key.namespace, key.name)? else {
+            return Ok(None);
+        };
+        let value = binding.decode(&saved)?;
+        if !matches!(holder, Holder::OriginalPlayer(_)) {
+            self.keep(store, holder, value.clone(), AttachmentWrite::Decoded)?;
+        }
+        Ok(Some(value))
+    }
+    fn with_decoded<S: AttachmentStore + ?Sized, R>(
+        &self,
+        store: &mut S,
+        holder: Holder,
+        read: impl FnOnce(Option<&T>) -> R,
+    ) -> Result<R, AttachmentError> {
+        let AttachmentBinding(key) = self.bind(store)?;
+        let value = store.decoded(holder, key.namespace, key.name)?;
+        Ok(read(value.as_ref().and_then(|v| v.downcast_ref::<T>())))
+    }
+    fn set<S: AttachmentStore + ?Sized>(
+        &self,
+        store: &mut S,
+        holder: Holder,
+        value: T,
+    ) -> Result<(), AttachmentError> {
+        let AttachmentBinding(key) = self.bind(store)?;
+        if let Some(old) = store.decoded(holder, key.namespace, key.name)?
+            && !old.is::<T>()
+        {
+            return Err(AttachmentError::TypeMismatch);
+        }
+        self.keep(store, holder, value, AttachmentWrite::Set)
+    }
+    fn remove<S: AttachmentStore + ?Sized>(
+        &self,
+        store: &mut S,
+        holder: Holder,
+    ) -> Result<Option<T>, AttachmentError> {
+        if !self.has(store, holder)? {
+            return Ok(None);
+        }
+        let value = self.get_existing(store, holder);
+        let key = self.key();
+        store.discard(holder, key.namespace, key.name, key.sync)?;
+        value
+    }
+    fn sync_data<S: AttachmentStore + ?Sized>(
+        &self,
+        store: &mut S,
+        holder: Holder,
+    ) -> Result<(), AttachmentError> {
+        let AttachmentBinding(key) = self.bind(store)?;
+        if key.sync {
+            store.queue_sync(holder, key.namespace, key.name)?;
         }
         Ok(())
     }
@@ -548,7 +732,8 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
         value: T,
         write: AttachmentWrite,
     ) -> Result<(), AttachmentError> {
-        let encoded = self
+        let key = self.key();
+        let encoded = key
             .codec
             .as_ref()
             .map(|codec| (codec.encode)(&value))
@@ -556,10 +741,10 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
         let value: AttachmentValue = Arc::new(value);
         let form = AttachmentForm {
             encoded,
-            policy: self.policy(),
+            policy: key.policy(),
             write,
         };
-        store.store(holder, self.namespace, self.name, value, form)
+        store.store(holder, key.namespace, key.name, value, form)
     }
 }
 
@@ -644,13 +829,12 @@ impl AttachmentEntry {
         &self,
         key: &AttachmentType<T>,
     ) -> Result<&T, AttachmentError> {
-        key.validate_policy()?;
-        self.read_validated(key)
+        self.read_bound(key.bind()?)
     }
 
-    fn read_validated<T: Send + Sync + 'static>(
+    fn read_bound<T: Send + Sync + 'static>(
         &self,
-        key: &AttachmentType<T>,
+        binding: AttachmentBinding<'_, T>,
     ) -> Result<&T, AttachmentError> {
         match &self.state {
             Entry::Decoded(value) => value
@@ -664,7 +848,7 @@ impl AttachmentEntry {
                         Some(value) => value,
                         None => {
                             let value = Arc::new(
-                                key.decode(raw_value(saved).ok_or(AttachmentError::Decode)?)?,
+                                binding.decode(raw_value(saved).ok_or(AttachmentError::Decode)?)?,
                             );
                             // Another reader may have initialized this slot with its type.
                             let _ = cache.value.set(value);

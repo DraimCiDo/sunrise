@@ -2,7 +2,7 @@
 use std::{fmt, hash::Hash, slice, sync::Arc};
 
 use super::{
-    AttachmentError, AttachmentType,
+    AttachmentBinding, AttachmentError, AttachmentType, CheckedAttachmentType,
     index::{AttachmentIndex, AttachmentOwner, AttachmentRow, AttachmentSnapshot},
 };
 
@@ -66,8 +66,25 @@ impl<H> AttachmentBatch<H> {
         self,
         key: &AttachmentType<T>,
     ) -> Result<AttachmentQuery<'_, H, T>, AttachmentError> {
-        key.validate_policy()?;
-        Ok(AttachmentQuery { batch: self, key })
+        Ok(self.query_bound(key.bind()?))
+    }
+
+    /// Bind a key whose policy has already been checked, without decoding any rows.
+    pub fn query_checked<T: Send + Sync + 'static>(
+        self,
+        key: &CheckedAttachmentType<T>,
+    ) -> AttachmentQuery<'_, H, T> {
+        self.query_bound(key.bind())
+    }
+
+    fn query_bound<T: Send + Sync + 'static>(
+        self,
+        binding: AttachmentBinding<'_, T>,
+    ) -> AttachmentQuery<'_, H, T> {
+        AttachmentQuery {
+            batch: self,
+            binding,
+        }
     }
 }
 
@@ -77,7 +94,7 @@ impl<H> AttachmentBatch<H> {
 #[non_exhaustive]
 pub struct AttachmentQuery<'key, H, T: 'static> {
     batch: AttachmentBatch<H>,
-    key: &'key AttachmentType<T>,
+    binding: AttachmentBinding<'key, T>,
 }
 
 impl<H: Copy, T: Send + Sync + 'static> AttachmentQuery<'_, H, T> {
@@ -86,7 +103,7 @@ impl<H: Copy, T: Send + Sync + 'static> AttachmentQuery<'_, H, T> {
     pub fn iter(&self) -> AttachmentIter<'_, H, T> {
         AttachmentIter {
             rows: self.batch.rows().iter(),
-            key: self.key,
+            binding: self.binding,
         }
     }
 }
@@ -108,7 +125,7 @@ impl<H: Copy + Eq + Hash, T: Clone + Send + Sync + 'static> AttachmentQuery<'_, 
         };
         rows[slot]
             .entry
-            .read_validated(self.key)
+            .read_bound(self.binding)
             .map(|value| Some(value.clone()))
             .map_err(AttachmentRowError::Value)
     }
@@ -118,7 +135,7 @@ impl<H: Copy + Eq + Hash, T: Clone + Send + Sync + 'static> AttachmentQuery<'_, 
 #[non_exhaustive]
 pub struct AttachmentIter<'q, H, T: 'static> {
     rows: slice::Iter<'q, AttachmentRow<H>>,
-    key: &'q AttachmentType<T>,
+    binding: AttachmentBinding<'q, T>,
 }
 
 impl<'q, H: Copy, T: Send + Sync + 'static> Iterator for AttachmentIter<'q, H, T> {
@@ -127,7 +144,7 @@ impl<'q, H: Copy, T: Send + Sync + 'static> Iterator for AttachmentIter<'q, H, T
     fn next(&mut self) -> Option<Self::Item> {
         self.rows.next().map(|row| {
             row.entry
-                .read_validated(self.key)
+                .read_bound(self.binding)
                 .map(|value| AttachmentRowRef {
                     holder: row.holder,
                     value,
