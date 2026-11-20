@@ -547,13 +547,6 @@ impl Logger {
     }
 
     fn enqueue(&self, record: &log::Record, mod_id: Option<&'static str>) -> LogOutcome {
-        let sunrise = mod_id.is_none() && ours(record.target());
-        let current = std::thread::current();
-        let thread = match current.name() {
-            Some("main") => self.main_thread,
-            Some(name) => name,
-            None => "unnamed",
-        };
         let level = record.level();
         let gate = if level <= log::Level::Warn {
             let mut floods = self.floods.lock().unwrap_or_else(|e| e.into_inner());
@@ -569,21 +562,29 @@ impl Logger {
         } else {
             Gate::Write { left_out: 0 }
         };
-        match gate {
-            Gate::Skip => return LogOutcome::Filtered,
-            Gate::Write { left_out } if left_out > 0 => {
-                self.send(
-                    thread,
-                    level,
-                    &format!(
-                        "{left_out} more lines like the next one were not logged in the last minute"
-                    ),
-                    None,
-                    mod_id.is_some(),
-                );
-            }
-            _ => {}
+        if gate == Gate::Skip {
+            return LogOutcome::Filtered;
         }
+        let current = std::thread::current();
+        let thread = match current.name() {
+            Some("main") => self.main_thread,
+            Some(name) => name,
+            None => "unnamed",
+        };
+        if let Gate::Write { left_out } = gate
+            && left_out > 0
+        {
+            self.send(
+                thread,
+                level,
+                &format!(
+                    "{left_out} more lines like the next one were not logged in the last minute"
+                ),
+                None,
+                mod_id.is_some(),
+            );
+        }
+        let sunrise = mod_id.is_none() && ours(record.target());
         let message = if sunrise {
             record.args().to_string()
         } else {

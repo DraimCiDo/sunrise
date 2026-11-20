@@ -72,7 +72,8 @@ pub struct ModLogger {
 
 impl ModLogger {
     /// Whether the game's log is available and its level filter accepts `level`.
-    /// Check before computing expensive arguments. Warning/error flood control is applied
+    /// INFO, WARN and ERROR are enabled by default. Check before computing expensive
+    /// arguments. Warning/error flood control is applied
     /// separately at the call to [`log`](Self::log).
     pub fn enabled(&self, level: LogLevel) -> bool {
         self.id.is_some()
