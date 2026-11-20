@@ -12,7 +12,6 @@ fn method(id: &str, signature: &str, refs: &[&str]) -> Method {
         MethodContract {
             signature: signature.into(),
             required: false,
-            wasm: true,
             refs: strings(refs),
         },
     )
@@ -25,7 +24,6 @@ fn handle(id: &str, signature: &str, refs: &[&str]) -> Function {
         FunctionContract {
             signature: signature.into(),
             impl_generics: String::new(),
-            wasm: true,
             refs: strings(refs),
         },
     )
@@ -630,7 +628,14 @@ fn a_used_hook_whose_version_changed_is_named() {
             entry.version = None;
         }
         if pinned {
-            table.pin_hook_versions(&base().build());
+            let mut surface = base().build();
+            surface.schema = 2;
+            let old_surface = surface.to_json();
+            assert!(matches!(
+                Surface::read(old_surface.as_bytes()),
+                Err(crate::ReadError::Schema(2))
+            ));
+            table.pin_hook_versions(old_surface.as_bytes()).unwrap();
         }
         table
     };
@@ -1079,8 +1084,8 @@ fn an_older_list_cannot_tell_a_literal_from_a_doubt_so_a_new_field_is_left_to_th
 fn bad_tables_are_refused_by_kind() {
     let refused = |text: &[u8]| UsesTable::read(text).unwrap_err();
     assert_eq!(
-        refused(br#"{"schema":3,"made_for":"x","entries":[]}"#),
-        UsesError::Schema(3)
+        refused(br#"{"schema":4,"made_for":"x","entries":[]}"#),
+        UsesError::Schema(4)
     );
     assert!(matches!(refused(b"not json"), UsesError::Json(_)));
     assert!(matches!(
@@ -2396,4 +2401,187 @@ fn self_after_a_nested_impl_is_the_outer_impls() {
     let source = "struct Settings { mine: u8 }\nimpl Settings { fn f(_: Pos) -> Self { impl Clone for Q { fn clone(&self) -> Q { Q } } Self { mine: 1 } } }";
     let uses = scan_on(wider(), source);
     assert_eq!(entry(&uses, "type:Pos").built, Some(Built::None));
+}
+
+#[test]
+fn legacy_tables_match_either_hash_of_an_unchanged_method_and_function() {
+    const METHOD: &str = "method:Api::act";
+    const FUNCTION: &str = "fn:get";
+    let act = method(
+        METHOD,
+        "fn act(&self) -> Result<(), Error>",
+        &["trait:Api", "type:Error"],
+    );
+    let get = Function::new(
+        FUNCTION,
+        "",
+        FunctionContract {
+            signature: "fn get(&self) -> u8".into(),
+            impl_generics: "<T: Copy>".into(),
+            refs: strings(&["type:Value"]),
+        },
+    );
+    let assemble = |method, functions| {
+        Surface::new(
+            vec![],
+            vec![api_trait("trait:Api", Role::Call, &[], vec![method])],
+            vec![],
+            functions,
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        )
+    };
+    let intact = assemble(act.clone(), vec![get.clone()]);
+    let changed = assemble(method(METHOD, "fn act(&self)", &["trait:Api"]), vec![]);
+    let removed = Misfit {
+        id: FUNCTION.into(),
+        change: Change::Removed,
+    };
+    let signature = Misfit {
+        id: METHOD.into(),
+        change: Change::Changed,
+    };
+    // The first two rows use the published v1/v2 recipe with each former bit value.
+    // The last uses the v3 recipe. Values are independently hashed compact JSON.
+    for (old_method, old_function, schemas) in [
+        (
+            "76bd37f1903f2f7d28199f2318858078",
+            "d82dbe00d23869939148f2bcc5e91b90",
+            &[1, 2][..],
+        ),
+        (
+            "0f10da06557544acfc8f629cfe0471e2",
+            "18aab5558a8e65aa98cf0ce41b0bb9bd",
+            &[1, 2][..],
+        ),
+        (
+            "0c14af5c91006e195b452953b5dbfa1c",
+            "e61664d5cab614b0f96e88892f96bc66",
+            &[3][..],
+        ),
+    ] {
+        for schema in schemas {
+            let table = UsesTable {
+                schema: *schema,
+                made_for: "test".into(),
+                entries: vec![
+                    Entry::plain(METHOD.into(), old_method.into()),
+                    Entry::plain(FUNCTION.into(), old_function.into()),
+                ],
+            };
+            let table = UsesTable::read(&serde_json::to_vec(&table).unwrap()).unwrap();
+            let report = table.fits(&table.entries, &intact);
+            assert_eq!(report.verdict, Fit::Fits);
+            assert_eq!(report.deferred, None);
+            let missing = assemble(act.clone(), vec![]);
+            let report = table.fits(&table.entries, &missing);
+            if *schema == 3 {
+                assert_eq!(report.verdict, Fit::DoesNotFit(vec![removed.clone()]));
+                assert_eq!(report.deferred, None);
+            } else {
+                assert_eq!(report.verdict, Fit::Fits);
+                assert_eq!(
+                    report.deferred.as_deref(),
+                    Some(
+                        "not checked: `fn:get`; list written for test before schema 3; the compile decides"
+                    )
+                );
+            }
+            let expected = if *schema == 3 {
+                vec![removed.clone(), signature.clone()]
+            } else {
+                vec![signature.clone()]
+            };
+            assert_eq!(
+                table.fits(&table.entries, &changed).verdict,
+                Fit::DoesNotFit(expected)
+            );
+            assert_ne!(
+                UsesTable {
+                    schema: if *schema == 3 { 2 } else { 3 },
+                    ..table.clone()
+                }
+                .fits(&table.entries, &intact)
+                .verdict,
+                Fit::Fits
+            );
+        }
+    }
+}
+
+#[test]
+fn only_legacy_tables_defer_a_tuple_field_that_became_private() {
+    let mut uses = scan_on(wider(), "fn read(p: Pos) -> i32 { p.0 }").table("baseline");
+    let mut target = wider();
+    let mut private = api_tuple("type:Pos", &[]);
+    private.contract.constructible = false;
+    target.replace_type(private);
+    let target = target.build();
+
+    let current = uses.fits(&uses.entries, &target);
+    assert_eq!(words(current.verdict), ["the field `Pos.0` (removed)"]);
+    assert_eq!(current.deferred, None);
+
+    uses.schema = 2;
+    let legacy = uses.fits(&uses.entries, &target);
+    assert_eq!(legacy.verdict, Fit::Fits);
+    assert_eq!(
+        legacy.deferred.as_deref(),
+        Some(
+            "not checked: `type:Pos.0`; list written for baseline before schema 3; the compile decides"
+        )
+    );
+}
+
+#[test]
+fn only_legacy_tables_defer_lost_impls_with_vanished_api_types_to_the_compile() {
+    let owner = api_type("type:Handle", "", false, vec![]);
+    let still_here = api_type("type:widgets::Visible", "", false, vec![]);
+    let uses = UsesTable {
+        schema: 2,
+        made_for: "baseline".into(),
+        entries: vec![Entry {
+            impls: strings(&["From<widgets::Old>", "From<widgets::Visible>", "Clone"]),
+            ..Entry::plain(owner.id.clone(), owner.hash.clone())
+        }],
+    };
+    let target = Pieces {
+        types: vec![owner, still_here],
+        ..base()
+    }
+    .build();
+    let expected = |names: &[&str]| {
+        Fit::DoesNotFit(
+            names
+                .iter()
+                .map(|name| Misfit {
+                    id: "type:Handle".into(),
+                    change: Change::LostImpl((*name).into()),
+                })
+                .collect(),
+        )
+    };
+    let report = uses.fits(&uses.entries, &target);
+    assert_eq!(
+        report.verdict,
+        expected(&["Clone", "From<widgets::Visible>"])
+    );
+    assert_eq!(
+        report.deferred.as_deref(),
+        Some(
+            "not checked: `type:Handle`; list written for baseline before schema 3; the compile decides"
+        )
+    );
+    let uses = UsesTable {
+        schema: USES_SCHEMA,
+        ..uses
+    };
+    let report = uses.fits(&uses.entries, &target);
+    assert_eq!(
+        report.verdict,
+        expected(&["Clone", "From<widgets::Old>", "From<widgets::Visible>"])
+    );
+    assert_eq!(report.deferred, None);
 }

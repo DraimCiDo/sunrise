@@ -5,7 +5,7 @@ mod's), primed TNT, experience orbs, paintings, item frames and your own general
 your own renderer. This is the counterpart of
 NeoForge 26.3's `EntityRenderersEvent.RegisterRenderers` (`registerEntityRenderer`): the mod
 registers one renderer per entity type at start, and the game hands each entity of that type in
-view to it, once a frame. Native and wasm mods register and draw the same way.
+view to it, once a frame.
 
 ## Write the renderer
 
@@ -58,7 +58,7 @@ here.
 
 A general entity type (`declare_general_entity`) has no vanilla look. Its render state carries the
 row's identity, age, pose and a frozen snapshot of its synced attachments
-([attachments](../../concepts/attachments.md)). Native and Wasm both get this same state in `submit`.
+([attachments](../../concepts/attachments.md)).
 
 ```rust,ignore
 static FUEL: AttachmentType<i32> = /* declared with sync: true */;
@@ -165,8 +165,7 @@ scan over the mods.
 - A later registration for a type replaces the earlier one silently, whichever mod made it, as in
   NeoForge, also for a vanilla type.
 - A type the game does not know is logged with its id and left out; nothing panics.
-- `submit` returns `Ok(())` to keep what it drew. A renderer that returns an `Err`, panics, or (in a
-  wasm mod) has its call refused or trapped is logged once and asked no more until the next resource
+- `submit` returns `Ok(())` to keep what it drew. A renderer that returns an `Err` or panics is logged once and asked no more until the next resource
   load (a reload resolves it again); what it drew that frame is dropped, and until then its type draws
   as it would without one.
 

@@ -6,15 +6,14 @@ use sunrise_core::nbt::{self, Limits, Tag};
 use sunrise_mod_runtime::attachments::{AttachmentEntry, Attachments};
 
 // The render call carries a projection, not a replay of the sync packets.
-// Keep that projection small for guests with little linear memory.
 const RENDER_FRAME_BYTES: usize = 64 * 1024;
 
 // Namespace, name and NBT each have a Wire length prefix.
 const FIELD_PREFIX_BYTES: usize = 3 * size_of::<u32>();
 
-/// A general entity's synced fields as they were at render-state extraction. Native
-/// and Wasm renderers see the same captured values. Fields that could not be captured
-/// are unavailable through [`Self::get`]; they do not prevent submission.
+/// A general entity's synced fields as they were at render-state extraction.
+/// Fields that could not be captured are unavailable through [`Self::get`];
+/// they do not prevent submission.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, sunrise_mod_api_macros::Wire)]
 pub struct EntityRenderAttachments {

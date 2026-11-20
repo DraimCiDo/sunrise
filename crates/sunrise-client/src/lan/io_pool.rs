@@ -353,7 +353,7 @@ fn start(threads: usize) -> std::io::Result<Pool> {
             load: AtomicUsize::new(0),
         });
         let mine = worker.clone();
-        // Payload handlers of wasm mods run on these threads (the server's network root).
+        // Mod payload handlers run on these threads (the server's network root).
         sunrise_guest_stack::spawn(format!("sunrise-net-{n}"), move || run(poll, &mine))?;
         workers.push(worker);
     }

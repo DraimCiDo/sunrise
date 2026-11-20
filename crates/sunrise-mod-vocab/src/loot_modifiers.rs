@@ -3,7 +3,6 @@
 //! Register a serializer once; data files under `loot_modifiers/` select its
 //! prepared instances. A top-level roll runs them after its table functions and
 //! stack splitter. Nested tables and raw sub-rolls never invoke this pass.
-use crate::wire::{Reader, Wire, WireError, Writer};
 use crate::{DataLoadContext, Identifier, LootContext, LootStack, RandomSource};
 use serde_json::Value;
 use std::sync::Arc;
@@ -111,11 +110,6 @@ impl LootModifierSettings {
 /// Decode validates custom fields once and retains typed immutable state. A bad
 /// file is diagnosed and skipped; it does not suppress other valid instances.
 pub trait GlobalLootModifierSerializer: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::global_loot_modifier_serializer::<Self>();
-    }
     /// Prepare one instance for this owning data load. The instance retains its
     /// implementation and code store while an active roll uses its generation.
     fn decode(
@@ -125,20 +119,10 @@ pub trait GlobalLootModifierSerializer: Send + Sync + 'static {
     ) -> Result<Arc<dyn GlobalLootModifier>, LootModifierError>;
 }
 
-crate::wire::wire_handlers::handler!(
-    dyn GlobalLootModifierSerializer,
-    "GlobalLootModifierSerializer"
-);
-
 /// A prepared instance (`IGlobalLootModifier`), enabled by a data file, not a hook
 /// listener. Priority and condition are captured once when decoding completes;
-/// a metadata failure, including a refused wasm call, refuses that preparation.
+/// a metadata failure refuses that preparation.
 pub trait GlobalLootModifier: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::global_loot_modifier::<Self>();
-    }
     /// Higher priorities run first; the default is `IGlobalLootModifier.DEFAULT_PRIORITY`.
     fn priority(&self) -> Result<i32, LootModifierError> {
         Ok(DEFAULT_PRIORITY)
@@ -162,9 +146,7 @@ pub trait GlobalLootModifier: Send + Sync + 'static {
     ) -> Result<Vec<LootStack>, LootModifierError>;
 }
 
-crate::wire::wire_handlers::handler!(dyn GlobalLootModifier, "GlobalLootModifier");
-
-/// A roll-scoped resource, identical for native and wasm instances. It lends the
+/// A roll-scoped resource. It lends the
 /// selected roll random, not a level random or an independently seeded stream.
 /// A mod cannot retain this context beyond the callback.
 pub trait LootModifierContext {
@@ -190,7 +172,7 @@ mod tests;
 /// descending priority. Equal-priority ordering has no specified meaning.
 /// Read it through `ServerHost::reload_resources` using `Self::key()`.
 ///
-/// Not on wasm: the manager is a retained, process-local reload listener and does not
+/// The manager is a retained, process-local reload listener and does not
 /// cross Wire. The serializer, the prepared modifier and the roll context do cross,
 /// through resource dispatch.
 #[derive(Default)]

@@ -232,6 +232,9 @@ enum DripStage {
     Land,
 }
 
+/// Every engine block state as a mod reads it, by state id, shared with the game.
+pub type BlockStates = Arc<dyn AsRef<[mod_api::BlockState]> + Send + Sync>;
+
 /// A native mod's sprite set: its handle in `set_sprites`, the behaviour its JSON declares,
 /// the provider that moves its particles, if a mod registered one, and the render group they
 /// draw in, if a mod listed the type in one. Resolved at load, so a spawn, a tick and a draw
@@ -240,7 +243,7 @@ enum DripStage {
 struct ModSet {
     set: u32,
     behaviour: Option<ModBehaviour>,
-    provider: Option<Arc<dyn ParticleProvider>>,
+    provider: Option<(u32, Arc<dyn ParticleProvider>)>,
     /// The handle of the registered group (`groups::registered`), none for the built-in one.
     group: Option<u32>,
 }
@@ -289,6 +292,9 @@ pub struct Particle {
     /// `Particle.random`: the particle's own generator (`RandomSource.create()`).
     random: LegacyRandom,
     controller: Option<Box<dyn native::Controller>>,
+    /// A mod provider's particle: its state, ticked in the provider's batch.
+    /// Boxed so a vanilla particle carries one pointer for it.
+    provided: Option<Box<native::Provided>>,
     /// A resource pack's Polytone custom particle type, for its `limit` and `exclusion_radius`.
     polytone_type: Option<std::sync::Arc<str>>,
     /// A Polytone model particle's faces, drawn instead of its sprite quad.
@@ -653,6 +659,7 @@ impl Particle {
             frame_ticks: 0,
             random: LegacyRandom::new(0),
             controller: None,
+            provided: None,
             polytone_type: None,
             model: None,
             orientation: polytone_gpu::Orientation::Camera,
@@ -992,17 +999,19 @@ impl<'a> ParticleLevel<'a> {
         ]
     }
     #[inline]
-    pub fn block(&self, x: i32, y: i32, z: i32) -> sunrise_world::registry::BlockStateId {
-        let (cx, cz) = (x >> 4, z >> 4);
-        let chunk = match self.cached_chunk.get() {
+    pub(crate) fn chunk(&self, cx: i32, cz: i32) -> Option<&'a crate::chunk::Chunk> {
+        match self.cached_chunk.get() {
             Some(((ccx, ccz), c)) if ccx == cx && ccz == cz => c,
             _ => {
                 let c = self.world.chunks.get(&(cx, cz)).map(|c| c.as_ref());
                 self.cached_chunk.set(Some(((cx, cz), c)));
                 c
             }
-        };
-        chunk.map_or(self.world.air, |c| c.block(x & 15, y, z & 15))
+        }
+    }
+    pub fn block(&self, x: i32, y: i32, z: i32) -> sunrise_world::registry::BlockStateId {
+        self.chunk(x >> 4, z >> 4)
+            .map_or(self.world.air, |c| c.block(x & 15, y, z & 15))
     }
     /// The fluid at a block and `FluidState.getHeight`.
     fn fluid(&self, b: [i32; 3]) -> (Fluid, f64) {
@@ -1108,6 +1117,12 @@ pub struct ParticleEngine {
     /// The code providers of mods' particle types, by name: `register_particle_providers`' registrations as
     /// this engine was built, applied to `mod_sets` at every load.
     providers: BTreeMap<String, Arc<dyn ParticleProvider>>,
+    /// Where the providers' `ParticleLevelView` finds every engine block state as a mod reads
+    /// it, asked only when a provider has particles to tick.
+    block_state_source: fn() -> Option<BlockStates>,
+    /// How many provider particles live, in every list and still waiting to join.
+    provided_live: Arc<std::sync::atomic::AtomicUsize>,
+    batch: native::Batch,
     set_sprites: Vec<Vec<u32>>,
     /// How many live particles it takes to tick them on several threads (`tick_all`), and how many threads.
     parallel_min: usize,
@@ -1228,6 +1243,9 @@ impl ParticleEngine {
             sets: HashMap::new(),
             mod_sets: HashMap::new(),
             providers: native::registered().clone(),
+            block_state_source: || None,
+            provided_live: Arc::default(),
+            batch: native::Batch::default(),
             set_sprites: Vec::new(),
             parallel_min: PARALLEL_MIN,
             live_limit: None,
@@ -1249,6 +1267,13 @@ impl ParticleEngine {
         engine.reload(root, atlas, translucent);
         engine
     }
+    /// Where a provider's level view finds the block states, by engine state id: the game's
+    /// table, or `None` while it has none, which stops the providers from running so that none
+    /// reads a state the engine cannot name. It is called only when a provider has particles
+    /// to tick.
+    pub fn set_block_state_source(&mut self, source: fn() -> Option<BlockStates>) {
+        self.block_state_source = source;
+    }
     /// `onResourceManagerReload`: sprite rects and sets come from the
     /// reloaded atlas and pack; a live particle keeps drawing its sprite by
     /// name or index.
@@ -1260,12 +1285,17 @@ impl ParticleEngine {
     ) {
         // Controllers' numeric sprite-set handles belong to this resource
         // generation. Discard them rather than selecting another set after reload.
-        self.particles.retain(|p| p.controller.is_none());
+        self.particles
+            .retain(|p| p.controller.is_none() && p.provided.is_none());
         for group in &mut self.groups {
-            group.particles.retain(|p| p.controller.is_none());
+            group
+                .particles
+                .retain(|p| p.controller.is_none() && p.provided.is_none());
         }
-        self.pending
-            .retain(|p| p.ordinary().is_none_or(|p| p.controller.is_none()));
+        self.pending.retain(|p| {
+            p.ordinary()
+                .is_none_or(|p| p.controller.is_none() && p.provided.is_none())
+        });
         self.atlas = atlas
             .iter()
             .map(|(name, &rect)| (name.clone(), (rect, translucent.contains(name))))
@@ -1388,7 +1418,11 @@ impl ParticleEngine {
                 })
                 .unwrap_or_default();
             if !sprites.is_empty() {
-                let provider = self.providers.get(&key).cloned();
+                let provider = self
+                    .providers
+                    .iter()
+                    .position(|(name, _)| *name == key)
+                    .map(|slot| (slot as u32, self.providers[&key].clone()));
                 self.mod_sets.insert(
                     key,
                     ModSet {
@@ -1893,7 +1927,7 @@ impl ParticleEngine {
                     q.sprite = Sprite::Index(sprites[0]);
                 }
             }
-            if let Some(provider) = provider {
+            if let Some((slot, provider)) = provider {
                 // The declared values seed the particle; the provider owns its tick from here.
                 // Its sprite is chosen by frame, so the set stays attached.
                 let frame = sprites
@@ -1902,7 +1936,12 @@ impl ParticleEngine {
                     .unwrap_or(0);
                 q.set = Some(set);
                 q.behaviour = Behaviour::Controlled { translucent: true };
-                q.controller = Some(Box::new(native::Provided::new(provider, frame as u32)));
+                q.provided = Some(Box::new(native::Provided::new(
+                    provider,
+                    slot,
+                    frame as u32,
+                    &self.provided_live,
+                )));
             }
             return Some(q);
         }
@@ -3551,6 +3590,7 @@ impl ParticleEngine {
         let mut particles = std::mem::take(&mut self.particles);
         self.spawned_in_tick = Some(Vec::new());
         self.tick_all(&mut particles, level);
+        self.tick_providers(&mut particles, level);
         particles.retain(|p| !p.removed);
         self.particles = particles;
         for handle in 0..self.groups.len() {
@@ -3558,6 +3598,7 @@ impl ParticleEngine {
             for p in &mut particles {
                 self.tick_particle(p, level);
             }
+            self.tick_providers(&mut particles, level);
             particles.retain(|p| !p.removed);
             self.groups[handle].particles = particles;
         }
@@ -3602,6 +3643,28 @@ impl ParticleEngine {
             }
         }
     }
+    /// The providers' part of a tick: each provider once with every particle of its type that
+    /// `tick_particle` aged. Nothing runs while no provider particle lives.
+    fn tick_providers(&mut self, particles: &mut [Particle], level: &ParticleLevel) {
+        if self
+            .provided_live
+            .load(std::sync::atomic::Ordering::Relaxed)
+            == 0
+        {
+            return;
+        }
+        let mut batch = std::mem::take(&mut self.batch);
+        if batch.gather(particles)
+            && let Some(states) = (self.block_state_source)()
+        {
+            let view = native::ProviderLevel {
+                level,
+                states: (*states).as_ref(),
+            };
+            batch.run(particles, &view, |p, frame| self.set_sprite_frame(p, frame));
+        }
+        self.batch = batch;
+    }
     /// `ParticleGroup.add`: each group's last quarter fills with decreasing probability.
     fn group_has_space(&mut self, size: usize) -> bool {
         if size >= MAX_PARTICLES {
@@ -3626,7 +3689,10 @@ impl ParticleEngine {
                 self.finish_simple(p, simple);
             }
             Behaviour::Controlled { .. } => {
-                if let Some(mut controller) = p.controller.take() {
+                if let Some(mut provided) = p.provided.take() {
+                    provided.age(p);
+                    p.provided = Some(provided);
+                } else if let Some(mut controller) = p.controller.take() {
                     let update = controller.tick(p, level);
                     p.controller = Some(controller);
                     if let Some(frame) = update.frame {
@@ -4533,7 +4599,9 @@ impl ParticleEngine {
                 ) - camera;
                 (pos.as_vec3(), p.quad_size(partial))
             });
-            let rotation = if p.orientation != polytone_gpu::Orientation::Camera {
+            let rotation = if let Some(provided) = &p.provided {
+                provided.rotation(base, p.o_roll, p.roll, partial)
+            } else if p.orientation != polytone_gpu::Orientation::Camera {
                 // A custom particle's `movement_aligned` quad has its texture's top against
                 // its motion (measured in Java: a light ray rising toward the noon sun hangs
                 // below the leaves it starts at); a GPU particle's has it along its motion.
@@ -4663,7 +4731,22 @@ impl ParticleEngine {
                     ((-1.0, 1.0), [u0, v0]),
                     ((-1.0, -1.0), [u0, v1]),
                 ] {
-                    let v = center + rotation * FVec3::new(n.0, n.1, 0.0) * size;
+                    // A provider's quad turns by JOML's `Quaternionf.transform`, which also takes a
+                    // quaternion that is not a unit one, as `LOOKAT_Y`'s is.
+                    let turned = if p.provided.is_some() {
+                        FVec3::from(
+                            crate::camera::joml::Quat {
+                                x: rotation.x,
+                                y: rotation.y,
+                                z: rotation.z,
+                                w: rotation.w,
+                            }
+                            .transform([n.0, n.1, 0.0]),
+                        )
+                    } else {
+                        rotation * FVec3::new(n.0, n.1, 0.0)
+                    };
+                    let v = center + turned * size;
                     target.push(Vertex {
                         normal: [0; 4],
                         pos: v.to_array(),

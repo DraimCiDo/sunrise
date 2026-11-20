@@ -1,18 +1,37 @@
-//! Exercise the real local-player caller and the same listener through both ABIs.
+//! Exercise the real local-player movement caller with and without a native listener.
 use super::*;
 use crate::game::native_entity_refs::tests::with_client_game;
 use mod_api::{ClientHost, Hooks, MovementInputEvent};
 use sunrise_client::motion::PlayerMotion;
 use winit::keyboard::KeyCode;
 
-#[path = "../../../../../sunrise-mod-wasm/tests/fixture/src/movement.rs"]
-mod fixture;
-
 struct Native;
 #[mod_api::__subscriptions]
 impl Hooks for Native {
     fn movement_input(&self, _: &dyn ClientHost, event: &mut MovementInputEvent) {
-        fixture::movement_input(event);
+        if event.right_key {
+            event.forward_key = true;
+            event.sprint = false;
+        } else if event.left_key {
+            if !(event.forward_key && event.backward_key) {
+                event.forward = -0.5;
+            }
+            event.strafe = 0.25;
+            event.jump = !event.jump;
+            event.sneak = !event.sneak;
+            event.sprint = true;
+        } else if event.backward_key {
+            event.forward_key = true;
+            event.left_key = true;
+            event.right_key = true;
+            // Direction-key edits must win over these conflicting axis edits.
+            event.forward = 0.25;
+            event.strafe = 0.5;
+            event.sprint = true;
+        } else {
+            event.forward_key = true;
+            event.sprint = true;
+        }
     }
 }
 
@@ -199,36 +218,6 @@ fn matrix(mods: mod_api::Mods) {
 #[ignore = "daily"]
 fn native_movement_input_keys_axes_and_sprint() {
     matrix(vec![mod_api::ModEntry::new("movement", Box::new(Native))].into());
-}
-
-#[test]
-#[ignore = "needs SUNRISE_TEST_RESOURCES, SUNRISE_WASM_FIXTURE and SUNRISE_WASM_STD"]
-fn wasm_movement_input_keys_axes_and_sprint() {
-    sunrise_guest_stack::run_on_guest_stack(|| {
-        use sunrise_mod_package::manifest::Package;
-        use sunrise_mod_wasm::{WasmPackage, load};
-        let path = std::path::PathBuf::from(std::env::var_os("SUNRISE_WASM_FIXTURE").unwrap());
-        let manifest = Package::read(&path).unwrap().manifest;
-        let info = mod_api::PackageInfo::new(
-            manifest.id.clone(),
-            manifest.version.to_string(),
-            mod_api::PackageKind::Code,
-            mod_api::Side::Both,
-            vec![manifest.id.clone()],
-            vec![],
-        );
-        let loaded = load(
-            &std::fs::read(std::env::var_os("SUNRISE_WASM_STD").unwrap()).unwrap(),
-            vec![WasmPackage {
-                manifest,
-                module: Package::read_wasm(&path).unwrap(),
-            }],
-        );
-        assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
-        assert_eq!(loaded.mods.len(), 1);
-        loaded.initialize(&[info]).unwrap();
-        matrix(loaded.mods.into());
-    });
 }
 
 #[test]

@@ -532,7 +532,3 @@ mod tests {
 #[cfg(test)]
 #[path = "storage_attempt_tests.rs"]
 mod storage_attempt_tests;
-
-#[cfg(test)]
-#[path = "storage_attempt_wasm_tests.rs"]
-mod storage_attempt_wasm_tests;
