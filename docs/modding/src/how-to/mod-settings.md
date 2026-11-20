@@ -98,7 +98,8 @@ registrar.register_mod_list_action("statistics", "example.mods.statistics", |hos
 
 Put the label's translation in your language assets. Action keys are local to your package; a duplicate or
 invalid declaration returns `ModListActionError` and leaves earlier declarations intact. Actions appear in
-registration order, and only while their package is active.
+registration order, and only while their package is active. A package declared `side = "server"` cannot register
+client Mods-list actions.
 
 Return `ModListActionResult::Stay` to leave the list open. `OpenScreen` requests your existing owned
 screen (`host.mod_screen()` identifies its owner); use `host.mod_list_action_key()` in your screen hooks

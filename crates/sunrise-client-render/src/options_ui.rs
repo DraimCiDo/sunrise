@@ -2423,14 +2423,18 @@ impl OptionsUi {
             self.studio.refresh();
         }
     }
+    /// Move focus within the Mods page without pressing a button.
+    pub fn focus_mods_control(&mut self, target: crate::widgets::Target) {
+        if self.page() == Page::Mods
+            && self.resource_error.is_none()
+            && let Some(mods) = &mut self.mods_screen
+        {
+            mods.focus_control(target);
+        }
+    }
     /// A controller's or the keyboard's focus landed on `rect`: a row of a shell screen's list
     /// that is partly hidden scrolls all into view. How far it moved down, when it moved.
     pub fn reveal(&mut self, s: &Settings, size: (f32, f32), rect: [f32; 4]) -> Option<f32> {
-        if self.page() == Page::Mods
-            && let Some(mods) = &mut self.mods_screen
-        {
-            mods.focus_action(rect);
-        }
         self.shell_mut()?.reveal(s, size, rect)
     }
     /// Whether a video settings screen is open, Sunrise's or vanilla's: the fullscreen mode

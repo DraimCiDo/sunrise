@@ -82,7 +82,7 @@ struct FocusName {
 
 /// The focus the pad left a screen on (`MenuCursor::remembered`).
 struct Remembered {
-    rect: Rect,
+    target: Target,
     name: Option<String>,
 }
 
@@ -175,7 +175,7 @@ pub(super) struct MenuCursor {
     pub(super) slider_hold: Option<(u64, Rect)>,
     /// What the last click landed on: vanilla focuses it, so the next Tab
     /// or arrow goes on from there (`ContainerEventHandler.mouseClicked`).
-    origin: Option<Rect>,
+    origin: Option<Target>,
     /// A shortcut put the focus here: not where the screen reopens.
     shortcut_focus: Option<Rect>,
     /// A pointer event the pad or the keyboard sends is being handled.
@@ -417,7 +417,11 @@ impl Game<'_> {
     }
 
     fn pad_visible_targets(&self) -> Vec<Target> {
-        let targets = self.pad_all_targets();
+        let mut targets = self.pad_all_targets();
+        targets.retain(|target| match target.kind {
+            Kind::ModListAction(id) => self.mod_list_action_visible(id, Some(target.rect)),
+            _ => true,
+        });
         match self.gui_batch() {
             Some(batch) => key_focus::on_screen(targets, (batch.width, batch.height)),
             None => targets,
@@ -522,19 +526,20 @@ impl Game<'_> {
         // Back on a screen the pad left: where it was, as vanilla keeps a
         // screen's focused widget (Options, after its Done). The same widget
         // first: the rows under it can have moved.
-        if let Some(i) = self
-            .pad
-            .menu
-            .remembered
-            .get(&self.key_screen())
-            .and_then(|r| {
-                r.name
-                    .as_ref()
-                    .and_then(|n| named_target(n, &widgets::last_labelled(), &rects))
-                    .or_else(|| gamepad::refind(r.rect, &rects, 2.0))
-            })
-        {
-            return Some(targets[i]);
+        if let Some(remembered) = self.pad.menu.remembered.get(&self.key_screen()) {
+            if matches!(remembered.target.kind, Kind::ModListAction(_)) {
+                if let Some(target) = key_focus::refind(remembered.target, targets) {
+                    return Some(target);
+                }
+            } else if let Some(i) = remembered
+                .name
+                .as_ref()
+                .and_then(|name| named_target(name, &widgets::last_labelled(), &rects))
+                .or_else(|| gamepad::refind(remembered.target.rect, &rects, 2.0))
+                .filter(|&i| !matches!(targets[i].kind, Kind::ModListAction(_)))
+            {
+                return Some(targets[i]);
+            }
         }
         let batch = self.gui_batch()?;
         let at = |x: f32, y: f32| {
@@ -679,8 +684,10 @@ impl Game<'_> {
 
     fn press_focused_button(&mut self, event_loop: &dyn EventLoopCtl, focus: Target) {
         if let Kind::ModListAction(id) = focus.kind {
-            self.audio.play_button_click();
-            self.activate_mod_list_action(id);
+            if self.mod_list_action_visible(id, Some(focus.rect)) {
+                self.audio.play_button_click();
+                self.activate_mod_list_action(id);
+            }
         } else {
             self.pad_click_at(event_loop, focus.center(), false);
         }
@@ -1301,6 +1308,9 @@ impl Game<'_> {
         }
         self.pad.menu.pending = None;
         self.pad.menu.nudge = None;
+        if self.screen == Screen::Options {
+            self.ui.options.focus_mods_control(target);
+        }
         if !self.pad.menu.held[0] {
             self.pad_pointer_to(event_loop, target.center());
         }
@@ -1333,8 +1343,13 @@ impl Game<'_> {
         if remembered.len() > 32 && !remembered.contains_key(&screen) {
             remembered.clear();
         }
-        let rect = focus.rect;
-        remembered.insert(screen, Remembered { rect, name });
+        remembered.insert(
+            screen,
+            Remembered {
+                target: focus,
+                name,
+            },
+        );
     }
 
     /// Vanilla's arrow navigation moves a screen's focus off the widget a
@@ -1514,7 +1529,7 @@ impl Game<'_> {
             self.pad.menu.pos = None;
             let focus = self.pad.menu.focus.take();
             if std::mem::take(&mut self.pad.menu.keyboard) {
-                self.pad.menu.origin = focus.map(|t| t.rect);
+                self.pad.menu.origin = focus;
             }
             self.pad_yield_input(event_loop);
         }
@@ -1780,7 +1795,7 @@ impl Game<'_> {
 
     // The same rectangle or translated label can now belong to another package's button.
     fn pad_follow_mod_list_action(&mut self, focus: Target, targets: &[Target]) {
-        let next = targets.iter().copied().find(|t| t.kind == focus.kind);
+        let next = key_focus::refind(focus, targets);
         if next != Some(focus) {
             self.pad.menu.armed = None;
         }
@@ -2044,7 +2059,7 @@ impl Game<'_> {
                 .menu
                 .remembered
                 .iter()
-                .map(|(k, r)| (format!("{k:016x}"), serde_json::json!(r.rect)))
+                .map(|(k, r)| (format!("{k:016x}"), serde_json::json!(r.target.rect)))
                 .collect::<serde_json::Map<_, _>>(),
         })
     }
@@ -2135,12 +2150,7 @@ impl Game<'_> {
         if targets.is_empty() {
             return false;
         }
-        let find = |rect: Rect| {
-            targets
-                .iter()
-                .find(|t| t.rect.iter().zip(rect).all(|(a, b)| (a - b).abs() < 0.5))
-                .copied()
-        };
+        let find = |target| key_focus::refind(target, &targets);
         // The focus: the keyboard's or the controller's, else what a click
         // focused (a slider a click focused changes with the arrows).
         let mut slider_edit = self.pad.menu.slider_edit;
@@ -2149,23 +2159,29 @@ impl Game<'_> {
             .menu
             .focus
             .filter(|_| self.pad_focus_mode())
-            .and_then(|f| {
-                if matches!(f.kind, Kind::ModListAction(_)) {
-                    targets.iter().copied().find(|t| t.kind == f.kind)
-                } else {
-                    find(f.rect)
-                }
-            });
+            .and_then(find);
         if focus.is_none()
             && let Some(clicked) = self.pad.menu.origin.and_then(find)
         {
             focus = Some(clicked);
             slider_edit = true;
         }
+        // Before focus navigation starts, Up/Down still walk the Mods list as before.
+        let mods_list = self.screen == Screen::Options && self.ui.options.page() == Page::Mods;
+        if mods_list
+            && focus.is_none()
+            && matches!(
+                nav,
+                key_focus::Nav::Arrow(Button::DPadUp | Button::DPadDown)
+            )
+        {
+            return false;
+        }
         let ctx = key_focus::Context {
             slider_edit,
             typing: self.edit_box_focused(),
             rows_take_enter: self.title.as_ref().is_some_and(|t| t.list_focused()),
+            single_list: mods_list,
             gui: self.gui_size(),
         };
         let act = key_focus::act(nav, focus, &targets, ctx);
@@ -2360,14 +2376,10 @@ impl Game<'_> {
             )
         {
             let (cx, cy) = self.cursor;
-            self.pad.menu.origin = self
-                .key_targets()
-                .into_iter()
-                .find(|t| {
-                    let [x, y, w, h] = t.rect;
-                    cx >= x && cy >= y && cx < x + w && cy < y + h
-                })
-                .map(|t| t.rect);
+            self.pad.menu.origin = self.key_targets().into_iter().find(|t| {
+                let [x, y, w, h] = t.rect;
+                cx >= x && cy >= y && cx < x + w && cy < y + h
+            });
         }
     }
 
@@ -2377,7 +2389,7 @@ impl Game<'_> {
             return;
         }
         let menu = &mut self.pad.menu;
-        menu.origin = menu.focus.take().map(|t| t.rect);
+        menu.origin = menu.focus.take();
         menu.pos = None;
         menu.pending = None;
         menu.nudge = None;
@@ -2401,11 +2413,8 @@ impl Game<'_> {
         let Some(origin) = self.pad.menu.origin else {
             return;
         };
-        let there = self.key_focus_screen()
-            && self
-                .key_targets()
-                .iter()
-                .any(|t| t.rect.iter().zip(origin).all(|(a, b)| (a - b).abs() < 0.5));
+        let there =
+            self.key_focus_screen() && key_focus::refind(origin, &self.key_targets()).is_some();
         if !there {
             self.pad.menu.origin = None;
         }
@@ -2851,7 +2860,10 @@ mod tests {
                 rect: [229.0, 98.0, 20.0, 18.0],
                 kind: Kind::Button,
             }),
-            origin: Some([229.0, 98.0, 20.0, 18.0]),
+            origin: Some(Target {
+                rect: [229.0, 98.0, 20.0, 18.0],
+                kind: Kind::Button,
+            }),
             slider_edit: true,
             ..MenuCursor::default()
         };

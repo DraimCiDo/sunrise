@@ -277,24 +277,45 @@ fn a_mod_with_no_screen_hook_leaves_set_screen_plain() {
 fn mods_actions_route_pointer_and_keyboard_to_the_owner_and_close_to_the_selection() {
     use mod_api::{ModListActionResult, Registrar, RegistrationContext};
     use sunrise_client::{
-        mod_list::{Installed, NativePage},
-        options_ui::{Event, Page},
-        widgets,
+        gamepad::Button,
+        mod_list::{Installed, NativePage, NativeSetting, NativeSettingValue},
+        options_ui::Page,
+        widgets::{self, Kind},
     };
-    use winit::event_loop::ControlFlow;
+    use winit::{
+        event::{DeviceId, ElementState, MouseButton, WindowEvent},
+        event_loop::ControlFlow,
+    };
 
     thread_local! {
-        static PRESSES: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+        static PRESSES: std::cell::RefCell<Vec<(&'static str, String)>> = const { std::cell::RefCell::new(Vec::new()) };
     }
     struct ActionOwner;
     #[mod_api::__subscriptions]
     impl Hooks for ActionOwner {
         fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
             r.register_mod_list_action("details", "gui.done", |_, key| {
-                PRESSES.with_borrow_mut(|presses| presses.push(key.into()));
+                PRESSES.with_borrow_mut(|presses| presses.push(("action_owner", key.into())));
                 ModListActionResult::OpenScreen
             })
             .unwrap();
+        }
+    }
+    struct OtherOwner;
+    #[mod_api::__subscriptions]
+    impl Hooks for OtherOwner {
+        fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+            for key in [
+                "details", "extra_01", "extra_02", "extra_03", "extra_04", "extra_05", "extra_06",
+                "extra_07", "extra_08", "extra_09", "extra_10", "extra_11", "extra_12", "extra_13",
+                "extra_14", "extra_15", "extra_16",
+            ] {
+                r.register_mod_list_action(key, "gui.done", |_, key| {
+                    PRESSES.with_borrow_mut(|presses| presses.push(("other_owner", key.into())));
+                    ModListActionResult::Stay
+                })
+                .unwrap();
+            }
         }
     }
     struct NoLoop;
@@ -306,6 +327,7 @@ fn mods_actions_route_pointer_and_keyboard_to_the_owner_and_close_to_the_selecti
     let answer = Arc::new(Mutex::new(None));
     let mods = vec![
         ModEntry::new("action_owner", Box::new(ActionOwner)),
+        ModEntry::new("other_owner", Box::new(OtherOwner)),
         ModEntry::new(
             "screens",
             Box::new(Probe {
@@ -318,34 +340,77 @@ fn mods_actions_route_pointer_and_keyboard_to_the_owner_and_close_to_the_selecti
     with_game_of(mods, |game| {
         mod_platform::__private::part_tests::install_parts_fixture(mod_api::__private::mods())
             .unwrap();
-        game.settings.mods.installed = ["action_owner", "screens"]
-            .map(|id| Installed {
-                id: id.into(),
-                title: id.into(),
-                description: String::new(),
-                problem: None,
-                dev: false,
-                native: Some(NativePage::default()),
-            })
-            .into();
+        game.settings.mods.installed =
+            [("action_owner", "A fixture"), ("other_owner", "B fixture")]
+                .map(|(id, title)| Installed {
+                    id: id.into(),
+                    title: title.into(),
+                    description: String::new(),
+                    problem: None,
+                    dev: false,
+                    native: Some(NativePage {
+                        settings: vec![NativeSetting {
+                            key: "flag".into(),
+                            label: "gui.done".into(),
+                            tooltip: None,
+                            value: NativeSettingValue::Toggle(false),
+                        }],
+                        ..Default::default()
+                    }),
+                })
+                .into();
         let draw = |game: &mut Game<'_>| {
             let mut batch = HudBatch::new([1280, 720], game.settings.gui_scale_inputs());
             widgets::cover_frame();
             game.draw_options(&mut batch);
             widgets::end_frame(widgets::generation() + 1);
         };
-        let id = mod_api::__private::ModListActionId {
-            owner: "action_owner",
-            key: "details",
+        let target = |kind| {
+            widgets::last_targets()
+                .into_iter()
+                .find(|t| t.kind == kind)
+                .unwrap()
+        };
+        let action = |owner, key| {
+            target(Kind::ModListAction(mod_api::__private::ModListActionId {
+                owner,
+                key,
+            }))
+        };
+        let tab_to = |game: &mut Game<'_>, rect| {
+            for _ in 0..=widgets::last_targets().len() {
+                if game.pad_focus_rect() == Some(rect) {
+                    return;
+                }
+                assert!(game.key_focus_key(&NoLoop, KeyCode::Tab));
+            }
+            panic!("Tab did not reach {rect:?}");
+        };
+        let click = |game: &mut Game<'_>, at| {
+            game.cursor = at;
+            let event = WindowEvent::MouseInput {
+                device_id: DeviceId::dummy(),
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+            };
+            game.key_focus_mouse(&NoLoop, &event, None);
+            game.key_focus_mouse_press(&event);
+            game.options_mouse(true, false).unwrap();
+            game.options_mouse(false, false).unwrap();
+        };
+        let expect_press = |owner, key: &str| {
+            assert_eq!(
+                PRESSES.with(std::cell::RefCell::take),
+                [(owner, key.to_owned())]
+            );
         };
         let show = |game: &mut Game<'_>, title| {
             game.open_options_at(title, Page::Mods);
+            game.pad_clear_focus();
             draw(game);
-            let screen = game.ui.options.mods_screen.as_mut().unwrap();
-            screen.step(1);
-            assert_eq!(screen.selected_package(), Some("action_owner"));
+            assert!(!game.key_focus_key(&NoLoop, KeyCode::ArrowDown));
+            game.options_key(KeyCode::ArrowDown, None).unwrap();
             draw(game);
-            assert_eq!(widgets::last_targets().len(), 1);
         };
         let assert_parent = |game: &Game<'_>| {
             assert_eq!(game.screen, Screen::Options);
@@ -363,19 +428,29 @@ fn mods_actions_route_pointer_and_keyboard_to_the_owner_and_close_to_the_selecti
         };
         show(game, false);
         take(&log);
-        assert!(game.key_focus_key(&NoLoop, KeyCode::Tab));
-        let focus = game.pad_focus_rect();
-        assert!(focus.is_some());
+        tab_to(game, target(Kind::Field).rect);
+        assert!(game.ui.options.typing());
+        tab_to(game, target(Kind::Row).rect);
+        assert!(!game.ui.options.typing());
+        let config_label =
+            sunrise_client::text::Text::translate("sunrise.mods.screen.config", &[]).plain();
+        let config = widgets::last_labelled()
+            .into_iter()
+            .find(|w| w.label == config_label && w.enabled)
+            .unwrap();
+        tab_to(game, [config.x, config.y, config.w, config.h]);
+        let focus = Some(action("action_owner", "details").rect);
+        tab_to(game, focus.unwrap());
         *answer.lock().unwrap() = Some(ScreenOpening::Cancel);
         assert!(game.key_focus_key(&NoLoop, KeyCode::Enter));
         assert_parent(game);
         assert_eq!(game.pad_focus_rect(), focus);
         assert_eq!(take(&log), ["opening options->mod"]);
-        assert_eq!(PRESSES.with(std::cell::RefCell::take), ["details"]);
+        expect_press("action_owner", "details");
         *answer.lock().unwrap() = None;
         assert!(game.key_focus_key(&NoLoop, KeyCode::Enter));
         assert_eq!(game.mod_screen(), Some("action_owner"));
-        assert_eq!(PRESSES.with(std::cell::RefCell::take), ["details"]);
+        expect_press("action_owner", "details");
         let owner = mod_api::__private::enter("action_owner", "fixture");
         assert_eq!(game.mod_list_action_key(), Ok(Some("details")));
         drop(owner);
@@ -384,27 +459,72 @@ fn mods_actions_route_pointer_and_keyboard_to_the_owner_and_close_to_the_selecti
         drop(other);
         game.key_pressed(KeyCode::Escape, KeyCode::Escape).unwrap();
         assert_parent(game);
-        game.ui.options.mods_screen.as_mut().unwrap().step(1);
-        game.handle_option_events(vec![Event::ActivateModListAction(id)])
-            .unwrap();
-        assert_eq!(game.screen, Screen::Options);
+        draw(game);
+        tab_to(game, target(Kind::Row).rect);
+        assert!(game.key_focus_key(&NoLoop, KeyCode::ArrowDown));
+        assert_eq!(
+            game.ui
+                .options
+                .mods_screen
+                .as_ref()
+                .unwrap()
+                .selected_package(),
+            Some("other_owner")
+        );
+        game.key_focus_key(&NoLoop, KeyCode::Enter);
         assert!(PRESSES.with_borrow(Vec::is_empty));
+        draw(game);
+
+        // Click a Stay action, then scroll another button into the remembered rectangle.
+        let details = action("other_owner", "details");
+        click(game, details.center());
+        expect_press("other_owner", "details");
+        game.options_scroll(-1.0).unwrap();
+        assert!(!game.key_focus_key(&NoLoop, KeyCode::Enter));
+        assert!(PRESSES.with_borrow(Vec::is_empty));
+        draw(game);
+        let scrolled = action("other_owner", "extra_01");
+        assert_eq!(scrolled.rect, details.rect);
+        assert!(!game.key_focus_key(&NoLoop, KeyCode::Enter));
+        assert!(PRESSES.with_borrow(Vec::is_empty));
+
+        // From the selected row, Tab to the replacement, then activate it with the controller.
+        // A resize between pressing and releasing must not dispatch even with the same selection.
+        let second_row = widgets::last_targets()
+            .into_iter()
+            .filter(|t| t.kind == Kind::Row)
+            .nth(1)
+            .unwrap();
+        click(game, second_row.center());
+        tab_to(game, scrolled.rect);
+        game.pad_menu_button(&NoLoop, Button::South, true).unwrap();
+        game.pad_menu_button(&NoLoop, Button::South, false).unwrap();
+        expect_press("other_owner", "extra_01");
+        game.pad_menu_button(&NoLoop, Button::South, true).unwrap();
+        let previous_scale = game.settings.gui_scale;
+        game.settings.gui_scale = if game.gui_size() == (1280.0, 720.0) {
+            2
+        } else {
+            1
+        };
+        game.pad_menu_button(&NoLoop, Button::South, false).unwrap();
+        assert!(!game.key_focus_key(&NoLoop, KeyCode::Enter));
+        assert!(PRESSES.with_borrow(Vec::is_empty));
+        game.settings.gui_scale = previous_scale;
 
         let _setup = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Setup);
         game.player = None;
         game.title = Some(game.new_title(Game::game_dir().join("saves")));
         show(game, true);
+        let details = action("action_owner", "details");
         game.settings.mods.disabled.insert("action_owner".into());
-        game.handle_option_events(vec![Event::ActivateModListAction(id)])
-            .unwrap();
+        click(game, details.center());
         assert_parent(game);
         assert!(PRESSES.with_borrow(Vec::is_empty));
         game.settings.mods.disabled.clear();
-        game.cursor = widgets::last_targets()[0].center();
-        game.options_mouse(true, false).unwrap();
-        game.options_mouse(false, false).unwrap();
+        click(game, details.center());
         assert_eq!(game.mod_screen(), Some("action_owner"));
-        assert_eq!(PRESSES.with(std::cell::RefCell::take), ["details"]);
+        expect_press("action_owner", "details");
         mod_api::prelude::ScreensClientHost::mod_screen_close(game, "action_owner");
         assert_parent(game);
         assert!(game.title.is_some());

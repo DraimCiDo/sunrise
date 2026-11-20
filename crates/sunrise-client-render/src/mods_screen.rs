@@ -11,6 +11,7 @@ use crate::{
     pack_screen,
     screen_draw::{self as d, Draw, Measure, TextField},
     text::{Style, Text},
+    widgets::{self, Kind as WidgetKind, Target},
 };
 use mod_api::__private::{ModListAction, ModListActionId, mod_list_actions};
 use std::{cell::Cell, collections::HashMap, sync::Arc};
@@ -362,7 +363,9 @@ impl ModsScreen {
         }
         let mut search = TextField::new(0, 0, SIDEBAR_W - SORT_W - 4, CONTROL_H);
         search.max_length = 64;
-        search.hint = Some(tr("sunrise.mods.screen.search").with_color(d::GRAY));
+        let search_label = tr("sunrise.mods.screen.search");
+        search.message = search_label.plain();
+        search.hint = Some(search_label.with_color(d::GRAY));
         let mut screen = Self {
             width,
             height,
@@ -558,14 +561,35 @@ impl ModsScreen {
         }
     }
 
-    /// Moving keyboard or controller focus to an action leaves the search field.
-    pub(crate) fn focus_action(&mut self, rect: [f32; 4]) {
-        if self
-            .drawn_actions
-            .iter()
-            .any(|(r, _)| r.map(|v| v as f32) == rect)
+    /// Whether a press still names a button painted at the current GUI size. A focus press
+    /// also supplies its rectangle: a held button must not follow a move between press and release.
+    pub fn action_visible(
+        &self,
+        id: ModListActionId,
+        size: (f32, f32),
+        rect: Option<[f32; 4]>,
+    ) -> bool {
+        (self.width, self.height) == (size.0 as i32, size.1 as i32)
+            && self.drawn_actions.iter().any(|(r, painted)| {
+                *painted == id && rect.is_none_or(|rect| rect == r.map(|v| v as f32))
+            })
+    }
+
+    fn row_at(&self, y: f64, list_top: i32) -> Option<usize> {
+        let below = y - f64::from(list_top + 2) + self.list.amount.trunc();
+        (below >= 0.0)
+            .then(|| (below / f64::from(ROW_H)) as usize)
+            .filter(|&position| position < self.shown.len())
+    }
+
+    /// Apply focus to the list, search field, or one of the screen's buttons.
+    pub(crate) fn focus_control(&mut self, target: Target) {
+        self.search.focused = target.kind == WidgetKind::Field;
+        self.list_focused = target.kind == WidgetKind::Row;
+        if self.list_focused
+            && let Some(position) = self.row_at(f64::from(target.center().1), self.geo().list[1])
         {
-            self.search.focused = false;
+            self.select(self.shown[position]);
         }
     }
 
@@ -787,6 +811,7 @@ impl ModsScreen {
         for (i, r) in g.footer.into_iter().enumerate() {
             if hit(r, x, y) {
                 self.search.focused = false;
+                self.list_focused = false;
                 let action = if i == 0 {
                     Action::OpenFolder
                 } else {
@@ -811,6 +836,7 @@ impl ModsScreen {
             return (Action::None, false);
         }
         self.search.focused = false;
+        self.list_focused = false;
         if hit(g.sort, x, y) {
             self.descending = !self.descending;
             self.refresh();
@@ -826,13 +852,10 @@ impl ModsScreen {
                 return (Action::None, false);
             }
             let row_w = lw - 6 - if scrollable { SCROLLBAR_W } else { 0 };
-            if (f64::from(lx + 3)..f64::from(lx + 3 + row_w)).contains(&x) {
-                let below = y - f64::from(ly + 2) + self.list.amount;
-                if below >= 0.0
-                    && let Some(&entry) = self.shown.get((below / f64::from(ROW_H)) as usize)
-                {
-                    self.select(entry);
-                }
+            if (f64::from(lx + 3)..f64::from(lx + 3 + row_w)).contains(&x)
+                && let Some(position) = self.row_at(y, ly)
+            {
+                self.select(self.shown[position]);
             }
             return (Action::None, false);
         }
@@ -985,17 +1008,11 @@ impl ModsScreen {
         crate::widgets::widget_cursor(sort_hover, true);
         let sort = if self.descending { "z_to_a" } else { "a_to_z" };
         let name = format!("sunrise.mods.screen.sort.{sort}");
+        let sort_text = tr(&name);
+        widgets::record(&sort_text.plain(), g.sort.map(|v| v as f32), true);
+        widgets::target(g.sort.map(|v| v as f32));
         d::button(
-            &mut out,
-            m,
-            &tr(&name),
-            sx,
-            sy,
-            sw,
-            sh,
-            true,
-            sort_hover,
-            now_ms,
+            &mut out, m, &sort_text, sx, sy, sw, sh, true, sort_hover, now_ms,
         );
         if sort_hover {
             tooltip = Some(tr(&format!("{name}.hover")));
@@ -1017,7 +1034,7 @@ impl ModsScreen {
         separator_at(&mut out, "header", fx, fy, frame_w);
         separator_at(&mut out, "footer", fx, py + view, frame_w);
 
-        self.draw_list(&mut out, m, &g);
+        self.draw_list(&mut out, m, &g, mouse);
 
         // The info panel's contents.
         if let Some(e) = self.current() {
@@ -1127,6 +1144,11 @@ impl ModsScreen {
             let hover = d::inside(mouse, r[0], r[1], r[2], r[3]);
             crate::widgets::widget_cursor(hover, active);
             let text = tr(&format!("sunrise.mods.screen.{label}"));
+            let rect = r.map(|v| v as f32);
+            widgets::record(&text.plain(), rect, active);
+            if active {
+                widgets::target(rect);
+            }
             d::button(
                 &mut out,
                 m,
@@ -1157,16 +1179,14 @@ impl ModsScreen {
                 let label = tr(action.label);
                 let hover = d::inside(mouse, r[0], r[1], r[2], r[3]);
                 crate::widgets::widget_cursor(hover, true);
-                crate::widgets::target_as(rect, crate::widgets::Kind::ModListAction(action.id));
-                crate::widgets::record(&label.plain(), rect, true);
+                let kind = WidgetKind::ModListAction(action.id);
+                widgets::target_as(rect, kind);
+                widgets::record_as(&label.plain(), rect, true, kind);
                 d::button(
                     &mut out, m, &label, r[0], r[1], r[2], r[3], true, hover, now_ms,
                 );
-                crate::widgets::last_narratable(|item| {
-                    use std::hash::{Hash, Hasher};
-                    let mut hash = std::collections::hash_map::DefaultHasher::new();
-                    (action.id.owner, action.id.key).hash(&mut hash);
-                    item.key = hash.finish();
+                widgets::last_narratable(|item| {
+                    item.key = widgets::key_of(&(action.id.owner, action.id.key));
                 });
                 self.drawn_actions.push((r, action.id));
             }
@@ -1186,6 +1206,9 @@ impl ModsScreen {
         for (i, (r, label)) in g.footer.into_iter().zip(&labels).enumerate() {
             let hover = d::inside(mouse, r[0], r[1], r[2], r[3]);
             crate::widgets::widget_cursor(hover, true);
+            let rect = r.map(|v| v as f32);
+            widgets::record(&label.plain(), rect, true);
+            widgets::target(rect);
             if i == 1 {
                 crate::widgets::declare_action(
                     crate::widgets::Action::Back,
@@ -1204,7 +1227,7 @@ impl ModsScreen {
     }
 
     /// The sidebar's `ModsList`: an `ObjectSelectionList` of 28 px rows.
-    fn draw_list(&self, out: &mut Vec<Draw>, m: &Measure, g: &Geo) {
+    fn draw_list(&self, out: &mut Vec<Draw>, m: &Measure, g: &Geo, mouse: (i32, i32)) {
         let [x, y, w, h] = g.list;
         let prefix = if self.in_world { "inworld_" } else { "" };
         let amount = self.list.amount as i32;
@@ -1228,11 +1251,46 @@ impl ModsScreen {
         let scrollable = Scroll::max(content, h) > 0;
         let row_w = w - 6 - if scrollable { SCROLLBAR_W } else { 0 };
         let left = x + 3;
+        let rect = g.list.map(|v| v as f32);
+        if scrollable {
+            widgets::scroll_area(rect, self.list.amount as f32, (content - h) as f32);
+        }
+        widgets::narratable(|| {
+            let row = |position: usize| {
+                let entry = &self.entries[self.shown[position]];
+                let name = Text::literal(entry.name.clone());
+                widgets::Row::new(
+                    position,
+                    Text::translate("narrator.select", &[name]).plain(),
+                )
+            };
+            let hovered = d::inside(mouse, left, y, row_w, h)
+                .then(|| self.row_at(f64::from(mouse.1), y))
+                .flatten();
+            let selected = self
+                .selected
+                .and_then(|i| self.shown.iter().position(|&j| i == j));
+            widgets::Narratable::list(
+                widgets::ListKind::Object,
+                self.shown.len(),
+                hovered.map(row),
+                selected.map(row),
+                rect,
+            )
+            .key(widgets::key_of(&"mods_list"))
+            .focused(self.list_focused)
+        });
         for (position, &i) in self.shown.iter().enumerate() {
             let top = y + 2 - amount + position as i32 * ROW_H;
-            if top + ROW_H < y || top > y + h {
+            let visible_top = top.max(y);
+            let visible_bottom = (top + ROW_H).min(y + h);
+            if visible_top >= visible_bottom {
                 continue;
             }
+            widgets::target_as(
+                [left, visible_top, row_w, visible_bottom - visible_top].map(|v| v as f32),
+                WidgetKind::Row,
+            );
             let e = &self.entries[i];
             if self.selected == Some(i) {
                 let border = if self.list_focused { -1 } else { -8355712 };
@@ -1485,6 +1543,7 @@ mod tests {
                     crate::widgets::end_frame(crate::widgets::generation() + 1);
                     crate::widgets::last_labelled()
                         .into_iter()
+                        .filter(|w| matches!(w.kind, WidgetKind::ModListAction(_)))
                         .map(|w| w.label)
                         .collect()
                 };

@@ -182,11 +182,26 @@ impl Game<'_> {
         }
         self.apply_screen_with_mod_book(screen, owner);
     }
+    /// Actions from the last frame can be stale before a redraw or after a page change.
+    pub(in crate::game) fn mod_list_action_visible(
+        &self,
+        id: ModListActionId,
+        rect: Option<[f32; 4]>,
+    ) -> bool {
+        self.screen == Screen::Options
+            && self.ui.options.page() == Page::Mods
+            && self.ui.options.resource_error.is_none()
+            && self
+                .ui
+                .options
+                .mods_screen
+                .as_ref()
+                .is_some_and(|screen| screen.action_visible(id, self.gui_size(), rect))
+    }
+
     /// Resolve a press against the same package, not the row that now occupies its position.
     fn current_mod_list_action(&self, id: ModListActionId) -> Option<&'static ModListAction> {
-        if self.screen != Screen::Options
-            || self.ui.options.page() != Page::Mods
-            || self.ui.options.resource_error.is_some()
+        if !self.mod_list_action_visible(id, None)
             || !self.options.execution_role.is_client()
             || self.mod_screen_blocked()
             || self.ui.options.mods_screen.as_ref()?.selected_package() != Some(id.owner)
