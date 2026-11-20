@@ -70,7 +70,7 @@ fbf4f06490, except where a line says a stage has landed.
   stays mid-update. The group state (`sunrise_group_state`: the handler table, the cache budget, the eviction
   callbacks) belongs to the std member, so every member shares it.
 - **What a fault can't leave half-done on the host.** Under the #1909 boundary, the host decodes a reply completely
-  before writing any field back, and point records do the same. So a call that faults applies none of its reply.
+  before writing any field back. So a call that faults applies none of its reply.
   What it already did through imports before the fault stays done. The native resource scope and `FrameScope`
   unwind correctly, and the group is marked stopped before held native objects drop (`PoisonOnPanic`).
 - **Native differs.** A native listener's panic is fatal to the game, and the crash report names the mod through
@@ -146,7 +146,7 @@ library the addon called, or in a nested callback into another member.
   runs out, this is the member that was running as the tank emptied. Stated honestly: it is not necessarily the
   member that used most of the budget.
 - **The entered member and the call path.** The host already pushes a frame for each nested call (`cx.frames`,
-  `cx.module`). The report lists every member on that stack, outermost first, with the hook or point at each level.
+  `cx.module`). The report lists every member on that stack, outermost first, with the hook at each level.
 - **What stays unattributable.** Direct calls from one member into a library don't cross the host, so the time
   inside a library function can't be charged to its caller without fuel or a profiler. The report names members at
   the granularity of host crossings plus the innermost frame, and says that this is the limit.

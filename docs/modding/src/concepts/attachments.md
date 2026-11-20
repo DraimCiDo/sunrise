@@ -97,9 +97,6 @@ retaining many batches keeps their old bindings alive. Values from an incompatib
 falling back to saved decoding.
 
 
-
-For injection listeners, see [The typed API from injection listeners](injections/typed-api.md).
-
 ## Holders and persistence
 
 Use `Holder::Level`, `Holder::Chunk([x, z])`, `Holder::BlockEntity([x, y, z])`,

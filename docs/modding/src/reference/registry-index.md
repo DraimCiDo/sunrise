@@ -309,10 +309,10 @@ metadata-check game dependencies; it does not compile or link a game executable.
 check cache is not a native mod build route. `[[native.state]]` is refused with
 `E_MIXIN_STATE_LAYOUT`; use attachments for per-object mod data.
 
-Without support modules, `internals add`, `inject add` and `inject update` read `internals.json` and
-`points.json` from the pinned SDK's build data (`build-data.tar.xz`). The tool verifies the SDK release,
-`sdk-<build id>`, against its signed `SHA256SUMS`, using `SUNRISE_SDK_BASE` when set. No game or mod code is run.
-With `[[native.module]]` tables, these commands use the Rust named by the signed SDK to stage the pinned source
+Without support modules, `internals add` reads `internals.json` from the pinned SDK's build data
+(`build-data.tar.xz`). The tool verifies the SDK release, `sdk-<build id>`, against its signed `SHA256SUMS`,
+using `SUNRISE_SDK_BASE` when set. No game or mod code is run.
+With `[[native.module]]` tables, `internals add` uses the Rust named by the signed SDK to stage the pinned source
 with the mod's modules applied and save the catalog under `target/sunrise-mod/catalog-snapshots/`. Only use
 source discovery on mods you trust. It does not run the game.
 The separate `update` command compares the SDKs' build data for the old and new pins. Each build's data is kept

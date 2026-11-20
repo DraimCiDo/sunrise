@@ -1,12 +1,8 @@
-# Named hook points
+# Entity hooks
 
-Implement catalog hooks as methods of `mod_api::Hooks`.
-
-For function-slot listeners, declare `[[inject]]` with `id`, a target in `at`,
-`kind` (`"head"`, `"return"` or `"replace"`), and a crate-root listener in `with`.
-The optional `hash` pins the function fingerprint; when you omit it, the build
-uses the pinned game's catalog. The schema rejects `hook` and `hook_version`.
-See [Injections](../../concepts/injections.md).
+Implement catalog hooks as methods of `mod_api::Hooks`, with `#[mod_api::sunrise_mod]` on the `impl`.
+The attribute derives subscriptions from the implemented methods. See
+[Writing hooks](../../start/writing-hooks.md).
 
 Native rendering callbacks such as `sunrise_mod_render::render::world_drawn`,
 `hand_drawn` and `world_views` use a HEAD mixin. The launcher compiles the patched
@@ -18,6 +14,11 @@ Use the geometry types re-exported as `sunrise_mod_render::render::{Vertex, Enti
 Implement the `render_needs` callback to set `RenderNeeds` requests for world depth
 and entity geometry; these requests feed the engine's frame requirements so it
 retains the resources your drawing callbacks borrow.
+
+## Opening a container
+
+`player_container_open` runs synchronously after a successful open. Failed opens and opening the player's
+own inventory do not notify. Replacing an open menu closes it before announcing the new one.
 
 ## Leaving a bed
 

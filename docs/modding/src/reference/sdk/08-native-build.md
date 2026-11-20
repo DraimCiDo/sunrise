@@ -78,7 +78,7 @@ cargo sunrise-mod native-check < plan.json
 | `mods` | A mod's folder, or a folder of mod folders. |
 | `build` | The build id (the game's full commit) the mods are checked against. |
 | `surface` | Optional. The build's `surface.json`, read only for a mod made for another build. |
-| `build_data` | Optional. The build's unpacked build data (`points.json`, `internals.json`), read only for a mod made for another build that has `[[inject]]` rows or declares game code (a `[[native.mixin]]` or `[[native.loop]]` row, an `internals` list); `functions.json` and `loops.json` are read from it too. |
+| `build_data` | Optional. The build's unpacked build data (`functions.json`, `internals.json`, `loops.json`), read only for a mod made for another build that declares game code (a `[[native.mixin]]` or `[[native.loop]]` row, an `internals` list). |
 
 The reply is `{"contract": 2, "route": …, "mods": […]}`. `route` is `prebuilt-api` or `prebuilt` for the usable
 mods, `null` when none is. Each of `mods` has:
@@ -87,7 +87,7 @@ mods, `null` when none is. Each of `mods` has:
 |---|---|
 | `id` | The mod's id. |
 | `refusal` | Why no build takes it, as the build log says it; then `verdict` is `null`. |
-| `verdict` | `{"kind": …, "made_for": build}`: `made-for` (no `made_for`), `fits`, `exact` (`why`: the `[native]` table whose rows no list can judge, or `internals` for a declared function whose body this build's data does not hold), `no-list` (its package's list of what it uses cannot show a fit; `why` is `missing`, `unreadable`, `newer-schema` (a tool from a newer build reads it), `other-build` (made for another build than its pin), `hook-versions` (nothing it can judge changed, but it holds no version of the hooks in `hooks`; packing the mod again writes them) or `game-code` (nothing it can judge changed, but it holds no record of game code the mod declares; packing the mod again writes it)), `does-not-fit` (`misfits`: each `{id, change}`: a surface id, or a `game:` id for game code the mod declares (`game:fn:<path>`, `game:internal:<kind>:<path>`, `game:loop:<name>`, `game:tool:horizon-mixins`), and how it changed), `points` (`why`: an `[[inject]]` point that isn't the same). `made-for` and `fits` are usable. |
+| `verdict` | `{"kind": …, "made_for": build}`: `made-for` (no `made_for`), `fits`, `exact` (`why`: the `[native]` table whose rows no list can judge, or `internals` for a declared function whose body this build's data does not hold), `no-list` (its package's list of what it uses cannot show a fit; `why` is `missing`, `unreadable`, `newer-schema` (a tool from a newer build reads it), `other-build` (made for another build than its pin), `hook-versions` (nothing it can judge changed, but it holds no version of the hooks in `hooks`; packing the mod again writes them) or `game-code` (nothing it can judge changed, but it holds no record of game code the mod declares; packing the mod again writes it)), `does-not-fit` (`misfits`: each `{id, change}`: a surface id, or a `game:` id for game code the mod declares (`game:fn:<path>`, `game:internal:<kind>:<path>`, `game:loop:<name>`, `game:tool:horizon-mixins`), and how it changed). `made-for` and `fits` are usable. |
 | `needs` | `surface` or `build-data` when the plan didn't give the file its verdict needs; then `verdict` is `null`. The caller fetches it and asks again. |
 
 A `change` is `"removed"`, `"changed"`, `{"lost-impl": trait}`, `{"fields": {gained, at}}`, `{"version": {named, now}}`,
@@ -102,7 +102,7 @@ source and caches), `toolchain` (as for `native-build`) and `mods` (the mod's fo
 
 | Command | Its own plan field | Reply | Error `kind` |
 |---|---|---|---|
-| `native-discover` | `catalog`, optional: a folder that doesn't exist yet | without `catalog`, `{"internals": […]}`: the game internals the mod names, each as the pinned game's catalog lists it (`cargo sunrise-mod internals sync` writes them into `sunrise-mod.toml`). With it, `{"catalog": folder}`: the pinned game's `internals.json` and `points.json` with only this mod's `[[native.module]]` rows applied, copied there | `source` (the pinned game's source isn't cached and couldn't be downloaded), `discover` |
+| `native-discover` | `catalog`, optional: a folder that doesn't exist yet | without `catalog`, `{"internals": […]}`: the game internals the mod names, each as the pinned game's catalog lists it (`cargo sunrise-mod internals sync` writes them into `sunrise-mod.toml`). With it, `{"catalog": folder}`: the pinned game's `internals.json` with only this mod's `[[native.module]]` rows applied, copied there | `source` (the pinned game's source isn't cached and couldn't be downloaded), `discover` |
 | `native-lock` | `update`, optional: resolve again when the mod has a lock | `{"lock": path}`: the mod's registry dependencies pinned in its `Cargo.lock`, starting from the versions the pinned game locks | `lock` |
 
 `native-lock` reads the pinned game's `Cargo.lock`, kept as `game-lock/<commit>.lock` in `work` and downloaded from
