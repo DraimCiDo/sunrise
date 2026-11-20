@@ -2174,6 +2174,21 @@ impl Behaviours {
             unknown_output: std::cell::Cell::new(false),
         }
     }
+    /// Evaluate candidate survival against a read adapter, using the level's live signal inputs
+    /// (including moving-piston support) without borrowing or changing its tick queues.
+    pub fn can_survive_read<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &Ticks,
+        pos: BlockPos,
+        state: BlockStateId,
+    ) -> bool {
+        let mut scratch = Ticks::default();
+        let mut sim = self.sim(level, &mut scratch);
+        sim.signal_reads = Some(ticks);
+        sim.can_survive(state, pos)
+    }
+
     /// Ask `Block.getStateForPlacement` with a resolved context, without placing the result.
     /// Give it a scratch level to discard writes and random draws. Signals may read live ticks;
     /// any ticks requested by the placement rule go into a separate, empty queue.

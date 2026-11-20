@@ -16,7 +16,7 @@ use sunrise_core::{
 use sunrise_items::items::ItemStack;
 use sunrise_world::registry::BlockStateId;
 
-fn block_pos([x, y, z]: [i32; 3]) -> BlockPos {
+pub(super) fn block_pos([x, y, z]: [i32; 3]) -> BlockPos {
     BlockPos::new(x, y, z)
 }
 
@@ -668,7 +668,7 @@ impl Game<'_> {
         if !self.level_in_place(level) {
             return None;
         }
-        let view = super::native_level_signals::ReadLevel { game: self, level };
+        let view = super::native_level_signals::ReadLevel::current(self, level);
         Some(f(&self.res.behaviours().signals(&view, &self.block_ticks)))
     }
     /// How strongly the block at `pos` powers the block on its `direction` side, power it
@@ -995,7 +995,7 @@ impl Game<'_> {
 }
 
 /// `Level.isInWorldBoundsHorizontal`: x and z inside the 30,000,000-block limit.
-fn horizontal_in_bounds(pos: [i32; 3]) -> bool {
+pub(super) fn horizontal_in_bounds(pos: [i32; 3]) -> bool {
     (-30_000_000..30_000_000).contains(&pos[0]) && (-30_000_000..30_000_000).contains(&pos[2])
 }
 

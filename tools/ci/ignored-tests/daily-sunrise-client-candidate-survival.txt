@@ -1,0 +1,5 @@
+sunrise-client game::native_survival::tests::client_predicts_only_from_its_loaded_replica lib daily resources
+sunrise-client game::native_survival::tests::parked_server_level_reads_its_own_support lib daily resources
+sunrise-client game::native_survival::tests::parts_settle_candidate_then_soil_then_plant_and_keep_disabled_rules_inert lib daily resources
+sunrise-client game::native_survival::tests::stale_invalid_unloaded_and_depth_refusals_are_not_survival_denials lib daily resources
+sunrise-client game::native_survival::tests::survival_observes_tentative_support_without_writing_or_settling_the_transaction lib daily resources

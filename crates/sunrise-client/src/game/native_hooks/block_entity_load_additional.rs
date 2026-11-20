@@ -28,7 +28,7 @@ impl Game<'_> {
             && let Some(level) = self.level(self.dim.id())
             && let Some((id, entity, tag)) = loaded_payload(&self.world, level, pos)
         {
-            let host = ReadLevel { game: self, level };
+            let host = ReadLevel::current(self, level);
             let pos = [pos.0, pos.1, pos.2];
             mod_api::dispatch_block_entity_load_additional(&host, id, entity, pos, level, tag);
         }

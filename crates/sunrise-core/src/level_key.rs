@@ -45,6 +45,21 @@ impl LevelKey {
         Ok(Self(leaked))
     }
 
+    /// Look up an already registered full id, without parsing, allocating or interning it.
+    pub fn registered(id: &str) -> Option<Self> {
+        match id {
+            "minecraft:overworld" => Some(Self::OVERWORLD),
+            "minecraft:the_nether" => Some(Self::NETHER),
+            "minecraft:the_end" => Some(Self::END),
+            _ => INTERNED
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(id)
+                .copied()
+                .map(Self),
+        }
+    }
+
     /// The Nether or the End for their ids, the Overworld for anything else.
     pub fn builtin_or_overworld(id: &str) -> Self {
         match id {

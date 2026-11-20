@@ -1791,23 +1791,30 @@ pub(super) mod tests {
         use std::sync::Arc;
         use sunrise_client::chunk::Chunk;
 
-        with_game(|game| {
-            game.world
-                .chunks
-                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-            let registry = game.pack.assets.registry;
-            let grass = registry.default_state("minecraft:grass_block").unwrap();
-            let stone = registry.default_state("minecraft:stone").unwrap();
-            let sapling = registry.default_state("minecraft:oak_sapling").unwrap();
-            game.world.set(0, 64, 0, grass).unwrap();
-            assert!(game.level_can_survive([0, 65, 0], sapling));
-            game.world.set(0, 64, 0, stone).unwrap();
-            assert!(!game.level_can_survive([0, 65, 0], sapling));
-            assert!(
-                !game
-                    .level_can_survive([0, 65, 0], sunrise_world::registry::BlockStateId(u32::MAX))
-            );
-            assert!(!game.level_can_survive([100, 65, 100], sapling));
+        mod_platform::testing::with_mods(Default::default(), || {
+            with_game(|game| {
+                let _phase =
+                    mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                let registry = game.pack.assets.registry;
+                let grass = registry.default_state("minecraft:grass_block").unwrap();
+                let stone = registry.default_state("minecraft:stone").unwrap();
+                let sapling = registry
+                    .default_state("minecraft:oak_sapling")
+                    .unwrap()
+                    .try_into_api()
+                    .unwrap();
+                let level = game.level("minecraft:overworld").unwrap();
+                // Ask about a sapling even though the destination contains stone.
+                game.world.set(0, 65, 0, stone).unwrap();
+                game.world.set(0, 64, 0, grass).unwrap();
+                assert_eq!(level.can_survive(game, [0, 65, 0], sapling), Ok(true));
+                game.world.set(0, 64, 0, stone).unwrap();
+                assert_eq!(level.can_survive(game, [0, 65, 0], sapling), Ok(false));
+                assert_eq!(game.world.block(0, 65, 0), stone);
+            });
         });
     }
 

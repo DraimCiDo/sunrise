@@ -1,7 +1,7 @@
 # Placing a block from code
 
 `level.set_block(host, pos, state, flags)` writes a state without running `Block.setPlacedBy`.
-These are all server operations on the level in place.
+The writes on this page are server operations on the level in place.
 
 - `level.update_from_neighbour_shapes(host, pos, state)` is `Block.updateFromNeighbourShapes`: it returns
   the state fitted to the blocks around `pos` (a fence gets its connections, a stair its corner). Nothing
@@ -31,6 +31,28 @@ else of `BlockItem.place` runs: no survival or obstruction check, item placement
 game event or advancement. `place_block` and `update_from_neighbour_shapes` refuse with `LevelWriteError`:
 `Stale` for a dead handle, `Unavailable` on a client or for a level that is not the one in place, and
 `InvalidState` for a state the world lacks.
+
+## Check whether a candidate can survive
+
+Before a direct write, call `level.can_survive(host, pos, candidate)` to ask
+`BlockState.canSurvive` about the candidate, not the block at `pos`:
+
+```rust,ignore
+if level.can_survive(host, pos, candidate)? {
+    level.place_block(host, pos, candidate, true)?;
+}
+```
+
+An explicit `BlockPart::can_survive` answer wins. Otherwise the block's rule runs, including
+`can_sustain_plant` on the soil before `may_place_on` on the plant where the rule asks them.
+`Ok(false)` is a rule refusal; `Err(Stale)` means the level handle is dead, and
+`Err(Unavailable)` means the host could not evaluate the state or destination. On a client the
+answer is only a prediction on its loaded local replica.
+
+The read sees earlier transaction writes that are already visible to normal reads. It loads no
+chunks, changes no blocks and opens or settles no transaction. It does not run `must_survive`
+or check placement context, obstruction or permissions, and a positive answer does not guarantee
+that a later write will succeed.
 
 To place from a stack or saved data, write the state with `set_block`, then load the block entity data
 if any, then call `set_placed_by` with the original stack (if any). `BlockItem.place` applies item data

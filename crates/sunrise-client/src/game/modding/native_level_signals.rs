@@ -1,18 +1,67 @@
 //! Shared level input for the canonical signal evaluator and its block Parts.
-use super::Game;
 use super::api_values::{TryIntoApi, TryIntoEngine};
+use super::native_level_refs::block_pos;
+use super::{Dim, Game, LevelDimension};
 use mod_api::LevelHost;
 use std::collections::HashMap;
-use sunrise_client::{items::Items, world::World};
+use sunrise_client::{block_entity_anim::Shulker, items::Items, world::World};
+use sunrise_core::fast_hash::FxHashMap;
 use sunrise_core::{geometry::Direction, position::BlockPos};
-use sunrise_world::{level::signal_access::SignalAccess, registry::BlockStateId};
+use sunrise_world::{
+    level::{Signals, Ticks, signal_access::SignalAccess},
+    registry::BlockStateId,
+};
 
-/// Created for the game's current level (`self.level(self.dim.id())` or after
-/// `level_in_place` confirms the level matches `self.world`). No mutable world,
-/// random source, entity snapshots or transaction is needed by a signal read.
+/// A shared level and its read-only Part host. The world and tick inputs belong to the
+/// level being evaluated; no entity snapshots or transaction are needed.
 pub(super) struct ReadLevel<'g, 'a> {
     pub game: &'g Game<'a>,
     pub level: mod_api::LevelRef,
+    pub world: &'g World,
+    pub dimension: Option<LevelDimension>,
+    pub lid_openers: &'g HashMap<(i32, i32, i32), i32>,
+    pub shulkers: &'g FxHashMap<[i32; 3], Shulker>,
+    /// Present in a survival rule view; the signal callback itself cannot read signals.
+    pub rule_ticks: Option<&'g Ticks>,
+}
+
+impl<'g, 'a> ReadLevel<'g, 'a> {
+    pub(super) fn current(game: &'g Game<'a>, level: mod_api::LevelRef) -> Self {
+        Self {
+            game,
+            level,
+            world: &game.world,
+            dimension: None,
+            lid_openers: &game.lid_openers,
+            shulkers: &game.be_anims.shulkers,
+            rule_ticks: None,
+        }
+    }
+
+    pub(super) fn dimension(&self) -> LevelDimension {
+        self.dimension.unwrap_or_else(|| self.game.dim.level())
+    }
+
+    fn read_signals<R>(&self, read: impl FnOnce(&Signals<'_, Self>) -> R) -> Option<R> {
+        // Signal Parts get the signal view, not the originating rule's signal-read capability.
+        let signal_view = Self {
+            rule_ticks: None,
+            ..*self
+        };
+        let signals = self
+            .game
+            .res
+            .behaviours()
+            .uncached_signals(&signal_view, self.rule_ticks?);
+        let result = read(&signals);
+        (self.game.is_logical_server() || !signals.read_unknown_output()).then_some(result)
+    }
+}
+
+impl super::mod_api_host::SidedLevel for ReadLevel<'_, '_> {
+    fn client_side(&self) -> bool {
+        !self.game.is_logical_server()
+    }
 }
 
 super::native_tags::impl_tags!(ReadLevel<'_, '_>, level, level.game.native_tag_items());
@@ -51,12 +100,10 @@ pub(super) fn block_entity_signal(
 
 impl SignalAccess for ReadLevel<'_, '_> {
     fn block_state(&self, pos: BlockPos) -> BlockStateId {
-        self.game.world.block(pos.x, pos.y, pos.z)
+        self.world.block(pos.x, pos.y, pos.z)
     }
     fn shulker_is_closed(&self, pos: BlockPos) -> Option<bool> {
-        self.game
-            .be_anims
-            .shulkers
+        self.shulkers
             .get(&[pos.x, pos.y, pos.z])
             .map(|s| s.status == sunrise_client::block_entity_anim::ShulkerStatus::Closed)
     }
@@ -68,7 +115,7 @@ impl SignalAccess for ReadLevel<'_, '_> {
         if !self.game.collision.publishes_shapes(state) {
             return None;
         }
-        match self.game.world.block_entities.get(&(pos.x, pos.y, pos.z))? {
+        match self.world.block_entities.get(&(pos.x, pos.y, pos.z))? {
             sunrise_client::containers::BlockEntity::Mod(entity) => {
                 entity.shapes().map(|shapes| shapes.collision().clone())
             }
@@ -110,7 +157,7 @@ impl SignalAccess for ReadLevel<'_, '_> {
         let mut check = vanilla;
         mod_api::dispatch_should_check_weak_power(
             self,
-            self.game.dim.level(),
+            self.dimension(),
             pos,
             state,
             direction,
@@ -141,7 +188,7 @@ impl SignalAccess for ReadLevel<'_, '_> {
         let mut connected = vanilla;
         mod_api::dispatch_should_redstone_wire_connect_to(
             self,
-            self.game.dim.level(),
+            self.dimension(),
             pos,
             state,
             direction,
@@ -167,7 +214,7 @@ impl SignalAccess for ReadLevel<'_, '_> {
         adjust_signal(direction, vanilla, |face, signal| {
             mod_api::dispatch_block_signal(
                 self,
-                self.game.dim.level(),
+                self.dimension(),
                 pos,
                 state,
                 face,
@@ -178,10 +225,10 @@ impl SignalAccess for ReadLevel<'_, '_> {
     }
     fn block_entity_signal(&self, pos: BlockPos, state: BlockStateId, _: Direction) -> i32 {
         block_entity_signal(
-            &self.game.world,
+            self.world,
             self.game.pack.assets.registry,
             self.game.items(),
-            &self.game.lid_openers,
+            self.lid_openers,
             pos,
             state,
         )
@@ -198,33 +245,40 @@ impl LevelHost for ReadLevel<'_, '_> {
         face: mod_api::BlockFace,
         support: mod_api::SupportType,
     ) -> Option<bool> {
-        self.game
-            .level_block_face_sturdy(self.level, pos, face, support)
+        if self.dimension.is_none() {
+            return self
+                .game
+                .level_block_face_sturdy(self.level, pos, face, support);
+        }
+        super::native_world_read::block_face_sturdy(
+            self.world,
+            self.game.res.behaviours(),
+            self.game.collision,
+            pos,
+            face,
+            support,
+        )
     }
     fn can_see_sky(&self, pos: [i32; 3]) -> Option<bool> {
-        self.game.level_can_see_sky(self.level, pos)
+        if self.dimension.is_none() {
+            return self.game.level_can_see_sky(self.level, pos);
+        }
+        Some(super::native_world_read::can_see_sky(self.world, pos))
     }
     fn block_entity(&self, pos: [i32; 3]) -> Option<mod_api::BlockEntityRef> {
-        self.game.block_entity(self.level, pos)
+        if self.dimension.is_none() {
+            return self.game.block_entity(self.level, pos);
+        }
+        super::native_block_entity_refs::world_block_entity(self.world, self.level, pos)
     }
     fn container_size(&self, at: mod_api::BlockSide) -> Option<usize> {
-        if at.level != self.level
-            || !self
-                .game
-                .world
-                .is_loaded_at(at.pos[0], at.pos[1], at.pos[2])
-        {
+        if at.level != self.level || !self.world.is_loaded_at(at.pos[0], at.pos[1], at.pos[2]) {
             return None;
         }
         self.game.container_size(at)
     }
     fn container_stack(&self, at: mod_api::BlockSide, slot: usize) -> Option<mod_api::ItemStack> {
-        if at.level != self.level
-            || !self
-                .game
-                .world
-                .is_loaded_at(at.pos[0], at.pos[1], at.pos[2])
-        {
+        if at.level != self.level || !self.world.is_loaded_at(at.pos[0], at.pos[1], at.pos[2]) {
             return None;
         }
         self.game.container_stack(at, slot)?.try_into_api().ok()
@@ -236,10 +290,17 @@ impl LevelHost for ReadLevel<'_, '_> {
         name: &str,
     ) -> Result<mod_api::AttachmentBatch, mod_api::PartStateError> {
         super::native_block_entity_refs::part_snapshot(
-            &self.game.world,
+            self.world,
             Some(self.level),
             self.game.native_authoritative(),
-            self.game.attachment_indexes.get(&self.game.dim),
+            self.game
+                .attachment_indexes
+                .get(&match self.level.dimension() {
+                    mod_api::DimensionKey::OVERWORLD => Dim::Overworld,
+                    mod_api::DimensionKey::NETHER => Dim::Nether,
+                    mod_api::DimensionKey::END => Dim::End,
+                    key => Dim::Extra(key),
+                }),
             entity,
             namespace,
             name,
@@ -252,7 +313,7 @@ impl LevelHost for ReadLevel<'_, '_> {
             .flatten()
     }
     fn block_state(&self, [x, y, z]: [i32; 3]) -> Option<mod_api::BlockState> {
-        self.game.world.block(x, y, z).try_into_api().ok()
+        self.world.block(x, y, z).try_into_api().ok()
     }
     fn state_block(&self, state: mod_api::BlockState) -> Option<&str> {
         self.game
@@ -273,22 +334,24 @@ impl LevelHost for ReadLevel<'_, '_> {
             .block_state_string(state.try_into_engine(&()).ok()?)
     }
     fn min_y(&self) -> i32 {
-        self.game.world.shape.min_y
+        self.world.shape.min_y
     }
     fn height(&self) -> i32 {
-        self.game.world.shape.height
+        self.world.shape.height
     }
     fn block_in_tag(&self, block: mod_api::BlockKey, tag: &str) -> Option<bool> {
+        if self.dimension.is_some() && !self.game.is_logical_server() {
+            return None;
+        }
         super::native_world_read::block_in_tag(block, tag)
     }
     fn tags(&self) -> &dyn mod_api::Tags {
         self
     }
     fn fluid_state(&self, [x, y, z]: [i32; 3]) -> Option<mod_api::FluidState> {
-        self.game
-            .world
+        self.world
             .is_loaded_at(x, y, z)
-            .then(|| self.game.world.block(x, y, z))
+            .then(|| self.world.block(x, y, z))
             .and_then(|state| self.game.state_fluid_state(state))
     }
     fn state_fluid_state(&self, state: mod_api::BlockState) -> Option<mod_api::FluidState> {
@@ -296,11 +359,40 @@ impl LevelHost for ReadLevel<'_, '_> {
             .state_fluid_state(state.try_into_engine(&()).ok()?)
     }
     fn fluid_in_tag(&self, fluid: &str, tag: &str) -> Option<bool> {
+        if self.dimension.is_some() && !self.game.is_logical_server() {
+            return None;
+        }
         Some(super::native_world_read::fluid_in_tag(
             self.game.items(),
             fluid,
             tag,
         ))
+    }
+    fn collision_shape(&self, [x, y, z]: [i32; 3]) -> Option<Vec<[f64; 6]>> {
+        self.rule_ticks?;
+        self.world.is_loaded_at(x, y, z).then(|| {
+            super::native_state_shapes::collision_boxes(
+                self.game.collision,
+                self.world,
+                self.world.block(x, y, z),
+                [x, y, z],
+            )
+        })
+    }
+    fn signal(&self, pos: [i32; 3], direction: Direction) -> Option<i32> {
+        self.read_signals(|s| s.signal(block_pos(pos), direction))
+    }
+    fn direct_signal(&self, pos: [i32; 3], direction: Direction) -> Option<i32> {
+        self.read_signals(|s| s.direct_signal(block_pos(pos), direction))
+    }
+    fn direct_signal_to(&self, pos: [i32; 3]) -> Option<i32> {
+        self.read_signals(|s| s.direct_signal_to(block_pos(pos)))
+    }
+    fn best_neighbor_signal(&self, pos: [i32; 3]) -> Option<i32> {
+        self.read_signals(|s| s.best_neighbor_signal(block_pos(pos)))
+    }
+    fn has_neighbor_signal(&self, pos: [i32; 3]) -> Option<bool> {
+        self.read_signals(|s| s.has_neighbor_signal(block_pos(pos)))
     }
     fn state_with_property(
         &self,
@@ -318,7 +410,7 @@ impl LevelHost for ReadLevel<'_, '_> {
         .ok()
     }
     fn brightness(&self, layer: mod_api::LightLayer, pos: [i32; 3]) -> i32 {
-        super::native_level_refs::world_brightness(&self.game.world, layer, pos)
+        super::native_level_refs::world_brightness(self.world, layer, pos)
     }
     fn raw_brightness(&self, pos: [i32; 3], sky_darken: i32) -> i32 {
         // Java's unchecked subtraction: a listener may pass any darkening, including
@@ -329,7 +421,7 @@ impl LevelHost for ReadLevel<'_, '_> {
         )
     }
     fn is_loaded(&self, [x, y, z]: [i32; 3]) -> bool {
-        self.game.world.is_loaded_at(x, y, z)
+        self.world.is_loaded_at(x, y, z)
     }
     fn is_raining_at(&self, pos: [i32; 3]) -> bool {
         self.game

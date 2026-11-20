@@ -7,6 +7,27 @@ use crate::*;
 #[sunrise_mod_api_macros::host_area]
 pub trait LevelBlocksBackend {
     /// Side: both.
+    /// Test the supplied candidate at `pos` (`BlockState.canSurvive`), regardless of the
+    /// state currently at that position. Uses this level's rule and existing Block Parts.
+    /// On a client this is a prediction from the locally loaded replica.
+    ///
+    /// Returns `Stale` for a dead level handle and `Unavailable` for a host, phase, level,
+    /// state or destination that cannot be evaluated, or a recursive read that repeats an
+    /// active query or exceeds the nesting limit. `Ok(false)` means the rule refused it.
+    ///
+    /// Sees prior transaction writes that are visible to ordinary level reads. It does not
+    /// open or change a transaction, write blocks, load chunks, or check placement context,
+    /// obstruction, permissions or `BlockItem.mustSurvive`.
+    /// Not on wasm: this query is exposed to native mods only.
+    #[doc(hidden)]
+    #[access(WorldOnly)]
+    fn level_can_survive(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockState,
+    ) -> Result<bool, LevelReadError>;
+    /// Side: both.
     /// The contextual friction of `state` at `pos` (`IBlockExtension.getFriction`).
     /// The state need not occupy the position. `entity` is the optional id and type
     /// passed to the block's part. Returns `Ok(None)` for a nested query that repeats

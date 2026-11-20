@@ -89,7 +89,7 @@ impl Game<'_> {
             && mod_api::__private::has_part_hook(HookId::BlockEntitySaveAdditional)
             && let Some(level) = self.level(self.dim.id())
         {
-            let host = ReadLevel { game: self, level };
+            let host = ReadLevel::current(self, level);
             save_additional(level, pos, generation, kind, tag, |id, entity, tag| {
                 let pos = [pos.0, pos.1, pos.2];
                 mod_api::dispatch_block_entity_save_additional(&host, id, entity, pos, level, tag);

@@ -165,7 +165,7 @@ fn part_state_is_per_block_entity_through_ticks_transactions_and_replacement() {
         let dedicated = game.options.dedicated.take();
         let role = game.options.execution_role;
         game.options.execution_role = super::execution_role::ExecutionRole::Client;
-        let client_view = super::native_level_signals::ReadLevel { game, level };
+        let client_view = super::native_level_signals::ReadLevel::current(game, level);
         assert_eq!(Press::state_in(&client_view, a), Ok(0));
         assert_eq!(Press::state_existing_in(&client_view, a), Ok(None));
         game.options.dedicated = dedicated;

@@ -50,6 +50,11 @@ fn doc_comments(
 ) -> Result<String, String> {
     let mut docs = String::new();
     for attr in attrs.iter().filter(|attr| attr.path().is_ident("doc")) {
+        // Hiding a backend entry (e.g. from the legacy Wire bindings) must not hide the
+        // documented native method generated from it.
+        if matches!(&attr.meta, syn::Meta::List(list) if list.tokens.to_string() == "hidden") {
+            continue;
+        }
         let syn::Meta::NameValue(value) = &attr.meta else {
             return Err(format!("unsupported doc attribute in {name}"));
         };
