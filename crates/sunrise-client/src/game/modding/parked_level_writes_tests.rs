@@ -64,6 +64,7 @@ fn with_two_levels(
     mod_platform::testing::with_mods(mods, || {
         with_game(|game| {
             let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+            game.world_root = game.options.game_dir.clone().unwrap();
             let states = chest_states(game);
             for dim in [Dim::Nether, Dim::Overworld] {
                 game.enter_level(dim).unwrap();
@@ -155,7 +156,7 @@ fn root_commit_uses_final_flags_and_keeps_same_position_levels_separate() {
                 assert_eq!(current.block_state(host, POS), Some(east));
                 assert!(entity.data(host).unwrap().contains_key(&"Items".into()));
                 assert!(heard.lock().unwrap().is_empty());
-                Ok(())
+                Ok::<_, ()>(())
             })
             .unwrap();
         assert_eq!(
