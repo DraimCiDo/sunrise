@@ -15,7 +15,7 @@ fn input(texture: &(u32, u32, Vec<bool>), above: f64, range: i32, fast: bool) ->
         // z -3.9600000381469727 sits at the corner of cell 0, 0, `above` the layer's bottom.
         camera: glam::DVec3::new(
             0.0,
-            f64::from(CLOUD_HEIGHT as f32) + above,
+            f64::from(CLOUD_HEIGHT) + above,
             -3.960_000_038_146_972_7,
         ),
         time: 0,
@@ -23,6 +23,7 @@ fn input(texture: &(u32, u32, Vec<bool>), above: f64, range: i32, fast: bool) ->
         range,
         fast,
         color: [1.0, 1.0, 1.0, 0.8],
+        height: CLOUD_HEIGHT,
     }
 }
 
@@ -212,12 +213,17 @@ fn the_faces_key_holds_only_while_the_faces_do() {
         let input = Input {
             texture: &texture,
             uv: [0.5; 2],
-            camera: glam::DVec3::new(t * 0.37, CLOUD_HEIGHT - 6.0 + (t * 0.05) % 14.0, t * 0.37),
+            camera: glam::DVec3::new(
+                t * 0.37,
+                f64::from(CLOUD_HEIGHT) - 6.0 + (t * 0.05) % 14.0,
+                t * 0.37,
+            ),
             time: i64::from(step),
             partial_tick: 0.0,
             range: 3,
             fast: false,
             color: [1.0; 4],
+            height: CLOUD_HEIGHT,
         };
         let key = faces_key(&input);
         let faces = faces(&input);
@@ -258,7 +264,7 @@ const JAVA_TEXTURES: &[(&str, u32, u32, &[[u32; 2]])] = &[
 /// the float vanilla took (1.2207031e-4f, 2^-13 exactly): narrowed first and added to the game
 /// time's remainder in float, as vanilla adds them, it ties to the remainder itself; summed in
 /// double it would round up a float step.
-const JAVA_FRAMES: &[(u32, bool, i32, [f64; 3], i64, f64)] = &[
+const JAVA_FRAMES: &[JavaFrame] = &[
     (0xFFFF_FFFF, true, 1, [37.25, 200.5, -5.5], 12345, 0.37),
     (0x00FF_0001, false, 1, [-3.75, 194.0, 30.125], 0, 0.0),
     (0xFE7F_80FF, true, 2, [0.5, 150.25, 0.5], 999_999, 0.99),
@@ -473,10 +479,32 @@ const JAVA: &[Case] = &[
     },
 ];
 
-/// The input a frame gives Sunrise: the ARGB colour as `environment` gives it (each channel over
-/// 255).
-fn java_input<'a>(texture: &'a (u32, u32, Vec<bool>), frame: usize) -> Input<'a> {
-    let (argb, fancy, range, camera, time, partial) = JAVA_FRAMES[frame];
+/// A frame of a Java dump: the ARGB colour, fancy, the range, the camera, the game time and the
+/// partial tick.
+type JavaFrame = (u32, bool, i32, [f64; 3], i64, f64);
+
+/// A texture of [`JAVA_TEXTURES`] by name: its width, height and filled cells.
+fn java_texture(name: &str) -> (u32, u32, Vec<bool>) {
+    let (_, w, h, cells) = JAVA_TEXTURES
+        .iter()
+        .find(|(texture, ..)| *texture == name)
+        .expect("a texture");
+    let mut filled = vec![false; (*w * *h) as usize];
+    for [x, y] in *cells {
+        filled[(y * w + x) as usize] = true;
+    }
+    (*w, *h, filled)
+}
+
+/// The input a frame gives Sunrise at a cloud height: the ARGB colour as `environment` gives it
+/// (each channel over 255).
+fn java_input<'a>(
+    texture: &'a (u32, u32, Vec<bool>),
+    frames: &[JavaFrame],
+    frame: usize,
+    height: f32,
+) -> Input<'a> {
+    let (argb, fancy, range, camera, time, partial) = frames[frame];
     let channel = |shift: u32| ((argb >> shift) & 0xFF) as f32 / 255.0;
     Input {
         texture,
@@ -487,6 +515,7 @@ fn java_input<'a>(texture: &'a (u32, u32, Vec<bool>), frame: usize) -> Input<'a>
         range,
         fast: !fancy,
         color: [channel(16), channel(8), channel(0), channel(24)],
+        height,
     }
 }
 
@@ -496,21 +525,83 @@ fn java_input<'a>(texture: &'a (u32, u32, Vec<bool>), frame: usize) -> Input<'a>
 #[test]
 fn faces_and_cloud_info_are_vanillas_byte_for_byte() {
     for case in JAVA {
-        let (_, w, h, cells) = JAVA_TEXTURES
-            .iter()
-            .find(|(name, ..)| *name == case.texture)
-            .expect("a texture");
-        let mut filled = vec![false; (*w * *h) as usize];
-        for [x, y] in *cells {
-            filled[(y * w + x) as usize] = true;
-        }
-        let texture = (*w, *h, filled);
-        let input = java_input(&texture, case.frame);
+        let texture = java_texture(case.texture);
+        let input = java_input(&texture, JAVA_FRAMES, case.frame, CLOUD_HEIGHT);
         let what = format!("{} frame {}", case.texture, case.frame);
         let got: Vec<u8> = faces(&input).iter().map(|&b| b as i8 as u8).collect();
         assert_eq!(got, case.faces, "{what}: faces");
         if let Some(java) = case.info {
             assert_eq!(&info(&input)[..44], java, "{what}: CloudInfo");
         }
+    }
+}
+
+/// The frames of [`JAVA_HEIGHT`]: the ARGB colour, fancy, the range, the camera, the game time and
+/// the partial tick, in a world whose datapack sets the overworld's `minecraft:visual/cloud_height`
+/// to 250 (dumped by a temporary bench-mod hook, not kept in the tree).
+const JAVA_HEIGHT_FRAMES: &[JavaFrame] = &[
+    (0xFFFF_FFFF, true, 1, [37.25, 255.5, -5.5], 12345, 0.37),
+    (0x00FF_0001, false, 1, [-3.75, 251.0, 30.125], 0, 0.0),
+    (0xFE7F_80FF, true, 2, [0.5, 150.25, 0.5], 999_999, 0.99),
+];
+
+/// What the bench mod's hook read of vanilla 26.3 in that world: `LevelExtractor`'s
+/// `levelRenderState.cloudHeight` (`EnvironmentAttributes.CLOUD_HEIGHT` at the camera) was 250.0
+/// (bits 1132068864), and `prepare` given it built these faces and `CloudInfo` for the wide
+/// texture.
+const JAVA_HEIGHT: &[Case] = &[
+    Case {
+        texture: "wide",
+        frame: 0,
+        info: Some(&[
+            0, 0, 128, 63, 0, 0, 128, 63, 0, 0, 128, 63, 0, 0, 128, 63, 17, 199, 57, 193, 0, 0,
+            176, 192, 41, 92, 39, 193, 0, 0, 0, 0, 0, 0, 64, 65, 0, 0, 128, 64, 0, 0, 64, 65,
+        ]),
+        faces: &[
+            0, 0, 1, 0, 0, 16, 0, 0, 17, 0, 0, 18, 0, 0, 19, 0, 0, 20, 0, 0, 21, 0, 0, 129, 0, 0,
+            144, 0, 0, 145, 0, 0, 146, 0, 0, 147, 0, 0, 148, 0, 0, 149, 255, 0, 193, 255, 0, 194,
+            255, 0, 197, 255, 0, 208, 255, 0, 209, 255, 0, 210, 255, 0, 211, 255, 0, 212, 255, 0,
+            213,
+        ],
+    },
+    Case {
+        texture: "wide",
+        frame: 1,
+        info: Some(&[
+            0, 0, 128, 63, 0, 0, 0, 0, 129, 128, 128, 59, 0, 0, 0, 0, 0, 0, 4, 193, 0, 0, 128, 191,
+            41, 92, 33, 193, 0, 0, 0, 0, 0, 0, 64, 65, 0, 0, 128, 64, 0, 0, 64, 65,
+        ]),
+        faces: &[0, 255, 96, 0, 0, 160, 255, 0, 224],
+    },
+    Case {
+        texture: "wide",
+        frame: 2,
+        info: Some(&[
+            255, 254, 254, 62, 129, 128, 0, 63, 0, 0, 128, 63, 255, 254, 126, 63, 0, 217, 255, 190,
+            0, 128, 199, 66, 82, 184, 142, 192, 0, 0, 0, 0, 0, 0, 64, 65, 0, 0, 128, 64, 0, 0, 64,
+            65,
+        ]),
+        faces: &[
+            0, 255, 64, 0, 255, 67, 0, 255, 80, 0, 255, 81, 0, 255, 82, 0, 255, 83, 0, 255, 84, 0,
+            255, 85, 255, 0, 0, 255, 0, 5, 255, 255, 192, 255, 255, 195, 255, 255, 197, 255, 255,
+            208, 255, 255, 209, 255, 255, 210, 255, 255, 211, 255, 255, 212, 255, 255, 213, 0, 0,
+            192, 0, 0, 194, 0, 0, 196, 0, 0, 208, 0, 0, 209, 0, 0, 210, 0, 0, 211, 0, 0, 212, 0, 0,
+            213, 254, 0, 128, 0, 1, 64, 0, 1, 66, 1, 0, 128, 1, 0, 132, 1, 255, 0, 1, 255, 3, 1,
+            255, 4, 1, 1, 0, 1, 1, 2, 1, 1, 4,
+        ],
+    },
+];
+
+/// A datapack's `visual/cloud_height` of 250 moves the layer as in vanilla: Sunrise's faces and
+/// `CloudInfo` for that height are vanilla's, byte for byte, above, inside and below the layer.
+#[test]
+fn faces_and_cloud_info_follow_a_datapacks_cloud_height() {
+    for case in JAVA_HEIGHT {
+        let texture = java_texture(case.texture);
+        let input = java_input(&texture, JAVA_HEIGHT_FRAMES, case.frame, 250.0);
+        let what = format!("frame {}", case.frame);
+        let got: Vec<u8> = faces(&input).iter().map(|&b| b as i8 as u8).collect();
+        assert_eq!(got, case.faces, "{what}: faces");
+        assert_eq!(&info(&input)[..44], case.info.unwrap(), "{what}: CloudInfo");
     }
 }

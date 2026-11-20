@@ -1291,7 +1291,6 @@ fn encode_full(
 ) -> NamedTag {
     let sky_light = shape.sky_light;
     let mut sections = Vec::new();
-    let air = tables.map_or(0, |t| t.air);
     // Sky layers below the highest section with light other than 15 are
     // written (even all-zero ones): vanilla derives missing layers from the
     // layer above them.
@@ -1299,9 +1298,42 @@ fn encode_full(
         .sections
         .iter()
         .rposition(|s| s.light.any_not(0xF0, 0xF0));
-    for (si, section) in chunk.sections.iter().enumerate() {
-        let y = (chunk.min_y() >> 4) + si as i32;
+    // `SerializableChunkData.copyOf` checks the engine's whole light range, not just
+    // sections with block data. A dimension can be narrower than the chunk's allocation.
+    let light_y = shape.min_section() - 1..=(shape.max_y() >> 4);
+    let first = (chunk.min_y() >> 4) - 1;
+    for y in light_y {
+        let b = (y - first) as usize;
+        let section = match b {
+            0 => chunk.pad_below.as_ref(),
+            _ if b == chunk.sections.len() + 1 => chunk.pad_above.as_ref(),
+            _ => chunk.sections.get(b - 1),
+        };
+        let Some(section) = section else { continue };
+        let layers = if chunk.lit {
+            chunk.stored_light_layers(b).unwrap_or_else(|| {
+                if !shape.has_section(y) {
+                    return [false; 2];
+                }
+                [
+                    top_sky.is_some_and(|top| b <= top + 2),
+                    section.light.any(15),
+                ]
+            })
+        } else {
+            [false; 2]
+        };
+        let mut entries = vec![("Y", Tag::Byte(y as i8))];
+        if layers[1] {
+            entries.push(("BlockLight", Tag::ByteArray(nibbles(&section.light, false))));
+        }
+        if sky_light && layers[0] {
+            entries.push(("SkyLight", Tag::ByteArray(nibbles(&section.light, true))));
+        }
         if !shape.has_section(y) {
+            if entries.len() > 1 {
+                sections.push(Tag::compound(entries));
+            }
             continue;
         }
         // PalettedContainer.pack: distinct states in index order, indices at
@@ -1354,21 +1386,10 @@ fn encode_full(
                 Tag::LongArray(data.iter().map(|&w| w as i64).collect()),
             ));
         }
-        let mut entries = vec![
-            ("Y", Tag::Byte(y as i8)),
+        entries.extend([
             ("block_states", Tag::compound(states)),
             ("biomes", Tag::compound(biome_tag)),
-        ];
-        if chunk.lit {
-            let block_lit = section.light.any(15);
-            if block_lit {
-                entries.push(("BlockLight", Tag::ByteArray(nibbles(&section.light, false))));
-            }
-            if sky_light && top_sky.is_some_and(|top| si <= top + 1) {
-                entries.push(("SkyLight", Tag::ByteArray(nibbles(&section.light, true))));
-            }
-        }
-        let _ = air;
+        ]);
         sections.push(Tag::compound(entries));
     }
     let extras = chunk.saved.as_deref();
@@ -1914,108 +1935,26 @@ pub fn load_light(tag: &Tag, chunk: &mut Chunk, sky_light: bool) {
     let Some(Tag::List(sections)) = tag.get("sections") else {
         return;
     };
-    let mut layers: Vec<(Option<&[u8]>, Option<&[u8]>)> = vec![(None, None); chunk.sections.len()];
+    let mut layers = vec![(None, None); chunk.sections.len() + 2];
+    let first = (chunk.min_y() >> 4) - 1;
     for section in sections {
         let Some(y) = number(section.get("Y")) else {
             continue;
         };
-        let Some(si) = chunk.section_index(y as i32 * 16) else {
+        let Some(slot) = y
+            .checked_sub(i64::from(first))
+            .and_then(|b| usize::try_from(b).ok())
+            .and_then(|b: usize| layers.get_mut(b))
+        else {
             continue;
         };
         let layer = |name: &str| match section.get(name) {
             Some(Tag::ByteArray(a)) if a.len() == 2048 => Some(&a[..]),
             _ => None,
         };
-        layers[si] = (layer("SkyLight"), layer("BlockLight"));
+        *slot = (layer("SkyLight"), layer("BlockLight"));
     }
-    // A saved layer is already the resident `Light::Sky`/`Light::Block`
-    // layer: byte `i` holds block `2i` in its low nibble and `2i + 1` in its
-    // high one. Both nibbles of each byte must match for a layer to be
-    // uniform; only then is the whole section one value.
-    let uniform_layer = |layer: &[u8]| {
-        let first = layer[0];
-        (first & 15 == first >> 4 && layer.iter().all(|&v| v == first)).then_some(first & 15)
-    };
-    let copy_layer = |layer: &[u8]| {
-        let mut out = Box::new([0u8; 2048]);
-        out.copy_from_slice(layer);
-        out
-    };
-    let mut above = [if sky_light { 15 } else { 0 }; 256];
-    for (si, (sky, block)) in layers.into_iter().enumerate().rev() {
-        let sky = sky.filter(|_| sky_light);
-        let sky_uniform = sky.and_then(uniform_layer);
-        let sky_varies = match sky {
-            Some(_) => sky_uniform.is_none(),
-            None => above.iter().any(|&v| v != above[0]),
-        };
-        let block_uniform = block.and_then(uniform_layer);
-        let block_varies = block.is_some() && block_uniform.is_none();
-        let sky_first = sky.map_or(above[0], |layer| layer[0] & 15);
-        let block_first = block.map_or(0, |layer| layer[0] & 15);
-        let section = Arc::make_mut(&mut chunk.sections[si]);
-        section.compact();
-        // The saved layer decides the resident variant directly: expand
-        // only when both nibbles vary (which keeps `Light::Full`).
-        section.light = match (sky_varies, block_varies) {
-            (false, false) => Light::Uniform(sky_first << 4 | block_first),
-            (false, true) => Light::Block(copy_layer(block.expect("block layer")), sky_first),
-            (true, false) => {
-                let layer = match sky {
-                    Some(layer) => copy_layer(layer),
-                    // No stored sky: the same 256-byte bottom row over and
-                    // over, which is exactly `Light::packed`'s layer here.
-                    None => {
-                        let mut layer = Box::new([0u8; 2048]);
-                        for row in layer.as_chunks_mut::<128>().0 {
-                            for (out, v) in
-                                row.iter_mut().zip(above.as_chunks::<2>().0.iter().cycle())
-                            {
-                                *out = v[0] | v[1] << 4;
-                            }
-                        }
-                        layer
-                    }
-                };
-                Light::Sky(layer, block_first)
-            }
-            (true, true) => {
-                let mut data = Box::new([0u8; 4096]);
-                match (sky, block) {
-                    (Some(sky), Some(block)) => {
-                        for ((pair, &s), &b) in
-                            data.as_chunks_mut::<2>().0.iter_mut().zip(sky).zip(block)
-                        {
-                            pair[0] = s << 4 | (b & 15);
-                            pair[1] = (s & 0xf0) | (b >> 4);
-                        }
-                    }
-                    (None, Some(block)) => {
-                        for (i, (pair, &b)) in data
-                            .as_chunks_mut::<2>()
-                            .0
-                            .iter_mut()
-                            .zip(block)
-                            .enumerate()
-                        {
-                            pair[0] = above[(i * 2) & 255] << 4 | (b & 15);
-                            pair[1] = above[(i * 2 + 1) & 255] << 4 | (b >> 4);
-                        }
-                    }
-                    _ => unreachable!("both light kinds vary"),
-                }
-                Light::Full(data)
-            }
-        };
-        if let Some(sky) = sky {
-            for (pair, &s) in above.as_chunks_mut::<2>().0.iter_mut().zip(sky) {
-                pair[0] = s & 15;
-                pair[1] = s >> 4;
-            }
-        }
-    }
-    chunk.lit = true;
-    chunk.light_loaded = true;
+    crate::light::light_from_layers(chunk, &layers, sky_light);
 }
 
 type RegionCache = Mutex<RegionFiles>;
@@ -3613,6 +3552,40 @@ pub fn write_world_gen_settings(dir: &Path, seed: i64, options: WorldGen) -> Res
     write_world_gen_settings_with(dir, seed, options, None, None, None)
 }
 include!("save/preset_generation.rs");
+const VANILLA_FEATURE_FLAGS: [&str; 1] = ["minecraft:vanilla"];
+/// The effective feature flags stored by a level. Fresh and defaulted saves have vanilla's set.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FeatureFlagIds(Arc<[String]>);
+
+impl Default for FeatureFlagIds {
+    fn default() -> Self {
+        static VANILLA: std::sync::LazyLock<Arc<[String]>> =
+            std::sync::LazyLock::new(|| VANILLA_FEATURE_FLAGS.map(str::to_owned).into());
+        Self(Arc::clone(&VANILLA))
+    }
+}
+
+impl FeatureFlagIds {
+    /// Share the flag ids with views of this level without copying them.
+    pub fn as_arc(&self) -> &Arc<[String]> {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for FeatureFlagIds {
+    type Target = [String];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T: Into<Arc<[String]>>> From<T> for FeatureFlagIds {
+    fn from(ids: T) -> Self {
+        Self(ids.into())
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Level {
     pub name: String,
@@ -3689,10 +3662,9 @@ pub struct Level {
     /// `DataPackConfig` (Create World's Data Packs and Experiments): the
     /// enabled and disabled pack ids. Unset keeps vanilla's defaults.
     pub data_packs: Option<(Vec<String>, Vec<String>)>,
-    /// `WorldDataConfiguration`'s `enabled_features`: the feature flag ids
-    /// the world enables, `minecraft:vanilla` included. Empty is vanilla's
-    /// default, which the level.dat omits.
-    pub enabled_features: std::sync::Arc<[String]>,
+    /// `WorldDataConfiguration`'s `enabled_features`: the effective feature flag ids.
+    /// An omitted `level.dat` tag decodes as vanilla's default, `minecraft:vanilla`.
+    pub enabled_features: FeatureFlagIds,
     /// The code mods (`fml.LoadingModList` beside `Data`), then the content mods (`sunrise.ContentModList`), the world was saved with; `None` without either list or when both are empty.
     pub saved_mods: Option<Vec<level_mods::ModRecord>>,
     /// Game rule values by name without namespace (`keep_inventory`, ...).
@@ -3732,6 +3704,7 @@ pub struct Level {
     /// that file, not their own.
     pub singleplayer_file: bool,
 }
+
 impl Level {
     /// `PrimaryLevelData.setDifficulty`: the level data holds the world's
     /// difficulty, so the game and the file follow each other and a world
@@ -3880,10 +3853,15 @@ impl Level {
             level.difficulty_locked = n(d.get("locked")) != 0;
         }
         level.allow_commands = Some(n(data.get("allowCommands")) != 0);
-        // WorldDataConfiguration.MAP_CODEC's `enabled_features`, flat in the
-        // Data compound and omitted when the flags are vanilla's default.
-        if let Some(Tag::List(flags)) = data.get("enabled_features") {
-            level.enabled_features = flags.iter().filter_map(|f| text(Some(f))).collect();
+        // WorldDataConfiguration.MAP_CODEC's lenient optional field uses the default
+        // for both absent and malformed input. A valid empty list is not the default.
+        if let Some(Tag::List(flags)) = data.get("enabled_features")
+            && let Some(flags) = flags
+                .iter()
+                .map(|flag| text(Some(flag)))
+                .collect::<Option<Arc<[_]>>>()
+        {
+            level.enabled_features = flags.into();
         }
         level.saved_mods = level_mods::saved(&root);
         if let Some(packs) = data.get("DataPacks") {
@@ -4591,11 +4569,10 @@ impl Level {
                 map.insert("allowCommands".into(), Tag::Byte(i8::from(allow)));
             }
             map.entry("WasModded".into()).or_insert(Tag::Byte(0));
-            // lenientOptionalFieldOf("enabled_features", DEFAULT_FLAGS): the
-            // tag is left out when the set is vanilla's default, so a
-            // `["minecraft:vanilla"]`-only list does not reach the file.
-            let vanilla_only = *self.enabled_features == ["minecraft:vanilla"];
-            if !self.enabled_features.is_empty() && !vanilla_only {
+            // WorldDataConfiguration omits the default, even when the retained Data had a tag.
+            if *self.enabled_features == VANILLA_FEATURE_FLAGS {
+                map.remove(&JavaString::from("enabled_features"));
+            } else {
                 map.insert(
                     "enabled_features".into(),
                     Tag::List(self.enabled_features.iter().map(|s| string(s)).collect()),
@@ -8363,13 +8340,13 @@ mod tests {
         let Some(Tag::List(sections)) = tag.get("sections") else {
             return;
         };
-        let mut layers: Vec<(Option<&[u8]>, Option<&[u8]>)> = vec![(None, None); SECTIONS];
+        let mut layers: Vec<(Option<&[u8]>, Option<&[u8]>)> = vec![(None, None); SECTIONS + 2];
         for section in sections {
             let Some(y) = number(section.get("Y")) else {
                 continue;
             };
-            let si = y as i32 - (MIN_Y >> 4);
-            if !(0..SECTIONS as i32).contains(&si) {
+            let si = y as i32 - (MIN_Y >> 4) + 1;
+            if !(0..SECTIONS as i32 + 2).contains(&si) {
                 continue;
             }
             let layer = |name: &str| match section.get(name) {
@@ -8378,8 +8355,7 @@ mod tests {
             };
             layers[si as usize] = (layer("SkyLight"), layer("BlockLight"));
         }
-        let above = [if sky_light { 15 } else { 0 }; 256];
-        crate::light::light_from_layers(chunk, &layers, above, sky_light);
+        crate::light::light_from_layers(chunk, &layers, sky_light);
     }
 
     #[test]
@@ -8428,6 +8404,41 @@ mod tests {
         );
         assert!(!unlit.lit && !unlit.light_loaded);
     }
+    #[test]
+    #[ignore = "daily"]
+    fn both_light_pads_survive_full_chunk_save_and_reload() {
+        let root = PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let biomes = Biomes::load(&sunrise_assets::resource_source::ResourceRoot::directory(
+            root,
+        ))
+        .unwrap();
+        let mut original = Chunk::empty(0, 0);
+        let mut layers = vec![(None, None); SECTIONS + 2];
+        layers[0] = (None, Some(vec![0x55; 2048]));
+        layers[SECTIONS + 1] = (Some(vec![0x27; 2048]), Some(vec![0; 2048]));
+        crate::light::light_from_layers(&mut original, &layers, true);
+        let saved = encode(&original, assets.registry, &biomes, &Default::default());
+        let Some(Tag::List(sections)) = saved.tag.get("sections") else {
+            panic!("missing saved sections");
+        };
+        assert_eq!(sections.len(), SECTIONS + 2);
+        for section in [sections.first().unwrap(), sections.last().unwrap()] {
+            assert!(section.get("block_states").is_none());
+            assert!(section.get("biomes").is_none());
+        }
+        let mut loaded = decode(&saved, assets.registry, &biomes).unwrap();
+        load_light(&saved.tag, &mut loaded, true);
+        assert_eq!(loaded.light(0, MIN_Y - 1, 0), 0x75);
+        assert_eq!(loaded.light(1, MIN_Y - 1, 0), 0x25);
+        assert_eq!(loaded.light(0, 70, 0), 0x70);
+        assert_eq!(loaded.light(1, 70, 0), 0x20);
+        assert_eq!(loaded.light(0, loaded.max_y(), 0), 0x70);
+        assert_eq!(loaded.light(1, loaded.max_y(), 0), 0x20);
+        assert_eq!(loaded.stored_light_layers(0), Some([false, true]));
+        assert_eq!(loaded.stored_light_layers(SECTIONS + 1), Some([true, true]));
+    }
+
     #[test]
     #[ignore = "daily"]
     fn saved_light_matches_reference_for_layers_and_metadata() {
@@ -9421,11 +9432,9 @@ mod tests {
         );
     }
 
-    /// `WorldDataConfiguration.MAP_CODEC`'s `lenientOptionalFieldOf
-    /// ("enabled_features", DEFAULT_FLAGS)`: a picked experiment's list
-    /// round-trips, a vanilla-only selection leaves the tag out.
+    /// A world with an experiment writes and reads its full feature set.
     #[test]
-    fn enabled_features_round_trip_and_omit_the_vanilla_default() {
+    fn experimental_feature_flags_round_trip() {
         let dir = gen_world("enabled-features");
         let mut level = Level {
             name: "Features".into(),
@@ -9439,29 +9448,80 @@ mod tests {
         level.write(&dir, &Default::default()).unwrap();
         let back = Level::read(&dir).unwrap();
         assert_eq!(back.enabled_features, level.enabled_features);
-        // The tag is in the file.
-        let raw = crate::save::read_level_dat(&dir).unwrap();
-        if let Tag::Compound(data) = &raw {
-            let data = data.get(&JavaString::from("Data")).unwrap();
-            assert!(matches!(data.get("enabled_features"), Some(Tag::List(_))));
-        }
-        // A vanilla-only selection writes no tag, and reads back as the
-        // same vanilla-only list. A fresh folder: write_internal keeps an
-        // older file's fields.
-        let dir2 = gen_world("enabled-features-vanilla");
-        level.enabled_features = ["minecraft:vanilla".into()].into();
-        level.write(&dir2, &Default::default()).unwrap();
-        let raw = crate::save::read_level_dat(&dir2).unwrap();
-        if let Tag::Compound(data) = &raw {
-            let data = data.get(&JavaString::from("Data")).unwrap();
-            assert!(data.get("enabled_features").is_none());
-        }
-        let back = Level::read(&dir2).unwrap();
-        // The read side keeps its own convention: empty is the vanilla
-        // default the file omitted.
-        assert!(back.enabled_features.is_empty());
+        let raw = read_level_dat(&dir).unwrap();
+        assert!(matches!(
+            raw.get("Data").unwrap().get("enabled_features"),
+            Some(Tag::List(_)),
+        ));
         let _ = fs::remove_dir_all(dir);
-        let _ = fs::remove_dir_all(dir2);
+    }
+
+    #[test]
+    fn omitted_feature_flags_decode_as_vanilla_and_stay_omitted() {
+        let dir = gen_world("omitted-feature-flags");
+        let output = gen_world("resaved-feature-flags");
+        let mut level = Level::default();
+        assert_eq!(*level.enabled_features, ["minecraft:vanilla"]);
+        level.write(&dir, &Default::default()).unwrap();
+        let raw = read_level_dat(&dir).unwrap();
+        assert!(raw.get("Data").unwrap().get("enabled_features").is_none());
+
+        let mut read = Level::read(&dir).unwrap();
+        assert_eq!(*read.enabled_features, ["minecraft:vanilla"]);
+        // The encoder must drop even a tag retained from an older file.
+        let mut experimental = Level {
+            enabled_features: [
+                "minecraft:vanilla".into(),
+                "minecraft:minecart_improvements".into(),
+            ]
+            .into(),
+            ..Level::default()
+        };
+        experimental.write(&output, &Default::default()).unwrap();
+        read.write(&output, &Default::default()).unwrap();
+        let raw = read_level_dat(&output).unwrap();
+        assert!(raw.get("Data").unwrap().get("enabled_features").is_none());
+        let _ = fs::remove_dir_all(dir);
+        let _ = fs::remove_dir_all(output);
+    }
+
+    /// `WorldDataConfiguration.MAP_CODEC` preserves a valid empty set, but defaults an
+    /// invalid tag instead of interpreting a failed list decode as an empty set.
+    #[test]
+    fn explicit_empty_and_malformed_feature_flags_have_distinct_save_outcomes() {
+        for (case, input, expected_flags, expected_tag) in [
+            ("empty", Tag::List(vec![]), &[][..], Some(Tag::List(vec![]))),
+            (
+                "non-string",
+                Tag::List(vec![Tag::Int(7)]),
+                &["minecraft:vanilla"][..],
+                None,
+            ),
+            ("non-list", Tag::Int(7), &["minecraft:vanilla"][..], None),
+        ] {
+            let dir = gen_world(&format!("feature-flags-{case}"));
+            write_dat(
+                &dir.join("level.dat"),
+                Tag::compound([(
+                    "Data",
+                    Tag::compound([
+                        ("DataVersion", Tag::Int(DATA_VERSION)),
+                        ("enabled_features", input),
+                    ]),
+                )]),
+            )
+            .unwrap();
+            let mut level = Level::read(&dir).unwrap();
+            assert_eq!(&*level.enabled_features, expected_flags, "{case}");
+            level.write_without_player(&dir).unwrap();
+            let raw = read_level_dat(&dir).unwrap();
+            assert_eq!(
+                raw.get("Data").unwrap().get("enabled_features"),
+                expected_tag.as_ref(),
+                "{case}"
+            );
+            let _ = fs::remove_dir_all(dir);
+        }
     }
 
     fn gen_world(name: &str) -> PathBuf {

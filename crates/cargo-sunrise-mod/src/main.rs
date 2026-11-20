@@ -147,6 +147,12 @@ fn build_command(
 ) -> Result<PathBuf, String> {
     let update_lock = build_args(args)?;
     let root = Path::new(".");
+    // Known from the manifest, before any SDK or package work.
+    if update_lock && read_manifest(root)?.native.is_none() {
+        return Err(format!(
+            "build --update-lock rewrites a native mod's Cargo.lock; {MANIFEST} has no [native] table"
+        ));
+    }
     let output = PackageOutput::in_project(root)?;
     let package = Package::read(root)?;
     if package.is_native() {
@@ -165,6 +171,11 @@ fn build_command(
     )?;
     println!("Built {}", path.display());
     Ok(path)
+}
+
+/// The manifest in `dir`, read within its size bound.
+fn read_manifest(dir: &Path) -> Result<Manifest, String> {
+    Manifest::parse(&bounded::read(&dir.join(MANIFEST), bounded::MAX_MANIFEST)?)
 }
 
 /// The SDK the project at `dir` pins, fetched into its `.sunrise/sdk/` when missing or stale; a

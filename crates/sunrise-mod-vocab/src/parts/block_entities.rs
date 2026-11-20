@@ -157,11 +157,13 @@ impl dyn Registrar + '_ {
     /// Attach a Part to a native type, including one another mod declares later.
     /// Vanilla keys are usable for capabilities, but not for native payload Parts.
     ///
-    /// A type declared by another package takes this package's Part only when this package lists
-    /// the declaring package in `[dependencies]`; otherwise load is refused, naming the type, this
-    /// package and "declare <package> as a dependency". A type no package declares is refused too,
-    /// unless the type's namespace is the id of an optional dependency that is not installed (an
-    /// absent package's other namespaces are unknown): the Part is then skipped without a refusal.
+    /// A type declared by another package takes this package's Part only when its
+    /// `[dependencies]` row for the declaring package applies on this installation side and
+    /// survives instance overrides. Otherwise load is refused, naming the type, this package
+    /// and "declare <package> as a dependency". A type no package declares is refused too.
+    /// The Part is skipped only when the type's namespace is the id of an absent package
+    /// with a surviving, applicable optional dependency row. An absent package's other
+    /// namespaces are unknown; a present package must declare the type.
     /// The Part's saved state is the key it declares (see [`Self::block_entity_part_with_state`]),
     /// which a package declares only in its own namespace, so it is saved under this package's id; it
     /// reaches the owner's state only through the owner's declared attachments. Declaring the type, its

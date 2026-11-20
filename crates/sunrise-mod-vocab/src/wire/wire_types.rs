@@ -41,17 +41,6 @@ impl Wire for crate::FluidResource {
     }
 }
 
-impl Wire for crate::FeatureFlags {
-    layout_fields!("flags" => Vec<String>);
-    const MIN: usize = 4;
-    fn put(&self, out: &mut Writer) {
-        out.put(&self.iter().map(str::to_owned).collect::<Vec<_>>());
-    }
-    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
-        Ok(Self::new(input.take::<Vec<String>>()?.into()))
-    }
-}
-
 macro_rules! slot_keys {
     (registries; $($key:path => $method:ident, $registry:literal, $resolve:expr;)+) => {
         impl crate::RegistryEntry {
