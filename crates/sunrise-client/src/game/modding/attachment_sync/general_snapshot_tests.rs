@@ -2,7 +2,7 @@
 //! even with nothing synced, since the client shows the row only once it arrives
 //! (`game/network/remote/general.rs`); and whole, so a client that pairs later reads the value
 //! the row holds then.
-use super::transport_tests::{VALUE, store};
+use super::transport_tests::{VALUE, VALUE_CODEC, store};
 use crate::game::general::{GeneralEntityRecord, GeneralTypeEnvelope};
 use crate::game::native_entity_refs::tests::with_game;
 use mod_api::{GeneralEntityCategory, GeneralSavePolicy};
@@ -13,8 +13,12 @@ struct Declare;
 #[mod_api::__subscriptions]
 impl mod_api::Hooks for Declare {
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type("sync_route:value", true)
-            .unwrap();
+        r.register_attachment_type(
+            mod_api::AttachmentDescriptor::new("sync_route:value", VALUE.default)
+                .serialize(VALUE_CODEC)
+                .sync(),
+        )
+        .unwrap();
         r.declare_general_entity(
             "robot",
             GeneralEntityCategory::Misc,

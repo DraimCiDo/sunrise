@@ -17,32 +17,36 @@ use sunrise_protocol::{
 const NAME: &str =
     "game::attachment_sync::transport_tests::attachment_sync_follows_the_negotiated_route";
 
+pub(super) const VALUE_CODEC: mod_api::AttachmentCodec<i32> = AttachmentCodec {
+    encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
+    decode: |c| match c.get(&"n".into()) {
+        Some(Tag::Int(n)) => Ok(*n),
+        _ => Err(mod_api::AttachmentError::Decode),
+    },
+};
+
 pub(super) static VALUE: AttachmentType<i32> = AttachmentType {
     namespace: "sync_route",
     name: "value",
     default: || 0,
-    codec: Some(AttachmentCodec {
-        encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
-        decode: |c| match c.get(&"n".into()) {
-            Some(Tag::Int(n)) => Ok(*n),
-            _ => Err(mod_api::AttachmentError::Decode),
-        },
-    }),
+    codec: Some(VALUE_CODEC),
     copy_on_death: false,
     sync: true,
 };
+const BLOB_CODEC: mod_api::AttachmentCodec<Vec<u8>> = AttachmentCodec {
+    encode: |bytes| Ok([("b".into(), Tag::ByteArray(bytes.clone()))].into()),
+    decode: |c| match c.get(&"b".into()) {
+        Some(Tag::ByteArray(bytes)) => Ok(bytes.clone()),
+        _ => Err(mod_api::AttachmentError::Decode),
+    },
+};
+
 /// A value past every network frame limit, and incompressible.
 static BLOB: AttachmentType<Vec<u8>> = AttachmentType {
     namespace: "sync_route",
     name: "blob",
     default: Vec::new,
-    codec: Some(AttachmentCodec {
-        encode: |bytes| Ok([("b".into(), Tag::ByteArray(bytes.clone()))].into()),
-        decode: |c| match c.get(&"b".into()) {
-            Some(Tag::ByteArray(bytes)) => Ok(bytes.clone()),
-            _ => Err(mod_api::AttachmentError::Decode),
-        },
-    }),
+    codec: Some(BLOB_CODEC),
     copy_on_death: false,
     sync: true,
 };
@@ -53,10 +57,18 @@ pub(super) struct Route;
 impl mod_api::Hooks for Route {
     fn register(&self, registrar: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
         registrar
-            .register_attachment_type("sync_route:value", true)
+            .register_attachment_type(
+                mod_api::AttachmentDescriptor::new("sync_route:value", VALUE.default)
+                    .serialize(VALUE_CODEC)
+                    .sync(),
+            )
             .unwrap();
         registrar
-            .register_attachment_type("sync_route:blob", true)
+            .register_attachment_type(
+                mod_api::AttachmentDescriptor::new("sync_route:blob", BLOB.default)
+                    .serialize(BLOB_CODEC)
+                    .sync(),
+            )
             .unwrap();
     }
 }

@@ -3,8 +3,8 @@
 
 Run `imports` first, then `receivers` to make Part state instance-based using
 the existing AttachmentType. Run `registrations` when introducing
-AttachmentDescriptor/AttachmentKey; it leaves key ownership, mixed raw/host
-fixtures and negative cases for hand fixes. Use --dry-run to inspect a pass.
+AttachmentDescriptor/AttachmentKey; it leaves work on the typed consumers
+to their own pass. Use --dry-run to inspect a pass.
 """
 
 import argparse
@@ -114,120 +114,84 @@ def imports(changes):
             changes.expect(GAME + path, marker)
 
 
-def descriptor(changes, path, head, qualified, attachment_id, sync):
-    """Change only the literal's type; keep its entire Rust initializer verbatim."""
-    pattern = rf"^(?P<indent> *){re.escape(head)}\n(?P<body>.*?)^(?P=indent)\}};"
+def fixture_descriptor(changes, path, symbol, codec_scope=""):
+    """Share real defaults/codecs with consumers whose typed signatures have not changed yet."""
+    pattern = (
+        rf"^(?P<indent> *)(?:pub(?:\(super\))? )?(?:const|static) {symbol}: "
+        r"(?:mod_api::)?AttachmentType<(?P<type>[^\n]+)> = (?:mod_api::)?AttachmentType \{\n"
+        r"(?P<body>.*?)^(?P=indent)\};"
+    )
     matches = list(re.finditer(pattern, changes.source(path), re.MULTILINE | re.DOTALL))
     if len(matches) != 1:
-        raise ValueError(f"{path}: expected exactly one descriptor starting with {head!r}")
+        raise ValueError(f"{path}: expected exactly one {symbol} initializer")
     match = matches[0]
-    prefix = match["indent"] + "    "
-    namespace, name = attachment_id.split(":", 1)
-    fields = match["body"].splitlines()
-    for field in (f'namespace: "{namespace}",', f'name: "{name}",', f"sync: {sync},"):
-        if fields.count(prefix + field) != 1:
-            raise ValueError(f"{path}: {head!r} does not declare {field!r}")
-    new_head = re.sub(r"(?:mod_api::)?AttachmentType\b", f"{qualified}::AttachmentDescriptor", head)
-    changes.replace(
-        path, match[0], match["indent"] + new_head + "\n" + match["body"] + match["indent"] + "};"
-    )
+    body, indent = match["body"], match["indent"]
+    name = re.search(r'namespace: "([^"]+)",\n\s+name: "([^"]+)",', body)
+    if name is None:
+        raise ValueError(f"{path}: missing namespaced id on {symbol}")
+    id = ":".join(name.groups())
+    descriptor = f'mod_api::AttachmentDescriptor::new("{id}", {symbol}.default)'
+    codec = re.search(r"codec: Some\(((?:mod_api::)?AttachmentCodec \{.*?\})\),", body, re.S)
+    if codec:
+        expr = codec[1]
+        # Keep the fixture's original comments and attributes on its raw type, not on the codec.
+        declaration = f"{indent}{codec_scope}const {symbol}_CODEC: mod_api::AttachmentCodec<{match['type']}> = {expr};\n\n"
+        start = match.start()
+        source = changes.source(path)
+        while start and source[:start].splitlines()[-1].lstrip().startswith(("///", "#[")):
+            start = source.rfind("\n", 0, start - 1) + 1
+        changes.replace(path, source[start:match.end()], declaration + source[start:match.start()] + match[0].replace(expr, f"{symbol}_CODEC"))
+        descriptor += f".serialize({symbol}_CODEC)"
+    elif "codec: None," not in body:
+        raise ValueError(f"{path}: unrecognized codec on {symbol}")
+    if "copy_on_death: true," in body:
+        descriptor += ".copy_on_death()"
+    if "sync: true," in body:
+        descriptor += ".sync()"
+    return id, descriptor
 
 
-def register_call(
-    changes, path, attachment_id, sync, symbol, receiver, *,
-    chain=None, indent=None, statement=8, count=1,
-):
-    """Pair a whole literal name/sync call with a descriptor checked above."""
-    args = f'.register_attachment_type("{attachment_id}", {sync})'
-    old = f"{receiver}{args}.unwrap();"
-    if indent is not None:
-        statement = indent - 4
-        old = f"{receiver}{args}\n{' ' * indent}.unwrap();"
-    if chain is not None:
-        statement = chain - 4
-        old = f"{receiver}\n{' ' * chain}{args}\n{' ' * chain}.unwrap();"
-    new = f"let {symbol.lower()}_key = {symbol}.register({receiver}).unwrap();"
-    start = "\n" + " " * statement
-    changes.replace(path, start + old + "\n", start + new + "\n", count=count)
+def register_call(changes, path, id, descriptor, *, count=1):
+    pattern = rf'\.register_attachment_type\(\s*"{re.escape(id)}", (?:true|false)\s*\)'
+    matches = list(re.finditer(pattern, changes.source(path)))
+    if len(matches) != count or len({m[0] for m in matches}) != 1:
+        raise ValueError(f"{path}: unexpected old registration calls for {id}: {matches}")
+    changes.replace(path, matches[0][0], f".register_attachment_type({descriptor})", count=count)
 
 
 def registrations(changes):
-    # Only match known declarations. Tests that build a descriptor with struct
-    # update syntax or intentionally register a wrong/duplicate name are hand fixes.
-    # The stored key, not the const descriptor, must be used by mod callbacks.
-    for path, declaration, attachment_id, sync, receiver, options in (
-        ("entities/general/tick_tests.rs", "static COUNTER", "mymod:counter", "false", "r", {}),
-        (
-            "entities/passengers.rs", "static VEHICLE_VALUE", "vehicle_boundary:value", "false",
-            "registrar", {"chain": 16, "count": 2},
-        ),
-        (
-            "mobs/creatures/borrowed_panic_tests.rs", "const VALUE", "borrowed-panic:retained",
-            "false", "r", {"indent": 12},
-        ),
-        (
-            "modding/attachment_sync/transport_tests.rs", "pub(super) static VALUE",
-            "sync_route:value", "true", "registrar", {"chain": 12},
-        ),
-        (
-            "modding/attachment_sync/transport_tests.rs", "static BLOB", "sync_route:blob",
-            "true", "registrar", {"chain": 12},
-        ),
-        (
-            "modding/block_entity_part_state_tests.rs", "const PROGRESS", "part_state:progress",
-            "false", "r", {"indent": 12},
-        ),
-        (
-            "modding/entity_initialization/tests.rs", "const SAVED", "constructing:saved",
-            "false", "r", {"indent": 12},
-        ),
-        (
-            "modding/entity_part_state_tests.rs", "const CHARGE", "part_state:charge",
-            "false", "r", {"indent": 12},
-        ),
-        ("modding/native_general_renderers_tests.rs", "static FUEL", "test:fuel", "true", "r", {}),
-        (
-            "modding/native_general_renderers_tests/fixture.rs", "pub static FUEL",
-            "general_render_fixture:render_fuel", "true", "registrar", {"chain": 8},
-        ),
-        (
-            "native_hooks/shared/item_fall_on_tests.rs", "static LOAN_VALUE", "loan_test:progress",
-            "false", "r", {"indent": 12},
-        ),
-        (
-            "runtime/transaction_entities_tests.rs", "static MARK", "journal:mark", "false", "r", {},
-        ),
-        (
-            "world/server_travel.rs", "const STATE", "natural_tree:state", "false", "r",
-            {"indent": 20},
-        ),
+    for base, path, symbols in (
+        (GAME, "entities/general/tick_tests.rs", ("COUNTER",)),
+        (GAME, "entities/passengers.rs", ("VEHICLE_VALUE",)),
+        (GAME, "mobs/creatures/borrowed_panic_tests.rs", ("VALUE",)),
+        (GAME, "modding/attachment_sync/transport_tests.rs", ("VALUE", "BLOB")),
+        (GAME, "modding/block_entity_part_state_tests.rs", ("PROGRESS",)),
+        (GAME, "modding/entity_initialization/tests.rs", ("VALUE", "SAVED")),
+        (GAME, "modding/entity_part_state_tests.rs", ("CHARGE",)),
+        (GAME, "modding/native_general_renderers_tests.rs", ("FUEL",)),
+        (GAME, "modding/native_general_renderers_tests/fixture.rs", ("FUEL",)),
+        (GAME, "modding/original_player.rs", ("VALUE", "RETAINED")),
+        (GAME, "native_hooks/shared/item_fall_on_tests.rs", ("LOAN_VALUE",)),
+        (GAME, "runtime/transaction_entities_tests.rs", ("MARK",)),
+        (GAME, "world/server_travel.rs", ("STATE",)),
+        (API_PARTS, "block_entities.rs", ("OWNERS_PROGRESS", "B_PROGRESS")),
+        (API_PARTS, "owned_namespaces.rs", ("SESSION",)),
     ):
-        path = GAME + path
-        symbol = declaration.rsplit(" ", 1)[1]
-        raw_type = (
-            "mod_api::AttachmentType" if symbol in {"VEHICLE_VALUE", "LOAN_VALUE"}
-            else "AttachmentType"
-        )
-        value_type = "Vec<u8>" if symbol == "BLOB" else "i32"
-        head = f"{declaration}: {raw_type}<{value_type}> = {raw_type} {{"
-        descriptor(changes, path, head, "mod_api", attachment_id, sync)
-        register_call(changes, path, attachment_id, sync, symbol, receiver, **options)
+        for symbol in symbols:
+            value_transport = path.endswith("transport_tests.rs") and symbol == "VALUE"
+            id, expression = fixture_descriptor(changes, base + path, symbol, "pub(super) " if value_transport else "")
+            count = {"vehicle_boundary:value": 2, "constructing:value": 3}.get(id, 1)
+            register_call(changes, base + path, id, expression, count=count)
+            if value_transport:
+                snapshot = GAME + "modding/attachment_sync/general_snapshot_tests.rs"
+                changes.replace(snapshot, "{VALUE, store}", "{VALUE, VALUE_CODEC, store}")
+                register_call(changes, snapshot, id, expression)
 
-    constructing = GAME + "modding/entity_initialization/tests.rs"
-    descriptor(changes, constructing, "const VALUE: AttachmentType<i32> = AttachmentType {", "mod_api", "constructing:value", "false")
-    register_call(changes, constructing, "constructing:value", "false", "VALUE", "r", indent=12, count=2)
-    register_call(changes, constructing, "constructing:value", "false", "VALUE", "r", indent=16)
-
-    # The snapshot test already imports VALUE from the transport fixture above.
-    snapshot = GAME + "modding/attachment_sync/general_snapshot_tests.rs"
-    changes.expect(snapshot, "use super::transport_tests::{VALUE, store};")
-    register_call(changes, snapshot, "sync_route:value", "true", "VALUE", "r", indent=12)
+    register_call(changes, GAME + "modding/original_player.rs", "clone:saved",
+                  'mod_api::AttachmentDescriptor::new("clone:saved", SAVED.default).serialize(RETAINED_CODEC)')
 
     fixture = GAME + "modding/block_entity_part_state_tests/fixture.rs"
-    for symbol, storage, name in (
-        ("COUNT", "const", "part_state_count"), ("MARK", "static", "part_state_mark"),
-    ):
-        descriptor(changes, fixture, f"pub {storage} {symbol}: AttachmentType<i32> = AttachmentType {{", "mod_api", f"part_state_fixture:{name}", "false")
+    calls = [fixture_descriptor(changes, fixture, symbol)[1] for symbol in ("COUNT", "MARK")]
     changes.replace(
         fixture,
         '    for name in ["part_state_count", "part_state_mark"] {\n'
@@ -235,21 +199,55 @@ def registrations(changes):
         '            .register_attachment_type(&format!("part_state_fixture:{name}"), false)\n'
         '            .unwrap();\n'
         '    }',
-        '    let count_key = COUNT.register(registrar).unwrap();\n'
-        '    let mark_key = MARK.register(registrar).unwrap();',
+        "\n".join(f"    registrar.register_attachment_type({call}).unwrap();" for call in calls),
+    )
+    changes.replace(
+        API_PARTS + "shared_fixtures/fixturecontent.rs",
+        "r.register_attachment_type(id, false).unwrap();",
+        "r.register_attachment_type(crate::AttachmentDescriptor::new(id, || 0u32)).unwrap();",
     )
 
-    for path, symbol, attachment_id, indent in (
-        ("block_entities.rs", "OWNERS_PROGRESS", "owner:progress", 16),
-        ("block_entities.rs", "B_PROGRESS", "b:progress", 12),
-        ("owned_namespaces.rs", "SESSION", "porter:session", 12),
+    # Policy/ownership tests intentionally use the same names with different policies.
+    fixture = API_PARTS + "attachment_types.rs"
+    changes.replace(fixture, "    use super::*;\n    struct Store", '''    use super::*;
+    const MANA_CODEC: crate::AttachmentCodec<u32> = crate::AttachmentCodec {
+        encode: |n| Ok([("n".into(), crate::Tag::Long(i64::from(*n)))].into()),
+        decode: |saved| match saved.get(&"n".into()) {
+            Some(crate::Tag::Long(n)) => u32::try_from(*n).map_err(|_| crate::AttachmentError::Decode),
+            _ => Err(crate::AttachmentError::Decode),
+        },
+    };
+    struct Store''')
+    for indent, sync in ((16, False), (12, True)):
+        expression = 'crate::AttachmentDescriptor::new("a:mana", || 37u32)'
+        if sync:
+            expression += ".serialize(MANA_CODEC).sync()"
+        prefix = "\n" + " " * indent + "registrar.register_attachment_type("
+        changes.replace(fixture, prefix + f'"a:mana", {str(sync).lower()}).unwrap();', prefix + expression + ").unwrap();")
+    for caller, id, sync, count in (
+        ("registrar", "a:mana", False, 2), ("bad", "test_pkg:session", False, 1),
+        ("bad", "test_pkg:mana", True, 1), ("good", "test_pkg:mana", False, 1),
+        ("registrar", "test_pkg:mana", True, 1), ("registrar", "a:mana", True, 1),
+        ("conflict", "test_pkg:mana", True, 1), ("conflict", "a:mana", False, 1),
+        ("missing", "test_pkg:mana", True, 1),
     ):
-        path = API_PARTS + path
-        descriptor(
-            changes, path, f"const {symbol}: AttachmentType<u32> = AttachmentType {{",
-            "crate", attachment_id, "false",
-        )
-        register_call(changes, path, attachment_id, "false", symbol, "r", statement=indent)
+        old = f'.register_attachment_type("{id}", {str(sync).lower()})'
+        pattern = rf"\b{caller}\s*{re.escape(old)}"
+        matches = list(re.finditer(pattern, changes.source(fixture)))
+        if len(matches) != count:
+            raise ValueError(f"{fixture}: unexpected {caller} calls for {old}: {matches}")
+        expression = f'crate::AttachmentDescriptor::new("{id}", || 37u32)'
+        if sync:
+            expression += ".serialize(MANA_CODEC).sync()"
+        source = changes.source(fixture)
+        prefixes = [source[source.rfind('\n', 0, m.start()):m.start()] for m in matches]
+        calls = [(prefix + m[0], prefix) for prefix, m in zip(prefixes, matches)]
+        for old_call, prefix in set(calls):
+            changes.replace(
+                fixture, old_call,
+                prefix + f"(&mut {caller} as &mut dyn crate::Registrar).register_attachment_type({expression})",
+                count=calls.count((old_call, prefix)),
+            )
 
 
 def receivers(changes):

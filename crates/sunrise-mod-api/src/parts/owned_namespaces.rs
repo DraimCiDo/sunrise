@@ -54,7 +54,11 @@ mod tests {
     #[mod_api::__subscriptions]
     impl Hooks for DeclaresSession {
         fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
-            r.register_attachment_type("porter:session", false).unwrap();
+            r.register_attachment_type(mod_api::AttachmentDescriptor::new(
+                "porter:session",
+                SESSION.default,
+            ))
+            .unwrap();
             let kind = r.block_entity_type("press").blocks(&[]).build();
             let _ = r.block_entity_part_with_state(&kind, Session { state_key: SESSION });
         }

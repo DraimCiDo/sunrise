@@ -6,24 +6,30 @@ use mod_api::{
 
 pub const KIND: &str = "general_render_fixture:render_probe";
 
+const FUEL_CODEC: mod_api::AttachmentCodec<i32> = AttachmentCodec {
+    encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
+    decode: |tag| match tag.get(&"n".into()) {
+        Some(Tag::Int(n)) => Ok(*n),
+        _ => Err(AttachmentError::Decode),
+    },
+};
+
 pub static FUEL: AttachmentType<i32> = AttachmentType {
     namespace: "general_render_fixture",
     name: "render_fuel",
     default: || 0,
-    codec: Some(AttachmentCodec {
-        encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
-        decode: |tag| match tag.get(&"n".into()) {
-            Some(Tag::Int(n)) => Ok(*n),
-            _ => Err(AttachmentError::Decode),
-        },
-    }),
+    codec: Some(FUEL_CODEC),
     copy_on_death: false,
     sync: true,
 };
 
 pub fn register(registrar: &mut dyn Registrar) {
     registrar
-        .register_attachment_type("general_render_fixture:render_fuel", true)
+        .register_attachment_type(
+            mod_api::AttachmentDescriptor::new("general_render_fixture:render_fuel", FUEL.default)
+                .serialize(FUEL_CODEC)
+                .sync(),
+        )
         .unwrap();
     registrar
         .declare_general_entity(

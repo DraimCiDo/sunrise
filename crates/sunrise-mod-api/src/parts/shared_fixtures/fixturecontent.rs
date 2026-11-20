@@ -3,7 +3,8 @@ pub(crate) struct FixtureContent;
 impl Hooks for FixtureContent {
     fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
         for id in ["test:hoard", "test:energy", "test:fluid"] {
-            r.register_attachment_type(id, false).unwrap();
+            r.register_attachment_type(crate::AttachmentDescriptor::new(id, || 0u32))
+                .unwrap();
         }
 
         r.declare_fluid("potion");

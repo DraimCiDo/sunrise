@@ -72,18 +72,20 @@ fn a_general_types_renderer_resolves_to_its_slot_and_a_type_without_one_is_named
     assert_eq!(table.unrendered_general(&catalog), ["test:plain"]);
 }
 
+const FUEL_CODEC: mod_api::AttachmentCodec<i32> = AttachmentCodec {
+    encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
+    decode: |c| match c.get(&"n".into()) {
+        Some(Tag::Int(n)) => Ok(*n),
+        _ => Err(AttachmentError::Decode),
+    },
+};
+
 /// The type's synced field the renderer reads while drawing.
 static FUEL: AttachmentType<i32> = AttachmentType {
     namespace: "test",
     name: "fuel",
     default: || 0,
-    codec: Some(AttachmentCodec {
-        encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
-        decode: |c| match c.get(&"n".into()) {
-            Some(Tag::Int(n)) => Ok(*n),
-            _ => Err(AttachmentError::Decode),
-        },
-    }),
+    codec: Some(FUEL_CODEC),
     copy_on_death: false,
     sync: true,
 };
@@ -158,7 +160,12 @@ struct Scene {
 #[mod_api::__subscriptions]
 impl mod_api::Hooks for Scene {
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type("test:fuel", true).unwrap();
+        r.register_attachment_type(
+            mod_api::AttachmentDescriptor::new("test:fuel", FUEL.default)
+                .serialize(FUEL_CODEC)
+                .sync(),
+        )
+        .unwrap();
         for path in ["missile", "bomb", "plain"] {
             r.declare_general_entity(
                 path,

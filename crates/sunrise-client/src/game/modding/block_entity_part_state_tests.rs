@@ -16,17 +16,19 @@ use sunrise_mod_runtime::attachments::{AttachmentCodec, AttachmentError, Attachm
 
 use super::{Dim, Game};
 
+const PROGRESS_CODEC: mod_api::AttachmentCodec<i32> = AttachmentCodec {
+    encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
+    decode: |saved: &Compound| match saved.get(&"n".into()) {
+        Some(Tag::Int(n)) => Ok(*n),
+        _ => Err(AttachmentError::Decode),
+    },
+};
+
 const PROGRESS: AttachmentType<i32> = AttachmentType {
     namespace: "part_state",
     name: "progress",
     default: || 0,
-    codec: Some(AttachmentCodec {
-        encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
-        decode: |saved: &Compound| match saved.get(&"n".into()) {
-            Some(Tag::Int(n)) => Ok(*n),
-            _ => Err(AttachmentError::Decode),
-        },
-    }),
+    codec: Some(PROGRESS_CODEC),
     copy_on_death: false,
     sync: false,
 };
@@ -72,8 +74,11 @@ struct StateMod;
 #[mod_api::__subscriptions]
 impl Hooks for StateMod {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type("part_state:progress", false)
-            .unwrap();
+        r.register_attachment_type(
+            mod_api::AttachmentDescriptor::new("part_state:progress", PROGRESS.default)
+                .serialize(PROGRESS_CODEC),
+        )
+        .unwrap();
         let kind = r
             .block_entity_type("press")
             .blocks(&["part_state:press"])

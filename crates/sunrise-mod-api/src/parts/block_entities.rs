@@ -727,7 +727,11 @@ pub mod tests {
     #[mod_api::__subscriptions]
     impl<const OWNERS: bool> Hooks for KeepsState<OWNERS> {
         fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
-            r.register_attachment_type("b:progress", false).unwrap();
+            r.register_attachment_type(mod_api::AttachmentDescriptor::new(
+                "b:progress",
+                B_PROGRESS.default,
+            ))
+            .unwrap();
             let press = r.block_entity_type_key("owner:press");
             let state_key = if OWNERS { OWNERS_PROGRESS } else { B_PROGRESS };
             let _ = r.block_entity_part_with_state(&press, Keeps { state_key });
@@ -747,7 +751,11 @@ pub mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for OwnerDeclaresKey {
             fn register(&self, r: &mut dyn Registrar, cx: &RegistrationContext) {
-                r.register_attachment_type("owner:progress", false).unwrap();
+                r.register_attachment_type(mod_api::AttachmentDescriptor::new(
+                    "owner:progress",
+                    OWNERS_PROGRESS.default,
+                ))
+                .unwrap();
                 Owner.register(r, cx);
             }
         }

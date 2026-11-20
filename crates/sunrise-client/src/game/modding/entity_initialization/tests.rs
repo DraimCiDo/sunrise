@@ -22,8 +22,11 @@ struct Listener(Calls);
 #[mod_api::__subscriptions]
 impl Hooks for Listener {
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type("constructing:value", false)
-            .unwrap();
+        r.register_attachment_type(mod_api::AttachmentDescriptor::new(
+            "constructing:value",
+            VALUE.default,
+        ))
+        .unwrap();
     }
     fn entity_constructing(&self, host: HostSide<'_>, event: &mut EntityConstructingEvent) {
         self.0
@@ -437,11 +440,13 @@ fn decode(c: &sunrise_core::nbt::Compound) -> Result<i32, mod_api::AttachmentErr
         _ => Err(mod_api::AttachmentError::Decode),
     }
 }
+const SAVED_CODEC: mod_api::AttachmentCodec<i32> = mod_api::AttachmentCodec { encode, decode };
+
 const SAVED: AttachmentType<i32> = AttachmentType {
     namespace: "constructing",
     name: "saved",
     default: || 0,
-    codec: Some(mod_api::AttachmentCodec { encode, decode }),
+    codec: Some(SAVED_CODEC),
     copy_on_death: false,
     sync: false,
 };
@@ -452,10 +457,16 @@ struct Saving(Kinds);
 #[mod_api::__subscriptions]
 impl Hooks for Saving {
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type("constructing:value", false)
-            .unwrap();
-        r.register_attachment_type("constructing:saved", false)
-            .unwrap();
+        r.register_attachment_type(mod_api::AttachmentDescriptor::new(
+            "constructing:value",
+            VALUE.default,
+        ))
+        .unwrap();
+        r.register_attachment_type(
+            mod_api::AttachmentDescriptor::new("constructing:saved", SAVED.default)
+                .serialize(SAVED_CODEC),
+        )
+        .unwrap();
     }
     fn entity_constructing(&self, host: HostSide<'_>, event: &mut EntityConstructingEvent) {
         self.0
@@ -629,8 +640,11 @@ fn marker_constructor_store_reaches_its_real_owned_map() {
     #[mod_api::__subscriptions]
     impl Hooks for Store {
         fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-            r.register_attachment_type("constructing:value", false)
-                .unwrap();
+            r.register_attachment_type(mod_api::AttachmentDescriptor::new(
+                "constructing:value",
+                VALUE.default,
+            ))
+            .unwrap();
         }
         fn entity_constructing(&self, host: HostSide<'_>, event: &mut EntityConstructingEvent) {
             if let HostSide::Server(host) = host {

@@ -13,19 +13,21 @@ use mod_api::{
 use std::sync::{Arc, Mutex};
 use sunrise_core::nbt::{Compound, Tag};
 
+const COUNTER_CODEC: mod_api::AttachmentCodec<i32> = AttachmentCodec {
+    encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
+    decode: |tag: &Compound| match tag.get(&"n".into()) {
+        Some(Tag::Int(n)) => Ok(*n),
+        _ => Err(AttachmentError::Decode),
+    },
+};
+
 /// The fixture counter: an attachment with a codec, so a saved row resumes
 /// its count and a quarantined record keeps it in its bytes.
 static COUNTER: AttachmentType<i32> = AttachmentType {
     namespace: "mymod",
     name: "counter",
     default: || 0,
-    codec: Some(AttachmentCodec {
-        encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
-        decode: |tag: &Compound| match tag.get(&"n".into()) {
-            Some(Tag::Int(n)) => Ok(*n),
-            _ => Err(AttachmentError::Decode),
-        },
-    }),
+    codec: Some(COUNTER_CODEC),
     copy_on_death: false,
     sync: false,
 };
@@ -123,7 +125,11 @@ struct Declare {
 #[mod_api::__subscriptions]
 impl Hooks for Declare {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type("mymod:counter", false).unwrap();
+        r.register_attachment_type(
+            mod_api::AttachmentDescriptor::new("mymod:counter", COUNTER.default)
+                .serialize(COUNTER_CODEC),
+        )
+        .unwrap();
         for (path, save) in [("robot", true), ("ghost", false)] {
             r.declare_general_entity(
                 path,

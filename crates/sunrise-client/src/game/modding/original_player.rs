@@ -172,17 +172,19 @@ mod tests {
         copy_on_death: false,
         sync: false,
     };
+    const RETAINED_CODEC: mod_api::AttachmentCodec<i32> = mod_api::AttachmentCodec {
+        encode: |value| Ok([("value".into(), sunrise_core::nbt::Tag::Int(*value))].into()),
+        decode: |value| match value.get(&sunrise_core::nbt::JavaString::from("value")) {
+            Some(sunrise_core::nbt::Tag::Int(value)) => Ok(*value),
+            _ => Err(mod_api::AttachmentError::Decode),
+        },
+    };
+
     const RETAINED: AttachmentType<i32> = AttachmentType {
         namespace: "clone",
         name: "retained",
         default: || 0,
-        codec: Some(mod_api::AttachmentCodec {
-            encode: |value| Ok([("value".into(), sunrise_core::nbt::Tag::Int(*value))].into()),
-            decode: |value| match value.get(&sunrise_core::nbt::JavaString::from("value")) {
-                Some(sunrise_core::nbt::Tag::Int(value)) => Ok(*value),
-                _ => Err(mod_api::AttachmentError::Decode),
-            },
-        }),
+        codec: Some(RETAINED_CODEC),
         copy_on_death: true,
         sync: false,
     };
@@ -202,9 +204,22 @@ mod tests {
     #[mod_api::__subscriptions]
     impl Hooks for Listener {
         fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-            r.register_attachment_type("clone:unsaved", false).unwrap();
-            r.register_attachment_type("clone:retained", false).unwrap();
-            r.register_attachment_type("clone:saved", false).unwrap();
+            r.register_attachment_type(mod_api::AttachmentDescriptor::new(
+                "clone:unsaved",
+                VALUE.default,
+            ))
+            .unwrap();
+            r.register_attachment_type(
+                mod_api::AttachmentDescriptor::new("clone:retained", RETAINED.default)
+                    .serialize(RETAINED_CODEC)
+                    .copy_on_death(),
+            )
+            .unwrap();
+            r.register_attachment_type(
+                mod_api::AttachmentDescriptor::new("clone:saved", SAVED.default)
+                    .serialize(RETAINED_CODEC),
+            )
+            .unwrap();
         }
         fn player_clone(&self, host: &mut dyn ServerHost, event: &mut PlayerCloneEvent<'_>) {
             assert_eq!(event.was_death, self.death);

@@ -186,8 +186,11 @@ impl mod_api::Hooks for Hooks {
             .fetch_add(event.entities.len(), Ordering::SeqCst);
     }
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type("borrowed-panic:retained", false)
-            .unwrap();
+        r.register_attachment_type(mod_api::AttachmentDescriptor::new(
+            "borrowed-panic:retained",
+            VALUE.default,
+        ))
+        .unwrap();
         if matches!(self.0.family, Family::Goal | Family::MountedGoal) {
             r.entity_part("minecraft:zombie", GoalPart(self.0.clone()));
         }
