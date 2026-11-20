@@ -27,7 +27,7 @@
 //! An entity added inside one goes at an abort, one removed is only marked until the root
 //! commit, and mods hear of joins and leaves at the root commit (`transactions/entities.rs`).
 use super::{BlockEntity, BlockStateId, Game, machines::HopperState, maps::MapData};
-use mod_api::{Transaction, TransactionLifecycle, TransactionSeal};
+use mod_api::{BlockEntityRef, LevelRef, Transaction, TransactionLifecycle, TransactionSeal};
 use std::collections::{BTreeMap, HashMap};
 use sunrise_client::{
     items::ItemStack, living_attributes::ModifierChanges, world::BlockEntityExtras,
@@ -45,6 +45,16 @@ pub(in crate::game) use entities::{Announcement, ArrivalRollback};
 mod scratch;
 
 type Pos = (i32, i32, i32);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct BlockLevel {
+    dim: super::Dim,
+    // There can be internal storage transactions before a mod world epoch exists.
+    lifetime: Option<LevelRef>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct Cell(BlockLevel, Pos);
 type ComposterRandoms =
     HashMap<(mod_api::DimensionKey, (i32, i32)), HashMap<Pos, sunrise_core::random::LegacyRandom>>;
 
@@ -121,14 +131,35 @@ impl Drop for ClosingPhase<'_, '_> {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum BlockWritePath {
+    Engine,
+    LevelHost,
+    Handle,
+}
+
+#[derive(Clone, Copy)]
 struct KeptBlock {
     state: BlockStateId,
-    flags: i32,
-    /// Replay LevelWriteHost writes through the direct host's block-entity creation path.
-    level_host: bool,
-    /// A level-host write only hid the entity from other reads. At commit
-    /// the real Level.setBlock still has to run its removal side effects.
+    final_state: BlockStateId,
+    combined_flags: i32,
+    last_flags: i32,
+    /// A handle write opts this cell into the final write's flags, even across savepoints.
+    exact_flags: bool,
+    path: BlockWritePath,
+    /// A level-host write hid the entity pending Level.setBlock's removal side effects.
     replay_removal: bool,
+}
+
+impl KeptBlock {
+    fn follow(&mut self, later: Self) {
+        self.final_state = later.final_state;
+        self.combined_flags = merge_block_update_flags(self.combined_flags, later.combined_flags);
+        self.last_flags = later.last_flags;
+        self.exact_flags |= later.exact_flags;
+        self.path = later.path;
+        self.replay_removal |= later.replay_removal;
+    }
 }
 
 /// Preserve requested updates, and suppress an effect only if every write
@@ -158,16 +189,16 @@ pub(super) struct Level {
     close_token: u64,
     dimension: Option<super::Dim>,
     /// Each block entity as it was before this transaction first wrote it.
-    block_entities: HashMap<Pos, Kept>,
-    /// The block entities this transaction removed (`journal_remove_block_entity`): an abort
-    /// puts them back as `block_entities` keeps them.
-    removed_block_entities: std::collections::HashSet<Pos>,
+    block_entities: HashMap<Cell, Kept>,
+    /// Displaced entities at removal time, including edits made earlier in this transaction.
+    /// Abort uses the original image in `block_entities` instead.
+    removed_block_entities: HashMap<Cell, BlockEntity>,
     /// Each item slot (block entity, slot) a slot-only write changed, as it was before this
     /// transaction first wrote it, for a block entity not kept whole in `block_entities`: a
     /// move through a container keeps the slot it touches, not the entity's whole saved data.
-    slots: HashMap<(Pos, usize), KeptSlot>,
-    /// Each block's original state and the combined update flags of its writes.
-    blocks: HashMap<Pos, KeptBlock>,
+    slots: HashMap<(Cell, usize), KeptSlot>,
+    /// Block states in all level lifetimes this transaction has reached.
+    blocks: HashMap<Cell, KeptBlock>,
     /// Level.random before the first transactional level write drew from it.
     level_random: Option<sunrise_core::random::LegacyRandom>,
     /// Composter-local random streams before this depth first evaluated their layers.
@@ -344,8 +375,10 @@ pub(super) enum After {
 
     /// `ServerLevel.destroyBlockProgress`: breaker id, position, stage. Sent once, at the root commit.
     BreakProgress(i32, [i32; 3], i32),
-    /// The block's final state, set with the combined update flags.
-    Block(Pos),
+    /// A saved-data load's implicit client and comparator updates.
+    SavedBlockEntity(BlockEntityRef),
+    /// The block's final state.
+    Block(BlockLevel, Pos),
     /// A validated level write host effect; never published on abort.
     LevelWrite(Box<super::journal_level_write::PendingWrite>),
     /// Save, remesh and resend a changed biome column.
@@ -543,7 +576,7 @@ impl Game<'_> {
             .trace_storage_attempt(if commit { "commit" } else { "abort" }.into());
         guard.game.close_level(level, commit);
         if root {
-            guard.game.world.block_entities.publish_retirement();
+            guard.game.publish_block_entity_retirement();
         }
     }
     /// What closing `level` does, with the closing phase already set.
@@ -575,18 +608,14 @@ impl Game<'_> {
                 for (pos, kept) in level.block_entities {
                     outer.block_entities.entry(pos).or_insert(kept);
                 }
-                outer
-                    .removed_block_entities
-                    .extend(level.removed_block_entities);
+                for (cell, entity) in level.removed_block_entities {
+                    outer.removed_block_entities.entry(cell).or_insert(entity);
+                }
                 for (pos, block) in level.blocks {
                     outer
                         .blocks
                         .entry(pos)
-                        .and_modify(|kept| {
-                            kept.flags = merge_block_update_flags(kept.flags, block.flags);
-                            kept.level_host = block.level_host;
-                            kept.replay_removal |= block.replay_removal;
-                        })
+                        .and_modify(|kept| kept.follow(block))
                         .or_insert(block);
                 }
                 if outer.level_random.is_none() {
@@ -753,44 +782,82 @@ impl Game<'_> {
             level.composter_randoms.clear();
         }
     }
+    fn journal_block_level(&self) -> BlockLevel {
+        BlockLevel {
+            dim: self.dim,
+            lifetime: self.native_level_here(),
+        }
+    }
+
+    fn with_journal_block_level(&mut self, level: BlockLevel, run: impl FnOnce(&mut Self)) {
+        if level
+            .lifetime
+            .is_none_or(|handle| self.level_handle_current(handle))
+        {
+            self.with_resident_block_level(level.dim, run);
+        }
+    }
+
+    /// A save cannot look at tentative block storage, including in a parked level.
+    pub(super) fn journal_pin_block_storage(&mut self) {
+        if let Some(level) = self.transactions.last_mut() {
+            level
+                .save_gate
+                .get_or_insert_with(sunrise_client::join_seq::visibility::PassLease::enter);
+        }
+    }
+
     /// Keeps the block entity at `pos` as it is, with its attachments and a hopper's
     /// cooldown, if a transaction is open and hasn't yet.
     pub(super) fn journal_block_entity(&mut self, pos: Pos) {
         self.transactions.writes = self.transactions.writes.wrapping_add(1);
-        let Some(level) = self.transactions.last_mut() else {
+        if self.transactions.is_empty() {
             return;
-        };
-        level
+        }
+        let cell = Cell(self.journal_block_level(), pos);
+        self.transactions
+            .last_mut()
+            .unwrap()
             .block_entities
-            .entry(pos)
+            .entry(cell)
             .or_insert_with(|| Kept::capture(&self.world, &self.hoppers, pos));
     }
-    /// Puts back the block entity at `pos` that a transaction removed, as `kept` holds it, with
-    /// its generation, where none stands there now.
-    fn restore_removed_block_entity(&mut self, pos: Pos, kept: &Kept) {
-        let Some(entity) = &kept.entity else {
-            return;
-        };
+    /// Put a temporarily displaced instance back, with its original generation and attachments.
+    fn restore_removed_block_entity(
+        &mut self,
+        pos: Pos,
+        entity: BlockEntity,
+        generation: Option<u64>,
+    ) {
         if self.world.block_entities.get(&pos).is_some() {
             return;
         }
-        self.world.block_entities.insert(pos, entity.clone());
-        if let Some(generation) = kept.generation {
+        self.world.block_entities.insert(pos, entity);
+        if let Some(generation) = generation {
             self.world
                 .block_entities
                 .restore_generation(pos, generation);
             self.world.block_entities.reattach_retired(pos, generation);
         }
     }
-    /// Removes the block entity at `pos`, kept whole by the open transaction, which puts it back
-    /// if it aborts: a block write in the transaction that drops it, so later reads in it see
-    /// none. Outside a transaction, it just goes.
+    /// Removes a block entity from tentative reads, keeping it for commit and its original
+    /// image for abort. Outside a transaction it just goes.
     pub(super) fn journal_remove_block_entity(&mut self, pos: Pos) {
         self.journal_block_entity(pos);
-        if let Some(level) = self.transactions.last_mut() {
-            level.removed_block_entities.insert(pos);
+        if self.transactions.is_empty() {
+            self.world.block_entities.remove(&pos);
+            return;
         }
-        self.world.block_entities.remove(&pos);
+        let cell = Cell(self.journal_block_level(), pos);
+        self.world.block_entities.defer_retirement();
+        if let Some(entity) = self.world.block_entities.remove(&pos) {
+            self.transactions
+                .last_mut()
+                .unwrap()
+                .removed_block_entities
+                .entry(cell)
+                .or_insert(entity);
+        }
     }
     /// How many block entities the open transactions keep whole, and how many single slots:
     /// what a test reads to tell a slot journal from a whole capture without timing it.
@@ -820,13 +887,15 @@ impl Game<'_> {
         {
             return self.journal_block_entity(pos);
         }
-        let Some(level) = self.transactions.last_mut() else {
-            return;
-        };
-        if level.block_entities.contains_key(&pos) {
+        if self.transactions.is_empty() {
             return;
         }
-        level.slots.entry((pos, slot)).or_insert_with(|| KeptSlot {
+        let cell = Cell(self.journal_block_level(), pos);
+        let level = self.transactions.last_mut().unwrap();
+        if level.block_entities.contains_key(&cell) {
+            return;
+        }
+        level.slots.entry((cell, slot)).or_insert_with(|| KeptSlot {
             stack: entity.and_then(|entity| entity.slots()[slot].clone()),
             generation: self.world.block_entities.generation(&pos),
         });
@@ -1040,46 +1109,54 @@ impl Game<'_> {
     /// state, and set with its updates at the root commit; otherwise at once
     /// (`Level.setBlock`).
     pub(super) fn journal_set_block(&mut self, pos: [i32; 3], state: BlockStateId) -> bool {
-        self.journal_set_block_flags(pos, state, sunrise_world::level::flags::UPDATE_ALL, false)
+        self.journal_set_block_flags(pos, state, flags::UPDATE_ALL, BlockWritePath::Engine)
     }
-    /// The root commit replays one write per position with the combined update flags.
+    /// Store a state without publishing effects. The existing root journal replays one
+    /// change per level lifetime and position.
     pub(super) fn journal_set_block_flags(
         &mut self,
-        pos: [i32; 3],
+        [x, y, z]: [i32; 3],
         state: BlockStateId,
         flags: i32,
-        level_host: bool,
+        path: BlockWritePath,
     ) -> bool {
-        let Some(level) = self.transactions.last_mut() else {
-            return self.level_set_with_flags(pos, state, flags).is_ok();
+        if self.transactions.is_empty() {
+            return self.level_set_with_flags([x, y, z], state, flags).is_ok();
+        }
+        let old = self.world.block(x, y, z);
+        if !self.world.set_stored(x, y, z, state) {
+            return false;
+        }
+        let owner = self.journal_block_level();
+        let pos = (x, y, z);
+        let block = KeptBlock {
+            state: old,
+            final_state: state,
+            combined_flags: flags,
+            last_flags: flags,
+            exact_flags: matches!(path, BlockWritePath::Handle),
+            path,
+            replay_removal: false,
         };
-        let key = (pos[0], pos[1], pos[2]);
-        let old = self.world.block(pos[0], pos[1], pos[2]);
+        self.transactions.writes = self.transactions.writes.wrapping_add(1);
+        let level = self.transactions.last_mut().unwrap();
         level
             .blocks
-            .entry(key)
-            .and_modify(|kept| {
-                kept.flags = merge_block_update_flags(kept.flags, flags);
-                kept.level_host = level_host;
-            })
-            .or_insert(KeptBlock {
-                state: old,
-                flags,
-                level_host,
-                replay_removal: false,
-            });
-        level.after.push(After::Block(key));
-        self.world.set_stored(pos[0], pos[1], pos[2], state)
+            .entry(Cell(owner, pos))
+            .and_modify(|kept| kept.follow(block))
+            .or_insert(block);
+        level.after.push(After::Block(owner, pos));
+        true
     }
-    /// Hide a replaced block entity from staged reads, without dropping its
-    /// contents until the real write. Fluid pickup/pour instead rolls its own
-    /// drops against the old entity before journalling the removal.
+    /// Hide a replaced block entity from staged reads without dropping its contents
+    /// until the real write. Fluid operations roll their own removal effects instead.
     pub(super) fn journal_block_replacement(&mut self, pos: Pos) {
+        let cell = Cell(self.journal_block_level(), pos);
         self.journal_remove_block_entity(pos);
         if let Some(block) = self
             .transactions
             .last_mut()
-            .and_then(|level| level.blocks.get_mut(&pos))
+            .and_then(|level| level.blocks.get_mut(&cell))
         {
             block.replay_removal = true;
         }
@@ -1122,6 +1199,7 @@ impl Game<'_> {
             After::FluidEffects(effects) => self.commit_fluid_effects(*effects),
             After::LevelWrite(write) => self.commit_level_write(*write),
             After::Changed(pos) => self.container_changed(pos),
+            After::SavedBlockEntity(entity) => self.publish_saved_block_entity(entity),
             After::Capabilities(pos) => self.world.capability_generations.invalidate(pos),
 
             After::BreakProgress(breaker, pos, progress) => {
@@ -1154,7 +1232,7 @@ impl Game<'_> {
                 } => self.audio.play(sound, Some(at), volume, pitch),
             },
             // Only reached through a root commit, which sets the block itself.
-            After::Block(_) => {}
+            After::Block(..) => {}
             After::Drop(pos, stack) => {
                 self.spawn_item(stack, pos.map(|p| f64::from(p) + 0.5), [0.0; 3], 10);
             }
@@ -1238,54 +1316,73 @@ impl Game<'_> {
             }
         }
     }
-    fn root_commit(&mut self, level: Level) {
+    fn root_commit(&mut self, mut level: Level) {
         // A deferred listener may read a new map or create one of its own.
         for (id, data) in level.new_maps {
             self.publish_map(id, data);
         }
-        let mut told = std::collections::HashSet::new();
+        let mut changed_told = std::collections::HashSet::new();
+        let mut saved_told = std::collections::HashSet::new();
+        let mut saved_updates = Vec::new();
+        let mut blocks_told = std::collections::HashSet::new();
         let mut biome_columns = std::collections::HashSet::new();
         for after in level.after {
             match after {
-                // Each storage tells the world once, after every write.
-                After::Changed(pos) if !told.insert(Ok(pos)) => {}
-                After::Block(pos) => {
-                    if !told.insert(Err(pos)) {
+                After::Changed(pos) if !changed_told.insert(pos) => {}
+                After::SavedBlockEntity(entity) => {
+                    if saved_told.insert(entity) {
+                        saved_updates.push(entity);
+                    }
+                }
+                After::Block(owner, pos) => {
+                    let cell = Cell(owner, pos);
+                    if !blocks_told.insert(cell) {
                         continue;
                     }
-                    let now = self.world.block(pos.0, pos.1, pos.2);
-                    let KeptBlock {
-                        state: was,
-                        flags,
-                        level_host,
-                        replay_removal,
-                    } = level.blocks[&pos];
-                    // Restore an entity that the real write must remove with its side effects,
-                    // or that survives because a later write returned it to the old block kind.
-                    let b = self.res.behaviours();
-                    if level.removed_block_entities.contains(&pos)
-                        && (replay_removal || b.block(now) == b.block(was))
-                        && let Some(kept) = level.block_entities.get(&pos)
-                    {
-                        self.restore_removed_block_entity(pos, kept);
-                    }
-                    if now != was {
-                        // The stored state back, so the one real write sees the change.
-                        self.world.set_stored(pos.0, pos.1, pos.2, was);
-                        let pos = [pos.0, pos.1, pos.2];
-                        if level_host {
-                            self.with_level(|_, level, ticks| {
-                                level.native_set_block(ticks, pos, now, flags);
-                            });
-                            let _ = self.process_level_events();
-                        } else {
-                            let _ = self.level_set_with_flags(pos, now, flags);
+                    let block = level.blocks[&cell];
+                    self.with_journal_block_level(owner, |game| {
+                        let KeptBlock {
+                            state: was,
+                            final_state: now,
+                            path,
+                            replay_removal,
+                            ..
+                        } = block;
+                        // Restore the entity for normal removal, or let it survive when the
+                        // final state can keep it. Intermediate states weren't published.
+                        if (replay_removal || game.res.behaviours().keeps_block_entity(was, now))
+                            && let Some(removed) = level.removed_block_entities.remove(&cell)
+                        {
+                            let kept = &level.block_entities[&cell];
+                            game.restore_removed_block_entity(pos, removed, kept.generation);
                         }
-                    }
+                        if now != was {
+                            game.world.set_stored(pos.0, pos.1, pos.2, was);
+                            let pos = [pos.0, pos.1, pos.2];
+                            let flags = if block.exact_flags {
+                                block.last_flags
+                            } else {
+                                block.combined_flags
+                            };
+                            match path {
+                                BlockWritePath::Engine => {
+                                    let _ = game.level_set_with_flags(pos, now, flags);
+                                }
+                                BlockWritePath::LevelHost | BlockWritePath::Handle => {
+                                    game.apply_native_block_write(pos, now, flags);
+                                }
+                            }
+                        }
+                    });
                 }
                 After::Biome(key) if !biome_columns.insert(key) => {}
                 after => self.run_after(after),
             }
+        }
+        // A staged state change may have hidden an entity its compatible final state retains.
+        // Publish saved data after state writes have settled, never to a replaced holder.
+        for entity in saved_updates {
+            self.publish_saved_block_entity(entity);
         }
         // A crafting grid the transaction changed has its result made again, once for each
         // player however many writes it took (`InventoryMenu.slotsChanged`).
@@ -1297,24 +1394,25 @@ impl Game<'_> {
                 self.guest_craft_result(*conn);
             }
         }
-        for (pos, kept) in level.block_entities {
+        for (Cell(owner, pos), kept) in level.block_entities {
             let record = |entity: Option<&BlockEntity>| match entity {
                 Some(BlockEntity::Jukebox(j)) => j.record().cloned(),
                 _ => None,
             };
             let was = record(kept.entity.as_ref());
-            let now = record(self.world.block_entities.get(&pos));
-            if was == now {
-                continue;
-            }
-            // The song of the record it had stops; the one it has now starts.
-            let pos = [pos.0, pos.1, pos.2];
-            if was.is_some() {
-                self.jukebox_stopped(pos);
-            }
-            if now.is_some() {
-                self.jukebox_inserted(pos);
-            }
+            self.with_journal_block_level(owner, |game| {
+                let now = record(game.world.block_entities.get(&pos));
+                if was == now {
+                    return;
+                }
+                let pos = [pos.0, pos.1, pos.2];
+                if was.is_some() {
+                    game.jukebox_stopped(pos);
+                }
+                if now.is_some() {
+                    game.jukebox_inserted(pos);
+                }
+            });
         }
     }
     fn roll_back(&mut self, mut level: Level) {
@@ -1356,74 +1454,81 @@ impl Game<'_> {
 
         // Block entities whose published shapes the abort changed back.
         let mut reshaped = Vec::new();
-        for (pos, kept) in level.block_entities {
-            match (&kept.entity, self.world.block_entities.get_mut(&pos)) {
-                (Some(entity), Some(now)) => {
-                    fn shapes(
-                        entity: &BlockEntity,
-                    ) -> Option<&sunrise_client::containers::PublishedShapes> {
-                        match entity {
-                            BlockEntity::Mod(entity) => entity.shapes(),
-                            _ => None,
+        for (cell @ Cell(owner, pos), kept) in level.block_entities {
+            self.with_journal_block_level(owner, |game| {
+                match (&kept.entity, game.world.block_entities.get_mut(&pos)) {
+                    (Some(entity), Some(now)) => {
+                        fn shapes(
+                            entity: &BlockEntity,
+                        ) -> Option<&sunrise_client::containers::PublishedShapes>
+                        {
+                            match entity {
+                                BlockEntity::Mod(entity) => entity.shapes(),
+                                _ => None,
+                            }
                         }
+                        if shapes(now) != shapes(entity) {
+                            reshaped.push((owner, pos));
+                        }
+                        *now = entity.clone();
+                        game.world
+                            .block_entities
+                            .restore_generation(pos, kept.generation.unwrap());
                     }
-                    if shapes(now) != shapes(entity) {
-                        reshaped.push(pos);
+                    // One this transaction removed comes back.
+                    (Some(entity), None) if level.removed_block_entities.contains_key(&cell) => {
+                        game.restore_removed_block_entity(pos, entity.clone(), kept.generation);
                     }
-                    *now = entity.clone();
-                    self.world
+                    _ => {}
+                }
+                game.world.block_entities.put_back_attachments(
+                    pos,
+                    kept.generation,
+                    kept.attachments,
+                );
+                match kept.name {
+                    Some(name) => game.world.block_names.insert(pos, name),
+                    None => game.world.block_names.remove(&pos),
+                };
+                game.world.set_block_entity_extras(pos, kept.extras);
+                if let Some(observer) = game.world.block_entities.identity(pos)
+                    && Some(observer.generation) == kept.generation
+                {
+                    game.world
                         .block_entities
-                        .restore_generation(pos, kept.generation.unwrap());
+                        .contents_watches
+                        .restore(observer, kept.contents_watches);
                 }
-                // One this transaction removed comes back.
-                (Some(_), None) if level.removed_block_entities.contains(&pos) => {
-                    self.restore_removed_block_entity(pos, &kept);
-                }
-                _ => {}
-            }
-            self.world
-                .block_entities
-                .put_back_attachments(pos, kept.generation, kept.attachments);
-            match kept.name {
-                Some(name) => self.world.block_names.insert(pos, name),
-                None => self.world.block_names.remove(&pos),
-            };
-            self.world.set_block_entity_extras(pos, kept.extras);
-            if let Some(observer) = self.world.block_entities.identity(pos)
-                && Some(observer.generation) == kept.generation
-            {
-                self.world
-                    .block_entities
-                    .contents_watches
-                    .restore(observer, kept.contents_watches);
-            }
-            match kept.hopper {
-                Some(hopper) => self.hoppers.insert(pos, hopper),
-                None => self.hoppers.remove(&pos),
-            };
+                match kept.hopper {
+                    Some(hopper) => game.hoppers.insert(pos, hopper),
+                    None => game.hoppers.remove(&pos),
+                };
+            });
         }
         // After the whole entities: a slot kept here was kept before any whole capture of its
         // entity at this depth, so its stack is the older one. Only into the block entity it
         // was taken from: one a write replaced (a `set_block` in the transaction) is left as is.
-        for ((pos, slot), kept) in level.slots {
-            if self.world.block_entities.generation(&pos) != kept.generation {
-                continue;
-            }
-            if let Some(target) = self
-                .world
-                .block_entities
-                .get_mut(&pos)
-                .and_then(|entity| entity.slots_mut().get_mut(slot))
-            {
-                *target = kept.stack;
-                #[cfg(test)]
-                if let Some(trace) = &self.transactions.trace {
-                    trace
-                        .lock()
-                        .unwrap()
-                        .push(format!("restore:{},{},{}:{slot}", pos.0, pos.1, pos.2));
+        for ((Cell(owner, pos), slot), kept) in level.slots {
+            self.with_journal_block_level(owner, |game| {
+                if game.world.block_entities.generation(&pos) != kept.generation {
+                    return;
                 }
-            }
+                if let Some(target) = game
+                    .world
+                    .block_entities
+                    .get_mut(&pos)
+                    .and_then(|entity| entity.slots_mut().get_mut(slot))
+                {
+                    *target = kept.stack;
+                    #[cfg(test)]
+                    if let Some(trace) = &game.transactions.trace {
+                        trace
+                            .lock()
+                            .unwrap()
+                            .push(format!("restore:{},{},{}:{slot}", pos.0, pos.1, pos.2));
+                    }
+                }
+            });
         }
         let bottom_quart = self.world.bottom_y() >> 2;
         for ((qx, qy, qz), biome) in level.biomes {
@@ -1436,20 +1541,24 @@ impl Game<'_> {
                 );
             }
         }
-        for (pos, block) in level.blocks {
-            self.world.set_stored(pos.0, pos.1, pos.2, block.state);
+        for (Cell(owner, pos), block) in level.blocks {
+            self.with_journal_block_level(owner, |game| {
+                game.world.set_stored(pos.0, pos.1, pos.2, block.state);
+            });
         }
         if let Some(random) = level.level_random {
             *self.world.random = random;
         }
         // The shapes are back: the neighbours that read them (a fluid beside it) are told, as
         // the publish told them.
-        for pos in reshaped {
-            let at = BlockPos::new(pos.0, pos.1, pos.2);
-            let state = self.world.block(pos.0, pos.1, pos.2);
-            self.with_level(|b, level, ticks| {
-                let block = b.block(state);
-                b.update_neighbors_at(level, ticks, at, block);
+        for (owner, pos) in reshaped {
+            self.with_journal_block_level(owner, |game| {
+                let at = BlockPos::new(pos.0, pos.1, pos.2);
+                let state = game.world.block(pos.0, pos.1, pos.2);
+                game.with_level(|b, level, ticks| {
+                    let block = b.block(state);
+                    b.update_neighbors_at(level, ticks, at, block);
+                });
             });
         }
         for (chunk, randoms) in level.composter_randoms {

@@ -24,6 +24,17 @@ impl Game<'_> {
         let _ = self.process_level_events();
         changed
     }
+    pub(in crate::game) fn apply_native_block_write(
+        &mut self,
+        pos: [i32; 3],
+        state: BlockStateId,
+        flags: i32,
+    ) -> bool {
+        let changed = self
+            .with_level(|_, level, ticks| level.apply_native_block_write(ticks, pos, state, flags));
+        let _ = self.process_level_events();
+        changed
+    }
     /// The item entities of the server level `dimension` whose box meets
     /// the box `min`..`max`, in the level's order: vanilla's
     /// `Level.getEntitiesOfClass(ItemEntity.class, box, ENTITY_STILL_ALIVE)`, as a

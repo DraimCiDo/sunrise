@@ -1,0 +1,4 @@
+sunrise-client game::parked_level_writes_tests::outer_abort_restores_state_and_payload_without_notices_or_dirtying_chunks lib daily resources
+sunrise-client game::parked_level_writes_tests::parked_property_and_payload_writes_reach_only_the_addressed_entity lib daily resources
+sunrise-client game::parked_level_writes_tests::root_commit_uses_final_flags_and_keeps_same_position_levels_separate lib daily resources
+sunrise-client game::parked_level_writes_tests::stale_or_unloaded_targets_never_write_or_load lib daily resources

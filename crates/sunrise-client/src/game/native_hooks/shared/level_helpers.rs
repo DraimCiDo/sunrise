@@ -133,6 +133,17 @@ impl GameLevel<'_> {
         {
             return false;
         }
+        self.apply_native_block_write(ticks, pos, state, flags)
+    }
+
+    /// Run the normal write after the caller validated the state and resident position.
+    pub(in crate::game) fn apply_native_block_write(
+        &mut self,
+        ticks: &mut Ticks,
+        pos: [i32; 3],
+        state: BlockStateId,
+        flags: i32,
+    ) -> bool {
         let at = BlockPos::new(pos[0], pos[1], pos[2]);
         let previous = self.world.block(pos[0], pos[1], pos[2]);
         let b = self.behaviours;

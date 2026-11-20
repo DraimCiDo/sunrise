@@ -5,7 +5,7 @@ use super::api_values::{TryIntoApi, TryIntoEngine};
 use super::creatures::NativeSound;
 use super::lan_particles::QueuedParticle;
 use super::native_level_signals::ReadLevel;
-use super::transactions::After;
+use super::transactions::{After, BlockWritePath};
 use mod_api::{
     AttachmentBatch, AttachmentStore, BlockEntityRef, BlockKey, BlockPos, BlockSide, BlockState,
     BlockUpdateFlags, Compound, Direction, FeatureFlags, FluidState, ItemStack, LegacyRandomSource,
@@ -38,31 +38,39 @@ impl<'g, 'a> JournalLevelWrite<'g, 'a> {
     }
 
     fn write_block(&mut self, pos: [i32; 3], state: BlockStateId, flags: i32) -> bool {
-        let [x, y, z] = pos;
-        if self.game.world_debug
-            || !(-30_000_000..30_000_000).contains(&x)
-            || !(-30_000_000..30_000_000).contains(&z)
-            || !self.game.world.is_loaded_at(x, y, z)
-            || self.game.world.carrier_fences.locks_cell(&pos)
-            || self.game.pack.assets.registry.state(state).is_none()
-        {
-            return false;
-        }
-        let old = self.game.world.block(x, y, z);
-        if old == state || !self.game.journal_set_block_flags(pos, state, flags, true) {
-            return false;
-        }
-        let b = self.game.res.behaviours();
-        if !b.keeps_block_entity(old, state)
-            && self.game.world.block_entities.get(&(x, y, z)).is_some()
-        {
-            self.game.journal_block_replacement((x, y, z));
-        }
-        true
+        !self.game.world_debug
+            && super::native_entity_refs::resident_block_write_position(&self.game.world, pos)
+            && self.game.pack.assets.registry.state(state).is_some()
+            && self
+                .game
+                .stage_native_block_write(pos, state, flags, BlockWritePath::LevelHost)
     }
 
     fn queue(&mut self, write: PendingWrite) -> bool {
         self.game.after_commit(After::LevelWrite(Box::new(write)));
+        true
+    }
+}
+
+impl Game<'_> {
+    /// Stage an already validated write and hide any displaced entity from tentative reads.
+    pub(super) fn stage_native_block_write(
+        &mut self,
+        pos @ [x, y, z]: [i32; 3],
+        state: BlockStateId,
+        flags: i32,
+        path: BlockWritePath,
+    ) -> bool {
+        let old = self.world.block(x, y, z);
+        if old == state || !self.journal_set_block_flags(pos, state, flags, path) {
+            return false;
+        }
+        self.journal_pin_block_storage();
+        if !self.res.behaviours().keeps_block_entity(old, state)
+            && self.world.block_entities.get(&(x, y, z)).is_some()
+        {
+            self.journal_block_replacement((x, y, z));
+        }
         true
     }
 }

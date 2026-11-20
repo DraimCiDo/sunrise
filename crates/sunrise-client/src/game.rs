@@ -2171,6 +2171,14 @@ impl Dim {
             }
         }
     }
+    fn from_key(key: mod_api::DimensionKey) -> Self {
+        match key {
+            mod_api::DimensionKey::OVERWORLD => Self::Overworld,
+            mod_api::DimensionKey::NETHER => Self::Nether,
+            mod_api::DimensionKey::END => Self::End,
+            key => Self::Extra(key),
+        }
+    }
     fn from_id(id: &str) -> Self {
         match id {
             "minecraft:the_nether" => Self::Nether,
@@ -3190,7 +3198,7 @@ impl Game<'_> {
             cake_requested: std::cell::Cell::new(false),
             cake_answer: None,
             api_level: if native_authoritative {
-                self.level(self.dim.id())
+                self.native_level_here()
             } else {
                 self.native_client_level()
             },
