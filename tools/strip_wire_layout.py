@@ -25,7 +25,6 @@ from pathlib import Path
 ROOTS = [
     "crates/sunrise-mod-vocab",
     "crates/sunrise-mod-api",
-    "crates/sunrise-mod-point-shape",
 ]
 # Files whose `fn layout` is a std-type forwarding impl, not an API type's declared form.
 NO_VIA = {"crates/sunrise-mod-vocab/src/wire/mod.rs"}

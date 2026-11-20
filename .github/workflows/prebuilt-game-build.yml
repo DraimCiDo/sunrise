@@ -104,7 +104,7 @@ jobs:
       - name: Build and collect
         run: python tools/prebuilt_game.py build prebuilt ${{ matrix.server && '--server' || '' }}
       # The staging pass on a clean checkout, with the sunrise-stage `build` compiled from this commit: HEAD's build
-      # data, each file headed with its commit, points with signature hashes, listed internals, and the tracked source
+      # data, each file headed with its commit, listed internals, and the tracked source
       # untouched. A failure is its own daily issue (tools/ci/daily_summary.py SDK_CHECKS), and the leg's assets
       # never upload, so no SDK publishes from a tree that does not stage.
       - name: The source stages with this commit's build data
