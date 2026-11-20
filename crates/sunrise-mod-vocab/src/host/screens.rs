@@ -139,7 +139,6 @@ pub trait ScreensClientHost {
     fn mod_screen(&self) -> Option<&str>;
     /// The owner-local action key that opened the current owned screen from the Mods list.
     /// `Ok(None)` for other opening routes or when called by a different mod.
-    /// Not on wasm: this context exists only for a native callback's screen.
     #[access(ClientSetup)]
     fn mod_list_action_key(&self) -> Result<Option<&str>, ModListActionUnavailable>;
     /// Side: client.

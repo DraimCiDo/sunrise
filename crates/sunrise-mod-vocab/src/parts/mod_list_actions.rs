@@ -1,7 +1,6 @@
 //! Owner-scoped actions for the installed Mods screen.
 use super::*;
 
-// no wire: returned directly by a native callback.
 /// What the Mods list should do after an action callback returns.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: the callback can stay on its parent or request its own screen
@@ -12,12 +11,10 @@ pub enum ModListActionResult {
     OpenScreen,
 }
 
-// no wire: this callback borrows the live client and calls native mod code.
 /// Invoked only for the registering mod, with its local action key and a read-only client host.
 /// There need not be a world. Return a request rather than switching screens inside the callback.
 pub type ModListActionCallback = fn(&dyn crate::ClientHost, &str) -> ModListActionResult;
 
-// no wire: returned directly by the native registrar.
 /// Why a Mods-list action was not registered. A refusal does not change existing actions.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -42,7 +39,6 @@ impl std::fmt::Display for ModListActionError {
 
 impl std::error::Error for ModListActionError {}
 
-// no wire: only a native owned screen can have this opening context.
 /// The current lifecycle phase does not allow reading the native Mods-list opening context.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -73,8 +69,6 @@ pub trait ModListActionsRegistrar {
     /// through [`crate::prelude::ScreensClientHost::mod_list_action_key`]. Closing returns to the
     /// same entry. Refusing the screen request does not undo native side effects of the callback.
     /// A `side = "server"` package cannot declare these client controls.
-    ///
-    /// Not on wasm: the registrar stores a native callback.
     fn register_mod_list_action(
         &mut self,
         key: &'static str,
@@ -84,7 +78,6 @@ pub trait ModListActionsRegistrar {
 }
 
 // hidden: resolved identity passed between the Mods screen and the game.
-// no wire: the identity points into the process-local action table.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: an engine action identifies its package and local key
@@ -94,7 +87,6 @@ pub struct ModListActionId {
 }
 
 // hidden: frozen action table entry for the engine.
-// no wire: native callback and resolved dispatch slot.
 #[doc(hidden)]
 #[derive(Clone, Debug)]
 // exhaustive: engine registration constructs this record
