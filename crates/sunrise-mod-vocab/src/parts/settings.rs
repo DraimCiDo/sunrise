@@ -1,5 +1,6 @@
 use super::*;
 use std::sync::atomic::AtomicBool;
+
 /// Owner-bound settings retained for the client's mod pages and typed reads.
 pub fn settings() -> &'static [(&'static str, crate::SettingSpec)] {
     installed().map_or(&[], |installed| &installed.keys.settings)
@@ -13,7 +14,6 @@ pub fn setting(mod_id: &str, key: &str) -> Option<&'static crate::SettingSpec> {
         .map(|(_, spec)| spec)
 }
 
-// no wire: this callback creates process-local screen sessions, not transferable data.
 /// A mod's Config button factory, analogous to NeoForge's `IConfigScreenFactory`.
 pub trait ConfigScreenFactory: Send + Sync + 'static {
     /// Called once per Config activation, for the loader-resolved `owner` only.
@@ -28,7 +28,7 @@ pub trait ConfigScreenFactory: Send + Sync + 'static {
 }
 
 /// The client UI location of a Config activation. It does not grant world access.
-#[derive(Clone, Copy, Debug, sunrise_mod_api_macros::Wire)]
+#[derive(Clone, Copy, Debug)]
 pub struct ConfigScreenContext {
     in_world: bool,
 }
@@ -45,7 +45,6 @@ impl ConfigScreenContext {
     }
 }
 
-// no wire: holds a process-local identity and a close request for one activation.
 /// An opaque return target for this activation's Mods list.
 ///
 /// Clone it if your Back control needs to request a close from a read-only
@@ -71,7 +70,6 @@ impl ConfigScreenParent {
     }
 }
 
-// no wire: owns a process-local return target.
 /// One activation of a mod's Config screen. Build it from the supplied return target.
 pub struct ConfigScreenSession {
     parent: ConfigScreenParent,
@@ -90,7 +88,7 @@ impl ConfigScreenSession {
 }
 
 /// A factory declined to create a screen. The Mods list stays open.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ConfigScreenRefusal {
     /// The mod cannot present its configuration screen right now.
@@ -98,7 +96,7 @@ pub enum ConfigScreenRefusal {
 }
 
 /// Why a Config screen factory could not be registered.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ConfigScreenRegistrationError {
     /// The owner already registered a factory. The first one remains installed.

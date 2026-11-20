@@ -79,10 +79,10 @@ A mod reads and writes only its own settings: another mod's id, or a key its own
 
 A native client mod can call `Registrar::register_config_screen_factory` during
 `Hooks::register`. This is Sunrise's counterpart to NeoForge's
-`IConfigScreenFactory` extension point. Register one factory per mod; a duplicate
-returns a typed error and keeps the first factory. The Config button appears even
-with no settings rows. If you register both, the factory takes precedence;
-without one, registered rows still open the generated page.
+`IConfigScreenFactory`. Register one factory per mod; a duplicate returns a
+typed error and keeps the first factory. The Config button appears even with no
+settings rows. If you register both, the factory takes precedence; without
+one, registered rows still open the generated page.
 
 The selected, enabled mod's factory is called once when Config is pressed. It
 receives the loader-resolved owner id, a client UI context with no world access,
