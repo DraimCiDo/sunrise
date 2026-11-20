@@ -228,6 +228,10 @@ fn kind_is(value: &Tag, expected: &str) -> bool {
 
 /// Borrowed NBT counterpart of `validate_text`; strings are not parsed as JSON.
 pub fn validate_text_tag(value: &Tag) -> Result<(), String> {
+    sunrise_core::nbt::with_tree_stack(|| validate_text_tag_node(value))
+}
+
+fn validate_text_tag_node(value: &Tag) -> Result<(), String> {
     if !matches!(value, Tag::Compound(_) | Tag::List(_)) {
         return Ok(());
     }
@@ -261,6 +265,17 @@ pub fn validate_text_tag(value: &Tag) -> Result<(), String> {
     {
         validate_text_tag(field(value, "separator"))?;
     }
+    if string_is(field(value, "type"), "object")
+        || (explicit.is_none()
+            && ["text", "translate", "keybind", "score", "selector", "nbt"]
+                .into_iter()
+                .all(|key| value.get(key).is_none())
+            && ["object", "sprite", "player"]
+                .into_iter()
+                .any(|key| value.get(key).is_some()))
+    {
+        validate_text_tag(field(value, "fallback"))?;
+    }
     Ok(())
 }
 
@@ -291,7 +306,7 @@ fn plain_message_tag(value: &Tag) -> Result<(), String> {
 fn dialog_body_tag(value: &Tag) -> Result<(), String> {
     if let Tag::List(values) = value {
         for value in values {
-            dialog_body_tag(value)?;
+            sunrise_core::nbt::with_tree_stack(|| dialog_body_tag(value))?;
         }
     } else if kind_is(value, "item") {
         super::validate_stack_tag(field(value, "item"))?;
@@ -313,6 +328,10 @@ fn dialog_button_tag(value: &Tag) -> Result<(), String> {
 
 /// Borrowed NBT counterpart of the stock dialog codec traversal.
 pub fn validate_dialog_tag(value: &Tag) -> Result<(), String> {
+    sunrise_core::nbt::with_tree_stack(|| validate_dialog_tag_node(value))
+}
+
+fn validate_dialog_tag_node(value: &Tag) -> Result<(), String> {
     if !matches!(value, Tag::Compound(_) | Tag::List(_)) {
         return Ok(());
     }

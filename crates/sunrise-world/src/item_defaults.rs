@@ -170,7 +170,7 @@ pub fn validate_component_map_tag(value: &sunrise_core::nbt::Tag) -> Result<(), 
 /// `ItemStackTemplate.CODEC` / `ItemStack.CODEC`, not their network codecs.
 pub fn validate_stack_tag(value: &sunrise_core::nbt::Tag) -> Result<(), String> {
     if let Some(components) = value.get("components") {
-        validate_component_map_tag(components)?;
+        sunrise_core::nbt::with_tree_stack(|| validate_component_map_tag(components))?;
     }
     Ok(())
 }
@@ -200,7 +200,7 @@ pub fn validate_item_predicate_tag(value: &sunrise_core::nbt::Tag) -> Result<(),
             let Some(name) = ascii_name(name, &mut scratch) else {
                 continue;
             };
-            validate_partial_predicate_tag(name, value)?;
+            sunrise_core::nbt::with_tree_stack(|| validate_partial_predicate_tag(name, value))?;
         }
     }
     Ok(())

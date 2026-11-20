@@ -3,16 +3,6 @@ use super::{Patch, Template, Value};
 use sunrise_core::nbt::Tag;
 
 type Result<T, E = String> = std::result::Result<T, E>;
-const TEXT_BOOLS: &[&str] = &[
-    "bold",
-    "italic",
-    "underlined",
-    "strikethrough",
-    "obfuscated",
-    "interpret",
-    "plain",
-];
-
 /// `Identifier.CODEC`: default the namespace, never substitute a registry entry.
 pub fn identifier(s: &str) -> Result<String> {
     let s = if s.contains(':') {
@@ -80,129 +70,403 @@ fn double(t: &Tag) -> Result<Value> {
 fn boolean(t: &Tag) -> Result<Value> {
     Ok(Value::Bool(number(t)? != 0.0))
 }
-fn text(t: &Tag) -> Result<Value> {
-    validate_text(t)?;
-    Ok(Value::from_nbt(super::compact_text_tag(t), TEXT_BOOLS))
+/// `ComponentSerialization.CODEC`: normalize the decoded contents and style before
+/// projection or hashing. A component list appends its tail to the first component.
+fn text(t: &Tag, source: Source) -> Result<Value> {
+    if let Tag::String(s) = t {
+        return Ok(Value::String(s.0.clone()));
+    }
+    let mut fields = text_fields(t, source)?;
+    if fields.len() == 1 && fields[0].0 == Value::string("text") {
+        return Ok(fields.pop().unwrap().1);
+    }
+    Ok(Value::Map(fields))
 }
-/// `ComponentSerialization.CODEC`: literal string, nonempty component list, or
-/// a record with explicit or inferred contents. Extra record fields are ignored.
-fn validate_text(t: &Tag) -> Result<()> {
+
+fn text_fields(t: &Tag, source: Source) -> Result<Vec<(Value, Value)>> {
     super::with_tree_stack(|| {
-        let valid = match t {
-            Tag::String(_) => true,
+        match t {
+            Tag::String(s) => return Ok(vec![(Value::string("text"), Value::String(s.0.clone()))]),
             Tag::List(items) => {
-                !items.is_empty() && items.iter().all(|item| validate_text(item).is_ok())
+                let (first, siblings) = items.split_first().ok_or("empty text component list")?;
+                let mut fields = text_fields(first, source)?;
+                if !siblings.is_empty() {
+                    let extra = Value::string("extra");
+                    let siblings = siblings.iter().map(|item| text(item, source));
+                    if let Some((_, Value::List(existing))) =
+                        fields.iter_mut().find(|(k, _)| *k == extra)
+                    {
+                        for sibling in siblings {
+                            existing.push(sibling?);
+                        }
+                    } else {
+                        fields.push((extra, Value::List(siblings.collect::<Result<_>>()?)));
+                    }
+                }
+                return Ok(fields);
             }
-            Tag::Compound(_) => {
-                let has_string = |key| matches!(t.get(key), Some(Tag::String(_)));
-                let valid_contents = |kind: &str| match kind {
-                    "text" => has_string("text"),
-                    "translatable" => {
-                        has_string("translate")
-                            && t.get("with").is_none_or(|arguments| {
-                                let argument =
-                                    |v: &Tag| number(v).is_ok() || validate_text(v).is_ok();
-                                match arguments {
-                                    Tag::List(args) => args.iter().all(argument),
-                                    Tag::ByteArray(_) | Tag::IntArray(_) | Tag::LongArray(_) => {
-                                        true
-                                    }
-                                    _ => false,
-                                }
-                            })
-                    }
-                    "keybind" => has_string("keybind"),
-                    "score" => t.get("score").is_some_and(|score| {
-                        matches!(score.get("name"), Some(Tag::String(_)))
-                            && matches!(score.get("objective"), Some(Tag::String(_)))
-                    }),
-                    "selector" => {
-                        has_string("selector")
-                            && t.get("separator").is_none_or(|v| validate_text(v).is_ok())
-                    }
-                    "nbt" => {
-                        let flags_conflict = ["interpret", "plain"].into_iter().all(|key| {
-                            matches!(t.get(key).map(boolean), Some(Ok(Value::Bool(true))))
-                        });
-                        has_string("nbt")
-                            && !flags_conflict
-                            && match t.get("source") {
-                                Some(Tag::String(kind)) => match kind.to_string_lossy().as_str() {
-                                    "storage" => t.get("storage").is_some_and(|v| ident(v).is_ok()),
-                                    "block" => has_string("block"),
-                                    "entity" => has_string("entity"),
-                                    _ => false,
-                                },
-                                None => {
-                                    has_string("block")
-                                        || has_string("entity")
-                                        || t.get("storage").is_some_and(|v| ident(v).is_ok())
-                                }
-                                _ => false,
-                            }
-                    }
-                    "object" => {
-                        let atlas = || {
-                            t.get("sprite").is_some_and(|v| ident(v).is_ok())
-                                && t.get("atlas").is_none_or(|v| ident(v).is_ok())
-                        };
-                        let player = || {
-                            t.get("player").is_some_and(|v| profile(v).is_ok())
-                                && t.get("hat").is_none_or(|v| boolean(v).is_ok())
-                        };
-                        let object = match t.get("object") {
-                            Some(Tag::String(kind)) => match kind.to_string_lossy().as_str() {
-                                "atlas" => atlas(),
-                                "player" => player(),
-                                _ => false,
-                            },
-                            None => atlas() || player(),
-                            _ => false,
-                        };
-                        object && t.get("fallback").is_none_or(|v| validate_text(v).is_ok())
-                    }
-                    _ => false,
-                };
-                let contents = match t.get("type") {
-                    Some(Tag::String(kind)) => valid_contents(&kind.to_string_lossy()),
-                    None => [
-                        "text",
-                        "translatable",
-                        "keybind",
-                        "score",
-                        "selector",
-                        "nbt",
-                        "object",
-                    ]
-                    .into_iter()
-                    .any(valid_contents),
-                    _ => false,
-                };
-                contents
-                    && [
-                        "bold",
-                        "italic",
-                        "underlined",
-                        "strikethrough",
-                        "obfuscated",
-                    ]
-                    .into_iter()
-                    .all(|key| t.get(key).is_none_or(|v| boolean(v).is_ok()))
-                    && t.get("insertion")
-                        .is_none_or(|v| matches!(v, Tag::String(_)))
-                    && t.get("extra").is_none_or(|extra| {
-                        matches!(extra, Tag::List(_)) && validate_text(extra).is_ok()
-                    })
-            }
-            _ => false,
+            Tag::Compound(_) => (),
+            _ => return Err("expected text component".into()),
+        }
+
+        let mut r = Record {
+            tag: t,
+            fields: vec![],
         };
-        if valid {
-            Ok(())
+        if let Some(kind) = t.get("type") {
+            text_contents(&mut r, &string(kind)?, source)?;
         } else {
-            Err("invalid text component".into())
+            let mut result = Err("no matching text contents".into());
+            for kind in [
+                "text",
+                "translatable",
+                "keybind",
+                "score",
+                "selector",
+                "nbt",
+                "object",
+            ] {
+                let present = match kind {
+                    "translatable" => t.get("translate").is_some(),
+                    "object" => ["object", "sprite", "player"]
+                        .into_iter()
+                        .any(|k| t.get(k).is_some()),
+                    _ => t.get(kind).is_some(),
+                };
+                if present {
+                    result = text_contents(&mut r, kind, source);
+                    if result.is_ok() {
+                        break;
+                    }
+                    r.fields.clear();
+                }
+            }
+            result?;
+        }
+
+        r.optional("extra", |v| {
+            let values = list(v, |v| text(v, source))?;
+            if matches!(&values, Value::List(items) if items.is_empty()) {
+                return Err("empty extra text list".into());
+            }
+            Ok(values)
+        })?;
+        text_style(&mut r, source)?;
+        Ok(r.fields)
+    })
+}
+
+fn text_contents(r: &mut Record<'_>, kind: &str, source: Source) -> Result<()> {
+    let t = r.tag;
+    match kind {
+        "text" => r.required("text", string_value),
+        "translatable" => {
+            r.required("translate", string_value)?;
+            if matches!(t.get("fallback"), Some(Tag::String(_))) {
+                r.required("fallback", string_value)?;
+            }
+            r.list("with", |v| {
+                if number(v).is_ok() {
+                    Ok(Value::from_nbt(v, &[]))
+                } else {
+                    text(v, source)
+                }
+            })
+        }
+        "keybind" => r.required("keybind", string_value),
+        "score" => r.required("score", |v| {
+            record(v, |r| {
+                r.required("name", string_value)?;
+                r.required("objective", string_value)
+            })
+        }),
+        "selector" => {
+            r.required("selector", string_value)?;
+            r.optional("separator", |v| text(v, source))
+        }
+        "nbt" => {
+            r.required("nbt", string_value)?;
+            let interpret = matches!(t.get("interpret").map(boolean), Some(Ok(Value::Bool(true))));
+            let plain = matches!(t.get("plain").map(boolean), Some(Ok(Value::Bool(true))));
+            if interpret && plain {
+                return Err("interpret and plain cannot both be enabled".into());
+            }
+            if interpret {
+                r.fields
+                    .push((Value::string("interpret"), Value::Bool(true)));
+            }
+            if plain {
+                r.fields.push((Value::string("plain"), Value::Bool(true)));
+            }
+            let data = if let Some(data) = t.get("source") {
+                string(data)?
+            } else if matches!(t.get("entity"), Some(Tag::String(_))) {
+                "entity".to_owned()
+            } else if matches!(t.get("block"), Some(Tag::String(_))) {
+                "block".to_owned()
+            } else {
+                "storage".to_owned()
+            };
+            match data.as_str() {
+                "entity" => r.required("entity", string_value)?,
+                "block" => r.required("block", string_value)?,
+                "storage" => r.required("storage", text_identifier)?,
+                _ => return Err("unknown text NBT source".into()),
+            }
+            r.optional("separator", |v| text(v, source))
+        }
+        "object" => {
+            let atlas = |r: &mut Record<'_>| {
+                r.required("sprite", text_identifier)?;
+                r.id("atlas", "minecraft:blocks", text_identifier)
+            };
+            let player = |r: &mut Record<'_>| {
+                r.required("player", profile)?;
+                r.b("hat", true)
+            };
+            match t.get("object").map(string).transpose()?.as_deref() {
+                Some("atlas") => atlas(r)?,
+                Some("player") => player(r)?,
+                Some(_) => return Err("unknown text object contents".into()),
+                None => {
+                    if atlas(r).is_err() {
+                        r.fields.clear();
+                        player(r)?;
+                    }
+                }
+            }
+            r.optional("fallback", |v| text(v, source))
+        }
+        _ => Err(format!("unknown text contents {kind}")),
+    }
+}
+
+/// `Style.Serializer.MAP_CODEC`: known fields are strict optional fields.
+fn text_style(r: &mut Record<'_>, source: Source) -> Result<()> {
+    r.optional("color", text_color)?;
+    r.optional("shadow_color", |t| {
+        if let Ok(color) = int(t) {
+            return Ok(color);
+        }
+        let value = list(t, float)?;
+        let Value::List(values) = &value else {
+            unreachable!()
+        };
+        let [
+            Value::Float(red),
+            Value::Float(green),
+            Value::Float(blue),
+            Value::Float(alpha),
+        ] = values.as_slice()
+        else {
+            return Err("expected four shadow color channels".into());
+        };
+        let color = [*alpha, *red, *green, *blue].map(|bits| {
+            let x = f32::from_bits(bits) * 255.0;
+            let n = x as i32;
+            (if x < n as f32 { n.wrapping_sub(1) } else { n }) as u8
+        });
+        Ok(Value::Int(i32::from_be_bytes(color)))
+    })?;
+    for key in [
+        "bold",
+        "italic",
+        "underlined",
+        "strikethrough",
+        "obfuscated",
+    ] {
+        r.optional(key, boolean)?;
+    }
+    r.optional("insertion", string_value)?;
+    r.optional("font", text_identifier)?;
+    r.optional("click_event", |v| click_event(v, source))?;
+    r.optional("hover_event", |v| hover_event(v, source))
+}
+
+fn text_identifier(t: &Tag) -> Result<Value> {
+    let id = sunrise_core::identifier::Identifier::parse(&string(t)?).map_err(|e| e.to_string())?;
+    Ok(Value::string(&id.to_string()))
+}
+
+/// `TextColor.parseColor`: named colors or a signed Java base-16 integer in RGB range.
+fn text_color(t: &Tag) -> Result<Value> {
+    let name = string(t)?;
+    if let Some(hex) = name.strip_prefix('#') {
+        let negative = hex.starts_with('-');
+        let hex = hex.strip_prefix(['+', '-']).unwrap_or(hex);
+        let bad = || format!("invalid text color {name}");
+        if hex.is_empty() {
+            return Err(bad());
+        }
+        let mut value = 0;
+        for unit in hex.encode_utf16() {
+            let digit = sunrise_core::java_character::digit(unit, 16).ok_or_else(bad)?;
+            value = (value << 4) | digit;
+            if value > 0xff_ffff {
+                return Err(bad());
+            }
+        }
+        if negative && value != 0 {
+            return Err(bad());
+        }
+        return Ok(Value::string(&format!("#{value:06X}")));
+    }
+    match name.as_str() {
+        "black" | "dark_blue" | "dark_green" | "dark_aqua" | "dark_red" | "dark_purple"
+        | "gold" | "gray" | "dark_gray" | "blue" | "green" | "aqua" | "red" | "light_purple"
+        | "yellow" | "white" => Ok(Value::string(&name)),
+        _ => Err(format!("invalid text color {name}")),
+    }
+}
+
+fn click_event(t: &Tag, source: Source) -> Result<Value> {
+    record(t, |r| {
+        let action = string(t.get("action").ok_or("missing click action")?)?;
+        r.fields
+            .push((Value::string("action"), Value::string(&action)));
+        match action.as_str() {
+            "open_url" => r.required("url", |v| {
+                if !sunrise_core::text::untrusted_http_url(&string(v)?) {
+                    return Err("invalid click URL".into());
+                }
+                string_value(v)
+            }),
+            "run_command" | "suggest_command" => r.required("command", |v| {
+                let Tag::String(s) = v else {
+                    return Err("expected command string".into());
+                };
+                if s.0
+                    .iter()
+                    .any(|&unit| unit < 32 || unit == 127 || unit == 167)
+                {
+                    return Err("disallowed click command character".into());
+                }
+                Ok(Value::String(s.0.clone()))
+            }),
+            "change_page" => r.required("page", |v| {
+                let page = int(v)?;
+                if matches!(page, Value::Int(n) if n > 0) {
+                    Ok(page)
+                } else {
+                    Err("click page must be positive".into())
+                }
+            }),
+            "copy_to_clipboard" => r.required("value", string_value),
+            "custom" => {
+                r.required("id", text_identifier)?;
+                r.optional("payload", |v| Ok(Value::from_nbt(v, &[])))
+            }
+            "show_dialog" => r.required("dialog", |v| {
+                if let Tag::String(_) = v {
+                    return text_identifier(v);
+                }
+                let Tag::Compound(fields) = v else {
+                    return Err("expected dialog holder or inline dialog".into());
+                };
+                let kind = text_identifier(v.get("type").ok_or("missing dialog type")?)?;
+                if ![
+                    "minecraft:notice",
+                    "minecraft:server_links",
+                    "minecraft:dialog_list",
+                    "minecraft:multi_action",
+                    "minecraft:confirmation",
+                ]
+                .into_iter()
+                .any(|name| kind == Value::string(name))
+                {
+                    return Err("unknown inline dialog type".into());
+                }
+                // The dialog's body and actions have their own traversal. Do not
+                // interpret opaque custom payloads there as text or item components.
+                crate::item_defaults::validate_dialog_tag(v)?;
+                let mut normalized = vec![
+                    (Value::string("type"), kind),
+                    (
+                        Value::string("title"),
+                        text(v.get("title").ok_or("missing dialog title")?, source)?,
+                    ),
+                ];
+                for (key, value) in fields {
+                    match key.to_string_lossy().as_str() {
+                        "type" | "title" => (),
+                        "external_title" => {
+                            normalized.push((Value::string("external_title"), text(value, source)?))
+                        }
+                        _ => normalized
+                            .push((Value::String(key.0.clone()), Value::from_nbt(value, &[]))),
+                    }
+                }
+                Ok(Value::Map(normalized))
+            }),
+            _ => Err(format!("invalid click action {action}")),
         }
     })
 }
+
+fn hover_event(t: &Tag, source: Source) -> Result<Value> {
+    record(t, |r| {
+        let action = string(t.get("action").ok_or("missing hover action")?)?;
+        r.fields
+            .push((Value::string("action"), Value::string(&action)));
+        match action.as_str() {
+            "show_text" => r.required("value", |v| text(v, source)),
+            "show_entity" => {
+                r.required("id", text_identifier)?;
+                r.required("uuid", |v| {
+                    if let Tag::String(s) = v {
+                        let uuid = sunrise_core::text::parse_java_uuid(&s.to_string_lossy())
+                            .ok_or("invalid hover entity UUID")?;
+                        return Ok(Value::IntArray(
+                            [96, 64, 32, 0].map(|shift| (uuid >> shift) as i32).to_vec(),
+                        ));
+                    }
+                    let value = integer_list(v)?;
+                    let Value::List(values) = &value else {
+                        unreachable!()
+                    };
+                    let [Value::Int(a), Value::Int(b), Value::Int(c), Value::Int(d)] =
+                        values.as_slice()
+                    else {
+                        return Err("hover entity UUID must have four integers".into());
+                    };
+                    Ok(Value::IntArray(vec![*a, *b, *c, *d]))
+                })?;
+                r.optional("name", |v| text(v, source))
+            }
+            "show_item" => {
+                // ShowItem flattens ItemStackTemplate.MAP_CODEC into the event map.
+                // Text is codec NBT, even when its outer component came from datafixing.
+                let mut item = template_tag(
+                    t,
+                    Source {
+                        upgraded: false,
+                        ..source
+                    },
+                )?;
+                r.fields
+                    .push((Value::string("id"), Value::string(&item.item)));
+                if item.count != 1 {
+                    r.fields
+                        .push((Value::string("count"), Value::Int(item.count)));
+                }
+                if !item.patch.is_empty() {
+                    let patch = std::mem::take(&mut item.patch)
+                        .into_iter()
+                        .map(|(id, value)| match value {
+                            Some(value) => (Value::string(&id), value),
+                            None => (Value::string(&format!("!{id}")), Value::Map(vec![])),
+                        })
+                        .collect();
+                    r.fields
+                        .push((Value::string("components"), Value::Map(patch)));
+                }
+                Ok(())
+            }
+            _ => Err(format!("invalid hover action {action}")),
+        }
+    })
+}
+
 fn list(t: &Tag, f: impl Fn(&Tag) -> Result<Value>) -> Result<Value> {
     let values = match t {
         Tag::List(v) => v.iter().map(f).collect::<Result<_>>()?,
@@ -407,16 +671,16 @@ fn explosion(t: &Tag) -> Result<Value> {
         r.b("has_twinkle", false)
     })
 }
-fn trim_material(t: &Tag) -> Result<Value> {
+fn trim_material(t: &Tag, source: Source) -> Result<Value> {
     record(t, |r| {
         r.required("palette_id", ident)?;
-        r.required("description", text)
+        r.required("description", |v| text(v, source))
     })
 }
-fn trim_pattern(t: &Tag) -> Result<Value> {
+fn trim_pattern(t: &Tag, source: Source) -> Result<Value> {
     record(t, |r| {
         r.required("asset_id", ident)?;
-        r.required("description", text)?;
+        r.required("description", |v| text(v, source))?;
         if t.get("decal").is_some() {
             r.required("decal", boolean)
         } else {
@@ -425,14 +689,14 @@ fn trim_pattern(t: &Tag) -> Result<Value> {
         }
     })
 }
-fn instrument(t: &Tag) -> Result<Value> {
+fn instrument(t: &Tag, source: Source) -> Result<Value> {
     validate_source("instrument", t)?;
     record(t, |r| {
         r.required("sound_event", sound)?;
         r.required("use_duration", float)?;
         r.required("range", float)?;
         r.i("durability_damage", 0)?;
-        r.required("description", text)
+        r.required("description", |v| text(v, source))
     })
 }
 fn banner(t: &Tag) -> Result<Value> {
@@ -741,8 +1005,8 @@ fn component_leaf(name: &str, id: &str, t: &Tag, source: Source) -> Result<Value
         "minimum_attack_charge" | "potion_duration_scale" => float(t)?,
         "enchantment_glint_override" => boolean(t)?,
         "unbreakable" | "glider" | "waxed" => unit(t)?,
-        "custom_name" | "item_name" => text(t)?,
-        "lore" => list(t, text)?,
+        "custom_name" | "item_name" => text(t, source)?,
+        "lore" => list(t, |v| text(v, source))?,
         "rarity"
         | "base_color"
         | "dye"
@@ -923,7 +1187,7 @@ fn component_leaf(name: &str, id: &str, t: &Tag, source: Source) -> Result<Value
             r.required("targeting_entity_types", holder_set)?;
             r.required("visibility", float)
         })?,
-        "attribute_modifiers" => list(t, attribute_entry)?,
+        "attribute_modifiers" => list(t, |v| attribute_entry(v, source))?,
         "custom_model_data" => record(t, |r| {
             r.list("floats", float)?;
             r.list("flags", boolean)?;
@@ -982,15 +1246,15 @@ fn component_leaf(name: &str, id: &str, t: &Tag, source: Source) -> Result<Value
             r.required("title", |v| filterable(v, string_value))?;
             r.required("author", string_value)?;
             r.i("generation", 0)?;
-            r.list("pages", |v| filterable(v, text))?;
+            r.list("pages", |v| filterable(v, |v| text(v, source)))?;
             r.b("resolved", false)
         })?,
         "trim" => record(t, |r| {
-            r.required("material", |v| holder(v, trim_material))?;
-            r.required("pattern", |v| holder(v, trim_pattern))
+            r.required("material", |v| holder(v, |v| trim_material(v, source)))?;
+            r.required("pattern", |v| holder(v, |v| trim_pattern(v, source)))
         })?,
-        "instrument" => holder(t, instrument)?,
-        "provides_trim_material" => holder(t, trim_material)?,
+        "instrument" => holder(t, |v| instrument(v, source))?,
+        "provides_trim_material" => holder(t, |v| trim_material(v, source))?,
         "entity_data" | "block_entity_data" => {
             let mut v = t.clone();
             let id = ident(t.get("id").ok_or("missing typed data id")?)?.to_tag()?;
@@ -1053,7 +1317,7 @@ fn component_leaf(name: &str, id: &str, t: &Tag, source: Source) -> Result<Value
                 r.required("min_ticks_in_hive", int)
             })
         })?,
-        "sign_text_front" | "sign_text_back" => sign_text(t)?,
+        "sign_text_front" | "sign_text_back" => sign_text(t, source)?,
         "profile" => profile(t)?,
         "blocks_attacks" => blocks_attacks(t)?,
         _ if !id.starts_with("minecraft:") => Value::convert_nbt(t, &[]),
@@ -1170,8 +1434,8 @@ fn only_fields(t: &Tag, allowed: &[&str]) -> Result<()> {
     }
     Ok(())
 }
-fn sign_messages(t: &Tag) -> Result<Value> {
-    let value = list(t, text)?;
+fn sign_messages(t: &Tag, source: Source) -> Result<Value> {
+    let value = list(t, |v| text(v, source))?;
     if !matches!(&value,Value::List(v) if v.len()==4) {
         return Err("sign requires four messages".into());
     }
@@ -1556,7 +1820,7 @@ fn validate_source(name: &str, t: &Tag) -> Result<()> {
     }
     Ok(())
 }
-fn attribute_entry(t: &Tag) -> Result<Value> {
+fn attribute_entry(t: &Tag, source: Source) -> Result<Value> {
     fn enumeration(t: &Tag, values: &[&str]) -> Result<Value> {
         let name = string(t)?;
         if !values.contains(&name.as_str()) {
@@ -1593,7 +1857,7 @@ fn attribute_entry(t: &Tag) -> Result<Value> {
                 let display = record(display, |r| {
                     r.required("type", |v| enumeration(v, &["hidden", "override"]))?;
                     if name == "override" {
-                        r.required("value", text)?;
+                        r.required("value", |v| text(v, source))?;
                     }
                     Ok(())
                 })?;
@@ -1603,12 +1867,12 @@ fn attribute_entry(t: &Tag) -> Result<Value> {
         Ok(())
     })
 }
-fn sign_text(t: &Tag) -> Result<Value> {
+fn sign_text(t: &Tag, source: Source) -> Result<Value> {
     record(t, |r| {
-        r.required("messages", sign_messages)?;
+        r.required("messages", |v| sign_messages(v, source))?;
         if let Some(filtered) = t
             .get("filtered_messages")
-            .and_then(|v| sign_messages(v).ok())
+            .and_then(|v| sign_messages(v, source).ok())
             && Some(&filtered) != r.fields.first().map(|(_, v)| v)
         {
             r.fields
@@ -1862,6 +2126,89 @@ mod tests {
                 .unwrap(),
             text
         );
+    }
+
+    #[test]
+    fn saved_text_refuses_malformed_style_fields_on_decode_and_projection() {
+        for style in [
+            r#"color:7"#,
+            r#"color:"reset""#,
+            r##"color:"#1000000""##,
+            r#"font:"..:uniform""#,
+            r#"font:{id:"uniform"}"#,
+            r#"click_event:{action:"open_file",path:"x"}"#,
+            r#"click_event:{action:"open_url",url:"https://example.org/%zz"}"#,
+            r#"click_event:{action:"run_command",value:"/say hi"}"#,
+            r#"click_event:{action:"suggest_command",command:"/say §hi"}"#,
+            r#"click_event:{action:"change_page",page:0}"#,
+            r#"click_event:{action:"show_dialog",dialog:7}"#,
+            r#"hover_event:{action:"show_text",contents:"legacy"}"#,
+            r#"hover_event:{action:"show_entity",id:"pig",uuid:[I;1,2]}"#,
+            r#"hover_event:{action:"show_item",id:"stone",count:100}"#,
+            r#"hover_event:{action:"show_item",id:"stone",components:{damage:-1}}"#,
+        ] {
+            let tag = parse(&format!(r#"{{text:"hi",{style}}}"#));
+            assert!(from_component_tag("custom_name", &tag).is_err(), "{style}");
+            assert!(
+                Value::from_nbt(&tag, &[])
+                    .to_component_tag("custom_name")
+                    .is_err(),
+                "{style}"
+            );
+        }
+    }
+
+    #[test]
+    fn saved_text_refuses_nested_hover_transient_sets_and_removals() {
+        for tag in [
+            parse(
+                r#"{text:"item",hover_event:{action:"show_item",id:"stone",components:{creative_slot_lock:{}}}}"#,
+            ),
+            parse(
+                r#"{text:"outer",hover_event:{action:"show_text",value:{text:"item",hover_event:{action:"show_item",id:"stone",components:{"!creative_slot_lock":{}}}}}}"#,
+            ),
+        ] {
+            for error in [
+                from_component_tag("custom_name", &tag).unwrap_err(),
+                Value::from_nbt(&tag, &[])
+                    .to_component_tag("custom_name")
+                    .unwrap_err(),
+            ] {
+                assert!(error.contains("minecraft:custom_name"));
+                assert!(error.contains("minecraft:creative_slot_lock"));
+            }
+        }
+    }
+
+    #[test]
+    fn saved_text_projects_canonical_style_and_the_hover_items_own_patch() {
+        let input = parse(
+            r##"{
+            type:"text",text:"item",color:"#+Ａ",font:":uniform",bold:2s,
+            click_event:{action:"change_page",page:2s},
+            hover_event:{action:"show_item",id:"stone",count:1b,components:{
+                damage:2s,
+                "!unbreakable":{ignored:1},
+                custom_name:{type:"text",text:"inner"},
+                custom_data:{bold:7b,creative_slot_lock:{}}
+            }}
+        }"##,
+        );
+        let output = parse(
+            r##"{
+            text:"item",color:"#00000A",font:"minecraft:uniform",bold:1b,
+            click_event:{action:"change_page",page:2},
+            hover_event:{action:"show_item",id:"minecraft:stone",components:{
+                "minecraft:damage":2,
+                "!minecraft:unbreakable":{},
+                "minecraft:custom_name":"inner",
+                "minecraft:custom_data":{bold:7b,creative_slot_lock:{}}
+            }}
+        }"##,
+        );
+        let value = from_component_tag("custom_name", &input).unwrap();
+        assert_eq!(value.to_component_tag("custom_name").unwrap(), output);
+        assert_eq!(from_component_tag("custom_name", &output).unwrap(), value);
     }
 
     #[test]
