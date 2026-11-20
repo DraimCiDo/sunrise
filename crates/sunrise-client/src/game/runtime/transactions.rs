@@ -86,6 +86,11 @@ impl OpenTransactions {
         }
     }
 
+    /// Record a write whose rollback state has already been kept.
+    pub(super) fn note_block_entity_write(&mut self) {
+        self.writes = self.writes.wrapping_add(1);
+    }
+
     /// The journaled-write epoch.
     pub(in crate::game) fn writes(&self) -> u64 {
         self.writes
@@ -756,7 +761,13 @@ impl Game<'_> {
     /// Keeps the block entity at `pos` as it is, with its attachments and a hopper's
     /// cooldown, if a transaction is open and hasn't yet.
     pub(super) fn journal_block_entity(&mut self, pos: Pos) {
-        self.transactions.writes = self.transactions.writes.wrapping_add(1);
+        self.transactions.note_block_entity_write();
+        self.keep_block_entity(pos);
+    }
+
+    /// Keep the rollback state before the resident tick lends the row. The
+    /// view records the write epoch only if a checked setter actually writes.
+    pub(super) fn keep_block_entity(&mut self, pos: Pos) {
         let Some(level) = self.transactions.last_mut() else {
             return;
         };

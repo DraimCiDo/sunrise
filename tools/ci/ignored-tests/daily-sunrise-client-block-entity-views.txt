@@ -1,0 +1,3 @@
+sunrise-client game::block_entity_view_tests::nested_commit_is_undone_by_outer_abort lib daily child-process
+sunrise-client game::block_entity_view_tests::removed_holder_is_not_ticked_or_revived lib daily child-process
+sunrise-client game::block_entity_view_tests::resident_tick_reads_and_updates_the_same_entity lib daily child-process

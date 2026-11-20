@@ -23,6 +23,7 @@ mod chunks;
 mod commands;
 mod mods;
 mod ticks;
+mod views;
 mod world;
 
 /// Where the measured workloads report.
@@ -49,14 +50,29 @@ impl Recorder {
         operations: u64,
         work: impl FnOnce() -> T,
     ) -> Result<()> {
+        self.measure_observed(name, operations, work, std::convert::identity)
+    }
+
+    fn measure_observed<T, U: Hash>(
+        &mut self,
+        name: &str,
+        operations: u64,
+        work: impl FnOnce() -> T,
+        observe: impl FnOnce(T) -> U,
+    ) -> Result<()> {
         let label = CString::new(name)?;
+        let alloc = sunrise_threads::alloc_count::ON.then(sunrise_threads::alloc_count::here);
         let started = Instant::now();
         sunrise_threads::callgrind::start();
         let done = work();
         sunrise_threads::callgrind::stop(&label);
         let wall = started.elapsed();
+        let alloc = alloc.map(|before| {
+            let after = sunrise_threads::alloc_count::here();
+            (after.allocs - before.allocs, after.bytes - before.bytes)
+        });
         let mut hash = DefaultHasher::new();
-        done.hash(&mut hash);
+        observe(done).hash(&mut hash);
         writeln!(
             self.out,
             "{}",
@@ -65,6 +81,8 @@ impl Recorder {
                 "operations": operations,
                 "checksum": format!("{:016x}", hash.finish()),
                 "wall_ns": wall.as_nanos() as u64,
+                "allocations": alloc.map(|(calls, _)| calls),
+                "allocated_bytes": alloc.map(|(_, bytes)| bytes),
             })
         )?;
         self.out.flush()?;
@@ -95,6 +113,9 @@ impl Game<'_> {
             .begin_open(mod_api::Authority::DedicatedServer);
         let listening =
             std::env::var_os("SUNRISE_HOT_PATHS_MODS").is_some_and(|mods| mods == "native");
+        if let Ok(mode) = std::env::var("SUNRISE_BLOCK_ENTITY_VIEW_BENCH") {
+            return self.hot_block_entity_view(&mut recorder, &mode, listening);
+        }
         if !listening {
             self.hot_ticks(&mut recorder)?;
             self.hot_commands(&mut recorder)?;
