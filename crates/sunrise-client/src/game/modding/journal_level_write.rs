@@ -66,25 +66,30 @@ impl Game<'_> {
             return false;
         }
         self.journal_pin_block_storage();
-        if !self.res.behaviours().keeps_block_entity(old, state) {
-            let key = (x, y, z);
-            let displaced = self.world.block_entities.get(&key).is_some();
-            if displaced {
+        let key = (x, y, z);
+        let compatible = self.res.behaviours().keeps_block_entity(old, state);
+        let occupied = self.world.block_entities.get(&key).is_some();
+        if compatible && occupied {
+            return true;
+        }
+
+        // The state-aware factory can supply a holder even on a property-only
+        // change. Let it read the staged state without flushing pending effects.
+        self.ensure_stateful_entity_table();
+        if occupied {
+            self.journal_block_replacement(key);
+        }
+        let needs_factory = !compatible || self.world.block_entities.stateful_entity(state.0);
+        if needs_factory
+            && let Some(entity) =
+                self.with_level_access(false, |_, level, _| level.new_block_entity_for_state(state))
+        {
+            if !occupied {
                 self.journal_block_replacement(key);
             }
-            // The factory can read the staged state, but this is not a normal
-            // level pass: leave pending sounds and other effects alone.
-            self.ensure_stateful_entity_table();
-            if let Some(entity) =
-                self.with_level_access(false, |_, level, _| level.new_block_entity_for_state(state))
-            {
-                if !displaced {
-                    self.journal_block_replacement(key);
-                }
-                self.world
-                    .block_entities
-                    .insert_journaled(key, entity, None);
-            }
+            self.world
+                .block_entities
+                .insert_journaled(key, entity, None);
         }
         true
     }

@@ -1427,7 +1427,10 @@ impl Game<'_> {
                     && game.world.block_entities.generation(&pos) != kept.generation
                 {
                     let pending = game.detach_journal_block_entity(pos, true);
-                    if !retains && let Some(kept) = pending {
+                    if block.state != block.final_state
+                        && (!retains || kept.entity.is_none())
+                        && let Some(kept) = pending
+                    {
                         staged.insert(
                             cell,
                             StagedBlockEntity {
