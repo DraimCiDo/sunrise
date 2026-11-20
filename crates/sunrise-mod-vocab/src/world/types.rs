@@ -1438,13 +1438,13 @@ pub trait LevelHost {
     ) -> Result<crate::AttachmentBatch, crate::PartStateError> {
         Err(crate::PartStateError::Stale)
     }
-    /// Read a block entity's saved data without identity metadata from this level.
-    /// During `block_drops`, reads the outgoing snapshot captured for loot rather than
-    /// the current block at that position. Its reference expires when dispatch ends.
-    /// Stale references and handles from another level or world return `None` without loading chunks.
-    fn block_entity_data(&self, _entity: crate::BlockEntityRef) -> Option<crate::Compound> {
-        None
-    }
+    /// Read this level's copy of a block entity's saved data without identity or position
+    /// metadata. This never loads chunks or opens loot containers. During `block_drops`,
+    /// reads the outgoing snapshot captured for loot rather than the current block at
+    /// that position; its handle expires when dispatch ends.
+    /// Returns `None` when no saved data is available, the handle is stale, or it names
+    /// another level or world. A view with no block entities returns `None` explicitly.
+    fn block_entity_data(&self, entity: crate::BlockEntityRef) -> Option<crate::Compound>;
 
     /// Read an owned block state through the level's engine read.
     /// Out-of-height or unloaded engine reads retain vanilla's air as `Some(air)`.
