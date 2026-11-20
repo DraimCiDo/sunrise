@@ -1,7 +1,6 @@
 # Is this the right tool for a block
 
-Two read-only queries answer whether a tool harvests a block, on both sides and for native and wasm
-mods alike. Use them to show that the block under the crosshair drops loot with the held item.
+Two read-only queries answer whether a tool harvests a block on both sides. Use them to show that the block under the crosshair drops loot with the held item.
 
 ## The stack alone
 

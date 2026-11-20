@@ -134,11 +134,11 @@ looks the tag up on its own and checks its signature for exactly that version.
 dispatches it (`-f commit=<sha>`, `-f dry_run=false` to write). One run runs and at most one waits; a newer waiting
 dispatch replaces an older waiting one. The schedule stops when main's head already has a completed real daily run;
 a hand dispatch never does, so it retries a run whose tag move, issues or nightly failed. Its legs are the workflows that left main pushes:
-the ignored-tests data shards (`ignored-tests.yml`), the wasm fixture and guest stacks (`wasm-mods.yml`),
+the ignored-tests data shards (`ignored-tests.yml`),
 `fn-replace-check.yml`, the game's Windows runtime-lease tests (`windows-runtime-leases.yml`), every
 `cargo-sunrise-mod` binstall archive built from the commit and published nowhere (`cargo-sunrise-mod-build.yml`; a pull
 request's check builds only the Linux x86_64 archive, and only a `cargo-sunrise-mod-v*` tag's push publishes, from
-`cargo-sunrise-mod.yml`), the wasm std member's names built on Linux and on Windows (`wasm-std-names.yml`), the machine sample built against the commit's mod API (`machine-sample.yml`), the modding book's start pages
+`cargo-sunrise-mod.yml`), the machine sample built against the commit's mod API (`machine-sample.yml`), the modding book's start pages
 (`book-quickstart.yml`, below) and the
 prebuilt SDK of the commit
 (`prebuilt-game-build.yml`; each leg packs its slices after the checks, including the [native linkage probe](native-dylib-probe.md)

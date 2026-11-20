@@ -1,6 +1,6 @@
 [book]
 title = "Modding Sunrise"
-description = "Guide and reference for making Sunrise mods: content, native and WebAssembly"
+description = "Guide and reference for making Sunrise mods: content and native"
 language = "en"
 src = "src"
 

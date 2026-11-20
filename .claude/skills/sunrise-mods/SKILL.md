@@ -1,6 +1,6 @@
 ---
 name: sunrise-mods
-description: Make, build, test or debug a Sunrise mod (a content, native or Wasm mod, the `.smod` package, the mod SDK, `cargo sunrise-mod`, `native-lock`), or change the mod tools in this repository and try the change on a real mod. Use for "make me a mod", "why doesn't my mod build", "does this mod fit the new build", a manifest or lock error, and any work in `crates/cargo-sunrise-mod`, `crates/sunrise-mod-package` or `crates/sunrise-native-build`.
+description: Make, build, test or debug a Sunrise mod (a content or native mod, the `.smod` package, the mod SDK, `cargo sunrise-mod`, `native-lock`), or change the mod tools in this repository and try the change on a real mod. Use for "make me a mod", "why doesn't my mod build", "does this mod fit the new build", a manifest or lock error, and any work in `crates/cargo-sunrise-mod`, `crates/sunrise-mod-package` or `crates/sunrise-native-build`.
 ---
 
 # Sunrise mods and the mod tools
@@ -14,8 +14,6 @@ Choose the walkthrough under `docs/modding/src/` for the kind of mod you are mak
 
 - **Native:** `for-agents.md` and `start/first-mod.md`. Use `cargo sunrise-mod check` after an edit, `build`
   to compile and pack, `run` to stage and play, and `cargo test` for the Rust logic.
-- **Wasm:** `start/first-wasm-mod.md`. Start with the Wasm template, use `cargo sunrise-mod build --wasm`,
-  then the page's `sunrise-client --dev-mod` command to try the package.
 - **Content-only:** `start/first-content-mod.md`. Use `cargo sunrise-mod build` and `check` the resulting
   `.smod`; there is no Cargo test target or SDK to install.
 
@@ -54,7 +52,7 @@ or change generated pins by hand. For code mods, `cargo sunrise-mod update` chan
 - Try a change on a real mod with a host debug build of the tool. From the checkout, resolve the executable
   before changing directories. Only code templates fetch an SDK: the current Nightly by default, or the
   build named by `new --sunrise <build>`. The example is for a native mod; use the matching walkthrough above
-  to smoke-test a Wasm or content-only change.
+  to smoke-test a content-only change.
 
   ```sh
   target_dir="$PWD/target/mod-tool-smoke"

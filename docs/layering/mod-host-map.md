@@ -28,8 +28,7 @@ The checker's canonical-path membership is case-sensitive by design.
 
 ## Strands and their proposals
 
-**Loading (phase 1): move.** `mod_list.rs`, package reading (`sunrise-mod-package`), the wasm start
-(`sunrise-mod-wasm`) and the dependency order go to `sunrise-mod-host`. `entry::main_with` mixes them with engine
+**Loading (phase 1): move.** `mod_list.rs`, package reading (`sunrise-mod-package`), and the dependency order go to `sunrise-mod-host`. `entry::main_with` mixes them with engine
 startup and takes `ModEntry`, `NativeSlot` and `BuiltMod`: it splits into an engine start that takes what the host
 loaded through one registration call, and the host's load step that runs before it. The engine keeps one start call.
 
@@ -81,11 +80,7 @@ answer for `sunrise-mod-api` (non-test files). Summary:
   `sunrise-mod-point-shape`). The generator writes the hook vocabulary itself: `mod_api_generated.rs` (events,
   `HookId`, `Hooks`, Parts traits, the dispatch functions; about 680 types, no `unsafe`, no state),
   `mod_api_generated_host.rs` (the `Host` traits), `wire_generated.rs`, the export lists and `parts_modules.rs`.
-  `wire_guest_generated.rs` (wasm guest glue, 6 `unsafe`) is not vocabulary. There are two ways: relayer the
-  generator to the engine layer (it runs only at build time, but build dependencies count), or commit its output
-  with a freshness check. Committing it adds a large generated file that every hook change touches.
-- **Not vocabulary; it stays in `sunrise-mod-api` or goes to the host:** `wire/wire_guest.rs` and
-  `wire/wire_resources.rs` (`unsafe`, wasm guest), `profiler.rs` (`unsafe`, state), `content/crash.rs` (panic
+- **Not vocabulary; it stays in `sunrise-mod-api` or goes to the host:** `profiler.rs` (`unsafe`, state), `content/crash.rs` (panic
   marks), `content/registry_keys.rs`, `world/{phase,reload,server_reload}.rs`, `client/client_reload.rs`,
   `parts/*` (installed Parts tables) and `testing/`. `runtime.rs` is the dispatch table and belongs with the
   vocabulary. Whether the generated dispatch functions also need the Parts tables (`parts/shared.rs`) is open:

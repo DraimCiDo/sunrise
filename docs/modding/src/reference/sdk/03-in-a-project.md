@@ -7,7 +7,7 @@ A code mod's project names the mod API by the path where `cargo sunrise-mod` kee
 sunrise-mod-api = { path = ".sunrise/sdk/api/crates/sunrise-mod-api" }
 ```
 
-`sunrise-mod-points`, `sunrise-internals` and `sunrise-wasmtime` (native mods only; [the game's wasmtime](../../concepts/native-route/8-wasmtime.md)) are named the same way, by `.sunrise/sdk/api/crates/<package>`. The
+`sunrise-mod-points` and `sunrise-internals` are named the same way, by `.sunrise/sdk/api/crates/<package>`. The
 SDK does not carry a `sunrise-internals` crate: `cargo sunrise-mod build` and `internals sync` generate the
 mod's own facade in its place. A plain `cargo check` cannot resolve it. Features
 (`features = ["testing"]` on a dev-dependency) are kept.
@@ -24,10 +24,8 @@ with the line to write instead:
 
 ## The pin
 
-The build a mod is made for is its pin, always a full commit sha in the file:
-
-- a native mod: `[native] sunrise` in `sunrise-mod.toml`;
-- a wasm mod: `sdk` under `[package.metadata.sunrise]` in `Cargo.toml`.
+The build a native mod is made for is its pin, a full commit SHA in `[native] sunrise` in
+`sunrise-mod.toml`.
 
 `cargo sunrise-mod new` writes the current Nightly's build, or the one selected with `--sunrise`.
 A native project normally leaves `[native] mixins` out. When a mod uses mixins, builds and discovery use the
@@ -56,7 +54,7 @@ that has one.
 
 ## `.sunrise/sdk/`
 
-In a code mod, `new`, `build`, `build --wasm`, `check`, `hooks`, `fits` and `update` fetch the pinned build's SDK
+In a code mod, `new`, `build`, `check`, `hooks`, `fits` and `update` fetch the pinned build's SDK
 into `.sunrise/sdk/` when the folder is missing or holds another build, after the [checks](01-release.md#how-a-download-is-checked).
 It holds `sdk.json`, `surface.json`, the unpacked API source under `api/`, and `build`, a file naming the build. That
 file is written last, so a fetch that stopped partway is fetched again by the next command.

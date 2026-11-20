@@ -162,7 +162,7 @@ Sunrise's own extras and its product, and every built-in address of an outside s
 
 ## Tools
 
-Developer tools that no player runs: `xtask`, `sunrise-bots`, `sunrise-mod-api-gen-tests`, `sunrise-mod-wasm-wire-loopback`, and the Python in
+Developer tools that no player runs: `xtask`, `sunrise-bots`, `sunrise-mod-api-gen-tests`, and the Python in
 `tools/`. They may depend on anything, and no shipped crate depends on them. `cargo-sunrise-mod`, the mod author's
 tool, is one: it fetches and checks Sunrise's signed mod SDK, so it reads `sunrise-addresses` and
 `sunrise-release-sign` beside the engine's mod crates.
@@ -238,8 +238,7 @@ that. sunrise-plain becomes a plain build of this repository.
 **Licence.** The project's licence is being decided (the poll ends around 2026-11-10); the Sunrise repository's
 licence follows from it. If this repository becomes GPL, the official game links the Sunrise crates into the same
 executable as the engine and the platform, so the Sunrise layer must be GPL-compatible too: no closed native code in
-it. Mods loaded as WebAssembly run as separate modules, not linked into the executable, so they could stay closed
-(duckybertduck's reading; the licence decision settles it).
+it.
 
 **Every official download includes it.** These paths must ship the Sunrise layer:
 

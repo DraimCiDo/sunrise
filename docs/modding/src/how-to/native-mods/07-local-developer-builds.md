@@ -4,16 +4,13 @@
 launcher installation command, not a native mod build route. It runs the checkout's packaging
 code with your rights and requires `--trust-unsigned`.
 
-Commit tracked changes, build the game and companion programs, generate the wasm standard library
-beside the game, and prepare compatible exporters from your own Minecraft installation before
-installing. The packager copies `sunrise-wasm-std.wasm` from the game's folder for every developer
-base, whether the mods you build are native or wasm; the command names it if it is missing. The
+Commit tracked changes, build the game and companion programs, and prepare compatible exporters from
+your own Minecraft installation before installing. The
 game program, the `--program` file, is the `sunrise-client` binary of the `sunrise-game` package
 (`cargo build -p sunrise-client` builds only the library):
 
 ```sh
 cargo build -p sunrise-game -p sunrise-client-lib --bins -p sunrise-prepare -p sunrise-server
-cargo run --locked -p cargo-sunrise-mod -- wasm-std CHECKOUT/target/debug/sunrise-wasm-std.wasm
 sunrise-launcher developer-install CHECKOUT --program CHECKOUT/target/debug/sunrise-client --trust-unsigned
 ```
 
@@ -33,7 +30,6 @@ programs end in `.exe`:
 | `sunrise-prepare` | beside the game program | `package`, `package-server` | cargo build PROFILE -p sunrise-prepare |
 | `sunrise-server` | beside the game program | `package`, `package-server` | cargo build PROFILE -p sunrise-server |
 | `sunrise-port-pack` | beside the game program | `package` | cargo build PROFILE -p sunrise-port-pack |
-| `sunrise-wasm-std.wasm` | beside the game program | `package`, `package-server` | cargo run --locked -p cargo-sunrise-mod -- wasm-std PROGRAM_FOLDER/sunrise-wasm-std.wasm |
 | `exporters/manifest.json` | in the checkout | `package`, `package-server` | sunrise-prepare compile-exporters --root CHECKOUT, then copy its server, client and manifest.json into CHECKOUT/exporters/ |
 <!-- end of required inputs -->
 

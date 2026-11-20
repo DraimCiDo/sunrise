@@ -6,7 +6,7 @@ and the build applies them to the prebuilt game without rebuilding the game.
 
 ## When to use it
 
-Try these first. They work on native and wasm:
+Try these first:
 
 1. a **hook**, a method of `mod_api::Hooks` that the game calls at one moment, or a **Part** method
    ([Your first native mod](../start/first-mod.md));
@@ -14,8 +14,7 @@ Try these first. They work on native and wasm:
    values ([Injections](injections.md)).
 
 Take the native route when neither can do it: you need the game's real types or private fields, a change in
-the middle of a function, a whole function replaced, or a change inside a hot loop. It is not for a wasm mod,
-which cannot declare `[native]` tables. Data kept on one entity or block is an
+the middle of a function, a whole function replaced, or a change inside a hot loop. Data kept on one entity or block is an
 [attachment](attachments.md), not this route.
 
 ## The tables
@@ -27,9 +26,6 @@ which cannot declare `[native]` tables. Data kept on one entity or block is an
 | `[[native.bridge]]` | read, write or call a private field or method of a game type from your mixin code | [Bridges](native-route/4-bridges.md) |
 | `[[native.module]]` | add a module of your own code inside a game source file, for your mixin code to share | [Support modules](native-route/5-support-modules.md) |
 | `[[native.state]]` | add a field to a game type: refused, use an attachment | [Native state](native-route/6-native-state.md) |
-
-A mod that embeds a wasm engine links the game's own wasmtime instead of bringing one:
-[The game's wasmtime](native-route/8-wasmtime.md).
 
 Every row of these tables has an `id`. No two rows of one mod share an `id`, counting `[[inject]]` rows too.
 
