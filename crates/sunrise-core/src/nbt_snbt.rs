@@ -1,5 +1,6 @@
 //! `SnbtGrammar`/`TagParser` over NbtOps, shared by commands and persistent codecs.
 use super::{Compound, JavaString, Tag, discard_tag};
+use smallvec::SmallVec;
 
 // no wire: a local parser diagnostic, not a mod payload or host value.
 /// An SNBT parse failure with a vanilla translation key and input-relative cursor.
@@ -128,6 +129,8 @@ pub fn snbt_whitespace(value: u32) -> bool {
     matches!(value, 0x09..=0x0d | 0x1c..=0x20 | 0x1680 | 0x2000..=0x2006
         | 0x2008..=0x200a | 0x2028..=0x2029 | 0x205f | 0x3000)
 }
+
+type Frames = SmallVec<[Frame; 8]>;
 
 enum Frame {
     Compound {
@@ -304,7 +307,7 @@ impl<'a> Parser<'a> {
         Ok(())
     }
     fn value(&mut self) -> Result<Tag, SnbtError> {
-        let mut frames = Vec::new();
+        let mut frames = Frames::new();
         let result = self.read_value(&mut frames);
         // On error the open containers can already own arbitrarily deep trees.
         for frame in frames {
@@ -315,7 +318,7 @@ impl<'a> Parser<'a> {
         }
         result
     }
-    fn read_value(&mut self, frames: &mut Vec<Frame>) -> Result<Tag, SnbtError> {
+    fn read_value(&mut self, frames: &mut Frames) -> Result<Tag, SnbtError> {
         'value: loop {
             self.skip();
             let mut value = match self.peek() {
@@ -402,6 +405,12 @@ impl<'a> Parser<'a> {
             while let Some(frame) = frames.last_mut() {
                 match frame {
                     Frame::Compound { entries, key } => {
+                        // SnbtGrammar's map-entry action validates the key only
+                        // after the colon and complete literal have parsed.
+                        if key.0.is_empty() {
+                            discard_tag(value);
+                            return Err(self.error("snbt.parser.empty_key"));
+                        }
                         if let Some(old) = entries.insert(std::mem::take(key), value) {
                             discard_tag(old);
                         }
@@ -562,9 +571,6 @@ impl<'a> Parser<'a> {
     }
     fn compound_key(&mut self) -> Result<JavaString, SnbtError> {
         let key = self.string()?;
-        if key.0.is_empty() {
-            return Err(self.error("snbt.parser.empty_key"));
-        }
         self.expect(b':')?;
         Ok(key)
     }

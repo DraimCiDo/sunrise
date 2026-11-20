@@ -20,6 +20,13 @@ fn snbt_full_input_and_utf16_error_cursors() {
         let err = parse_compound_fully(&source.into()).unwrap_err();
         assert_eq!((err.key, err.cursor), (key, cursor), "{source}");
     }
+    // The map-entry action checks the empty key only after reading the value.
+    assert_eq!(
+        parse_compound_fully(&r#"{"":1}"#.into())
+            .unwrap_err()
+            .cursor,
+        5
+    );
 }
 
 #[test]
@@ -82,6 +89,11 @@ fn snbt_walks_beyond_network_nesting_without_recursion() {
         parse_compound_fully(&source).unwrap_err().key,
         "argument.nbt.expected.compound"
     );
+    let empty_key: JavaString = format!("{{\"\":{}}}", source.to_string().unwrap())
+        .as_str()
+        .into();
+    let error = parse_fully(&empty_key).unwrap_err();
+    assert_eq!(error.cursor, empty_key.0.len() - 1);
 }
 
 #[test]
@@ -117,6 +129,24 @@ fn json_input_keeps_member_order_and_narrows_the_original_number() {
             Tag::String(JavaString(vec![0xdc00])),
         )]))
     );
+}
+
+#[test]
+fn json_duplicate_members_discard_conversion_errors_but_not_syntax_errors() {
+    let expected = Ok(Tag::compound([("x", Tag::Byte(1))]));
+    for source in [r#"{"x":1e10000,"x":1}"#, r#"{"x":[{"y":1e10000}],"x":1}"#] {
+        assert_eq!(from_json(source), expected);
+    }
+    assert_eq!(
+        from_json(r#"{"x":1,"x":1e10000}"#),
+        Err(JsonTextError::NumberOutOfRange { cursor: 11 })
+    );
+    assert!(matches!(
+        from_json(r#"{"x":1e,"x":1}"#),
+        Err(JsonTextError::Malformed { .. })
+    ));
+    let deep = format!("{}1{}", "[".repeat(512), "]".repeat(512));
+    assert_eq!(from_json(&format!(r#"{{"x":{deep},"x":1}}"#)), expected);
 }
 
 #[test]

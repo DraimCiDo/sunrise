@@ -72,9 +72,10 @@ These functions work on either logical side without a `Host` or an open world.
   example, the printed `END` parses as text, and NaN payload bits cannot be
   recovered from their spelling.
 - `from_json(&str)` reads one UTF-8 JSON value. Compound members are inserted
-  in source order; a duplicate replaces its earlier value. Exact integers use
-  the narrowest signed tag that fits, other numbers use float or double, JSON
-  booleans become bytes, and arrays become lists. Unicode escapes retain their
+  in source order; a duplicate replaces its earlier value. Only surviving
+  values can cause conversion refusals, but malformed input is always refused.
+  Exact integers use the narrowest signed tag that fits; other numbers use float
+  or double. JSON booleans become bytes, and arrays become lists. Unicode escapes retain their
   UTF-16 units. A root `null` becomes `Tag::End`; a surviving nested `null` is
   refused. `JsonTextError` distinguishes malformed input, decimals outside
   Gson's length or scale bounds, and conversion refusals such as nested null.

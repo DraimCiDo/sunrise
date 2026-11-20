@@ -9,6 +9,7 @@
 //! only exposes its map's iteration order, not the original collision history.
 
 use crate::nbt::{Compound, CompoundIter, JavaString, Tag, discard_tag};
+use indexmap::IndexMap;
 use serde_json::{Map, Number, Value, value::RawValue};
 
 const MAX_DEPTH: usize = 512;
@@ -67,43 +68,69 @@ impl std::error::Error for JsonTextError {}
 
 /// Parse one complete UTF-8 JSON value, inserting object members in source order
 /// at every level. Duplicate keys replace the value in its original position.
-/// Unicode escapes retain their UTF-16 units. Numbers narrow from the original
-/// decimal, booleans become bytes, arrays become lists, and a root null becomes
-/// End. Returns [`JsonTextError`] for malformed input, unsupported decimal size,
-/// surviving nested nulls, or more than 512 nested list/compound containers.
+/// Only surviving values can cause conversion errors; malformed JSON is always
+/// refused. Unicode escapes retain their UTF-16 units. Numbers narrow from the
+/// original decimal, booleans become bytes, arrays become lists, and a root null
+/// becomes End. Returns [`JsonTextError`] for malformed input, unsupported decimal
+/// size, surviving nested nulls, or more than 512 nested list/compound containers.
 pub fn parse_json_tag(source: &str) -> Result<Tag, JsonTextError> {
     let mut parser = JsonParser {
         source,
         tail: source,
     };
-    let tag = parser.value()?;
+    let result = parser.value()?;
     if !parser.remaining().is_empty() {
-        discard_tag(tag);
         return Err(parser.malformed());
     }
-    // A duplicate member may have replaced a null. Check only the surviving
-    // values, just as JsonOps does after JSON parsing.
-    if matches!(tag, Tag::End) {
-        return Ok(tag);
-    }
-    let mut pending = vec![&tag];
-    while let Some(value) = pending.pop() {
-        match value {
-            Tag::End => {
-                discard_tag(tag);
-                return Err(JsonTextError::Conversion(JsonNbtError::NestedNull));
-            }
-            Tag::List(children) => pending.extend(children),
-            Tag::Compound(children) => pending.extend(children.values()),
-            _ => {}
-        }
-    }
-    Ok(tag)
+    result.map(DecodedTag::into_tag)
 }
 
+// Dropping a replaced member or a partial parse must not recurse through its NBT.
+struct DecodedTag(Tag);
+impl DecodedTag {
+    fn into_tag(mut self) -> Tag {
+        std::mem::replace(&mut self.0, Tag::End)
+    }
+}
+impl Drop for DecodedTag {
+    fn drop(&mut self) {
+        discard_tag(std::mem::replace(&mut self.0, Tag::End));
+    }
+}
+
+// Keep a conversion error attached to its value so replacing a duplicate
+// object member also replaces its error.
+type Converted = Result<DecodedTag, JsonTextError>;
+
 enum JsonFrame {
-    List(Vec<Tag>),
-    Object(Compound, JavaString),
+    List(Vec<Converted>),
+    Object(IndexMap<JavaString, Converted>, JavaString),
+}
+impl JsonFrame {
+    fn finish(self) -> Converted {
+        match self {
+            Self::List(values) => {
+                let mut output = DecodedTag(Tag::List(Vec::with_capacity(values.len())));
+                let Tag::List(list) = &mut output.0 else {
+                    unreachable!()
+                };
+                for value in values {
+                    list.push(value?.into_tag());
+                }
+                Ok(output)
+            }
+            Self::Object(entries, _) => {
+                let mut output = DecodedTag(Tag::Compound(Compound::new()));
+                let Tag::Compound(compound) = &mut output.0 else {
+                    unreachable!()
+                };
+                for (key, value) in entries {
+                    compound.insert(key, value?.into_tag());
+                }
+                Ok(output)
+            }
+        }
+    }
 }
 
 struct JsonParser<'a> {
@@ -174,27 +201,19 @@ impl JsonParser<'_> {
         }
         Ok(key)
     }
-    fn value(&mut self) -> Result<Tag, JsonTextError> {
+    fn value(&mut self) -> Result<Converted, JsonTextError> {
+        const TOO_DEEP: Converted = Err(JsonTextError::Conversion(JsonNbtError::TooDeep));
         let mut frames = Vec::new();
-        let result = self.read_value(&mut frames);
-        for frame in frames {
-            match frame {
-                JsonFrame::List(values) => discard_tag(Tag::List(values)),
-                JsonFrame::Object(entries, _) => discard_tag(Tag::Compound(entries)),
-            }
-        }
-        result
-    }
-    fn read_value(&mut self, frames: &mut Vec<JsonFrame>) -> Result<Tag, JsonTextError> {
         'value: loop {
             let mut value = match self.remaining().as_bytes().first().copied() {
-                Some(b'[' | b'{') if frames.len() >= MAX_DEPTH => {
-                    return Err(JsonTextError::Conversion(JsonNbtError::TooDeep));
-                }
                 Some(b'[') => {
                     self.tail = &self.tail[1..];
                     if self.eat("]") {
-                        Tag::List(Vec::new())
+                        if frames.len() >= MAX_DEPTH {
+                            TOO_DEEP
+                        } else {
+                            Ok(DecodedTag(Tag::List(Vec::new())))
+                        }
                     } else {
                         frames.push(JsonFrame::List(Vec::new()));
                         continue;
@@ -203,16 +222,20 @@ impl JsonParser<'_> {
                 Some(b'{') => {
                     self.tail = &self.tail[1..];
                     if self.eat("}") {
-                        Tag::Compound(Compound::new())
+                        if frames.len() >= MAX_DEPTH {
+                            TOO_DEEP
+                        } else {
+                            Ok(DecodedTag(Tag::Compound(Compound::new())))
+                        }
                     } else {
-                        frames.push(JsonFrame::Object(Compound::new(), self.key()?));
+                        frames.push(JsonFrame::Object(IndexMap::new(), self.key()?));
                         continue;
                     }
                 }
-                Some(b'"') => Tag::String(self.string()?),
-                Some(b't') if self.eat("true") => Tag::Byte(1),
-                Some(b'f') if self.eat("false") => Tag::Byte(0),
-                Some(b'n') if self.eat("null") => Tag::End,
+                Some(b'"') => Ok(DecodedTag(Tag::String(self.string()?))),
+                Some(b't') if self.eat("true") => Ok(DecodedTag(Tag::Byte(1))),
+                Some(b'f') if self.eat("false") => Ok(DecodedTag(Tag::Byte(0))),
+                Some(b'n') if self.eat("null") => Ok(DecodedTag(Tag::End)),
                 Some(b'-' | b'0'..=b'9') => {
                     let len = self
                         .tail
@@ -224,36 +247,37 @@ impl JsonParser<'_> {
                     let (decimal, tail) = self.tail.split_at(len);
                     // RawValue checks JSON number syntax without narrowing to f64.
                     serde_json::from_str::<&RawValue>(decimal).map_err(|_| self.malformed())?;
-                    let out_of_range = || JsonTextError::NumberOutOfRange {
-                        cursor: self.cursor(),
-                    };
-                    // JsonOps calls JsonPrimitive.getAsBigDecimal, which applies these
-                    // Gson NumberLimits checks before any integer or float conversion.
-                    let (mantissa, scale) = decimal_parts(decimal)
+                    // JsonPrimitive.getAsBigDecimal checks Gson's bounds before
+                    // JsonOps narrows the number; this is not a JSON syntax error.
+                    let result = decimal_parts(decimal)
                         .filter(|(_, scale)| {
                             decimal.len() <= 10_000 && scale.unsigned_abs() < 10_000
                         })
-                        .ok_or_else(out_of_range)?;
-                    let tag = if let Some(value) = exact_long(mantissa, scale) {
-                        integer_tag(value)
-                    } else {
-                        floating_tag(decimal.parse::<f64>().expect("validated decimal"))
-                    };
+                        .map(|(mantissa, scale)| match exact_long(mantissa, scale) {
+                            Some(value) => integer_tag(value),
+                            None => {
+                                floating_tag(decimal.parse::<f64>().expect("validated decimal"))
+                            }
+                        })
+                        .ok_or_else(|| JsonTextError::NumberOutOfRange {
+                            cursor: self.cursor(),
+                        });
                     self.tail = tail;
-                    tag
+                    result.map(DecodedTag)
                 }
                 _ => return Err(self.malformed()),
             };
             while let Some(frame) = frames.last_mut() {
+                if matches!(value, Ok(DecodedTag(Tag::End))) {
+                    value = Err(JsonTextError::Conversion(JsonNbtError::NestedNull));
+                }
                 let end = match frame {
                     JsonFrame::List(values) => {
                         values.push(value);
                         "]"
                     }
                     JsonFrame::Object(entries, key) => {
-                        if let Some(old) = entries.insert(std::mem::take(key), value) {
-                            discard_tag(old);
-                        }
+                        entries.insert(std::mem::take(key), value);
                         "}"
                     }
                 };
@@ -266,9 +290,11 @@ impl JsonParser<'_> {
                     }
                     continue 'value;
                 }
-                value = match frames.pop().expect("completed frame") {
-                    JsonFrame::List(values) => Tag::List(values),
-                    JsonFrame::Object(entries, _) => Tag::Compound(entries),
+                let complete = frames.pop().expect("completed frame");
+                value = if frames.len() >= MAX_DEPTH {
+                    TOO_DEEP
+                } else {
+                    complete.finish()
                 };
             }
             return Ok(value);

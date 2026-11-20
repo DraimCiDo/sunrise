@@ -142,7 +142,7 @@ pub fn write_snbt_utf16(tag: &Tag, mut sink: impl FnMut(u16)) {
         Compound(std::vec::IntoIter<(&'a JavaString, &'a Tag)>),
         SingleEntry,
     }
-    let mut frames = Vec::new();
+    let mut frames = smallvec::SmallVec::<[Frame<'_>; 8]>::new();
     let mut next = Some(tag);
     loop {
         if let Some(tag) = next.take() {
