@@ -46,11 +46,14 @@ impl BlockEntityPart for Fixture {
     }
 }
 
-fn with_fixture(name: &str, test: impl FnOnce(&mut Game<'_>, mod_api::BlockEntityRef)) {
+fn with_fixture(
+    name: &str,
+    test: impl FnOnce(&mut Game<'_>, mod_api::BlockEntityRef) + Send + 'static,
+) {
     if run_fresh_cases(name, "SUNRISE_BLOCK_ENTITY_VIEW_CASE", &["server"]) {
         return;
     }
-    sunrise_guest_stack::run_on_guest_stack(|| {
+    sunrise_guest_stack::run_on_guest_stack(move || {
         let mods: mod_api::Mods = vec![ModEntry::new(
             "block_entity_view_fixture",
             Box::new(Fixture),
