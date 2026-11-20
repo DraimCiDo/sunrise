@@ -210,7 +210,6 @@ pub fn compile(
                     prebuilt::library_entry(
                         &template,
                         &[&bundle.manifest],
-                        &catalog,
                         sdk.commit(),
                         id,
                         &bundle.manifest.version.to_string(),
@@ -221,9 +220,6 @@ pub fn compile(
                 let mut source = fs::read_to_string(&root).map_err(|e| e.to_string())?;
                 prebuilt::check_entry_root(&source, id)?;
                 source.push_str("\n#[allow(unsafe_code)]\n#[path = \"__sunrise_entry.rs\"] mod __sunrise_entry;\n");
-                if project.uses_wasmtime() {
-                    source.push_str(prebuilt::WASMTIME_LINK);
-                }
                 fs::write(&root, source).map_err(|e| e.to_string())?;
                 mod_dirs.insert(id.clone(), dest.clone());
                 mod_roots.insert(id.clone(), root);
@@ -236,12 +232,6 @@ pub fn compile(
         ]);
         for (name, path) in &externs {
             prebuilt::refuse_closure_rlib(id, name, path)?;
-        }
-        if project.uses_wasmtime() {
-            externs.insert(
-                "sunrise_mod_wasm".into(),
-                prebuilt::library(&deps, "sunrise_mod_wasm")?,
-            );
         }
         for (name, package) in project.api_dependencies() {
             if package != "internals" {
@@ -383,15 +373,8 @@ pub fn compile(
         .as_ref()
         .map(|patch| patch.installs.as_slice())
         .unwrap_or(&[]);
-    let mut entry = prebuilt::library_entry(
-        &template,
-        &[],
-        &catalog,
-        sdk.commit(),
-        "sunrise_patch",
-        "0",
-        installs,
-    );
+    let mut entry =
+        prebuilt::library_entry(&template, &[], sdk.commit(), "sunrise_patch", "0", installs);
     entry.push_str(prebuilt::PATCH_HOST_LINK);
     fs::write(out.join("src/lib.rs"), entry).map_err(|e| e.to_string())?;
     let mut manifest = toml::toml! { [package] name = "sunrise_patch" version = "0.0.0" edition = "2024" [lib] crate-type = ["dylib"] [workspace] resolver = "2" };
@@ -837,7 +820,6 @@ mod tests {
         for name in [
             "mod_api",
             "mod_vocab",
-            "mod_points",
             "sunrise_mod_package",
             "sunrise_mod_host",
         ] {
@@ -875,7 +857,11 @@ mod tests {
                 String::from_utf8_lossy(&result.stderr)
             );
         }
-        fs::write(game.join(prebuilt::TEMPLATE), "fn main() { sunrise_mod_host::main_with(); }\n/* MOD_ENTRIES */\n/* MOD_SLOTS */\n/* BUILT_MODS */\n").unwrap();
+        fs::write(
+            game.join(prebuilt::TEMPLATE),
+            "fn main() { sunrise_mod_host::main_with(); }\n/* MOD_ENTRIES */\n/* BUILT_MODS */\n",
+        )
+        .unwrap();
         let template = api::template(&game.join(prebuilt::TEMPLATE)).unwrap();
         let wrapper = scratch.path().join("wrapper");
         fs::create_dir_all(wrapper.join("src")).unwrap();
@@ -884,11 +870,7 @@ mod tests {
             "[package]\nname='registry-game'\nversion='0.0.0'\nedition='2024'\n[workspace]\n",
         )
         .unwrap();
-        fs::write(
-            wrapper.join("src/main.rs"),
-            api::main_rs(&template, &[], &internals::Catalog::default()),
-        )
-        .unwrap();
+        fs::write(wrapper.join("src/main.rs"), api::main_rs(&template, &[])).unwrap();
         let bindings = prebuilt::wrapper_externs(&game.join("deps")).unwrap();
         let mut wrapper_plan = compiler_plan(
             &rust,

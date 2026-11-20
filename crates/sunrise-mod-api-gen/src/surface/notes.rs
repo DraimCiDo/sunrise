@@ -323,7 +323,7 @@ mod tests {
         std::fs::create_dir(head.join("history")).unwrap();
         std::fs::write(
             head.join("history/earlier-change.toml"),
-            note("point:game::old", "backfilled"),
+            note("loop:game.old", "backfilled"),
         )
         .unwrap();
         let names = |found: Vec<NoteFile>| -> Vec<String> {

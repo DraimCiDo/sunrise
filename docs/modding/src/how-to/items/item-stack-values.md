@@ -114,8 +114,7 @@ side that calls it. An invalid stack is a `TextFormError`.
 
 `ItemStack::from_nbt(host, compound)` and `to_nbt(host)` are the NBT escape. They live on the
 plain API value, not as a second engine implementation in the items host area. They use only
-typed host key lookup and canonical id metadata, so native and WebAssembly mods execute the
-same parsing and serialization code. Persistent NBT contains identifiers, never process-local
+typed host key lookup and canonical id metadata. Persistent NBT contains identifiers, never process-local
 key slots. Unknown ids, malformed values and zero counts fail decoding; unavailable id
 metadata fails encoding.
 

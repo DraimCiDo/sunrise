@@ -10,8 +10,6 @@ use std::{
 };
 
 pub const FILE: &str = "sunrise-mods.txt";
-/// The `sunrise-mods.txt` key of [`ModList::wasm_memory_cap_mib`].
-const WASM_MEMORY_CAP: &str = "wasm.memory_cap_mib";
 /// The folder holding `.smod` files, beside `options.txt`.
 pub const DIR: &str = "sunrise-mods";
 /// Where the launcher installs native mods (`<id>.smod`), beside [`DIR`]. They run only in a
@@ -30,10 +28,6 @@ pub struct ModList {
     /// The keys the player chose for mods' keys, mod id → key name → key
     /// (`key.<id>.<name>:key.keyboard.x` lines).
     pub keys: BTreeMap<String, BTreeMap<String, String>>,
-    /// The player's cap on each wasm dependency group's memory, in MiB
-    /// (`wasm.memory_cap_mib:<1 to 4096>`); unset, wasm32's whole 4 GiB. A group whose mods
-    /// declare more (`wasm_memory_mib`) is refused at load, naming both numbers.
-    pub wasm_memory_cap_mib: Option<u32>,
     /// What the Mods page shows, filled by the game from the mods it found.
     pub installed: Vec<Installed>,
     /// What the Mods screen's panel shows of each installed mod, by id.
@@ -363,17 +357,10 @@ impl ModList {
                 entry.insert(name.to_owned(), v.trim().to_owned());
             }
         }
-        let wasm_memory_cap_mib = text
-            .lines()
-            .filter_map(|l| l.split_once(':'))
-            .filter(|(k, _)| k.trim() == WASM_MEMORY_CAP)
-            .filter_map(|(_, v)| v.trim().parse().ok())
-            .rfind(|mib| (1..=crate::manifest::MAX_WASM_MEMORY_MIB).contains(mib));
         Self {
             enabled,
             disabled,
             keys,
-            wasm_memory_cap_mib,
             installed: Vec::new(),
             info: BTreeMap::new(),
         }
@@ -385,15 +372,7 @@ impl ModList {
             keys.iter()
                 .map(move |(name, key)| format!("key.{id}.{name}:{key}\n"))
         });
-        let cap = self
-            .wasm_memory_cap_mib
-            .map(|mib| format!("{WASM_MEMORY_CAP}:{mib}\n"));
-        on.chain(off).chain(keys).chain(cap).collect()
-    }
-    /// The cap on each wasm group's memory this instance allows, in MiB.
-    pub fn wasm_memory_cap(&self) -> u32 {
-        self.wasm_memory_cap_mib
-            .unwrap_or(crate::manifest::MAX_WASM_MEMORY_MIB)
+        on.chain(off).chain(keys).collect()
     }
     /// Mod `id`'s chosen keys, for `Mods::set_bindings`.
     pub fn keys_of(&self, id: &str) -> Vec<(&str, &str)> {
@@ -427,7 +406,6 @@ impl ModList {
         if self.enabled.is_empty()
             && self.disabled.is_empty()
             && self.keys.is_empty()
-            && self.wasm_memory_cap_mib.is_none()
             && !path.exists()
         {
             return;
@@ -467,8 +445,6 @@ impl ModList {
                 self.disabled.insert(m.id.clone());
             }
         } else if !self.enabled.remove(&m.id) {
-            // A wasm mod paused in the previous process is not loaded yet; selecting its
-            // package again must clear the same code-dispatch switch used while it ran.
             self.disabled.remove(&m.id);
             self.enabled.insert(m.id.clone());
         }
@@ -485,30 +461,6 @@ mod tests {
         assert_eq!(list.enabled.iter().collect::<Vec<_>>(), ["coords_hud"]);
         assert_eq!(ModList::parse(&list.serialize()), list);
         assert_eq!(ModList::default().serialize(), "");
-    }
-
-    #[test]
-    fn the_player_may_lower_the_wasm_memory_cap() {
-        assert_eq!(ModList::parse("").wasm_memory_cap(), 4096);
-        let list = ModList::parse("mod.a:true\nwasm.memory_cap_mib:512\n");
-        assert_eq!(list.wasm_memory_cap(), 512);
-        assert_eq!(ModList::parse(&list.serialize()), list);
-        // Outside 1 to 4096 MiB (wasm32's whole space) the line is ignored.
-        for text in [
-            "wasm.memory_cap_mib:0\n",
-            "wasm.memory_cap_mib:8192\n",
-            "wasm.memory_cap_mib:lots\n",
-        ] {
-            assert_eq!(ModList::parse(text).wasm_memory_cap(), 4096, "{text}");
-        }
-        // A cap alone is still saved, in a folder with no list yet.
-        let dir = tempfile::tempdir().unwrap();
-        let only_cap = ModList {
-            wasm_memory_cap_mib: Some(64),
-            ..ModList::default()
-        };
-        only_cap.save(dir.path());
-        assert_eq!(ModList::load(dir.path()).wasm_memory_cap(), 64);
     }
 
     #[test]
@@ -636,27 +588,6 @@ mod tests {
             list.info["target"].warnings[1].1,
             ["Owner", "Target fallback", "\noverride."]
         );
-    }
-
-    #[test]
-    fn selecting_a_paused_package_clears_its_previous_code_switch() {
-        let mut list = ModList::parse("mod.wasm_mod:false\n");
-        list.installed.push(Installed {
-            id: "wasm_mod".into(),
-            title: "wasm_mod".into(),
-            description: String::new(),
-            problem: None,
-            dev: false,
-            native: None,
-        });
-        list.toggle(0);
-        assert!(list.enabled.contains("wasm_mod"));
-        assert!(!list.disabled.contains("wasm_mod"));
-        list.enabled.clear();
-        list.disabled.insert("wasm_mod".into());
-        list.turn_on("wasm_mod");
-        assert!(list.enabled.contains("wasm_mod"));
-        assert!(!list.disabled.contains("wasm_mod"));
     }
 
     #[test]

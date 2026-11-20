@@ -371,34 +371,20 @@ impl Game<'_> {
         let enabled = self.applied_mods();
         // Only content-only packages are selectable on reload. Keep code packages' validated
         // startup manifests: changing their content must not install code or registries live.
-        let content = sunrise_mod_package::selection::content_packages(
+        self.mods.selected = sunrise_mod_package::selection::content_packages(
             &Self::game_dir(),
             &enabled,
             &self.mods.dev,
         )
         .filter(|p| {
-            p.package.manifest.wasm.is_none()
-                && !self
-                    .mods
-                    .native
-                    .built()
-                    .iter()
-                    .any(|built| built.id == p.package.manifest.id)
-        });
-        let code = self
-            .mods
-            .selected
-            .iter()
-            .filter(|p| p.package.manifest.wasm.is_some())
-            .map(|p| sunrise_mod_package::selection::SelectedPackage {
-                path: p.path.clone(),
-                package: sunrise_mod_package::Package {
-                    manifest: p.package.manifest.clone(),
-                    icon: p.package.icon.clone(),
-                    layouts: p.package.layouts.clone(),
-                },
-            });
-        self.mods.selected = content.chain(code).collect();
+            !self
+                .mods
+                .native
+                .built()
+                .iter()
+                .any(|built| built.id == p.package.manifest.id)
+        })
+        .collect();
         self.mods.refused = Default::default();
         let mod_sources = self.mods.clone();
         let (selected, server) = (

@@ -7,8 +7,7 @@
 #   paths      repository paths, fnmatch patterns (`*` crosses `/`); a changed file under one selects the area
 #   cargo      Rust tests: { package, target ("lib", "bin:NAME" or "test:NAME"), filter (a libtest substring) }.
 #              `run` runs the filter's ordinary tests; `run --daily` also runs the daily rows
-#              (tools/ci/ignored-tests/) whose package, target and test path the entry matches, and names those
-#              that need the wasm fixture, which its own job runs.
+#              (tools/ci/ignored-tests/) whose package, target and test path the entry matches.
 #   harnesses  parity harness names (tools/test_<name>_parity.py), fnmatch patterns; a proof parity.py refuses
 #              (PARITY_MANUAL) is named, to run by hand
 #   lan        tools/lan_e2e.py check names, fnmatch patterns; run with `run --lan`, and an opt-in check
@@ -290,7 +289,7 @@ harnesses = [
   "named_predicate_reference", "predicate_reference_startup", "run_coordinate_feedback", "terminal_execute_fork",
   "fork_function_feedback", "loaded_command", "storage_alias", "seed_sync", "team_rules", "local_coordinate_rotation",
   "folder_datapack_metadata", "world_pack_enchantment_loader", "world_test_def*", "vehicle_command_damage",
-  "stand_command_hurt", "clone_dimensions", "inline_object", "entity_lookup_order",
+  "stand_command_hurt", "dialog_codec", "clone_dimensions", "inline_object", "entity_lookup_order",
 ]
 lan = [
   "commands", "feedback", "styles", "tag-query", "selector-tags", "entity-tags", "data_uuid", "command-block-chat",
@@ -373,9 +372,9 @@ harnesses = ["wire_stream", "protocol_*", "item_wire", "stop_sound_wire", "playe
 
 [[area]]
 name = "mod-api"
-about = "the native mod API: hooks, the Host, handles, parts, wasm and native mods"
+about = "the native mod API: hooks, the Host, handles and parts"
 paths = [
-  "crates/sunrise-mod-*", "crates/cargo-sunrise-mod/*", "crates/sunrise-native-build/*", "crates/sunrise-engine-slots/*",
+  "crates/sunrise-mod-*", "crates/cargo-sunrise-mod/*", "crates/sunrise-native-build/*",
   "crates/sunrise-guest-stack/*", "crates/sunrise-hooks/*", "crates/sunrise-client/src/game/native_hooks/*",
   "crates/sunrise-client/src/game/modding/*",
 ]
@@ -386,7 +385,7 @@ cargo = [
   { package = "sunrise-client", target = "lib", filter = "game::host::" },
   { package = "sunrise-client", target = "lib", filter = "game::api_values::" },
   { package = "sunrise-client", target = "lib", filter = "game::load_conditions::" },
-  { package = "sunrise-client", target = "lib", filter = "game::creatures::pending_birth_wasm_tests" },
+  { package = "sunrise-client", target = "lib", filter = "game::creatures::pending_birth_matrix_tests" },
 ]
 harnesses = []
 lan = ["recipes-smod"]

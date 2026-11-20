@@ -112,7 +112,7 @@ impl Game<'_> {
             visible.push(ExtractedGeneral {
                 type_slot: row.type_slot,
                 entity,
-                at: at - camera,
+                at,
                 block,
                 light: packed,
             });
@@ -123,7 +123,8 @@ impl Game<'_> {
                     resolved,
                     &row.entity,
                     catalog.key(row.type_slot),
-                    row.at,
+                    row.at - camera,
+                    Some(row.at),
                     row.block,
                     row.light,
                     out,

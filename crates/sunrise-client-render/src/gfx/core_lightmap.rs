@@ -226,27 +226,11 @@ impl CoreLightmap {
         let info = info_binding.map(|b| (b, INFO_OFFSET, INFO_SIZE, program.stages_reading(b)));
         let mut blocks = super::expression_blocks::vanilla_blocks(program);
         blocks.extend(info.filter(|(.., stages)| !stages.is_empty()));
-        let entries: Vec<wgpu::BindGroupLayoutEntry> = (blocks.iter())
-            .map(|&(binding, _, size, stages)| {
-                super::expression_blocks::block_entry(binding, size, stages)
-            })
-            .chain(extra.layout())
-            .collect();
+        let (entries, resources) = super::expression_blocks::bindings(&blocks, &extra, &uniform);
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Resource pack lightmap"),
             entries: &entries,
         });
-        let resources: Vec<wgpu::BindGroupEntry> = (blocks.iter())
-            .map(|&(binding, offset, size, _)| wgpu::BindGroupEntry {
-                binding,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &uniform,
-                    offset,
-                    size: wgpu::BufferSize::new(size),
-                }),
-            })
-            .chain(extra.entries(&uniform))
-            .collect();
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Resource pack lightmap"),
             layout: &layout,

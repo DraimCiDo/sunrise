@@ -442,7 +442,7 @@ fn refresh_building_player(host: &LanHost, _conn: u32) {
     });
 }
 
-/// Kept at LAN action scope to preserve its derived internals point identity.
+/// Kept at LAN action scope to preserve its published internals target path.
 impl Game<'_> {
     pub(super) fn vehicle_has_other_viewers(
         container: Option<(i32, i32, i32)>,

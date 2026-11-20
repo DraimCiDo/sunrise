@@ -256,14 +256,27 @@ fn the_sky_draws_its_expression_uniform() {
 
 /// A frame's screenshot: the colour of the pixel two in from the top left corner.
 fn corner(game: &mut super::Game<'_>) -> [u8; 3] {
+    corner_of(game, frame)
+}
+
+/// A game frame.
+pub(super) fn frame(game: &mut super::Game<'_>) -> sunrise_client::Result<bool> {
+    game.render_with(|renderer, frame| renderer.render(frame))
+}
+
+/// The colour of the pixel two in from the top left corner of the frame `draw` draws (a game
+/// frame, a loading screen's), from a screenshot of it.
+pub(super) fn corner_of(
+    game: &mut super::Game<'_>,
+    draw: impl FnOnce(&mut super::Game<'_>) -> sunrise_client::Result<bool>,
+) -> [u8; 3] {
     game.renderer.as_mut().unwrap().screenshot = Some(sunrise_client::gfx::ScreenshotRequest {
         path: "unused.png".into(),
         size: None,
         scaled: false,
         background: false,
     });
-    game.render_with(|renderer, frame| renderer.render(frame))
-        .unwrap();
+    draw(game).unwrap();
     let result = game.renderer.as_mut().unwrap().screenshot_result.take();
     let mut pending = result.unwrap().unwrap();
     let image = pending.image_mut();
