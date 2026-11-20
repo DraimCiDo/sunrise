@@ -277,7 +277,7 @@ pub enum SupportType {
 }
 
 /// What caused a block to enter the final `block_drops` decision.
-#[derive(Clone, Copy, Debug, PartialEq, sunrise_mod_api_macros::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum BlockDestructionCause {
     /// A player's harvest, including a break made through a player handle.
@@ -299,7 +299,7 @@ pub enum BlockDestructionCause {
 }
 
 /// The level operation responsible for a block's destruction.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum LevelDestructionCause {
     /// A piston destroyed an obstructing block.
