@@ -1842,10 +1842,23 @@ mod tests {
                 for dim in [Dim::Nether, Dim::End, Dim::Overworld] {
                     game.enter_level(dim).unwrap();
                     dirty_test_chunk(game);
-                    folders.push((game.save.root.clone(), game.save.shape));
+                    folders.push((dim, game.save.root.clone(), game.save.shape));
                     if dim != Dim::End {
                         queue_unencodable_entity_record(&game.save);
                     }
+                }
+                let error = game
+                    .save_game()
+                    .unwrap_err()
+                    .downcast::<RecordSaveFailures>()
+                    .unwrap()
+                    .to_string();
+                for (_, folder, _) in folders.iter().filter(|(dim, _, _)| *dim != Dim::End) {
+                    assert!(
+                        error.contains(&format!("{} entities 2,0:", folder.display())),
+                        "missing failed record for {} in {error}",
+                        folder.display()
+                    );
                 }
                 assert_eq!(
                     game.save_all_reply().translation_key(),
@@ -1856,7 +1869,7 @@ mod tests {
                     Level::read(root.path()).unwrap().name,
                     "saved despite two refused records"
                 );
-                for (folder, shape) in folders {
+                for (_, folder, shape) in folders {
                     assert!(
                         SaveDir::new(folder.clone(), shape, None)
                             .raw_chunk(0, 0)
