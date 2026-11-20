@@ -832,6 +832,7 @@ impl Game<'_> {
                     &entity,
                     f.kind(),
                     at - camera,
+                    Some(at),
                     f.pos,
                     packed,
                     out,

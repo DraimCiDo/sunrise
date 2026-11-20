@@ -234,6 +234,7 @@ impl Game<'_> {
         partial: f32,
         camera: DVec3,
         light: u32,
+        in_level: bool,
         out: &mut Vec<Vertex>,
     ) -> bool {
         let entity = entity_render_state(mob, mob.id, partial);
@@ -245,6 +246,7 @@ impl Game<'_> {
             &entity,
             &mob.kind.id,
             feet - camera,
+            in_level.then_some(feet),
             block,
             light,
             out,

@@ -140,9 +140,6 @@ jobs:
           for leg in sdk-leg-linux sdk-leg-linux-server; do
             [ -d "$QS_SCRATCH/legs/$leg" ] || { echo "::error::the daily run's sdk job left no $leg artifact"; exit 1; }
           done
-      - name: The API source's wasm32 check
-        if: inputs.own_sdk && steps.sdk.outputs.source == 'legs'
-        run: rustup target add wasm32-unknown-unknown
       - name: Assemble the SDK release folder
         if: inputs.own_sdk && steps.sdk.outputs.source == 'legs'
         run: tools/ci/assemble_sdk_folder.sh "$QS_SCRATCH/legs" "$QS_SCRATCH/sdk-base" "$(git rev-parse HEAD)"

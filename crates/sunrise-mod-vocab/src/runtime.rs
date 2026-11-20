@@ -7,34 +7,17 @@ use crate::*;
 pub struct ModEntry {
     pub(crate) id: &'static str,
     pub(crate) hooks: Box<dyn Hooks>,
-    /// Whether the game loaded it as a wasm module: what its registrations are checked against,
-    /// whatever the module says of itself.
-    pub(crate) wasm: bool,
 }
 
 impl ModEntry {
     /// Bind a hook implementation to its nonempty bundle id.
     pub fn new(id: &'static str, hooks: Box<dyn Hooks>) -> Self {
         assert!(!id.is_empty(), "native mod id must not be empty");
-        Self {
-            id,
-            hooks,
-            wasm: false,
-        }
-    }
-
-    /// Bind a loaded wasm module's hook proxy to its bundle id.
-    // hidden: the wasm runtime's side, not part of the mod surface
-    #[doc(hidden)]
-    pub fn wasm(id: &'static str, hooks: Box<dyn Hooks>) -> Self {
-        Self {
-            wasm: true,
-            ..Self::new(id, hooks)
-        }
+        Self { id, hooks }
     }
 
     /// Marks the thread as inside this mod's `hook` until the guard drops, so a panic in it
-    /// names both. A trait injection's generated dispatch calls it.
+    /// names both. The generated hook dispatcher calls it.
     // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn enter(&self, hook: &'static str) -> crate::content::crash::ModGuard {
@@ -390,8 +373,7 @@ pub(crate) fn outside_world() -> bool {
 }
 
 /// Runs a listener's call. With `contained` (outside `World`) a Host call the phase gate refuses
-/// comes back as `Err`, and the caller answers as a refused wasm call does; otherwise it is the
-/// plain call.
+/// comes back as `Err`. In `World` the listener is called directly.
 #[inline]
 pub(crate) fn refusable<T>(
     contained: bool,

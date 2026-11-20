@@ -61,7 +61,7 @@ class RustChangesTests(unittest.TestCase):
             # Generated references that Rust tests compare with their generator's output.
             "docs/api/server-reference.md", "docs/sunrise-ctl-commands.md",
             # Embedded with include_str!.
-            "docs/modpacks/atm10-mods.csv", "crates/sunrise-mod-api-gen/coverage-notes.md",
+            "docs/modpacks/atm10-mods.csv",
             # A page a Rust test requires to be absent: adding it fails that test.
             "docs/modding/src/reference/hook-notes.md",
             # A workspace crate's sources under docs/.

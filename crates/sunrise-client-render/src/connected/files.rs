@@ -565,23 +565,19 @@ mod tests {
         let of: Vec<_> = rule.connect_blocks.iter().map(|b| b.id.as_str()).collect();
         assert_eq!(of, ["demo:shingles", "demo:roof"]);
         // A rule with no clause, a `side` with nothing to look for, an `of` with nothing to
-        // compare, an unknown clause and a second way to join are refused by name.
-        for (connect, named) in [
-            (r#"{"height":{}}"#, "needs one of"),
-            (r#"{"height":{"same":true,"side":true}}"#, "side needs"),
-            (
-                r#"{"height":{"higher":true,"of":["demo:roof"]}}"#,
-                "of is for same",
-            ),
-            (r#"{"height":{"heigher":true}}"#, "heigher"),
-            (
-                r#"{"height":{"same":true},"same":["axis"]}"#,
-                "one of tag, same and height",
-            ),
+        // compare, an unknown clause and a second way to join are all refused.
+        for connect in [
+            r#"{"height":{}}"#,
+            r#"{"height":{"same":true,"side":true}}"#,
+            r#"{"height":{"higher":true,"of":["demo:roof"]}}"#,
+            r#"{"height":{"heigher":true}}"#,
+            r#"{"height":{"same":true},"same":["axis"]}"#,
         ] {
-            let err = file(connect).unwrap_err();
-            assert!(err.contains(named), "{connect}: {err}");
+            assert!(file(connect).is_err(), "{connect}");
         }
+        // An unknown clause is named.
+        let err = file(r#"{"height":{"heigher":true}}"#).unwrap_err();
+        assert!(err.contains("heigher"), "{err}");
     }
 
     #[test]

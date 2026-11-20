@@ -260,7 +260,9 @@ impl Game<'_> {
         let modded = super::native_entity_renderers::living_renderer(mob, false)
             .0
             .is_some_and(|renderer| {
-                self.mod_living_renderer_geometry(&renderer, mob, partial, camera, FULL_BRIGHT, out)
+                self.mod_living_renderer_geometry(
+                    &renderer, mob, partial, camera, FULL_BRIGHT, false, out,
+                )
             });
         let atlas = &self.gui.atlas;
         let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);

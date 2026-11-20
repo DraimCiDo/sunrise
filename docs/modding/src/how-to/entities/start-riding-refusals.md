@@ -26,8 +26,7 @@ match rider.start_riding(host, vehicle, false) {
 }
 ```
 
-The enum is `#[non_exhaustive]`: keep a wildcard arm. It crosses the wasm boundary whole, so a
-wasm mod reads the same refusal a native mod does.
+The enum is `#[non_exhaustive]`: keep a wildcard arm.
 
 ## Why nothing rides a player
 

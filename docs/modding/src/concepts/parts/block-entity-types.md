@@ -78,7 +78,7 @@ The engine applies the answers after the level write, in this order:
 
 Each list accepts at most 1024 entries; positions must be finite. Invalid list sizes or
 positions refuse the outputs. Stack writes use the usual checked item boundary. The same
-fields cross to native and wasm. A part that answers nothing consumes no random draws.
+fields go to the Part. A part that answers nothing consumes no random draws.
 Version 2 uses optional drops to represent empty slots; wrap a filled slot in `Some`.
 
 ## Part state
@@ -117,7 +117,7 @@ let done = Press::edit_state(host, entity, |_, progress| {
   under the new handle.
 - An edit stores nothing, and its transaction aborts with everything the closure wrote, in these
   cases:
-  - the closure panics and the panic unwinds (a wasm trap counts the same). A panic that aborts
+  - the closure panics and the panic unwinds. A panic that aborts
     the process cannot be rolled back;
   - the value was replaced while the closure ran (`Changed`);
   - the value does not encode.
@@ -129,18 +129,13 @@ let done = Press::edit_state(host, entity, |_, progress| {
   removed, with its attachment map still bound. Handles of block entities made inside it stay
   `Stale`. Removed block entities retire only when the outermost transaction commits. No save runs
   while a value may still be tentative, and a chunk unload waits until no transaction is open.
-- A wasm closure that traps ends the call like a native panic that unwinds: nothing is stored and
-  the transaction aborts. The runtime then stops calling that module's link group, since the trap
-  may have left its own state half-written.
 - No size or depth limit of its own applies to a value. A saved value follows the chunk's NBT rules:
   vanilla 26.3 reads region files with `NbtAccounter.unlimitedHeap`, an unbounded byte budget and
   depth 512. The 2 MiB quota of a chunk packet's block entity data is a network limit and does not
   cap saved state.
 - Registration refuses a declaration that syncs, copies on death, lies outside the mod's namespaces
   or reuses a key with a type of another Rust type name. It refuses a type whose Wire form holds a resource
-  handle (an erased handler such as `Arc<dyn BlockPart>`) on every target: such a value crosses
-  only into one link group and cannot be saved. It also refuses a declaration without a codec from
-  a mod the game loaded as wasm, whatever the module says of itself. The refusal names the Part,
+  handle (an erased handler such as `Arc<dyn BlockPart>`): such a value cannot be saved. The refusal names the Part,
   the key, the type and the reason.
 - Values without a codec last for the session. Part state is server-side for now. A client reads the
   default, because nothing is sent to it yet.
@@ -185,8 +180,7 @@ notice. Client sync instead uses `block_entity_data_received`.
 ## Transform saved data with a structure
 
 Add an optional `.transform(...)` step to the declaration when the saved payload contains a facing
-or relative positions that must turn with a structure. The same declaration works for native and
-wasm mods:
+or relative positions that must turn with a structure:
 
 ```rust,ignore
 use mod_api::{Compound, StructureMirror, StructureRotation, StructureTransform, Tag, TransformRefusal};
@@ -234,7 +228,7 @@ The engine restores the original `id` and any original `x`, `y`, `z` fields over
 payload transform cannot change the saved entity's identity or original coordinates. With no step,
 data is unchanged. A `TransformRefusal` logs the type and position and keeps the original data;
 placement succeeds. Invalid output exceeding standard NBT limits (64 MiB, one million nodes,
-depth 512), native unwinding panics and wasm traps also keep the original data.
+depth 512), or unwinding panics also keep the original data.
 
 Callbacks are registered at startup and frozen with the block registry snapshot. A data-pack
 `/reload` keeps that registry and its existing callbacks; it does not register replacement code.

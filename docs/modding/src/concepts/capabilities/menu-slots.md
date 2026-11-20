@@ -42,7 +42,6 @@ disconnecting discards it. Reads allocate nothing and do not rescan recipes or r
 A client without this mod predicts vanilla here; the server corrects it.
 
 Parts that read `context.setting(..)` or `side()` have no counterpart on the Host.
-Named injections for `menu_slot_rules` request `hook_version = 5`.
 
 ### Who and where: the slot's context
 
@@ -260,7 +259,7 @@ Inside `menu_clicked`, `ItemPlace::MenuSlot` can take from and give to the click
 player's inventory and hotbar slots as well as the menu's own storage. Inserts fill
 only the named slot and return the amount that fits. Abort the transaction if a
 partial move should leave both places unchanged. Stale menu or player identities
-refuse writes. The same storage path is used by native and wasm listeners.
+refuse writes.
 
 ## A mod's chest menu
 

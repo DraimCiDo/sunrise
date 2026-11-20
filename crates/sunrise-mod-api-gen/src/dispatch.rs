@@ -1017,8 +1017,8 @@ pub(super) fn emit<'a>(
             }
             None => format!("super::entered(HookId::{hook_id}, \"{name}\")"),
         };
-        // Restore writable event fields after a phase refusal. Draw-local layer editors also
-        // contain ordinary panics and restore the failed listener's snapshot in every phase.
+        // Ordinary listeners restore a refused call's writable fields outside `World` only.
+        // Draw-local layer editors also contain panics and restore the snapshot in every phase.
         let layer_editor = args
             .iter()
             .find(|(_, ty)| ty.to_token_stream().to_string() == "& mod_api :: HiddenLayers < '_ >");
@@ -1027,7 +1027,7 @@ pub(super) fn emit<'a>(
         let mut snaps: Vec<String> = Vec::new();
         let mut restores: Vec<String> = Vec::new();
         // A `&mut dyn Trait` field is a registrar or a draw surface: its effects stand, as the
-        // effects of a refused wasm listener's earlier calls do, and it has no value to copy.
+        // surface has no whole value to copy.
         for (field, by_reference) in rollback
             .iter()
             .filter(|(field, _)| !surfaces.contains(field))
@@ -1077,11 +1077,11 @@ pub(super) fn emit<'a>(
                 restores.join(" ")
             )
         };
-        let refused_value = crate::wire::refusal_value(
-            result.trim() == "-> Flow",
-            "Flow::Continue",
-            "Default::default()",
-        );
+        let refused_value = if result.trim() == "-> Flow" {
+            "Flow::Continue"
+        } else {
+            "Default::default()"
+        };
         let run = |expression: &str| {
             if let Some((editor, _)) = layer_editor {
                 // Lend the original editor again if a listener reassigned its event field.

@@ -28,7 +28,7 @@ impl ReloadResourceError {
         }
     }
 }
-/// The error as its resource and message, the form it crosses a wasm mod's boundary in.
+/// The error as its resource ID and message.
 impl From<&ReloadResourceError> for (Identifier, String) {
     fn from(error: &ReloadResourceError) -> Self {
         (error.resource.clone(), error.source.to_string())
@@ -58,11 +58,6 @@ impl std::error::Error for ReloadResourceError {
 /// generation in place, but cannot undo this callback's own effects. One per listener per reload, never per tick;
 /// `<dyn ReloadApply>::new(move || ...)` makes one from a closure.
 pub trait ReloadApply: Send + Sync {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::reload_apply::<Self>();
-    }
     /// Publish the prepared state.
     fn apply(&self);
 }

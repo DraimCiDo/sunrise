@@ -125,9 +125,8 @@ impl<'a> BlockStates<'a> {
         Self::of(&NoBlockTables)
     }
 
-    /// The reads this service answers from, for the wasm host to serve a guest's calls through
-    /// the same tables (or the same refusals) the service itself uses.
-    // hidden: the wasm host's receiver for a level frame; mods call the service, never its backend
+    /// The block-state tables behind this service.
+    // hidden: mods call the service, never its backend
     #[doc(hidden)]
     pub fn backend(&self) -> &'a dyn BlockStatesBackend {
         self.backend
@@ -135,8 +134,7 @@ impl<'a> BlockStates<'a> {
 }
 
 /// The reads of a level view with no block tables: the one place that says what such a view answers,
-/// `None` for a fact and `Unavailable` for a refusal. [`BlockStates`] reads through it, natively and
-/// for a wasm guest alike, so the two cannot differ.
+/// `None` for a fact and `Unavailable` for a refusal. [`BlockStates`] reads through it.
 struct NoBlockTables;
 
 impl BlockStatesBackend for NoBlockTables {

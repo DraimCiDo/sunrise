@@ -47,7 +47,7 @@ pub struct DiscoverPlan {
     pub toolchain: Unpacked,
     /// The mod's folder.
     pub mods: PathBuf,
-    /// Where to copy the build data (`internals.json`, `points.json`), a folder that doesn't exist yet; absent, the reply lists the mod's internals.
+    /// Where to copy `internals.json`, a folder that doesn't exist yet; absent, the reply lists the mod's internals.
     #[serde(default)]
     pub catalog: Option<PathBuf>,
 }

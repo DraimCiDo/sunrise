@@ -1278,7 +1278,7 @@ mod tests {
         assert!(observer.join().unwrap() <= 1_000);
     }
 
-    /// How a wasm mod's audio paces: it pushes once a tick, 50 ms of audio each, and a tick can
+    /// How a tick-paced mod supplies audio: it pushes once a tick, 50 ms of audio each, and a tick can
     /// arrive up to 50 ms late. Returns the underruns in 30 s of 48 kHz mono for `prebuffer_ms`,
     /// with a device callback every 10 ms. The ticks' lateness is a fixed pseudo-random series,
     /// so the figures are exact and repeat.
@@ -1286,7 +1286,7 @@ mod tests {
         let rig = Rig::new();
         let stream = rig
             .open(
-                "wasm",
+                "tick_paced",
                 &StreamSpec::new(SoundSource::Voice, 1, 48_000).with_prebuffer_ms(prebuffer_ms),
             )
             .unwrap();

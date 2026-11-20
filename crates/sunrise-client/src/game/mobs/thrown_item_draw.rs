@@ -45,6 +45,7 @@ impl Game<'_> {
                 &entity,
                 t.id,
                 c.as_dvec3(),
+                Some(glam::DVec3::from_array(at)),
                 block,
                 packed,
                 out,
