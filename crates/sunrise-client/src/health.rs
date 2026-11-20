@@ -2304,7 +2304,7 @@ mod tests {
             _: super::Hurting<'_>,
             container: &super::DamageContainer,
         ) {
-            // The plain values used by wasm must preserve the decision in both directions.
+            // Converting to plain values and back must preserve the damage decision.
             let values = DamageValues::from(container);
             assert_eq!(
                 values.should_cause_side_effects,

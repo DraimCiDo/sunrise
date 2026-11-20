@@ -1,20 +1,12 @@
-//! Installed native and wasm code loading.
+//! Installed native code loading.
 use mod_api::__private::game::Fields;
-/// Load installed native and wasm code, register its dependency-ordered entries,
+/// Load installed native code, register its dependency-ordered entries,
 /// and start the engine. Keep the validated startup lease alive for the whole run.
 pub fn main_with(
     mods: Vec<mod_api::ModEntry>,
-    slots: &[crate::SlotListener],
     built: &'static [mod_api::__private::native::BuiltMod],
     startup: sunrise_client::entry::Startup,
 ) {
-    // The stack policy follows the engine mods run on, and must be settled before any worker starts.
-    if let Err(error) = sunrise_mod_wasm::install_stack_policy() {
-        eprintln!("{error}");
-        std::process::exit(1);
-    }
-    sunrise_engine_slots::install_seal(mod_points::__private::seal)
-        .expect("engine seal provider must be installed once before startup");
     // The title screen's Mods button: every game that loads mods has it, before the game seals
     // the title screen's buttons.
     if let Err(error) = sunrise_hooks::title::register(&crate::mods_button::MODS) {
@@ -29,16 +21,18 @@ pub fn main_with(
         eprintln!("Sunrise: refusing startup because mod instrumentation is unavailable: {error}");
         std::process::exit(1);
     }
-    if let Err(error) = sunrise_engine_slots::install_platform(sunrise_engine_slots::Platform {
-        install_packages: mod_api::__private::install_packages,
-        install_registration_data: mod_api::__private::install_registration_data,
-        install_parts: mod_api::__private::install_parts,
-        profiler_is_enabled: mod_api::__private::profiler::is_enabled,
-        profiler_start: mod_api::__private::profiler::start,
-        profiler_stop: mod_api::__private::profiler::stop,
-        profiler_summary: mod_api::__private::profiler::summary,
-        profiler_firefox_profile: mod_api::__private::profiler::firefox_profile,
-    }) {
+    if let Err(error) =
+        mod_api::__private::platform::install_platform(mod_api::__private::platform::Platform {
+            install_packages: mod_api::__private::install_packages,
+            install_registration_data: mod_api::__private::install_registration_data,
+            install_parts: mod_api::__private::install_parts,
+            profiler_is_enabled: mod_api::__private::profiler::is_enabled,
+            profiler_start: mod_api::__private::profiler::start,
+            profiler_stop: mod_api::__private::profiler::stop,
+            profiler_summary: mod_api::__private::profiler::summary,
+            profiler_firefox_profile: mod_api::__private::profiler::firefox_profile,
+        })
+    {
         eprintln!("Sunrise: {error}");
         std::process::exit(1);
     }
@@ -60,17 +54,11 @@ pub fn main_with(
     sunrise_client::entry::start(
         native,
         |native, launch| {
-            sunrise_mod_wasm::set_game_build(crate::GAME_BUILD_ID);
-            let mut wasm =
-                sunrise_mod_wasm::load_installed(launch, &sunrise_client::logging::player_dir());
-            let mut mods = mods;
-            mods.extend(std::mem::take(&mut wasm.mods));
-            // One installed dispatch order for both targets; ties retain bundle order.
+            // Installed code dispatch follows the resolved package order.
             let code_manifests: Vec<_> = native
                 .packages()
                 .iter()
                 .map(|p| &p.manifest)
-                .chain(wasm.manifests.iter())
                 .filter(|m| mods.iter().any(|entry| entry.fields().id == m.id))
                 .collect();
             assert_eq!(
@@ -106,16 +94,7 @@ pub fn main_with(
             let manifests: Vec<_> = code_manifests
                 .iter()
                 .copied()
-                .chain(
-                    content
-                        .iter()
-                        .filter(|source| {
-                            let manifest = &source.package.manifest;
-                            let code = manifest.native.is_some() || manifest.wasm.is_some();
-                            !code || !code_ids.contains(manifest.id.as_str())
-                        })
-                        .map(|source| &source.package.manifest),
-                )
+                .chain(content.iter().map(|source| &source.package.manifest))
                 .collect();
             let order = sunrise_mod_package::dependencies::Overrides::read(
                 &launch
@@ -162,68 +141,7 @@ pub fn main_with(
                 .filter(|&i| code_ids.contains(manifests[i].id.as_str()))
                 .map(|i| entries.remove(manifests[i].id.as_str()).unwrap())
                 .collect();
-            let ids: Vec<_> = mods.iter().map(|entry| entry.fields().id).collect();
             mod_api::__private::install(mods.into());
-            for &id in &ids {
-                for slot in slots.iter().filter(|slot| slot.id() == id) {
-                    if let Err(error) = mod_points::register(slot) {
-                        log::error!("Sunrise: {id}: {error}");
-                        sunrise_client::logging::flush();
-                        std::process::exit(1);
-                    }
-                }
-            }
-            (ids, wasm)
-        },
-        sunrise_client::entry::CodeRuntime {
-            initialize: sunrise_mod_wasm::initialize,
-            refusal: |id| {
-                sunrise_mod_wasm::refusal(id).map(|reason| {
-                use sunrise_client::text::Text;
-                match reason {
-                    sunrise_mod_wasm::Refusal::CompileTimeout { member, budget } => {
-                        let source = match budget.threads {
-                            Some(threads) => Text::translate_with_fallback("sunrise.wasm.compile_default", "default for %s threads", &[Text::literal(threads.to_string())]),
-                            None => Text::translate_with_fallback("sunrise.wasm.compile_setting", "setting %s", &[Text::literal(sunrise_mod_wasm::compile_budget::SETTING)]),
-                        };
-                        Text::translate_with_fallback("sunrise.wasm.compile_timeout", "%s: compilation exceeded %s seconds (%s). Increase %s to allow more compile time.", &[
-                            Text::literal(member),
-                            Text::literal(budget.limit.as_secs_f64().to_string()),
-                            source,
-                            Text::literal(sunrise_mod_wasm::compile_budget::SETTING),
-                        ]).plain()
-                    }
-                    sunrise_mod_wasm::Refusal::CompileSetting(error) => {
-                        use sunrise_mod_wasm::compile_budget::{SETTING, SettingError};
-                        match error {
-                            SettingError::InvalidValue(value) => Text::translate_with_fallback(
-                                "sunrise.wasm.compile_setting_invalid",
-                                "Invalid %s=%s: expected positive finite seconds.",
-                                &[Text::literal(SETTING), Text::literal(format!("{value:?}"))],
-                            ).plain(),
-                            SettingError::File { path, why } => Text::translate_with_fallback(
-                                "sunrise.wasm.compile_setting_file",
-                                "Cannot read %s from %s: %s",
-                                &[Text::literal(SETTING), Text::literal(path.display().to_string()), Text::literal(why)],
-                            ).plain(),
-                        }
-                    }
-                    sunrise_mod_wasm::Refusal::CompileUnavailable { member, budget, why } => {
-                        Text::translate_with_fallback(
-                            "sunrise.wasm.compile_unavailable",
-                            "%s: cannot enforce the %s second compilation budget: %s. Restore a private writable .sunrise-cache/wasm directory and a working compiler executable.",
-                            &[Text::literal(member), Text::literal(budget.limit.as_secs_f64().to_string()), Text::literal(why)],
-                        ).plain()
-                    }
-                    other => other.to_string(),
-                }
-            })
-            },
-            startup_refused: |id| {
-                sunrise_mod_wasm::refused()
-                    .iter()
-                    .any(|(owner, _)| owner == id)
-            },
         },
         startup,
     );

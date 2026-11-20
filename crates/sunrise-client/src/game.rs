@@ -94,55 +94,6 @@ fn pack_files(world_tables: &Option<WorldTables>) -> sunrise_world::loot::PackOv
     }
 }
 include!(concat!(env!("OUT_DIR"), "/game_modules.rs"));
-/// Installs the dispatcher of each injection point a mod listens at as its function's entry,
-/// once the points are sealed. The prebuilt game's staging pass writes the call; a build without
-/// points has none to arm.
-macro_rules! arm_points {
-    () => {};
-}
-
-/// The game's side of the injection points (#589), whose slots and listeners live above the engine.
-#[doc(hidden)]
-pub mod points {
-    /// A `side = "both"` point's host, out of line: each point's listener call stays a few bytes.
-    /// Called only by the `#[point]`s the stage adds to its copy.
-    #[inline(never)]
-    #[allow(dead_code, reason = "used by the staged copy's points")]
-    pub(super) fn host_side<'a>(game: &'a mut super::Game<'_>) -> mod_api::HostSide<'a> {
-        super::execution_role::host_side(game)
-    }
-
-    /// An engine value's `mod_api` mirror for a point record, through the boundary's conversion.
-    #[allow(dead_code, reason = "used by the staged copy's points")]
-    pub(super) fn mirror_in<T: super::api_values::TryIntoApi + ?Sized>(
-        value: &T,
-    ) -> Option<T::Api> {
-        value.try_into_api().ok()
-    }
-
-    /// A listener's `mod_api` value as the engine's, validated as every mod value is; a value the
-    /// engine refuses leaves the engine's own in place.
-    #[allow(dead_code, reason = "used by the staged copy's points")]
-    pub(super) fn mirror_out<A: super::api_values::TryIntoEngine<()>>(
-        value: &A,
-        point: &str,
-    ) -> Option<A::Engine> {
-        let engine = value.try_into_engine(&()).ok();
-        if engine.is_none() {
-            log::warn!(
-                "point {point}: a listener's value has no engine form; the engine's is kept"
-            );
-        }
-        engine
-    }
-
-    /// An engine value with no `mod_api` form at this call: its listeners are skipped this once.
-    #[cold]
-    #[allow(dead_code, reason = "used by the staged copy's points")]
-    pub(super) fn unconverted(point: &str) {
-        log::warn!("point {point}: a value has no API form; its listeners were skipped");
-    }
-}
 mod host;
 mod native_hooks;
 use event_loop::EventLoopCtl;
@@ -2133,7 +2084,6 @@ struct Game<'a> {
     player_model: Option<Mob>,
     block_entity_tick_key: Option<block_entity_tick_items::Key>,
     block_entity_tick_items: Option<Box<block_entity_tick_items::Scope>>,
-    wasm_dispatch_failures: std::rc::Rc<std::cell::Cell<u64>>,
 }
 /// The open world's dimensions past vanilla's three. One per process, as a window
 /// and its server thread name the same dimensions.
@@ -3323,29 +3273,6 @@ impl Game<'_> {
             );
         });
         self.process_level_events()
-    }
-    /// `BlockState.canSurvive(level, pos)` for `state` at `pos` in the level in
-    /// place: the rule a placement checks before `level_set` (a sapling on
-    /// grass, a torch on a wall), with a mod block's own `native_can_survive`
-    /// hook. False for an invalid state, an unloaded or out-of-height
-    /// position, and on a client.
-    ///
-    /// This is the non-closure equivalent of `with_level(|b, level, ticks|
-    /// b.can_survive(level, ticks, pos, state))`, for a wasm mod whose
-    /// internals view cannot send a closure.
-    // A wasm mod's staged internals table calls this; nothing in Sunrise does.
-    #[allow(dead_code)]
-    fn level_can_survive(&mut self, pos: [i32; 3], state: BlockStateId) -> bool {
-        if !self.is_logical_server()
-            || !self.world.loaded(pos[0], pos[2])
-            || !self.world.shape.contains_y(pos[1])
-            || self.pack.assets.registry.state(state).is_none()
-        {
-            return false;
-        }
-        self.with_level(|b, level, ticks| {
-            b.can_survive(level, ticks, BlockPos::new(pos[0], pos[1], pos[2]), state)
-        })
     }
     fn attack_block(&mut self, pos: [i32; 3]) -> Result<()> {
         let note = self.with_level(|b, level, ticks| {
@@ -6248,6 +6175,7 @@ impl Game<'_> {
                     &entity,
                     "minecraft:experience_orb",
                     glam::DVec3::from_array(at) - camera,
+                    Some(glam::DVec3::from_array(at)),
                     block,
                     packed,
                     out,
@@ -10906,11 +10834,16 @@ impl<'a> Game<'a> {
         let slow_frame_ms = options
             .spikes
             .unwrap_or(sunrise_client::client_perf::SLOW_FRAME_MS);
-        let particles = sunrise_client::particles::ParticleEngine::new(
+        let mut particles = sunrise_client::particles::ParticleEngine::new(
             &pack.source,
             &gui.atlas.sprites,
             &gui.atlas.translucent,
         );
+        particles.set_block_state_source(|| {
+            api_values::block_state::current()
+                .ok()
+                .map(|states| -> sunrise_client::particles::BlockStates { states })
+        });
         let resource_source = pack.source.clone();
         let mut game = Game {
             structure_spawns: sunrise_client::mobs::spawn_selection::StructureSpawns::load(
@@ -11321,8 +11254,6 @@ impl<'a> Game<'a> {
             transactions: Default::default(),
             block_entity_tick_key: None,
             block_entity_tick_items: None,
-            wasm_dispatch_failures:
-                sunrise_mod_runtime::dispatch_failures::dispatch_failure_counter(),
             contents_changing: Vec::new(),
             mod_screen: None,
             mod_container_viewers: HashMap::new(),
@@ -11657,14 +11588,6 @@ pub(crate) fn run_with(
     let mod_phase = mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::Packages);
     api_values::install_packages(options.mods.native.packages(), &options.mods.selected)?;
     mods::install_registration_data(&vanilla_root, mods::runtime_files::sources(&options.mods))?;
-    {
-        use mod_api::__private::game::RegistrationContextNew;
-        let context = mod_api::RegistrationContext::new();
-        let inventory: Vec<_> = context.mods().iter().cloned().collect();
-        crate::entry::initialize_code(&inventory);
-    }
-    sunrise_engine_slots::seal().expect("engine registration seals once at startup");
-    arm_points!();
     mod_phase.advance(mod_api::__private::ModPhase::Registration)?;
     crate::game::part_admission::admit_parts(mod_api::__private::mods())?;
     // The structure types those mods registered, handed to the engine before

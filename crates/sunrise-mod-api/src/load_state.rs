@@ -64,7 +64,7 @@ fn inventory(native: &[PackageInfo], content: &[PackageInfo]) -> Vec<PackageInfo
             packages.push(selected.clone());
         }
     }
-    // The code inventory follows the one installed native/wasm dispatch slice;
+    // The code inventory follows the one installed native dispatch slice;
     // content-only packages remain after it in their selected layer order.
     packages.sort_by_key(|p| {
         crate::__private::mods()
@@ -82,14 +82,6 @@ pub fn install_packages(native: &[PackageInfo], content: &[PackageInfo]) {
         PACKAGES.set(inventory(native, content).into()).is_ok(),
         "package inventory already installed"
     );
-}
-
-/// Install the host's ordered package inventory in a guest at initialization.
-// hidden: the guest runtime installs this once before dispatching hooks.
-#[doc(hidden)]
-pub fn install_guest_packages(packages: Vec<PackageInfo>) {
-    let _ = crate::__private::initialize();
-    let _ = PACKAGES.set(packages.into());
 }
 
 static REGISTRATION_DATA: OnceLock<RegistrationData> = OnceLock::new();

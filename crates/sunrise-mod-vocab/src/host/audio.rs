@@ -11,10 +11,9 @@ pub trait AudioClientHost {
     /// do. It plays at the output's rate behind the `spec`'s category volume (master times the
     /// group, as every sound's) and the muffle (`muffle_sounds`), at its placement, fading
     /// linearly to silence at its range. The stream is not a sound instance: no sound hook
-    /// fires for it. The handle's `push` works from any thread, so a native mod's audio never
-    /// waits for a tick; a wasm mod's arrives at tick rate with up to 50 ms of jitter, so it
-    /// wants a larger `prebuffer_ms`. Dropping the handle stops the stream. `Err`, with nothing
-    /// opened, on a server, without a sound output, for a spec out of range (a stereo stream
+    /// fires for it. The handle's `push` works from any thread, so audio never waits for a tick.
+    /// Dropping the handle stops the stream. Returns `Err` without opening a stream on a server,
+    /// without a sound output, for a spec out of range (a stereo stream
     /// with a placement other than `Flat` included), for a mod already holding 32 streams, when
     /// 64 are open across every mod, and for a call from no mod or outside the phases a client
     /// opens one in (`Unavailable`).

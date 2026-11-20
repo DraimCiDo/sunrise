@@ -18,7 +18,6 @@ path = "../sunrise-client/src/client_lib.rs"
 [dependencies]
 sunrise-guest-stack = { path = "../sunrise-guest-stack" }
 sunrise-mod-api-macros = { path = "../sunrise-mod-api-macros" }
-sunrise-engine-slots = { path = "../sunrise-engine-slots" }
 sunrise-hooks = { path = "../sunrise-hooks" }
 sunrise-mod-runtime = { path = "../sunrise-mod-runtime" }
 mod_api = { package = "sunrise-mod-vocab", path = "../sunrise-mod-vocab" }
@@ -53,7 +52,7 @@ sunrise-shaders = { path = "../sunrise-shaders" }
 sunrise-shader-api = { path = "../sunrise-shader-api" }
 # The narrator (GameNarrator): text-to-speech of chat, system messages and screens.
 sunrise-narrator = { path = "../sunrise-narrator" }
-# Sunrise mods: sandboxed WebAssembly components, off unless installed and turned on (docs/modding/src/how-to/content-mods.md).
+# Sunrise mods: native code and content packages (docs/modding/src/how-to/content-mods.md).
 # Their runtime is the `mods` feature.
 sunrise-mod-package = { path = "../sunrise-mod-package", default-features = false, features = ["index"] }
 wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "vulkan", "metal", "wgsl", "naga-ir"] }
@@ -140,7 +139,6 @@ workspace = true
 [dev-dependencies]
 sunrise-client-lib = { path = ".", default-features = false, features = ["test-dry-side"] }
 sunrise-threads = { path = "../sunrise-threads", features = ["test-allocation-probe", "test-game-dir"] }
-sunrise-mod-wasm = { path = "../sunrise-mod-wasm", features = ["listener-fixture", "test-copy-probe"] }
 tempfile = "3"
 mod_platform = { package = "sunrise-mod-api", path = "../sunrise-mod-api", features = ["testing"] }
 mod_api = { package = "sunrise-mod-vocab", path = "../sunrise-mod-vocab", features = ["testing"] }

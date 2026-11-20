@@ -8,8 +8,6 @@
 //! keeps the ones that match the typed text, so every mod completes the same way.
 
 use super::command_argument::{CommandSender, CommandSuggestion};
-use crate::wire::{Reader, Wire, WireError, Writer};
-use std::sync::Arc;
 
 /// One argument the engine parsed before the one being completed: its name from the command's
 /// usage and the text the player wrote for it.
@@ -101,16 +99,9 @@ impl SuggestionReply {
 /// The game keeps one value per registered argument type and may ask it from more than one
 /// request: implement it to be shared, without mutable state.
 pub trait SuggestionProvider: Send + Sync + 'static {
-    // hidden: it marks the trait's methods as imports of a mod that implements it; nothing calls it.
-    #[doc(hidden)]
-    fn __sunrise_marks(&self, _: crate::__private::Sealed) {
-        sunrise_mod_marks::suggestion_provider::<Self>();
-    }
     /// The candidates for `request`: the text typed, the arguments before it and the sender.
     fn suggest(&self, request: &SuggestionRequest) -> SuggestionReply;
 }
-
-crate::wire::wire_handlers::handler!(dyn SuggestionProvider, "SuggestionProvider");
 
 #[cfg(test)]
 mod tests {

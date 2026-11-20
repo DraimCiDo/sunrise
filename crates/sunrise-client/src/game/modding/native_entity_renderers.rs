@@ -2,8 +2,7 @@
 //! (NeoForge's `EntityRenderersEvent.RegisterRenderers`) is asked once at start, before resources
 //! load, and every resource load resolves the registrations into the slots the draw routes read, so
 //! a frame hands an entity to its type's renderer without a lookup by name or a scan over the mods.
-//! The renderer draws through the shared drawing boundary (`BlockEntityDrawContext`) for native and
-//! wasm mods alike.
+//! The renderer draws through the shared drawing boundary (`BlockEntityDrawContext`).
 //!
 //! The routes that read the table so far: the content mods' thrown types
 //! (`ProjectileKind::Thrown`, by [`ThrownType::slot`]), the living types drawn as mobs (by
@@ -18,7 +17,9 @@
 //! through the same guard ([`Game::guarded_entity_draw`]).
 use super::general::GeneralTypeCatalog;
 use super::{
-    Game, host::draw::GameBlockEntityDrawContext, native_block_entity_draw::BlockEntityDraw,
+    Game,
+    host::draw::GameBlockEntityDrawContext,
+    native_block_entity_draw::{BlockEntityDraw, LevelLight},
 };
 use glam::{DVec3, Mat4};
 use mod_api::{BlockEntityDrawContext, EntityRenderState, EntityRenderer};
@@ -330,8 +331,9 @@ impl Game<'_> {
         self.resolve_entity_layers(&rows, registered);
     }
 
-    /// Draws `entity` with `resolved`'s renderer, at `at` relative to the camera (`block` the
-    /// block it stands in), lit by `light` as the entity pass packs it: true when it drew, and the
+    /// Draws `entity` with `resolved`'s renderer at `at` relative to the camera, with
+    /// `world_origin` the same point in the level (`None` for a preview). `block` is the
+    /// item owner's block. `light` is the entity pass's fixed light. True when it drew, and the
     /// type's own drawing is left out. False, with nothing it drew kept, when it fails this frame
     /// and from then until the next resource load resolves it again.
     pub(in crate::game) fn mod_entity_renderer_geometry(
@@ -340,6 +342,7 @@ impl Game<'_> {
         entity: &EntityRenderState,
         entity_type: &str,
         at: DVec3,
+        world_origin: Option<DVec3>,
         block: [i32; 3],
         light: u32,
         out: &mut Vec<Vertex>,
@@ -352,16 +355,16 @@ impl Game<'_> {
             block,
             pose,
             light,
+            world_origin,
             out,
             |draw| resolved.inner.submit(entity, draw),
         )
     }
 
     /// Runs one mod renderer's or layer's `submit` on a draw posed at `pose` (`block` the block the
-    /// entity stands in, lit by `light`), adding to `out`: true when it drew. An `Err`, a panic and
-    /// a refused or trapped wasm call (an `Err` from the proxy) all drop what it drew this frame,
-    /// log once and set `failed`, after which it is asked no more until the next resource load
-    /// resolves it again.
+    /// entity stands in, lit by `light`). `world_origin` enables level light for a translation-only
+    /// starting pose. Adds to `out` and returns true when it drew. An error or panic discards this
+    /// frame's drawing, logs once and disables the renderer until the next resource load.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::game) fn guarded_entity_draw(
         &self,
@@ -371,6 +374,7 @@ impl Game<'_> {
         block: [i32; 3],
         pose: Mat4,
         light: u32,
+        world_origin: Option<DVec3>,
         out: &mut Vec<Vertex>,
         submit: impl FnOnce(&mut dyn BlockEntityDrawContext) -> Result<(), String>,
     ) -> bool {
@@ -388,6 +392,9 @@ impl Game<'_> {
             std::mem::take(out),
         )
         .animated(self.animation_time());
+        if world_origin.is_some() {
+            surface.track_entity_local_light_pose();
+        }
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             submit(&mut GameBlockEntityDrawContext {
                 game: self,
@@ -395,10 +402,16 @@ impl Game<'_> {
             })
         }))
         .unwrap_or_else(|_| Err("it panicked".into()));
-        *out = surface.into_vertices();
         let Err(error) = result else {
+            let light_at = |[x, y, z]: [i32; 3]| self.world.light(x, y, z);
+            let level = world_origin.map(|origin| LevelLight {
+                origin,
+                light_at: &light_at,
+            });
+            *out = surface.into_vertices_with_light(level.as_ref());
             return true;
         };
+        *out = surface.into_vertices();
         out.truncate(start);
         if !failed.swap(true, Ordering::Relaxed) {
             log::warn!(
@@ -406,5 +419,86 @@ impl Game<'_> {
             );
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sunrise_client::chunk::{Chunk, Light, index};
+
+    #[test]
+    #[ignore = "daily"]
+    fn entity_renderer_samples_the_elements_world_cell_but_a_preview_stays_fixed() {
+        if super::super::native_entity_refs::tests::run_fresh_cases(
+            "game::native_entity_renderers::tests::entity_renderer_samples_the_elements_world_cell_but_a_preview_stays_fixed",
+            "SUNRISE_ENTITY_LEVEL_LIGHT_CHILD",
+            &["world-and-preview"],
+        ) {
+            return;
+        }
+
+        struct LitQuad;
+        impl EntityRenderer for LitQuad {
+            fn submit(
+                &self,
+                _: &EntityRenderState,
+                draw: &mut dyn BlockEntityDrawContext,
+            ) -> Result<(), String> {
+                draw.level_light();
+                draw.translate([0.25, 0.0, 0.0]);
+                assert!(draw.quad(
+                    "block/stone",
+                    [[0.0, 1.0, 0.0], [0.0; 3], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+                    [0.0, 0.0, 16.0, 16.0],
+                    0xFF_FFFF,
+                ));
+                Ok(())
+            }
+        }
+
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let mut chunk = Chunk::empty(0, 1);
+            let mut cells = Box::new([0u8; 4096]);
+            cells[index(11, 64, 4)] = 0x37;
+            let section = chunk.section_index(64).unwrap();
+            Arc::make_mut(&mut chunk.sections[section]).light = Light::packed(cells);
+            game.world.chunks.insert((0, 1), Arc::new(chunk));
+
+            let renderer = Resolved::<dyn EntityRenderer>::new(Arc::new(LitQuad));
+            let entity = mod_api::__private::built::EntityRenderState {
+                id: 1,
+                partial: 0.5,
+                age: 1.5,
+                yaw: 0.0,
+                pitch: 0.0,
+                living: None,
+                tnt_fuse: None,
+                orb_value: None,
+                painting: None,
+                item_frame: None,
+                attachments: None,
+            }
+            .into();
+            let at = DVec3::new(10.875, 64.25, 20.375);
+            let camera = DVec3::new(6.5, 63.0, 25.5);
+            for (world_origin, expected) in [(Some(at), 0x7030), (None, 0x50A0)] {
+                let mut out = Vec::new();
+                assert!(game.mod_entity_renderer_geometry(
+                    &renderer,
+                    &entity,
+                    "test:lit_quad",
+                    at - camera,
+                    world_origin,
+                    [10, 64, 20],
+                    0x50A0,
+                    &mut out,
+                ));
+                assert_eq!(
+                    out.iter().map(|v| v.light).collect::<Vec<_>>(),
+                    [expected; 4]
+                );
+            }
+        });
     }
 }

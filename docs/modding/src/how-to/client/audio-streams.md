@@ -66,27 +66,13 @@ Each stream has a fixed ring, allocated when it opens: `2 * prebuffer_ms + 100` 
 
 `AudioStreamRef` is `Send`, and `push` works from any thread. A native mod can push from a `Network`-thread payload handler, so its audio never waits for a client tick, and a native `push` never waits for the mixer: it writes straight into a lock-free ring made when the stream opened, which the output callback reads, and allocates nothing. The controls (`set_placement`, `set_volume`) take no lock the output callback takes either. Only one thread pushes at a time: a push that overlaps another on the same stream is refused (returns 0), so keep each stream to one pushing thread.
 
-Opening a stream is a host call and runs where the host does. Every call on the handle works from any thread for a native mod. A wasm mod has one thread and enters from hooks.
-
-## wasm mods
-
-The handle crosses to a wasm mod as a held resource, and the API is the same (a call crosses the boundary, which encodes the whole slice pushed). The timing is not: **wasm audio is paced by ticks, with up to 50 ms of jitter**. A wasm instance is entered from hooks, so a frame it pushes waits for the next one, and the 50 ms is the nominal tick spacing: a stalled tick is later still. Use a larger `prebuffer_ms` than a native mod would. The ring is `2 * prebuffer_ms + 100` milliseconds, so it holds a tick's burst.
-
-A simulation of that pacing runs in the game's tests (`tick_paced_underruns` in the mixer: one 50 ms push per tick, each tick up to 50 ms late, 30 s of 48 kHz mono, an output callback every 10 ms). It counts underruns, a stream going from `Playing` back to `Buffering`:
-
-| `prebuffer_ms` | Underruns in 30 s |
-|---|---|
-| 50 | 2 |
-| 100 | 0 |
-| 150 | 0 |
-
-The same pacing with a compiled wasm guest (`audio_stream_wasm_tests`, run by the daily run with the wasm fixture: the fixture mod pushes 50 ms per client tick into three streams through the real API, the game's own mixer plays them, ticks up to 50 ms late) gives the same counts, 2, 0 and 0 for 50, 100 and 150 ms. Take 100 ms as the least for a wasm voice mod.
+Opening a stream is a host call and runs where the host does. Every call on the handle works from any thread.
 
 ## Limits
 
 - 32 streams open per mod (`AudioRefusal::ModStreamLimit`) and 64 across every mod (`AudioRefusal::TooManyStreams`). A stopped stream frees its place.
 - Sample rate 8000 to 48000 Hz, 1 or 2 channels, `prebuffer_ms` 20 to 500.
-- A call from no mod, or outside the phases a client opens a stream in, answers `AudioRefusal::Unavailable` on native and wasm alike.
+- A call from no mod, or outside the phases a client opens a stream in, answers `AudioRefusal::Unavailable`.
 - Bad input never panics: a rate or channel count out of range, a volume or range that is not a number, or a position that is not finite is refused (`AudioRefusal::BadSpec`, or `false` from `set_volume` and `set_placement`).
 
 ## Known limits
@@ -94,5 +80,4 @@ The same pacing with a compiled wasm guest (`audio_stream_wasm_tests`, run by th
 - There is no echo cancellation: a mod that plays voice while capturing the microphone must deal with its own echo.
 - Voice is unmoderated: the engine neither records, filters nor reports a stream's audio.
 - Replay recordings capture voice payloads like any other payload.
-- wasm audio is paced by ticks (above).
 - This API plays audio. Getting it between players (payload delivery), encoding it and capturing a microphone are separate: a mod brings its own codec as an ordinary dependency.

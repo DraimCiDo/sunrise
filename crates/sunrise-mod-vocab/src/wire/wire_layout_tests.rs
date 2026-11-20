@@ -3,30 +3,7 @@ use super::*;
 use crate::*;
 use sunrise_core::nbt::{Compound, JavaString};
 
-pub(super) fn install_layout_resources() {
-    let _ = crate::wire::install_resource_access(crate::wire::ResourceAccess {
-        intern: |value| {
-            if value.len() > crate::wire::MAX_STATIC_STRING_BYTES {
-                return Err(WireError::Invalid("static string too long"));
-            }
-            Ok(Box::leak(value.to_owned().into_boxed_str()))
-        },
-        store: |value| {
-            let provider = value
-                .downcast::<std::sync::Arc<dyn std::any::Any + Send + Sync>>()
-                .map_err(|_| WireError::Invalid("no resource context"))?;
-            if provider.downcast_ref::<u32>() != Some(&73) {
-                return Err(WireError::Invalid("no resource context"));
-            }
-            Ok(crate::wire::Id(0x100000007))
-        },
-        load: |_, _| Err(WireError::Invalid("no resource context")),
-        refused: |_| {},
-    });
-}
-
 fn fields<T: Wire, F: Wire + std::fmt::Debug + PartialEq>(value: T, expected: F) {
-    install_layout_resources();
     assert_eq!(decode::<T, F>(value), expected);
 }
 fn id(s: &str) -> Identifier {
@@ -363,25 +340,6 @@ fn snapshot_and_reload_records_have_declared_field_bytes() {
     fields(DamageContainer::from(values.clone()), (values,));
     let revision = crate::item::containers::ModRevision::from_snapshot(31, 47);
     fields(revision, (31u64, 47u64));
-    let snapshot = crate::item::containers::ModBlockEntitySnapshot {
-        id: "example:machine".into(),
-        fields: crate::item::containers::ModBlockEntityFields {
-            nbt: Compound::new(),
-            items: vec![None],
-            data: vec![19, -3],
-        },
-        revision,
-        client_update_fields: Some(Compound::new()),
-    };
-    let (decoded,): (crate::item::containers::ModBlockEntitySnapshot,) =
-        decode(ModBlockEntity::from(snapshot));
-    assert_eq!(decoded.id, "example:machine");
-    assert_eq!(decoded.fields.nbt, Compound::new());
-    assert_eq!(decoded.fields.items, vec![None]);
-    assert_eq!(decoded.fields.data, vec![19, -3]);
-    assert_eq!(decoded.revision.identity(), 31);
-    assert_eq!(decoded.revision.changes(), 47);
-    assert_eq!(decoded.client_update_fields, Some(Compound::new()));
     let files = std::collections::BTreeMap::from([(id("example:recipe"), vec![3u8, 5, 7])]);
     fields(
         crate::world::reload::ReloadFiles::new(files.clone()),
@@ -530,7 +488,6 @@ fn registration_and_attribute_records_have_declared_field_bytes() {
     let details = PackageDetails {
         name: "Example".into(),
         icon_path: Some("icon.png".into()),
-        runtime: Some(PackageRuntime::Native),
         properties: [("ratio".into(), PropertyValue::Float(0.5))].into(),
         ..Default::default()
     };
@@ -547,7 +504,6 @@ fn registration_and_attribute_records_have_declared_field_bytes() {
             (
                 None::<String>,
                 Some("icon.png".to_owned()),
-                Some(PackageRuntime::Native),
                 details.properties.clone(),
             ),
         ),
@@ -728,10 +684,8 @@ fn newtype_widths_and_unit_enum_tags_match_their_encodings() {
     fields(SoundRef { id: 71 }, (71u64,));
     fields(crate::__private::biome_id(11), (11u32,));
     fields(crate::__private::mod_color_resolver(13), (13u32,));
-    fields(crate::wire::wire_slots::Id(0x100000003), (0x100000003u64,));
     fields(BlockUpdateFlags(17), (17u32,));
     fields(PackageKind::Code, (0u32,));
-    fields(PackageRuntime::Wasm, (1u32,));
     fields(Side::Both, (1u32,));
     fields(Reduction::Armor, (1u8,));
     fields(SpawnerKind::Patrol, (1u32,));
@@ -996,18 +950,6 @@ fn every_attachment_error_and_write_case_has_declared_tag_type() {
     fields(AttachmentWrite::Decoded, (0u32,));
     fields(AttachmentWrite::Default, (1u32,));
     fields(AttachmentWrite::Set, (2u32,));
-}
-
-#[test]
-fn erased_provider_record_uses_active_resource_scope() {
-    // Pin the layout at this layer; platform tests own active codec lifetimes.
-    fields(
-        OwnProvider {
-            handler: "example:handler".into(),
-            provider: std::sync::Arc::new(73u32),
-        },
-        ("example:handler".to_owned(), 0x100000007u64),
-    );
 }
 
 #[test]

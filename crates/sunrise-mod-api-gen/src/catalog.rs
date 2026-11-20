@@ -130,7 +130,7 @@ pub struct Hook {
     pub host: Option<HostAccess>,
     pub context: Option<PhaseContext>,
     pub counterparts: Counterparts,
-    /// The contract version an injection's `hook_version` names.
+    /// The hook's contract version.
     pub version: u64,
     /// Whether the NeoForge counterpart event is cancellable, written by the
     /// stamper from the counterpart's javadoc; documentation metadata, not the
@@ -139,8 +139,6 @@ pub struct Hook {
     /// The parameters of a hook whose game target takes them as one generated `<Name>Call`
     /// (name and type, in order, without a `Ticks` parameter); empty for a flat target.
     pub call: Vec<(String, String)>,
-    /// Parameter retained in a decision-scoped guest slot instead of copied per ask.
-    pub prepared: Option<String>,
     /// Admission policy for the mutable stack-list output; placement owns trimming.
     pub stack_count: Option<StackCount>,
     /// Keep construction and exhaustive patterns of the event inside the vocabulary crate.
@@ -271,8 +269,6 @@ struct HookEntry {
     context: Option<PhaseContext>,
     #[serde(default)]
     call: Vec<(String, String)>,
-    /// Only `prepared = "stack"` on `can_equip` is supported; reject at parse time.
-    prepared: Option<String>,
     stack_count: Option<StackCount>,
     #[serde(default)]
     non_exhaustive: bool,
@@ -323,16 +319,6 @@ impl Hook {
                 hook: name.clone(),
                 error: error.to_string(),
             })?;
-        // This transport is implemented only for can_equip's stack. Validate here,
-        // before either host or guest generation can accept a different hook.
-        if let Some(parameter) = &entry.prepared
-            && (name != "can_equip" || parameter != "stack")
-        {
-            return Err(CatalogError::InvalidHook {
-                hook: name,
-                error: "prepared is supported only as prepared = \"stack\" on can_equip".into(),
-            });
-        }
         let doc = entry
             .doc
             .filter(|doc| !doc.trim().is_empty())
@@ -434,7 +420,6 @@ impl Hook {
             version: entry.version.unwrap_or(1),
             cancellable: entry.cancellable,
             call: entry.call,
-            prepared: entry.prepared,
             stack_count: entry.stack_count,
             non_exhaustive: entry.non_exhaustive,
             read_only: entry.read_only,
@@ -880,7 +865,6 @@ impl Hook {
             version: 1,
             cancellable: None,
             call: Vec::new(),
-            prepared: None,
             stack_count: None,
             non_exhaustive: false,
             read_only: None,
@@ -936,31 +920,6 @@ mod tests {
                 .any(|h| h.contract == Contract::Replace)
         );
         assert!(!catalog.draw_contexts.is_empty());
-    }
-
-    #[test]
-    fn prepared_is_rejected_on_other_hooks_at_catalog_boundary() {
-        let mut declaration = serde_json::json!({"name":"other_hook","doc":"Doc.","side":"server","target":"unused", "prepared":"stack", "mod_api":{"contract":"listen"}});
-        let error = Hook::parse(declaration.clone()).unwrap_err().to_string();
-        assert_eq!(
-            error,
-            "hook other_hook: prepared is supported only as prepared = \"stack\" on can_equip"
-        );
-        declaration["name"] = "can_equip".into();
-        assert_eq!(
-            Hook::parse(declaration.clone())
-                .unwrap()
-                .prepared
-                .as_deref(),
-            Some("stack")
-        );
-        declaration["prepared"] = "other".into();
-        assert!(
-            Hook::parse(declaration)
-                .unwrap_err()
-                .to_string()
-                .contains("only as prepared")
-        );
     }
 
     fn checkout(files: &[(&str, &str)]) -> std::path::PathBuf {

@@ -71,9 +71,7 @@ impl Game<'_> {
     pub(in crate::game) fn native_chat(&mut self, text: &str) {
         self.hud_chat_notice(Text::literal(text));
     }
-    /// A native mod's own folder: `sunrise-mods/.sunrise-mod-data/<id>/`,
-    /// where the WebAssembly mod of the same id kept its storage, so a
-    /// player's settings carry over. Not created here.
+    /// A native mod's own folder: `sunrise-mods/.sunrise-mod-data/<id>/`. Not created here.
     pub(in crate::game) fn native_data_dir(&self, mod_id: &str) -> PathBuf {
         Self::mod_data_root().join(mod_id)
     }

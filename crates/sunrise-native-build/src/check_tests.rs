@@ -8,9 +8,7 @@ const OTHER_BUILD: &str = "cccccccccccccccccccccccccccccccccccccccc";
 fn surface(functions: &[(&str, &str)]) -> mod_surface::Surface {
     let functions: Vec<_> = functions
         .iter()
-        .map(|(id, hash)| {
-            serde_json::json!({"id": id, "hash": hash, "signature": "fn f()", "wasm": true})
-        })
+        .map(|(id, hash)| serde_json::json!({"id": id, "hash": hash, "signature": "fn f()"}))
         .collect();
     serde_json::from_value(serde_json::json!({
         "schema": mod_surface::SCHEMA, "hash": "s", "functions": functions,
@@ -61,7 +59,6 @@ fn judged_with(
         &project,
         build,
         &mut || Ok::<_, String>(target.clone()),
-        &mut || Err("no [[inject]] rows: never read".to_owned()),
         &mut || match data {
             Some(data) => game_uses::entries(&bundle.manifest, data, build),
             None => Err("no game code declared: never read".to_owned()),
