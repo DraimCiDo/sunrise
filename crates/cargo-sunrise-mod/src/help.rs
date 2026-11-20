@@ -37,8 +37,8 @@ const COMMANDS: &[Command] = &[
     Command {
         name: "update",
         everyday: true,
-        usage: "update [--sunrise <build>] [--accept <inject id>]…",
-        summary: "Repins a native mod to another game build (the current Nightly unless --sunrise names one) and reports what that breaks, refusing a changed [[inject]] target unless --accept names it; a content mod pins no build.",
+        usage: "update [--sunrise <build>]",
+        summary: "Repins a native mod to another game build (the current Nightly unless --sunrise names one) and reports what that breaks; a content mod pins no build.",
     },
     Command {
         name: "hooks",
@@ -51,12 +51,6 @@ const COMMANDS: &[Command] = &[
         everyday: false,
         usage: "publish [--out <dir>] [--registry <checkout>] [--summary <text>] [--owner <login>]… [--categories a,b] [--tags a,b] [--changelog <text>] [--key <public key> --signature <file.minisig>]",
         summary: "Builds the mod, then writes its registry entry, the staged file and the pull request text into a folder; it uploads nothing.",
-    },
-    Command {
-        name: "inject",
-        everyday: false,
-        usage: "inject update [--accept <id>]… | inject sync --repo <game checkout> | inject add <at> --kind <kind> [--call <canonical callee>] [--nth N] [--with <fn>]",
-        summary: "Refreshes, validates or adds a native mod's [[inject]] rows.",
     },
     Command {
         name: "internals",

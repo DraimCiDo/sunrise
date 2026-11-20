@@ -23,7 +23,7 @@ use sunrise_release_sign::PublicKey;
 pub(crate) const DIR: &str = ".sunrise/sdk";
 /// Other builds' folders in a project, one per build id.
 pub(crate) const CACHE: &str = ".sunrise/cache";
-/// The folder in a build's folder its build data (`points.json`, `internals.json`, …) is
+/// The folder in a build's folder its build data (`internals.json`, `loops.json`, `functions.json`) is
 /// unpacked to.
 pub(crate) const BUILD_DATA: &str = "build-data";
 /// The releases' base, when `SUNRISE_SDK_BASE` names none.
