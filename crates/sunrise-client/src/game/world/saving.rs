@@ -267,7 +267,10 @@ impl Game<'_> {
                         chunks => {
                             let finished = chunks? && players;
                             if finished {
-                                self.message = Some(("Saved the game".into(), Instant::now()));
+                                self.message = Some((
+                                    sunrise_client::lang::get("commands.save.success"),
+                                    Instant::now(),
+                                ));
                             }
                             Ok(finished)
                         }
@@ -490,6 +493,47 @@ mod tests {
     use std::sync::{Arc, mpsc};
     use sunrise_client::save::{LevelShape, SaveDir};
     use sunrise_core::nbt::{DISK_WRITE_NESTING_GUARD, Tag};
+
+    #[test]
+    #[ignore = "daily"]
+    fn both_successful_save_paths_resolve_the_banner_in_the_active_language() {
+        use sunrise_client::lang::{Language, scoped};
+
+        mod_platform::testing::with_mods(Vec::new().into(), || {
+            with_game(|game| {
+                let dir = tempfile::tempdir().unwrap();
+                game.world_root = dir.path().to_path_buf();
+                game.save = Arc::new(SaveDir::new(
+                    game.world_root.clone(),
+                    LevelShape::OVERWORLD,
+                    Some(Default::default()),
+                ));
+                let translated = "[test locale]";
+                let language = Language::of(
+                    "en_test",
+                    [("commands.save.success".into(), translated.into())],
+                );
+                scoped(language, || {
+                    game.save_game().unwrap();
+                    let explicit = game.message.take().unwrap().0;
+                    game.pending_save = Some(ClosingSave {
+                        quit: false,
+                        close: false,
+                        reply: None,
+                        started: Instant::now(),
+                        stage: Stage::Writes,
+                    });
+                    game.poll_closing_save().unwrap();
+                    assert!(game.pending_save.is_none());
+                    let incremental = game.message.take().unwrap().0;
+                    assert_eq!(
+                        (explicit.as_str(), incremental.as_str()),
+                        (translated, translated)
+                    );
+                });
+            });
+        });
+    }
 
     #[test]
     #[ignore = "daily"]
