@@ -72,6 +72,28 @@ class SaveRoundtripPathsTests(unittest.TestCase):
                 self.assertEqual(roundtrip.summarize(report), 2)
 
 
+class SaveRoundtripChunkTests(unittest.TestCase):
+    def test_light_only_section_compares_both_layers_and_does_not_hide_blocks(self):
+        key = ('r.0.0.mca', 0, 0)
+        section = {'Y': ('b', -5), 'BlockLight': ('bytearray', [1] * 2048),
+                   'SkyLight': ('bytearray', [2] * 2048)}
+        vanilla = {key: {'Status': 'minecraft:full', 'sections': [section]}}
+        for other, paths in (
+            ([section], []),
+            ([], ['BlockLight', 'SkyLight']),
+            ([{**section, 'BlockLight': ('bytearray', [0] * 2048),
+               'SkyLight': ('bytearray', [0] * 2048)}], ['BlockLight', 'SkyLight']),
+            ([{**section, 'block_states': {'palette': [{'Name': 'minecraft:stone'}]},
+               'biomes': {'palette': ['minecraft:plains']}}], ['blocks']),
+        ):
+            with self.subTest(paths=paths):
+                report = []
+                sunrise = {key: {'Status': 'minecraft:full', 'sections': other}}
+                roundtrip.compare_chunks(vanilla, sunrise, report)
+                self.assertEqual([path for path, _, _ in report],
+                                 [f'chunk.sections.{name}[-5] @{key}' for name in paths])
+
+
 class SaveRoundtripTimersTests(unittest.TestCase):
     def test_elapsed_despawn_timers_do_not_hide_other_saved_state_changes(self):
         report = [

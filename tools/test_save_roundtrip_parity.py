@@ -470,8 +470,13 @@ def normalize_chunk(root):
     sections = {}
     for s in root.get('sections', []):
         y = s['Y'][1] if isinstance(s['Y'], tuple) else s['Y']
-        blocks = decode_container(s['block_states'], 4096, 4, 'minecraft:air')
-        biomes = decode_container(s['biomes'], 64, 1, 'minecraft:plains') if 'biomes' in s else None
+        # SerializableChunkData.write can emit light without a chunk section.
+        # Compare its blocks as air, like an absent section, but keep both light layers.
+        if 'block_states' not in s and 'biomes' not in s and ('BlockLight' in s or 'SkyLight' in s):
+            blocks, biomes = ['minecraft:air'] * 4096, None
+        else:
+            blocks = decode_container(s['block_states'], 4096, 4, 'minecraft:air')
+            biomes = decode_container(s['biomes'], 64, 1, 'minecraft:plains') if 'biomes' in s else None
         sections[y] = {'blocks': blocks, 'biomes': biomes, 'BlockLight': s.get('BlockLight'),
                        'SkyLight': s.get('SkyLight')}
     out = {k: v for k, v in root.items() if k != 'sections'}
