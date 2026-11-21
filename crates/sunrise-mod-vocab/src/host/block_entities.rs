@@ -40,7 +40,9 @@ pub trait BlockEntitiesServerHost {
 #[sunrise_mod_api_macros::host_area]
 pub trait BlockEntitiesBackend {
     /// Side: both.
-    /// Lends a resident block entity's identity and menu data, or skips an unavailable entity.
+    /// Resolves the resident block entity and calls `read` once without holding a residency
+    /// guard or lock. Skip the callback for an unavailable entity, including one taken out
+    /// for its tick.
     #[access(WorldOnly)]
     #[decline_unavailable]
     fn with_block_entity_view(

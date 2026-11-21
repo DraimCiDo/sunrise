@@ -92,7 +92,8 @@ pub enum ItemPlace {
     /// `ItemAccess` for a menu slot): the storage the slot shows ([`crate::MenuView::slot_backing`]),
     /// its own slot only, under the slot's own rules first ([`crate::MenuView::slot_holds`],
     /// [`crate::MenuView::slot_gives`]). Nothing where the menu is closed, replaced or its player gone;
-    /// nothing goes into or out of the crafting result.
+    /// nothing goes into or out of the crafting result. The write resolves the menu again and
+    /// checks the current slot; it does not use a backing saved from an earlier read.
     MenuSlot {
         /// The open menu.
         menu: MenuRef,

@@ -78,6 +78,8 @@ pub trait ClientMenuView: MenuView {
 }
 
 /// What a menu slot shows: where [`MenuView::slot_backing`] says its stack lives.
+/// This is an owned description, not a live slot or a write permission. Resolve again after
+/// mutation or reentry before relying on the backing still belonging to the same menu slot.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
 pub enum MenuSlotBacking {
@@ -144,8 +146,10 @@ impl crate::AccessRefusal for MenuDataRefusal {
 
 impl MenuRef {
     /// Resolve this menu once for related reads. Calls `read` once if it is current and the
-    /// host can supply it, or returns `None` without calling it. The view and borrows from
-    /// it cannot escape the callback; return copied data or an owned value instead.
+    /// host can supply it, or returns `None` without calling it. A resolved view can still
+    /// report an unavailable field or an empty slot. No residency guard or lock is held during
+    /// the callback. Return owned results, such as a copied kind name, instead of borrowing
+    /// from the view. Resolve again after mutation or reentry.
     pub fn with_view<R>(self, host: &dyn Host, read: impl FnOnce(&dyn MenuView) -> R) -> Option<R> {
         let backend = backend_of(host)?;
         let mut read = Some(read);
@@ -161,7 +165,8 @@ impl MenuRef {
     /// Resolve this client's current menu once, including when its screen is not visible.
     /// Calls `read` once if the menu resolves, returns `Ok(None)` for a stale or foreign
     /// handle, and returns [`LevelReadError::Unavailable`] when the phase or host cannot
-    /// supply the read. The view and borrows from it cannot escape the callback.
+    /// supply the read. A resolved view may still report unavailable geometry or its own
+    /// merchant-read error. Like [`Self::with_view`], it only lends a view during `read`.
     pub fn with_client_view<R>(
         self,
         host: &dyn ClientHost,

@@ -26,6 +26,7 @@ use sunrise_client::{
 
 /// A current server window. The guest owns the menu, the crafting grid and native slots;
 /// the acting guest's inventory, equipment, cursor and ender chest are in `Game`.
+// no wire: the read scope borrows live server menu storage.
 pub(super) struct ServerMenuRead<'read, 'game> {
     game: &'read Game<'game>,
     host: &'read LanHost,
@@ -39,6 +40,7 @@ pub(super) struct ServerMenuRead<'read, 'game> {
     rules: OnceCell<Menu>,
 }
 
+// no wire: the menu scope's backing borrows a world and its slot layout.
 struct OpenBacking<'read> {
     level: LevelRef,
     world: &'read World,
@@ -46,6 +48,7 @@ struct OpenBacking<'read> {
 }
 
 /// A current client window, independent of whether the player can see its screen.
+// no wire: the read scope borrows live client menu state.
 struct ClientMenuRead<'read, 'game> {
     game: &'read Game<'game>,
     name: &'read str,
@@ -59,11 +62,13 @@ struct ClientMenuRead<'read, 'game> {
 }
 
 /// A slot in the game's own menu storage, not a handler's display mirror.
+// no wire: a short-lived target for an internal journaled write.
 pub(super) struct MenuStorageSlot {
     conn: u32,
     target: MenuStorageTarget,
 }
 
+// no wire: internal indices in the game or guest's menu storage.
 enum MenuStorageTarget {
     ActingEnder(usize),
     GuestEnder(usize),

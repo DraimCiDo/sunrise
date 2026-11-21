@@ -452,6 +452,7 @@ impl PlayerRead<'_> {
 }
 
 /// The resolved live player and the acting state it can read without looking up the handle again.
+// no wire: borrows live player storage for a read scope.
 pub(super) struct PlayerReadView<'a, 'w> {
     game: &'a Game<'w>,
     pub(super) read: PlayerRead<'a>,

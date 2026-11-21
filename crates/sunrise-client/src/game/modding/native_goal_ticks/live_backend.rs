@@ -3,6 +3,7 @@
 use super::{GoalCx, Mob, Resolved};
 use mod_api::{EntityRef, EntityTypeKey, EntityView};
 
+// no wire: a read scoped to the mob tick's live and observed entities.
 struct GoalEntityView<'a> {
     position: Option<[f64; 3]>,
     mob: Option<&'a Mob>,

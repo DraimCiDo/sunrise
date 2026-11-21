@@ -72,7 +72,8 @@ pub trait MenusClientHost {
 #[sunrise_mod_api_macros::host_area]
 pub trait MenusBackend {
     /// Side: both.
-    /// Lends the current menu once, or skips the callback if it is unavailable.
+    /// Resolves the current menu and calls `read` once without holding a residency guard or lock.
+    /// An unavailable or stale menu never calls `read`.
     #[access(WorldOnly)]
     #[decline_unavailable]
     fn with_menu_view(&self, menu: MenuRef, read: &mut dyn FnMut(&dyn MenuView));
@@ -83,7 +84,9 @@ pub trait MenusBackend {
 #[sunrise_mod_api_macros::host_area]
 pub trait MenusClientBackend {
     /// Side: client.
-    /// Lends the current client menu once, skips a stale menu, or refuses an unavailable read.
+    /// Resolves the current client menu and calls `read` once, even if no screen is visible.
+    /// A stale menu returns `Ok(())` without calling `read`; an unavailable phase or backend
+    /// returns `Err(LevelReadError::Unavailable)`.
     #[access(WorldOnly)]
     fn with_client_menu_view(
         &self,
@@ -98,7 +101,7 @@ pub trait MenusClientBackend {
 pub trait MenusClientBackendMut {
     /// Side: client.
     /// Submit clicks on the local player's live menu through normal prediction
-    /// and `ContainerClick`. Slots use the same menu order as `slot`; `None`
+    /// and `ContainerClick`. Slots use the same menu order as [`MenuView::slot`]; `None`
     /// is outside (-999). All clicks are validated before any prediction or send.
     /// A drag expands to one complete quick-craft gesture.
     /// Refuses stale menus, invalid slots/hotbar indices, spectators, non-client hosts,

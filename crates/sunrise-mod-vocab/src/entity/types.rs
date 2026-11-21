@@ -48,7 +48,7 @@ pub struct EffectKey(pub(crate) u32);
 /// An entity type (`minecraft:zombie`) in the built-in entity-type registry, in
 /// registration order. Returned by [`EntityView::kind`]; Copy/Eq comparisons do not
 /// allocate. Request `key.id(host)` for its namespaced name (an owned diagnostic
-/// string). A key stays valid until the game exits.
+/// string). Copy the key out of the view to retain it until the game exits.
 // no wire: the manual scalar codec validates host slots.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: incoming scalar slots are checked against the host's registry
@@ -153,8 +153,9 @@ impl EntityRef {
     }
     /// Resolve this entity once and lend its spatial and type reads to `read`.
     /// Returns `None` without calling `read` if the host cannot lend the entity, such as for a
-    /// stale handle. An available view can still lack individual fields. The view cannot escape
-    /// the callback; copy the values you need before making a write through the host.
+    /// stale handle. `Some(None)` from an optional read means the entity was resolved but that
+    /// field was not available. No entity-residency guard is held while `read` runs. Retain the
+    /// handle or values, not the view, and resolve again after mutation or reentry.
     pub fn with_view<R>(
         self,
         host: &dyn Host,
@@ -1156,7 +1157,8 @@ pub enum RemovalReason {
 /// This is the player's identity, not a particular body: handles for the same
 /// player stay equal across respawn. Respawning does not invalidate a handle.
 /// A nested guest turn cannot re-enter a player active in an outer turn;
-/// operations requiring that player's swapped state report them unavailable.
+/// operations requiring that player's swapped state report them unavailable. Use [`Self::with_view`]
+/// for related live reads; UUID-based settings that support offline players are separate.
 #[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct PlayerRef {
@@ -1177,7 +1179,10 @@ impl PlayerRef {
     /// Resolve one live player for related mode, ability, food and experience reads.
     /// Calls `read` once if the host can lend the player, or returns `None` without calling it
     /// for an unavailable host, a stale handle, an offline or displaced player, or a player
-    /// other than the local player on a client. The view cannot escape the callback.
+    /// other than the local player on a client. `Some(None)` from an optional read means the
+    /// player resolved but that field was unavailable. The view is borrowed only for `read`,
+    /// which runs without a residency guard. Retain the handle or returned values and resolve
+    /// again after mutation or reentry.
     pub fn with_view<R>(
         self,
         host: &dyn Host,

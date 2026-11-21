@@ -513,6 +513,7 @@ pub fn fake_block_entity_view(
     FakeBlockEntityView { entity, kind }
 }
 
+// no wire: a view lent by in-process test backends.
 struct FakeBlockEntityView {
     entity: BlockEntityRef,
     kind: Option<BlockEntityTypeKey>,
@@ -654,6 +655,7 @@ impl crate::prelude::FluidsEnergyBackend for FakeHost {
             .map_or(0, |energy| energy.capacity)
     }
 }
+// no wire: a view lent by an in-process test backend.
 struct FakeEntityView<'a>(&'a str);
 
 impl crate::EntityView for FakeEntityView<'_> {

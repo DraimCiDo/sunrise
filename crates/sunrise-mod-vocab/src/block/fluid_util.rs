@@ -101,7 +101,8 @@ pub fn interact_with_handler(
         Some([x, y, z]) => Some([x, y, z].map(|c| f64::from(c) + 0.5)),
         None => player
             .entity()
-            .position(host)
+            .with_view(host, |view| view.position())
+            .flatten()
             .map(|[x, y, z]| [x, y + 0.5, z]),
     };
     if let Some(at) = at {

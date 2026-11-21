@@ -7,7 +7,9 @@ use crate::*;
 #[sunrise_mod_api_macros::host_area]
 pub trait EntityPositionBackend {
     /// Side: both.
-    /// Lends the resolved entity's spatial and type reads, or skips an unavailable entity.
+    /// Resolves the entity and calls `read` once without holding a residency guard.
+    /// Skip the callback if the entity is unavailable; a resolved partial view can still
+    /// decline individual reads.
     #[access(WorldOnly)]
     #[decline_unavailable]
     fn with_entity_view(&self, entity: EntityRef, read: &mut dyn FnMut(&dyn EntityView));

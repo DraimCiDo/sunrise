@@ -31,7 +31,9 @@ pub trait PlayerModesBackend {
     #[access(WorldOnly)]
     fn player_is_secondary_use_active(&self, player: PlayerRef) -> Option<bool>;
     /// Side: both.
-    /// Lends a resolved live player once, or skips the callback if it is unavailable.
+    /// Resolves the live player and calls `read` once without holding a residency guard.
+    /// A stale, offline or displaced player never calls `read`; neither does a nonlocal player
+    /// on a client.
     #[access(WorldOnly)]
     #[decline_unavailable]
     fn with_player_view(&self, player: PlayerRef, read: &mut dyn FnMut(&dyn PlayerView));

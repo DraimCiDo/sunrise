@@ -642,19 +642,16 @@ handle, an entity the client doesn't track and a level it doesn't show:
   and `can_eat(always)`; `abilities()` (mode plus `ClientboundPlayerAbilities`, with flying predicted locally);
   `experience()` (`ClientboundSetExperience`) and `xp_needed_for_next_level()`. It skips the callback for
   other players, whose state the client does not receive. `player.selected_slot(host)` stays a separate read.
-- The local player's open menu: `host.local_player()` then `player.container_menu(host)` makes a `MenuRef` for the menu
-  the client has open (the player's own inventory when none is). Use `menu.with_view(host, |view| …)` to read its
-  `slot_count()`, `slot(index)` and `carried()` together after server synchronization and local prediction. Indexes are
-  the menu's own slot order, not indices in the backing container. Another player's menu is `None`; `container_id()`
-  and `kind()` only have server answers. A slot reads `Some(None)` when empty and `None` when it doesn't exist or can't
-  be projected. An unknown client layout has no count or indexed stacks, but can still have a cursor. The callback
-  is skipped when its menu is closed or replaced (a reused window id included), on respawn, dimension change, logout
-  and reconnect. Nothing here sends a packet or changes the menu.
+- `host.local_player()` then `player.container_menu(host)` gets the open menu or, if none, the local player's inventory.
+  Use `menu.with_view(host, |view| …)` for `slot_count()`, `slot(index)` and `carried()` after server sync and client
+  prediction. Indices follow menu order, not backing storage. `container_id()` and `kind()` only answer on the server.
+  A slot gives `Some(None)` when empty and `None` when unavailable; without layout, a cursor can still be present.
+  Close, replacement (including window id reuse), respawn, dimension change, logout or reconnect invalidate the handle
+  and skip the callback. Retain the handle or owned results and resolve again after a write or reentry. Reads send nothing.
 
-- `entity.with_view(host, |view| …)` resolves the entity once for `view.position()`, `block_position()`,
-  `rotation()` (yaw and pitch in degrees) and `kind()` (a type key, e.g. `minecraft:zombie`). It skips the
-  callback when the entity cannot be lent; individual fields can still be absent. `uuid` (`&mut`: an entity
-  with no UUID yet gets its own) and `level` are separate handle operations.
+- `entity.with_view(host, |view| …)` resolves the entity once for `view.position()`, `block_position()`, `rotation()` (yaw
+  and pitch in degrees) and `kind()` (a type key). An unavailable entity skips the callback; a resolved view can still
+  lack fields. `uuid` (`&mut`: assigns a UUID if needed) and `level` remain separate handle operations.
 - `level.block_state(host, pos)` returns a typed `BlockState` without allocating a state string. For text such as
   `minecraft:oak_stairs[facing=east,…]`, pass the ID to `host.block_state_string(id)`. `block` (the name alone),
   `block_property(host, pos, key)`, `is_loaded`, `height` (lowest `y` and height), `game_time` and `day_time` read any

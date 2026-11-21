@@ -18,6 +18,7 @@ use sunrise_core::position::BlockPos;
 use sunrise_items::items::ItemStack;
 use sunrise_world::registry::{BlockRegistry, BlockStateId};
 
+// no wire: borrows a resident block entity for a read scope.
 pub(super) struct NativeBlockEntityView<'a> {
     world: &'a World,
     block_entity: &'a BlockEntity,

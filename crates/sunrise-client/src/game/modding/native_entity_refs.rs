@@ -88,12 +88,14 @@ fn entity_ray_hits(
 
 /// A validated read source. The residency table has already released its borrow before a
 /// view is lent. `Target` projections use only the selected owner, not another handle lookup.
+// no wire: borrows live entity storage for a read scope.
 pub(super) struct NativeEntityView<'g, 'a> {
     game: &'g Game<'a>,
     source: EntityReadSource<'g>,
     write_position: Option<[f64; 3]>,
 }
 
+// no wire: engine lookup sources for an in-process read scope.
 enum EntityReadSource<'g> {
     Body(Target, Option<Location>),
     Mob(&'g super::Mob),

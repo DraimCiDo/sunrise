@@ -1,3 +1,4 @@
+// no wire: dispatch fixture for a read-only view.
 struct EntityView;
 
 impl EntityView {

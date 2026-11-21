@@ -8,6 +8,7 @@ impl BlockEntityRef {
     }
 }
 
+// no wire: dispatch fixture for a read-only view.
 struct BlockEntityView;
 
 impl BlockEntityView {

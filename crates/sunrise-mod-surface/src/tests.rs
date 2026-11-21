@@ -123,7 +123,7 @@ fn leaves_are_what_a_mod_writes() {
         ("hook:player_logged_in", "player_logged_in"),
         ("trait:host::items::ItemsHost", "ItemsHost"),
         ("method:Hooks::tick", "tick"),
-        ("handle:entity::EntityRef::with_view", "with_view"),
+        ("handle:entity::EntityRef::position", "position"),
         ("fn:world::ground", "ground"),
         ("macro:sunrise_mod", "sunrise_mod"),
         ("type:entity::EntityRef", "EntityRef"),

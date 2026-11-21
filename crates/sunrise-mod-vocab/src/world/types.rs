@@ -437,7 +437,8 @@ pub enum RaidStatus {
 }
 
 /// A chunk position in an open level. A handle may be kept after unloading;
-/// [`Self::with_view`] can still read facts that do not require a resident column.
+/// [`Self::with_view`] can still read facts that do not require a resident column. Neither
+/// the handle nor the scope loads or keeps a chunk resident.
 #[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ChunkRef {
@@ -464,6 +465,9 @@ impl ChunkRef {
     /// Resolve this server chunk once and lend its facts to `read`, without loading it.
     /// A valid but unloaded chunk still lends a view; a stale or unavailable level,
     /// a client host, or a position outside the world returns `None` without calling `read`.
+    /// Inside the scope, `status` and palette reads can be unavailable even though the chunk
+    /// resolves. No residency guard or lock is held while `read` runs. Retain the handle or
+    /// owned results, not the view, and resolve again after mutation or reentry.
     pub fn with_view<R>(
         self,
         host: &dyn Host,

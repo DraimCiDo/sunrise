@@ -13,7 +13,8 @@ pub trait LevelChunksBackend {
     #[access(WorldOnly)]
     fn level_chunk_ref(&self, level: LevelRef, pos: [i32; 2]) -> Option<ChunkRef>;
     /// Side: server.
-    /// Lends facts about a valid chunk of an open server level, even if it is unloaded.
+    /// Resolves the server level and calls `read` once without holding a residency guard or lock.
+    /// A valid unloaded chunk still calls `read`; a stale level or invalid chunk position does not.
     #[access(WorldOnly)]
     #[decline_unavailable]
     fn with_chunk_view(&self, chunk: ChunkRef, read: &mut dyn FnMut(&dyn ChunkView));

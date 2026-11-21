@@ -3,6 +3,7 @@ use mod_api::{BlockKey, ChunkStatus, ChunkView};
 use sunrise_client::chunk::Chunk;
 use sunrise_core::random::{RandomSource, slime_chunk_random};
 
+// no wire: borrows the resident column, if any, for a read scope.
 pub(super) struct NativeChunkView<'a> {
     pub(super) column: Option<&'a Chunk>,
     pub(super) pos: [i32; 2],

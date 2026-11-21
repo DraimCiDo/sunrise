@@ -48,8 +48,7 @@ owned diagnostic string and can allocate. Persist the name, never the scalar slo
 For example, retain the zombie key at setup, then compare
 `entity.with_view(host, |view| view.kind()).flatten() == Some(zombie_key)` in a predicate.
 
-The key derives `Wire` through its scalar slot: host decoding checks the registered
-slot.
+The key's `Wire` codec uses its scalar slot: host decoding checks the registered slot.
 
 This is a clean break from `Option<String>`: callers that need textual names must
 request `.id(host)` explicitly. `UnspawnedMobRef::kind` keeps its separate scoped

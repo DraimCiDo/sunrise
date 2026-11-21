@@ -20,6 +20,7 @@ pub(in crate::game) struct EquipSnapshot {
     pub(in crate::game) equipment: [Option<ItemStack>; 8],
 }
 
+// no wire: borrows the equipment decision's prepared and live reads.
 struct EquipEntityView<'a> {
     row: &'a EquipSnapshot,
     live: Option<&'a dyn EntityView>,

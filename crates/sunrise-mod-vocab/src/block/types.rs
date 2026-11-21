@@ -272,7 +272,9 @@ pub enum SupportType {
 /// One block entity in an open level, identified by its lifecycle generation.
 /// Removal, replacement or chunk reload invalidates the handle, even at the same
 /// position. In-place data edits and temporary tick take/put preserve identity.
-/// Stale handles read as `None`; Result-returning methods report `Stale`.
+/// [`Self::with_view`] lends identity and transient menu data only while resident. A block entity
+/// temporarily taken out for its tick still has its identity for Part state. Stale handles read
+/// as `None`; Result-returning methods report `Stale`.
 #[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BlockEntityRef {
@@ -285,7 +287,9 @@ impl BlockEntityRef {
     /// Resolve this block entity once and lend its identity and menu data to `read`.
     /// Works on either side. Returns `None` without calling `read` if the handle is stale,
     /// the entity is out for its tick, or its level or block is unavailable.
-    /// Copy any data you need to keep before making a write through the host.
+    /// Optional fields can be absent even when the entity resolves. The scope does not hold a
+    /// residency guard or lock while `read` runs. Retain the handle or copy the fields you need
+    /// inside the callback, then resolve again after mutation or reentry.
     pub fn with_view<R>(
         self,
         host: &dyn Host,

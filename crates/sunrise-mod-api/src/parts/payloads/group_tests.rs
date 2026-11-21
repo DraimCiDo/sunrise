@@ -85,6 +85,7 @@ impl crate::prelude::EntityIdentityBackend for Double {
         self.trackers.get(&entity.id()).cloned()
     }
 }
+// no wire: a read view lent by the test backend.
 struct Position([f64; 3]);
 
 impl crate::EntityView for Position {
