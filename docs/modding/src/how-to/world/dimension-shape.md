@@ -216,8 +216,8 @@ pay only the empty-index guard, not a mod scan or callback.
 save runs at the start of the next server tick, not inside the call; multiple requests before
 then save it once. The call answers whether the request was taken, not whether the save succeeded.
 `level_save` fires with the level's dimension after the save pass, even if an individual record
-could not be written. As in vanilla, those failures are logged and counted as saved. A failed
-storage flush fails the pass and does not fire `level_save`.
+could not be written. As in vanilla, those failures are logged but do not fail the pass. A failed
+awaited storage flush fails the pass and does not fire `level_save`.
 
 Inside a hook, use `level.request_save(host)`, not a synchronous `save-all` command.
 While an entity pass or held-out row is borrowed, synchronous saving refuses with vanilla's

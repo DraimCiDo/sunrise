@@ -67,9 +67,9 @@ pub trait LevelSavedDataBackendMut {
     /// `/save-all` save a level. The save runs at the start of the next server tick, not inside
     /// the call; multiple requests before then save it once. True when the request was taken,
     /// not when the save succeeds. `level_save` fires with the level's dimension after the save
-    /// pass. Individual record failures are logged and counted as saved, as in vanilla. A
-    /// failed storage flush fails the pass and does not fire `level_save`. False for a stale
-    /// handle and on a client.
+    /// pass. Individual record failures are logged but do not fail the pass. A failed awaited
+    /// storage flush does fail the pass and suppresses `level_save`. False for a stale handle
+    /// and on a client.
     #[access(WorldOnly)]
     fn level_request_save(&mut self, level: LevelRef) -> bool;
 }
