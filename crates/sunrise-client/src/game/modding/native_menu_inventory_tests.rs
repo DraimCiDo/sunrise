@@ -138,12 +138,12 @@ fn exercise(reopen: bool) {
                 assert_eq!(take.stack(game).unwrap().count(), 6);
                 assert_eq!(give.stack(game).unwrap().count(), 5);
                 assert_eq!(partial.stack(game).unwrap().count(), 16);
-                let aborted: Result<(), ()> =
+                let aborted: Result<(), mod_api::TransactionError<()>> =
                     (game as &mut dyn ServerHost).transaction(|host, tx| {
                         assert_eq!(give.insert(host, tx, &dirt, 3), 3);
                         Err(())
                     });
-                assert!(aborted.is_err());
+                assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
                 assert_eq!(give.stack(game).unwrap().count(), 5);
                 game.lan
                     .as_mut()
@@ -310,13 +310,14 @@ mod owner {
                 slot: 0,
             };
             let dropped = game.dropped.len();
-            let moved: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, tx| {
-                let taken = source.extract(host, tx, &diamond, 1);
-                assert_eq!(taken, 1);
-                assert_eq!(slot.insert(host, tx, &diamond, taken), 0);
-                Err(())
-            });
-            assert!(moved.is_err());
+            let moved: Result<(), mod_api::TransactionError<()>> = (game as &mut dyn ServerHost)
+                .transaction(|host, tx| {
+                    let taken = source.extract(host, tx, &diamond, 1);
+                    assert_eq!(taken, 1);
+                    assert_eq!(slot.insert(host, tx, &diamond, taken), 0);
+                    Err(())
+                });
+            assert_eq!(moved, Err(mod_api::TransactionError::Aborted(())));
             assert!(game.inventory.iter().all(Option::is_none));
             let giver = game.lan.as_ref().unwrap().hub.guest(13).unwrap();
             assert_eq!(giver.inventory[0].as_ref().map(|s| s.count), Some(1));
@@ -358,11 +359,12 @@ mod owner {
                 .unwrap();
             let player = game.players().server_players()[1];
             assert_eq!(player.uuid(), 13);
-            let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, _| {
-                player.set_inventory_slot(host, 0, None).unwrap();
-                Err(())
-            });
-            assert!(aborted.is_err());
+            let aborted: Result<(), mod_api::TransactionError<()>> = (game as &mut dyn ServerHost)
+                .transaction(|host, _| {
+                    player.set_inventory_slot(host, 0, None).unwrap();
+                    Err(())
+                });
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             assert_eq!(player.inventory_slots(game), Some(vec![(0, stone)]));
 
             game.lan

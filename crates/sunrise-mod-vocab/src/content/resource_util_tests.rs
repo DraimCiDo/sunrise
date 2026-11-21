@@ -410,7 +410,7 @@ fn move_first_moves_one_resource_and_an_abort_puts_it_back() {
 
     // Aborted: both chests as they were.
     let host: &mut dyn ServerHost = &mut fake;
-    let aborted: Result<(), _> = host.transaction(|host, tx| {
+    let aborted: Result<(), crate::TransactionError<_>> = host.transaction(|host, tx| {
         Err(move_first_stacking(
             host,
             &from,
@@ -420,7 +420,13 @@ fn move_first_moves_one_resource_and_an_abort_puts_it_back() {
             Some(tx),
         ))
     });
-    assert_eq!(aborted, Err(Ok(Some((stone.clone(), 12)))));
+    assert_eq!(
+        aborted,
+        Err(crate::TransactionError::Aborted(Ok(Some((
+            stone.clone(),
+            12
+        )))))
+    );
     assert_eq!(counts(&fake, A), [5, 3, 7]);
     assert_eq!(counts(&fake, B), [0, 10]);
 
@@ -745,7 +751,8 @@ fn a_caught_bulk_error_does_not_commit_earlier_moves_and_the_sink_sees_the_sourc
                 Ok(0)
             );
             Ok::<_, ()>(())
-        })?;
+        })
+        .unwrap();
         // Commit this unrelated edit even after catching the helper's failure.
         assert_eq!(other.insert_at(host, parent, 0, stone, 1), 1);
         assert_eq!(

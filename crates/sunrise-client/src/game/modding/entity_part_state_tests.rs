@@ -220,16 +220,17 @@ fn entity_part_state_is_per_entity_through_edits_transactions_and_panics() {
 
         // An inner edit commits into the outer transaction, which then aborts: the value goes
         // back, and with it the save gate.
-        let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, _| {
-            assert_eq!(Charge::edit_state(host, a, |_, n| *n = 11), Ok(()));
-            assert_eq!(Charge::state(host, a), Ok(11), "later steps see it");
-            assert!(
-                !sunrise_client::join_seq::visibility::passes_settled(),
-                "no save while it is tentative"
-            );
-            Err(())
-        });
-        assert_eq!(aborted, Err(()));
+        let aborted: Result<(), mod_api::TransactionError<()>> = (game as &mut dyn ServerHost)
+            .transaction(|host, _| {
+                assert_eq!(Charge::edit_state(host, a, |_, n| *n = 11), Ok(()));
+                assert_eq!(Charge::state(host, a), Ok(11), "later steps see it");
+                assert!(
+                    !sunrise_client::join_seq::visibility::passes_settled(),
+                    "no save while it is tentative"
+                );
+                Err(())
+            });
+        assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
         assert_eq!(stored(game, a), Some(7));
         assert!(sunrise_client::join_seq::visibility::passes_settled());
         assert_eq!(indexed(game, Dim::Overworld), [(a.id(), 7)]);

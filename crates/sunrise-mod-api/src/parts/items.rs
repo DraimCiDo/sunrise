@@ -467,11 +467,11 @@ pub mod tests {
                 return 0;
             }
             let damage = self.0.stack(host).map_or(0, |case| case.damage());
-            let tried: Result<(), ()> = host.transaction(|host, tx| {
+            let tried: Result<(), crate::TransactionError<()>> = host.transaction(|host, tx| {
                 self.rewrite(host, tx, damage % 100);
                 Err(())
             });
-            assert!(tried.is_err());
+            assert_eq!(tried, Err(crate::TransactionError::Aborted(())));
             let damage = self.0.stack(host).unwrap().damage();
             assert_eq!(damage / 100, 1, "diamond restored after inner abort");
             let took = amount.min(damage % 100);
@@ -610,7 +610,7 @@ pub mod tests {
             assert_eq!(items.insert(host, tx, &sticks, 10), Ok(10));
             Err::<(), ()>(())
         });
-        assert!(aborted.is_err());
+        assert_eq!(aborted, Err(crate::TransactionError::Aborted(())));
         assert_eq!(
             player_of(&player).slots[&5],
             stack("minecraft:stick", 60, 0)
@@ -915,9 +915,9 @@ pub mod tests {
         let host: &mut dyn ServerHost = &mut player;
         let pouch = HAND.capability(host, &ITEM_ITEMS).unwrap();
         let sticks = ItemResource::of(&stick());
-        let aborted: Result<(), u32> =
+        let aborted: Result<(), crate::TransactionError<u32>> =
             host.transaction(|host, tx| Err(pouch.insert_at(host, tx, 0, &sticks, 3)));
-        assert_eq!(aborted, Err(3));
+        assert_eq!(aborted, Err(crate::TransactionError::Aborted(3)));
         assert_eq!(main_hand(&player), Some(stack("test:pouch", 2, 0)));
         assert!(player_of(&player).given.is_empty());
         // One of the two pouches is filled: it leaves the hand for the player, the other stays.
@@ -998,7 +998,7 @@ pub mod tests {
             let moved = move_energy(host, &other, &hand, 400, tx);
             Err::<(), _>(moved)
         });
-        assert_eq!(aborted, Err(Ok(400)));
+        assert_eq!(aborted, Err(crate::TransactionError::Aborted(Ok(400))));
         assert_eq!(player_of(&player).slots[&9], stack("test:cell", 1, 1000));
         assert_eq!(main_hand(&player), Some(stack("test:cell", 1, 600)));
         // An item no mod answers for has no energy.
@@ -1015,7 +1015,7 @@ pub mod tests {
         let mut player = player_world(Some(stack("test:cell", 3, 0)));
         let host: &mut dyn ServerHost = &mut player;
         let aborted = host.transaction(|host, tx| Err::<(), _>(battery.insert(host, tx, 300)));
-        assert_eq!(aborted, Err(250));
+        assert_eq!(aborted, Err(crate::TransactionError::Aborted(250)));
         assert_eq!(main_hand(&player), Some(stack("test:cell", 3, 0)));
         assert!(player_of(&player).given.is_empty());
         // The limit moves 250 of 300: one of the three is charged and splits off.
@@ -1043,7 +1043,7 @@ pub mod tests {
         let host: &mut dyn ServerHost = &mut player;
         let aborted =
             host.transaction(|host, tx| Err::<(), _>(canteen.insert_at(host, tx, 0, &water, 1000)));
-        assert_eq!(aborted, Err(1000));
+        assert_eq!(aborted, Err(crate::TransactionError::Aborted(1000)));
         assert_eq!(main_hand(&player), Some(stack("test:case", 3, 0)));
         assert!(player_of(&player).given.is_empty());
         let host: &mut dyn ServerHost = &mut player;
@@ -1286,7 +1286,7 @@ pub mod tests {
             assert_eq!(place.exchange(host, tx, &worn, 1), 1);
             Err::<(), ()>(())
         });
-        assert!(aborted.is_err());
+        assert_eq!(aborted, Err(crate::TransactionError::Aborted(())));
         assert_eq!(shelf_.slots, [Some(sword(2, 0)), None, None]);
         let host: &mut dyn ServerHost = &mut shelf_;
         assert_eq!(exchange(host, &place, sword(1, 5)), 1);
@@ -1526,7 +1526,7 @@ pub mod tests {
             assert_eq!(remainder.count(), 127);
             Err::<(), ()>(())
         });
-        assert!(inspected.is_err());
+        assert_eq!(inspected, Err(crate::TransactionError::Aborted(())));
         assert!(shelf_.slots[1].is_none());
         let handler = here().capability(&mut shelf_, &ITEMS, SHELF, None).unwrap();
         assert_eq!(handler.capacity(&mut shelf_, 1, Some(&resource)), 64);
@@ -1589,9 +1589,9 @@ pub mod tests {
         let host: &mut dyn ServerHost = &mut player;
         let pouch = in_bag.capability(host, &ITEM_ITEMS).unwrap();
         let sticks = ItemResource::of(&stick());
-        let aborted: Result<(), u32> =
+        let aborted: Result<(), crate::TransactionError<u32>> =
             host.transaction(|host, tx| Err(pouch.insert_at(host, tx, 0, &sticks, 3)));
-        assert_eq!(aborted, Err(3));
+        assert_eq!(aborted, Err(crate::TransactionError::Aborted(3)));
         assert_eq!(main_hand(&player), Some(stack("test:bag", 2, 1)));
         assert!(player_of(&player).given.is_empty());
     }

@@ -199,16 +199,17 @@ fn part_state_is_per_block_entity_through_ticks_transactions_and_replacement() {
         // An inner edit commits into the outer transaction, which then aborts: the value and
         // the chunk's unsaved mark go back, so a chunk that was clean is clean again.
         game.world.modified.clear();
-        let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, _| {
-            assert_eq!(Press::edit_state(host, a, |_, n| *n = 11), Ok(()));
-            assert_eq!(Press::state(host, a), Ok(11), "later steps see it");
-            assert!(
-                !sunrise_client::join_seq::visibility::passes_settled(),
-                "no save while it is tentative"
-            );
-            Err(())
-        });
-        assert_eq!(aborted, Err(()));
+        let aborted: Result<(), mod_api::TransactionError<()>> = (game as &mut dyn ServerHost)
+            .transaction(|host, _| {
+                assert_eq!(Press::edit_state(host, a, |_, n| *n = 11), Ok(()));
+                assert_eq!(Press::state(host, a), Ok(11), "later steps see it");
+                assert!(
+                    !sunrise_client::join_seq::visibility::passes_settled(),
+                    "no save while it is tentative"
+                );
+                Err(())
+            });
+        assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
         assert_eq!(stored(game, a), Some(9));
         assert!(
             !game.world.modified.contains(&(0, 0)),

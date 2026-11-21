@@ -2019,7 +2019,12 @@ pub(super) mod tests {
                 cursor.on_crafted_by(host, tx, 3)?;
                 Err::<(), CraftedByError>(CraftedByError::Unavailable)
             });
-            assert_eq!(aborted, Err(CraftedByError::Unavailable));
+            assert_eq!(
+                aborted,
+                Err(mod_api::TransactionError::Aborted(
+                    CraftedByError::Unavailable
+                ))
+            );
             let guest = &game.lan.as_ref().unwrap().hub.guests[0];
             assert_eq!(guest.carried, Some(map.clone()));
             let conn = guest.conn;
@@ -2423,7 +2428,10 @@ pub(super) mod tests {
                     }
                 })
             };
-            assert_eq!(moved(host, false), Err((9, [3, 3, 3])));
+            assert_eq!(
+                moved(host, false),
+                Err(mod_api::TransactionError::Aborted((9, [3, 3, 3])))
+            );
             assert_eq!(held(game), before);
             let host: &mut dyn ServerHost = game;
             assert_eq!(moved(host, true), Ok((9, [3, 3, 3])));
@@ -2555,7 +2563,7 @@ pub(super) mod tests {
                 assert_eq!(grid.insert(host, tx, &log, 1), 1);
                 Err::<(), ()>(())
             });
-            assert!(aborted.is_err());
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             let g = &game.lan.as_ref().unwrap().hub.guests[0];
             assert_eq!((g.craft_grid[0].clone(), result(game)), (None, None));
             let host: &mut dyn ServerHost = game;
@@ -2709,7 +2717,7 @@ pub(super) mod tests {
                     assert_eq!(other.insert(host, tx, &log, 3), 3);
                     Err::<(), ()>(())
                 });
-                assert!(child.is_err());
+                assert_eq!(child, Err(mod_api::TransactionError::Aborted(())));
                 assert_eq!((grid.amount(host), other.amount(host)), (1, 0));
                 assert_eq!(grid.insert(host, tx, &log, 1), 1);
                 Ok::<_, ()>(menu.slot(host, 0))
@@ -2753,7 +2761,7 @@ pub(super) mod tests {
                 assert_eq!(items.insert(host, tx, &sticks, 70), Ok(70));
                 Err::<(), ()>(())
             });
-            assert!(aborted.is_err());
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             assert_eq!(inventories(game), before);
 
             // `Inventory.add`: onto the selected stack (4 more), then the same item in order
@@ -2952,7 +2960,7 @@ pub(super) mod tests {
                 assert_eq!(items.insert(host, tx, &sticks, 70), Ok(70));
                 Err::<(), ()>(())
             });
-            assert!(aborted.is_err());
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             assert!(game.carts[0].items.iter().all(Option::is_none));
             let host: &mut dyn ServerHost = game;
             let went = host.transaction(|host, tx| items.insert(host, tx, &sticks, 70));
@@ -3663,7 +3671,7 @@ pub(super) mod tests {
                     assert_eq!(place.amount(host), 5);
                     Err::<(), _>(())
                 });
-                assert_eq!(aborted, Err(()));
+                assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
                 assert_eq!(place.amount(host), 2);
                 Ok::<_, ()>(place)
             });

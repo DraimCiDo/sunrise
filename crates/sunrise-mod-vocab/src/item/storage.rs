@@ -576,11 +576,11 @@ mod tests {
         chest(&mut host, [0, 64, 0], &[Some((&r[0], 10)), None]);
         let storage = storage_at(&mut host, [0, 64, 0]);
         let host: &mut dyn ServerHost = &mut host;
-        let aborted: Result<(), ()> = host.transaction(|host, tx| {
+        let aborted: Result<(), crate::TransactionError<()>> = host.transaction(|host, tx| {
             assert_eq!(storage.insert(host, tx, &r[0], 70), 70);
             Err(())
         });
-        assert!(aborted.is_err());
+        assert_eq!(aborted, Err(crate::TransactionError::Aborted(())));
         assert_eq!(storage.amount(host, &r[0]), Ok(10));
     }
 
@@ -871,7 +871,7 @@ mod tests {
                 (&b, &a)
             };
             let kind = &r[(round % 3 % 2) as usize];
-            let result: Result<u64, ()> = host.transaction(|host, tx| {
+            let result: Result<u64, crate::TransactionError<()>> = host.transaction(|host, tx| {
                 let moved =
                     transfer(host, from, to, kind, round + 1, tx).expect("test transfer succeeds");
                 // Every third round aborts after it wrote.

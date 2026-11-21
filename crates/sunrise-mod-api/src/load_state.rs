@@ -423,7 +423,8 @@ mod tests {
                             let _ = host.player(1);
                         }
                         _ => {
-                            let _: Result<(), ()> = host.transaction(|_, _| Ok(()));
+                            let _: Result<(), crate::TransactionError<()>> =
+                                host.transaction(|_, _| Ok(()));
                         }
                     }
                 })

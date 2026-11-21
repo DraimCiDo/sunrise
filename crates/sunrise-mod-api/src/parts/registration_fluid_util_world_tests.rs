@@ -137,7 +137,7 @@ mod tests {
         let mut host = host("minecraft:bucket", 1);
         host.level.block_entity(TANK).tanks[0].held = Some(fluid("minecraft:lava", 2500));
         let server: &mut dyn ServerHost = &mut host;
-        let aborted: Result<(), ()> = server.transaction(|host, _| {
+        let aborted: Result<(), crate::TransactionError<()>> = server.transaction(|host, _| {
             let player = host.player(PLAYER).unwrap();
             let level = player.level(host).unwrap();
             let bucket = held(host);
@@ -146,7 +146,7 @@ mod tests {
             assert_eq!(picked, Some(fluid("minecraft:lava", 1000)));
             Err(())
         });
-        assert!(aborted.is_err());
+        assert_eq!(aborted, Err(crate::TransactionError::Aborted(())));
         let tank = &host.level.block_entity_at(TANK).unwrap().tanks[0];
         assert_eq!(tank.held, Some(fluid("minecraft:lava", 2500)));
         assert_eq!(hand(&host), Some(stack("minecraft:bucket", 1)));
@@ -158,7 +158,7 @@ mod tests {
         let mut host = host("minecraft:bucket", 1);
         host.level.block_entity(TANK).tanks[0].held = Some(fluid("minecraft:lava", 2500));
         let server: &mut dyn ServerHost = &mut host;
-        let committed: Result<(), ()> = server.transaction(|host, _| {
+        let committed: Result<(), crate::TransactionError<()>> = server.transaction(|host, _| {
             let player = host.player(PLAYER).unwrap();
             let level = player.level(host).unwrap();
             let bucket = held(host);

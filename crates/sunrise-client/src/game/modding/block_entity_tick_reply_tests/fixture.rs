@@ -55,12 +55,13 @@ impl BlockEntityPart for Ticker {
             assert_eq!(stack.count(), 5);
             stack.set_count(2).unwrap();
             if mode == 6 {
-                let aborted: Result<(), ()> = host.transaction(|host, _| {
-                    assert_eq!(item.set_stack(host, stack), Ok(true));
-                    assert_eq!(item.stack(host).unwrap().count(), 2);
-                    Err(())
-                });
-                assert_eq!(aborted, Err(()));
+                let aborted: Result<(), mod_api::TransactionError<()>> =
+                    host.transaction(|host, _| {
+                        assert_eq!(item.set_stack(host, stack), Ok(true));
+                        assert_eq!(item.stack(host).unwrap().count(), 2);
+                        Err(())
+                    });
+                assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
                 assert_eq!(item.stack(host).unwrap().count(), 5);
             } else {
                 assert_eq!(item.set_stack(host, stack), Ok(true));

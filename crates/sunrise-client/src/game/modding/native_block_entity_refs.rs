@@ -1625,21 +1625,22 @@ mod tests {
 
             // An abort puts back data and name; a commit keeps them.
             let host: &mut dyn ServerHost = game;
-            let aborted: Result<(), ()> = host.transaction(|host, _| {
+            let aborted: Result<(), mod_api::TransactionError<()>> = host.transaction(|host, _| {
                 assert!(chest.merge_data(host, compound(stick)).unwrap());
                 assert!(chest.set_name(host, Some("Gone")).unwrap());
                 assert!(chest.set_changed(host).unwrap());
                 Err(())
             });
-            assert_eq!(aborted, Err(()));
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             assert_eq!((slot3(game), chest.name(game)), (None, None));
             assert!(game.transactions.is_empty());
             let host: &mut dyn ServerHost = game;
-            let committed: Result<(), ()> = host.transaction(|host, _| {
-                assert!(chest.merge_data(host, compound(stick)).unwrap());
-                assert!(chest.set_name(host, Some("Kept")).unwrap());
-                Ok(())
-            });
+            let committed: Result<(), mod_api::TransactionError<()>> =
+                host.transaction(|host, _| {
+                    assert!(chest.merge_data(host, compound(stick)).unwrap());
+                    assert!(chest.set_name(host, Some("Kept")).unwrap());
+                    Ok(())
+                });
             assert_eq!(committed, Ok(()));
             assert_eq!(
                 (slot3(game), chest.name(game)),
@@ -1647,11 +1648,12 @@ mod tests {
             );
 
             // Replacement uses the same journal and restores the original payload on abort.
-            let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, _| {
-                assert!(chest.replace_data(host, compound("{}")).unwrap());
-                Err(())
-            });
-            assert_eq!(aborted, Err(()));
+            let aborted: Result<(), mod_api::TransactionError<()>> = (game as &mut dyn ServerHost)
+                .transaction(|host, _| {
+                    assert!(chest.replace_data(host, compound("{}")).unwrap());
+                    Err(())
+                });
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             assert_eq!(
                 (slot3(game), chest.name(game)),
                 (Some(3), Some("Kept".to_owned()))
@@ -1715,7 +1717,7 @@ mod tests {
             let before = game.world.block_entity_extras(key);
 
             let host: &mut dyn ServerHost = game;
-            let aborted: Result<(), ()> = host.transaction(|host, _| {
+            let aborted: Result<(), mod_api::TransactionError<()>> = host.transaction(|host, _| {
                 assert!(
                     chest
                         .set_lock(host, Some(compound("{items:\"minecraft:stick\"}")))
@@ -1724,16 +1726,17 @@ mod tests {
                 assert!(chest.merge_data(host, table.clone()).unwrap());
                 Err(())
             });
-            assert_eq!(aborted, Err(()));
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             assert_eq!(game.world.block_entity_extras(key), before);
             assert!(game.world.block_lock(key).is_none());
 
             let host: &mut dyn ServerHost = game;
-            let committed: Result<(), ()> = host.transaction(|host, _| {
-                assert!(chest.merge_data(host, lock.clone()).unwrap());
-                assert!(chest.merge_data(host, table.clone()).unwrap());
-                Ok(())
-            });
+            let committed: Result<(), mod_api::TransactionError<()>> =
+                host.transaction(|host, _| {
+                    assert!(chest.merge_data(host, lock.clone()).unwrap());
+                    assert!(chest.merge_data(host, table.clone()).unwrap());
+                    Ok(())
+                });
             assert_eq!(committed, Ok(()));
             assert!(game.world.block_lock(key).is_some());
             assert_ne!(game.world.block_entity_extras(key), before);

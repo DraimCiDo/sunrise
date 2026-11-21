@@ -57,7 +57,7 @@ impl BlockEntityPart for Consume {
             2
         );
         if case == "nested_abort" {
-            let aborted: Result<(), ()> = host.transaction(|host, _| {
+            let aborted: Result<(), mod_api::TransactionError<()>> = host.transaction(|host, _| {
                 assert_eq!(
                     item.set_stack(
                         host,
@@ -68,7 +68,7 @@ impl BlockEntityPart for Consume {
                 assert_eq!(item.stack(host).unwrap().count(), 1);
                 Err(())
             });
-            assert_eq!(aborted, Err(()));
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             assert_eq!(item.stack(host).unwrap().count(), 2);
         }
         assert!(second.discard(host));

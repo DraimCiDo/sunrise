@@ -740,11 +740,12 @@ fn a_mod_reads_the_open_transaction_its_depth_and_the_root_commits_phase() {
                         Ok(Some(4))
                     );
                     Ok::<_, ()>(())
-                })?;
+                })
+                .unwrap();
                 assert_eq!(items.amount(host, 0), 4);
                 Err::<(), ()>(())
             });
-            assert!(aborted.is_err());
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             assert_eq!(items.amount(host, 0), 0);
             // The closed transaction is no longer open.
             let closed =

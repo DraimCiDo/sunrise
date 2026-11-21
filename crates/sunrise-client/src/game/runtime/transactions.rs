@@ -2418,11 +2418,12 @@ mod tests {
                 host.transaction(|host, tx| {
                     assert!(handler.set_max_stack_size(host, tx, 4));
                     Ok::<_, ()>(())
-                })?;
+                })
+                .unwrap();
                 assert_eq!(handler.capacity(host, 0, Some(&stick)), 4);
                 Err::<(), ()>(())
             });
-            assert_eq!(aborted, Err(()));
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             assert_eq!(handler.capacity(host, 0, Some(&stick)), 64);
             assert_eq!(handler.capacity(host, 0, Some(&large)), 99);
             assert_eq!(handler.amount(host, 0), 0);
@@ -2450,7 +2451,7 @@ mod tests {
             .unwrap_err();
 
             let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _: Result<(), ()> = host.transaction(|host, tx| {
+                let _: Result<(), mod_api::TransactionError<()>> = host.transaction(|host, tx| {
                     assert!(handler.set_max_stack_size(host, tx, 10));
                     assert_eq!(handler.insert_at(host, tx, 0, &stick, 64), 10);
                     panic!("abort container writes");
@@ -2647,7 +2648,7 @@ mod tests {
 
         // Five in, then a committed child takes two and an aborted one adds three: the
         // outer abort puts all of it back, the cauldron's water too.
-        let refused: Result<(), ()> = host.transaction(|host, tx| {
+        let refused: Result<(), mod_api::TransactionError<()>> = host.transaction(|host, tx| {
             assert!(insert(host, on([0, 64, 0], None), 0, sticks(5), tx).is_none());
             let taken = host
                 .transaction(|host, tx| Ok::<_, ()>(extract(host, on([0, 64, 0], None), 0, 2, tx)));
@@ -2660,14 +2661,14 @@ mod tests {
             assert_eq!(water.map(|w| w.amount), Some(1000));
             Err(())
         });
-        assert_eq!(refused, Err(()));
+        assert_eq!(refused, Err(mod_api::TransactionError::Aborted(())));
         assert_eq!(chest_items(&game), []);
         assert_eq!(game.world.block(2, 64, 0), full);
         assert!(game.transactions.is_empty());
 
         // The same, committed: what the children left stands, the cauldron is set for good.
         let host: &mut dyn ServerHost = &mut game;
-        let done: Result<(), ()> = host.transaction(|host, tx| {
+        let done: Result<(), mod_api::TransactionError<()>> = host.transaction(|host, tx| {
             insert(host, on([0, 64, 0], None), 0, sticks(5), tx);
             let _ = host.transaction(|host, tx| {
                 extract(host, on([0, 64, 0], None), 0, 2, tx);
@@ -2967,12 +2968,14 @@ mod tests {
                     assert!(place.stack(host).is_none());
                     assert_eq!(place.insert(host, tx, &stick, 1), 1);
                     Ok::<_, ()>(())
-                })?;
+                })
+                .unwrap();
                 Ok::<_, ()>(())
-            })?;
+            })
+            .unwrap();
             Err::<(), ()>(())
         });
-        assert!(result.is_err());
+        assert_eq!(result, Err(mod_api::TransactionError::Aborted(())));
         assert_eq!(len(&game), 0);
 
         for (kind, nbt) in vehicles {
@@ -3167,7 +3170,7 @@ mod mod_capability_tests {
                 assert_eq!(amounts(host), (250, 350));
                 Err::<(), ()>(())
             });
-            assert!(aborted.is_err());
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             assert_eq!(amounts(host), (350, 250));
             assert!(game.transactions.is_empty());
         });
@@ -3260,11 +3263,12 @@ mod mod_capability_tests {
 
             // Aborted, with a committed child inside: both maps as they were, and the entity
             // that had no value has none.
-            let aborted: Result<(), _> = host.transaction(|host, _| {
+            let aborted: Result<(), mod_api::TransactionError<_>> = host.transaction(|host, _| {
                 ENERGY.set(host, stand, 250)?;
                 ENERGY.set(host, player, 90)?;
                 ENERGY.set(host, fresh, 7)?;
-                host.transaction(|host, _| ENERGY.set(host, stand, 300))?;
+                host.transaction(|host, _| ENERGY.set(host, stand, 300))
+                    .unwrap();
                 assert_eq!(energy(host, stand), Some(300));
                 Err(mod_api::AttachmentError::MissingHolder)
             });

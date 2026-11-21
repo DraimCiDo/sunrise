@@ -52,7 +52,7 @@ mod tests {
             let moved = move_resources(host, &from, &into, any, 1000, Some(tx));
             Err::<(), _>(moved)
         });
-        assert_eq!(aborted, Err(Ok(300)));
+        assert_eq!(aborted, Err(crate::TransactionError::Aborted(Ok(300))));
         // Lava takes no water; water fills only up to the target's room.
         let refused =
             server.transaction(|host, tx| move_resources(host, &from, &lava, any, 1000, Some(tx)));
@@ -79,7 +79,7 @@ mod tests {
         let eggs = ItemResource::of(&ItemStack::of(host.item_key(&egg).unwrap()));
         let server: &mut dyn ServerHost = &mut host;
         let aborted = server.transaction(|host, tx| Err::<(), _>(hand.insert(host, tx, &eggs, 20)));
-        assert_eq!(aborted, Err(20));
+        assert_eq!(aborted, Err(crate::TransactionError::Aborted(20)));
         assert!(host.players.get(7).unwrap().slots.is_empty());
         let server: &mut dyn ServerHost = &mut host;
         let went = server.transaction(|host, tx| Ok::<_, ()>(hand.insert(host, tx, &eggs, 20)));

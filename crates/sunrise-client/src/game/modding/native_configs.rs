@@ -294,7 +294,8 @@ mod tests {
                 );
                 if let HostSide::Server(host) = &mut host {
                     let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        let _: Result<(), ()> = host.transaction(|_, _| Ok(()));
+                        let _: Result<(), mod_api::TransactionError<()>> =
+                            host.transaction(|_, _| Ok(()));
                     }))
                     .unwrap_err();
                     assert_eq!(

@@ -47,7 +47,7 @@ fn a_second_pickup_of_one_source_in_a_transaction_gets_nothing() {
         let water = state(game, "minecraft:water");
         game.world.set(AT[0], AT[1], AT[2], water).unwrap();
         let host: &mut dyn ServerHost = game;
-        let picked: Result<_, ()> = host.transaction(|host, tx| {
+        let picked: Result<_, mod_api::TransactionError<()>> = host.transaction(|host, tx| {
             Ok((
                 level.pickup_fluid(host, AT, None, tx),
                 level.pickup_fluid(host, AT, None, tx),
@@ -104,7 +104,7 @@ fn a_committed_pour_breaks_what_it_replaces_then_sends_its_events_in_order() {
         game.creatures.lan_sounds.clear();
         dispense_fixture::start_recording();
         let host: &mut dyn ServerHost = game;
-        let placed: Result<bool, ()> = host.transaction(|host, tx| {
+        let placed: Result<bool, mod_api::TransactionError<()>> = host.transaction(|host, tx| {
             Ok(level.place_fluid(host, AT, key("minecraft:lava"), None, false, tx))
         });
         assert_eq!(placed, Ok(true));

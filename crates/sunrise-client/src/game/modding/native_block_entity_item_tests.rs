@@ -87,24 +87,26 @@ fn internal_slots_preserve_automation_limits_and_nested_transactions() {
                 .items
                 .push(Some(ItemStack::new("minecraft:gold_ingot", 3)));
             game.world.modified.clear();
-            let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, tx| {
-                assert_eq!(
-                    set(
-                        host,
-                        tx,
-                        0,
-                        Some(ItemStack::new("minecraft:dirt", 1).try_into_api().unwrap())
-                    ),
-                    Ok(true)
-                );
-                host.transaction(|host, child| {
-                    assert_eq!(set(host, child, 1, Some(diamond.clone())), Ok(true));
-                    Ok(())
-                })?;
-                assert_eq!(get(host, 1), Ok(Some(diamond.clone())));
-                Err(())
-            });
-            assert_eq!(aborted, Err(()));
+            let aborted: Result<(), mod_api::TransactionError<()>> = (game as &mut dyn ServerHost)
+                .transaction(|host, tx| {
+                    assert_eq!(
+                        set(
+                            host,
+                            tx,
+                            0,
+                            Some(ItemStack::new("minecraft:dirt", 1).try_into_api().unwrap())
+                        ),
+                        Ok(true)
+                    );
+                    host.transaction(|host, child| {
+                        assert_eq!(set(host, child, 1, Some(diamond.clone())), Ok(true));
+                        Ok(())
+                    })
+                    .unwrap();
+                    assert_eq!(get(host, 1), Ok(Some(diamond.clone())));
+                    Err(())
+                });
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             assert_eq!(get(game, 0), Ok(Some(dirt.clone())));
             assert_eq!(get(game, 1), Ok(None));
             assert!(
@@ -301,25 +303,27 @@ fn container_moves_roll_back_slots_and_saved_data_in_any_order() {
             let before = saved(game);
             // Slot writes, then a whole-entity write, then slots again, through nested
             // transactions that commit into one that aborts.
-            let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, tx| {
-                assert_eq!(items.extract_at(host, tx, 0, &dirt, 4), 4);
-                assert_eq!(items.insert_at(host, tx, 3, &dirt, 7), 7);
-                host.transaction(|host, child| {
-                    assert_eq!(items.insert_at(host, child, 0, &dirt, 50), 50);
-                    assert_eq!(entity.set_data_slots(host, vec![7]), Ok(true));
-                    assert_eq!(items.extract_at(host, child, 3, &dirt, 2), 2);
-                    Ok::<_, ()>(())
-                })?;
-                host.transaction(|host, child| {
-                    assert_eq!(items.insert_at(host, child, 8, &dirt, 1), 1);
-                    Err::<(), ()>(())
-                })
-                .unwrap_err();
-                assert_eq!(items.amount(host, 8), 0, "the child's abort undid its slot");
-                assert_eq!(items.amount(host, 0), 56);
-                Err(())
-            });
-            assert_eq!(aborted, Err(()));
+            let aborted: Result<(), mod_api::TransactionError<()>> = (game as &mut dyn ServerHost)
+                .transaction(|host, tx| {
+                    assert_eq!(items.extract_at(host, tx, 0, &dirt, 4), 4);
+                    assert_eq!(items.insert_at(host, tx, 3, &dirt, 7), 7);
+                    host.transaction(|host, child| {
+                        assert_eq!(items.insert_at(host, child, 0, &dirt, 50), 50);
+                        assert_eq!(entity.set_data_slots(host, vec![7]), Ok(true));
+                        assert_eq!(items.extract_at(host, child, 3, &dirt, 2), 2);
+                        Ok::<_, ()>(())
+                    })
+                    .unwrap();
+                    host.transaction(|host, child| {
+                        assert_eq!(items.insert_at(host, child, 8, &dirt, 1), 1);
+                        Err::<(), ()>(())
+                    })
+                    .unwrap_err();
+                    assert_eq!(items.amount(host, 8), 0, "the child's abort undid its slot");
+                    assert_eq!(items.amount(host, 0), 56);
+                    Err(())
+                });
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             assert_eq!(
                 saved(game),
                 before,
@@ -503,12 +507,12 @@ fn a_child_whole_capture_keeps_its_older_slot_entries() {
                 ),
             ];
             for (case, write) in cases {
-                let aborted: Result<(), ()> =
+                let aborted: Result<(), mod_api::TransactionError<()>> =
                     (game as &mut dyn ServerHost).transaction(|host, _| {
                         write(host);
                         Err(())
                     });
-                assert!(aborted.is_err());
+                assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
                 assert_eq!(holder_state(game), before, "{case}");
             }
             assert!(game.transactions.is_empty());
@@ -531,11 +535,12 @@ fn an_insert_past_a_short_mod_list_rolls_back_its_length() {
             let level = entity.level(game).unwrap();
             let items = level.capability(game, &ITEMS, [1, 64, 1], None).unwrap();
             let before = holder_state(game);
-            let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, tx| {
-                assert_eq!(items.insert_at(host, tx, 5, &dirt(), 7), 7);
-                Err(())
-            });
-            assert!(aborted.is_err());
+            let aborted: Result<(), mod_api::TransactionError<()>> = (game as &mut dyn ServerHost)
+                .transaction(|host, tx| {
+                    assert_eq!(items.insert_at(host, tx, 5, &dirt(), 7), 7);
+                    Err(())
+                });
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             assert_eq!(
                 holder_state(game),
                 before,
@@ -592,7 +597,7 @@ fn each_slot_journalled_container_aborts_to_its_exact_stacks() {
                 let before = container_at(game, pos, block);
                 let items = level.capability(game, &ITEMS, [3, 64, 1], None).unwrap();
                 let stone = ItemResource::of(&before[0].clone().unwrap().try_into_api().unwrap());
-                let aborted: Result<(), ()> =
+                let aborted: Result<(), mod_api::TransactionError<()>> =
                     (game as &mut dyn ServerHost).transaction(|host, _| {
                         host.transaction(|host, tx| {
                             assert_eq!(items.extract_at(host, tx, 0, &stone, 10), 10);
@@ -608,7 +613,7 @@ fn each_slot_journalled_container_aborts_to_its_exact_stacks() {
                         .unwrap();
                         Err(())
                     });
-                assert!(aborted.is_err());
+                assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
                 assert_eq!(slots_at(game, pos), Some(before), "{block}");
                 game.world.block_entities.remove(&pos);
             }
@@ -616,11 +621,12 @@ fn each_slot_journalled_container_aborts_to_its_exact_stacks() {
             let entity = container_holder(game, 3);
             let before = holder_state(game);
             let stack = ItemStack::new("minecraft:dirt", 2).try_into_api().unwrap();
-            let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, tx| {
-                assert_eq!(entity.set_item_slot(host, tx, 3, Some(stack)), Ok(true));
-                Err(())
-            });
-            assert!(aborted.is_err());
+            let aborted: Result<(), mod_api::TransactionError<()>> = (game as &mut dyn ServerHost)
+                .transaction(|host, tx| {
+                    assert_eq!(entity.set_item_slot(host, tx, 3, Some(stack)), Ok(true));
+                    Err(())
+                });
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             assert_eq!(holder_state(game), before);
             assert!(game.transactions.is_empty());
         });
@@ -643,7 +649,7 @@ fn a_kept_slot_goes_back_only_into_the_block_entity_it_came_from() {
                 ItemResource::of(&ItemStack::new("minecraft:stone", 1).try_into_api().unwrap());
             let replace = |game: &mut super::Game<'_>, state, commit: bool| {
                 let items = level.capability(game, &ITEMS, at, None).unwrap();
-                let result: Result<(), ()> =
+                let result: Result<(), mod_api::TransactionError<()>> =
                     (game as &mut dyn ServerHost).transaction(|host, tx| {
                         assert_eq!(items.extract_at(host, tx, 0, &stone, 10), 10);
                         assert!(
@@ -775,12 +781,13 @@ fn storage_asks_a_game_container_by_kind_and_rolls_back_with_its_transaction() {
                 Ok(24 * 64 + 28),
                 "two stone slots, one dirt"
             );
-            let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, tx| {
-                assert_eq!(storage.extract(host, tx, &stone, 70), 70);
-                assert_eq!(storage.insert(host, tx, &dirt, 2000), 25 * 64 + 59);
-                Err(())
-            });
-            assert!(aborted.is_err());
+            let aborted: Result<(), mod_api::TransactionError<()>> = (game as &mut dyn ServerHost)
+                .transaction(|host, tx| {
+                    assert_eq!(storage.extract(host, tx, &stone, 70), 70);
+                    assert_eq!(storage.insert(host, tx, &dirt, 2000), 25 * 64 + 59);
+                    Err(())
+                });
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             assert_eq!(storage.amount(game, &stone), Ok(100));
             assert_eq!(storage.amount(game, &dirt), Ok(5));
             let BlockEntity::Chest(slots) = game.world.block_entities.get(&(3, 64, 1)).unwrap()
@@ -907,7 +914,7 @@ fn storage_writes_abort_to_the_exact_state_of_every_container_kind() {
                 };
                 let resource = of(item);
                 let before = whole_state(game, pos);
-                let aborted: Result<(), ()> =
+                let aborted: Result<(), mod_api::TransactionError<()>> =
                     (game as &mut dyn ServerHost).transaction(|host, _| {
                         host.transaction(|host, tx| {
                             assert_eq!(storage.insert(host, tx, &resource, 1), 1, "{block}");
@@ -922,7 +929,7 @@ fn storage_writes_abort_to_the_exact_state_of_every_container_kind() {
                         .unwrap();
                         Err(())
                     });
-                assert!(aborted.is_err());
+                assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
                 assert_eq!(whole_state(game, pos), before, "{block} after the abort");
                 // Committed, the item is there.
                 commit(game, |host, tx| {
@@ -984,13 +991,15 @@ fn an_aborted_bulk_transfer_conserves_every_item() {
             };
             let (before_a, before_b) = (slots_at(game, a), slots_at(game, b));
             let before = total(game);
-            let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, tx| {
-                let moved = mod_api::transfer_matching(host, &from, &to, |_| true, u64::MAX, tx)
-                    .expect("test transfer succeeds");
-                assert!(moved > 0);
-                Err(())
-            });
-            assert!(aborted.is_err());
+            let aborted: Result<(), mod_api::TransactionError<()>> = (game as &mut dyn ServerHost)
+                .transaction(|host, tx| {
+                    let moved =
+                        mod_api::transfer_matching(host, &from, &to, |_| true, u64::MAX, tx)
+                            .expect("test transfer succeeds");
+                    assert!(moved > 0);
+                    Err(())
+                });
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             assert_eq!((slots_at(game, a), slots_at(game, b)), (before_a, before_b));
             let moved = (game as &mut dyn ServerHost)
                 .transaction(|host, tx| {

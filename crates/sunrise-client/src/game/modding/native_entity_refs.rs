@@ -3241,11 +3241,11 @@ pub(super) mod tests {
             );
             assert_ne!(overworld_actor, nether_actor);
             let host: &mut dyn mod_api::ServerHost = game;
-            let aborted: Result<(), ()> = host.transaction(|host, _| {
+            let aborted: Result<(), mod_api::TransactionError<()>> = host.transaction(|host, _| {
                 attachment.set(host, holder, 99).unwrap();
                 Err(())
             });
-            assert!(aborted.is_err());
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             assert_eq!(
                 attachment
                     .get(
@@ -3264,11 +3264,12 @@ pub(super) mod tests {
                 &sunrise_client::items::ItemStack::new("minecraft:stick", 1),
             ));
             let host: &mut dyn mod_api::ServerHost = game;
-            let rolled_back: Result<(), ()> = host.transaction(|host, tx| {
-                assert_eq!(place.insert(host, tx, &sticks, 1), 1);
-                Err(())
-            });
-            assert!(rolled_back.is_err());
+            let rolled_back: Result<(), mod_api::TransactionError<()>> =
+                host.transaction(|host, tx| {
+                    assert_eq!(place.insert(host, tx, &sticks, 1), 1);
+                    Err(())
+                });
+            assert_eq!(rolled_back, Err(mod_api::TransactionError::Aborted(())));
             assert!(place.stack(game).is_none());
             assert_eq!(
                 game.lan
@@ -4384,11 +4385,11 @@ pub(super) mod tests {
         assert_eq!(game.world.modified.clone(), dirty_before);
         assert_eq!(game.world.block(5, 64, 0), block_before);
         let host: &mut dyn mod_api::ServerHost = &mut game;
-        let aborted: Result<(), ()> = host.transaction(|host, _| {
+        let aborted: Result<(), mod_api::TransactionError<()>> = host.transaction(|host, _| {
             assert!(level.send_block_updated(host, [6, 64, 0]));
             Err(())
         });
-        assert!(aborted.is_err());
+        assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
         assert!(game.world.block_log.as_ref().unwrap().contains(&(6, 64, 0)));
         assert!(!game.level_send_block_updated(level, [5, 10_000, 0]));
         assert_eq!(

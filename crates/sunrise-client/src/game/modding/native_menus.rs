@@ -584,12 +584,12 @@ mod tests {
                                 assert_eq!(place.extract(host, tx, &resource, 1), 1);
                                 Err::<(), ()>(())
                             });
-                            assert_eq!(inner, Err(()));
+                            assert_eq!(inner, Err(mod_api::TransactionError::Aborted(())));
                             inner_restored = place.stack(host);
                             assert_eq!(place.extract(host, tx, &resource, 1), 1);
                             Err::<(), ()>(())
                         });
-                        assert_eq!(aborted, Err(()));
+                        assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
                         restored.push((inner_restored, place.stack(host)));
                         // Player and menu writes share the ender snapshot, not competing copies.
                         let aborted = host.transaction(|host, tx| {
@@ -597,7 +597,7 @@ mod tests {
                             assert_eq!(menu.cursor().insert(host, tx, &resource, 1), 1);
                             Err::<(), ()>(())
                         });
-                        assert_eq!(aborted, Err(()));
+                        assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
                         assert_eq!(
                             place.stack(host),
                             Some(stack.clone().try_into_api().unwrap())
@@ -612,7 +612,7 @@ mod tests {
                             .unwrap();
                             Err::<(), ()>(())
                         });
-                        assert_eq!(aborted, Err(()));
+                        assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
                         assert_eq!(
                             place.stack(host),
                             Some(stack.clone().try_into_api().unwrap())
@@ -1980,18 +1980,20 @@ mod tests {
                         );
 
                         let host = game as &mut dyn ServerHost;
-                        let committed: Result<(), ()> = host.transaction(|host, _| {
-                            assert_eq!(menu.set_data_slot(host, 0, 1), Ok(true));
-                            let nested: Result<(), ()> = host.transaction(|host, _| {
-                                assert_eq!(menu.set_data_slot(host, 0, i32::MIN), Ok(true));
-                                assert_eq!(menu.set_data_slot(host, 1, 5), Ok(true));
+                        let committed: Result<(), mod_api::TransactionError<()>> = host
+                            .transaction(|host, _| {
+                                assert_eq!(menu.set_data_slot(host, 0, 1), Ok(true));
+                                let nested: Result<(), mod_api::TransactionError<()>> = host
+                                    .transaction(|host, _| {
+                                        assert_eq!(menu.set_data_slot(host, 0, i32::MIN), Ok(true));
+                                        assert_eq!(menu.set_data_slot(host, 1, 5), Ok(true));
+                                        Ok(())
+                                    });
+                                assert_eq!(nested, Ok(()));
+                                assert_eq!(menu.set_data_slot(host, 1, 0), Ok(true));
+                                assert!(sent(&rx).is_empty());
                                 Ok(())
                             });
-                            assert_eq!(nested, Ok(()));
-                            assert_eq!(menu.set_data_slot(host, 1, 0), Ok(true));
-                            assert!(sent(&rx).is_empty());
-                            Ok(())
-                        });
                         assert_eq!(committed, Ok(()));
                         assert_eq!(
                             updates(sent(&rx)),
@@ -2040,7 +2042,7 @@ mod tests {
                             .hub
                             .guests
                             .update(0, |g| g.next_window = window - 1);
-                        let replaced: Result<(), ()> =
+                        let replaced: Result<(), mod_api::TransactionError<()>> =
                             (game as &mut dyn ServerHost).transaction(|host, _| {
                                 assert_eq!(menu.set_data_slot(host, 0, 900), Ok(true));
                                 assert_eq!(show(host, vec![5, 6]), Ok(Some(window)));

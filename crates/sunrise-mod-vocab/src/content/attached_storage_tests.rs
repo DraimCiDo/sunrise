@@ -205,7 +205,7 @@ fn energy_limits_and_a_nested_abort() {
                 battery.insert(host, tx, 10);
                 Err::<(), _>(())
             });
-            assert_eq!(aborted, Err(()));
+            assert_eq!(aborted, Err(crate::TransactionError::Aborted(())));
             let came = battery.extract(&mut *outer_host, outer_tx, 5);
             assert_eq!(came, 5);
             Ok::<_, ()>(came)

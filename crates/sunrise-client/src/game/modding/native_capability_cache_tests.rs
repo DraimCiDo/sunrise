@@ -457,7 +457,7 @@ fn a_providers_invalidation_counts_once_after_its_commit_and_not_when_aborted() 
                 );
                 Err::<(), ()>(())
             });
-            assert!(aborted.is_err());
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             assert_eq!(
                 slots(game, &mut cache),
                 Some(1),

@@ -45,7 +45,7 @@ fn attached_items_are_undone_by_an_abort_and_saved_by_their_codec() {
         let host: &mut dyn ServerHost = game;
         let aborted =
             host.transaction(|host, tx| Err::<(), _>(slots.insert_at(host, tx, 4, &dirt, 10)));
-        assert_eq!(aborted, Err(10));
+        assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(10)));
         assert_eq!(ITEMS.has(host, CHUNK), Ok(false));
         let went =
             host.transaction(|host, tx| Ok::<_, ()>(slots.insert_at(host, tx, 4, &dirt, 10)));
