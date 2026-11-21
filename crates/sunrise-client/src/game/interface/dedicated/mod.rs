@@ -24,6 +24,7 @@ use sunrise_client::{
     lan::{
         LoginGate, NetConfig, NetLog, OnlineMode, hub::HubConfig, viewed_levels::areas as viewed,
     },
+    save::RecordSaveFailures,
     server::{
         eula, profiles,
         properties::{GAME_MODES, ServerProperties, SystemEntropy},
@@ -1216,8 +1217,9 @@ impl Game<'_> {
         }
         log("INFO", &startup_done(level_load_time));
         // DedicatedServer.initServer ends with saveEverything(false, true, true).
-        self.save_game()?;
-        self.log_saved_levels();
+        if self.save_dedicated_checkpoint("server startup")? {
+            self.log_saved_levels();
+        }
         if let Some(host) = self.lan.as_mut() {
             host.hub.entity_range_percent = props.entity_broadcast_range_percentage;
         }
@@ -1315,12 +1317,7 @@ impl Game<'_> {
                         state.pause_when_empty_seconds
                     ),
                 );
-                if let Err(error) = self.save_game() {
-                    if !error.is::<sunrise_client::save::RecordSaveFailures>() {
-                        return Err(error);
-                    }
-                    log::warn!("Server paused after a partial save: {error}");
-                }
+                self.save_dedicated_checkpoint("pause on empty")?;
             }
             if !paused && !auto_save(&state) {
                 // `MinecraftServer.autoSave` keeps its schedule while every level's
@@ -2384,6 +2381,18 @@ fn console_level(active: super::Dim, spawn: super::Dim) -> Option<super::Dim> {
 }
 
 impl Game<'_> {
+    /// Dedicated lifecycle saves continue after an individual record refusal, but not I/O errors.
+    fn save_dedicated_checkpoint(&mut self, phase: &str) -> Result<bool> {
+        match self.save_game() {
+            Ok(()) => Ok(true),
+            Err(error) if error.is::<RecordSaveFailures>() => {
+                log::warn!("Partial save during {phase}: {error}");
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     pub(super) fn stop_after_crash(&mut self, message: &str) -> Result<()> {
         // Single player's server thread (`integrated.rs`) has no console: it logs to the game's log.
         let integrated = self.serving.is_some();
@@ -2407,8 +2416,9 @@ impl Game<'_> {
         }
         self.native_lifecycle.begin_close();
         log("INFO", "Saving worlds");
-        self.save_game()?;
-        self.log_saved_levels();
+        if self.save_dedicated_checkpoint("crash shutdown")? {
+            self.log_saved_levels();
+        }
         self.native_lifecycle_world_closed();
         self.lan_close(false);
         Err(format!("the server thread panicked: {message}").into())
@@ -2417,6 +2427,56 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "daily"]
+    fn dedicated_checkpoints_continue_only_after_record_refusals() {
+        use crate::game::{
+            execution_role::ExecutionRole,
+            native_entity_refs::tests::{fixture_root, with_game_role},
+        };
+        use std::sync::Arc;
+        use sunrise_client::save::{LevelShape, SaveDir};
+        use sunrise_core::nbt::{DISK_WRITE_NESTING_GUARD, Tag};
+
+        mod_platform::testing::with_mods(Vec::new().into(), || {
+            with_game_role(fixture_root(), ExecutionRole::DedicatedServer, |game| {
+                let dir = tempfile::tempdir().unwrap();
+                game.world_root = dir.path().to_path_buf();
+                game.save = Arc::new(SaveDir::new(
+                    game.world_root.clone(),
+                    LevelShape::OVERWORLD,
+                    Some(Default::default()),
+                ));
+                assert!(game.save_dedicated_checkpoint("startup fixture").unwrap());
+                let invalid = (0..=DISK_WRITE_NESTING_GUARD)
+                    .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
+                game.save
+                    .save_entities_later(vec![((2, 0), vec![invalid])])
+                    .unwrap();
+                assert!(!game.save_dedicated_checkpoint("startup fixture").unwrap());
+                assert!(!game.save_dedicated_checkpoint("pause fixture").unwrap());
+                let error = game.stop_after_crash("fixture panic").unwrap_err();
+                assert_eq!(
+                    error.to_string(),
+                    "the server thread panicked: fixture panic"
+                );
+
+                std::fs::write(dir.path().join("entities"), b"not a directory").unwrap();
+                game.save
+                    .save_entities_later(vec![(
+                        (3, 0),
+                        vec![Tag::compound([("marker", Tag::Int(7))])],
+                    )])
+                    .unwrap();
+                let error = game.save_dedicated_checkpoint("pause fixture").unwrap_err();
+                assert!(
+                    error.to_string().contains("failed to write entities files"),
+                    "{error}"
+                );
+            });
+        });
+    }
+
     #[test]
     #[ignore = "daily"]
     fn broadcast_console_destination_follows_role_not_launch_marker() {

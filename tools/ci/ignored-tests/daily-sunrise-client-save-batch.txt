@@ -1,3 +1,4 @@
+sunrise-client game::dedicated::tests::dedicated_checkpoints_continue_only_after_record_refusals lib daily resources
 sunrise-client game::levels::tests::an_idle_level_with_a_refused_record_stays_open_without_failing_the_tick lib daily resources
 sunrise-client game::levels::tests::save_all_reports_refusals_after_saving_each_level_and_metadata lib daily resources
 sunrise-client game::native_chunk_save::tests::an_unloaded_refusal_cannot_hide_a_later_edit_from_eager_saves lib daily resources
