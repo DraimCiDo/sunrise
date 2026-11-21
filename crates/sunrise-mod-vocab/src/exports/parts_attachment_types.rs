@@ -5,6 +5,6 @@ pub use crate::parts::{
 mod __private {
     pub use crate::parts::{
         check_attachment_descriptor, project_sync_attachment, registered_copy_on_death,
-        validate_attachment_use, validate_declared_attachment,
+        validate_attachment_use, validate_attachment_write, validate_declared_attachment,
     };
 }

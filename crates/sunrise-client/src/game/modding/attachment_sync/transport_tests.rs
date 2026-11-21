@@ -36,6 +36,7 @@ const BLOB_CODEC: AttachmentCodec<Vec<u8>> = AttachmentCodec {
 };
 /// A value past every network frame limit, and incompressible.
 static BLOB_KEY: Mutex<Option<AttachmentKey<Vec<u8>>>> = Mutex::new(None);
+static BAD_NBT_KEY: Mutex<Option<AttachmentKey<()>>> = Mutex::new(None);
 
 pub(super) fn value_key() -> AttachmentKey<i32> {
     VALUE_KEY
@@ -78,6 +79,23 @@ impl mod_api::Hooks for Route {
             )
             .unwrap();
         *BLOB_KEY.lock().unwrap() = Some(blob);
+        let bad_nbt = registrar
+            .register_attachment_type(
+                mod_api::AttachmentDescriptor::new("sync_route:bad_nbt", || ()).sync(
+                    AttachmentCodec {
+                        encode: |_| {
+                            Ok([(
+                                "too_long".into(),
+                                Tag::String("x".repeat(65_536).as_str().into()),
+                            )]
+                            .into())
+                        },
+                        decode: |_| Ok(()),
+                    },
+                ),
+            )
+            .unwrap();
+        *BAD_NBT_KEY.lock().unwrap() = Some(bad_nbt);
     }
 }
 
@@ -365,11 +383,25 @@ fn attachment_sync_follows_the_negotiated_route() {
                 assert!(Instant::now() < deadline);
                 std::thread::yield_now();
             }
+            let set_pair = |game: &Game<'_>, n: i32| {
+                let bad = BAD_NBT_KEY.lock().unwrap().clone().unwrap();
+                let good = value_key.clone();
+                game.integrated
+                    .as_ref()
+                    .unwrap()
+                    .call(move |server| {
+                        let seal = server.transaction_open();
+                        bad.set(server, Holder::Level, ()).unwrap();
+                        good.set(server, Holder::Level, n).unwrap();
+                        server.transaction_close(&seal, true);
+                    })
+                    .unwrap();
+            };
             // Integrated memory connection: a commit reaches the window, a rollback does not.
             set_level(game, 7, true);
             wait_window(game, &value_key, 7);
             set_level(game, 9, false);
-            set_level(game, 10, true);
+            set_pair(game, 10);
             wait_window(game, &value_key, 10);
 
             let port = game
@@ -388,10 +420,11 @@ fn attachment_sync_follows_the_negotiated_route() {
             let mut sunrise = peer(port, "SyncSunrise", true);
             let mut vanilla = peer(port, "SyncVanilla", false);
             // A joining Sunrise peer is sent the level's whole value, then each commit in
-            // order; a rolled-back edit sends nothing, and the authority keeps the old value.
+            // order; a refused projection on that same holder does not suppress the join
+            // snapshot or a later commit. A rolled-back edit sends nothing.
             assert_eq!(values_until(&mut sunrise, Holder::Level, 10), [10]);
             set_level(game, 11, false);
-            set_level(game, 12, true);
+            set_pair(game, 12);
             assert_eq!(values_until(&mut sunrise, Holder::Level, 12), [12]);
             let authority = {
                 let key = value_key.clone();

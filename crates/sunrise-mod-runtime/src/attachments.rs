@@ -175,6 +175,13 @@ pub trait AttachmentHost {
         name: &str,
         sync: bool,
     ) -> Result<(), AttachmentError>;
+    fn validate_attachment_write(
+        &self,
+        write: &AttachmentStoreWrite<'_>,
+    ) -> Result<(), AttachmentError> {
+        let (namespace, name) = write.id();
+        self.validate_attachment(namespace, name, write.form.policy.sync)
+    }
     fn attachments(
         &mut self,
         holder: Holder,
@@ -220,6 +227,52 @@ pub enum AttachmentWrite {
     Set,
 }
 
+/// A typed attachment operation already prepared by its descriptor. A store can consume it,
+/// but cannot replace its value, codec output, or policy and send it back to the host.
+// no wire: lends the process-local descriptor that prepared this write.
+pub struct AttachmentStoreWrite<'descriptor> {
+    id: (&'static str, &'static str),
+    descriptor: &'descriptor (dyn Any + Send + Sync),
+    engine_owned: bool,
+    value: AttachmentValue,
+    form: AttachmentForm,
+}
+
+impl AttachmentStoreWrite<'_> {
+    /// The attachment namespace and path.
+    pub fn id(&self) -> (&'static str, &'static str) {
+        self.id
+    }
+
+    /// Unpack the prepared value and storage form for a custom store implementation.
+    pub fn into_parts(
+        self,
+    ) -> (
+        (&'static str, &'static str),
+        AttachmentValue,
+        AttachmentForm,
+    ) {
+        (self.id, self.value, self.form)
+    }
+
+    /// Whether a runtime-only descriptor prepared this write rather than an issued key.
+    #[doc(hidden)]
+    pub fn engine_owned(&self) -> bool {
+        self.engine_owned
+    }
+
+    /// Test whether this write was constructed by the installed descriptor itself.
+    #[doc(hidden)]
+    pub fn matches_descriptor<T: Send + Sync + 'static>(
+        &self,
+        descriptor: &AttachmentType<T>,
+    ) -> bool {
+        self.descriptor
+            .downcast_ref::<AttachmentType<T>>()
+            .is_some_and(|actual| std::ptr::eq(actual, descriptor))
+    }
+}
+
 /// The current server's holders' values, erased to what crosses any boundary: typed
 /// attachment key methods (`AttachmentKey`) are built on it, for mods.
 pub trait AttachmentStore {
@@ -260,14 +313,12 @@ pub trait AttachmentStore {
         namespace: &str,
         name: &str,
     ) -> Result<Option<Compound>, AttachmentError>;
-    /// Keep `value` under `namespace:name`, with what comes with it.
+    /// Commit a descriptor-prepared write. Use `AttachmentKey::set`
+    /// for ordinary mod writes rather than calling this custom-store boundary directly.
     fn store(
         &mut self,
         holder: Holder,
-        namespace: &str,
-        name: &str,
-        value: AttachmentValue,
-        form: AttachmentForm,
+        write: AttachmentStoreWrite<'_>,
     ) -> Result<(), AttachmentError>;
     /// Drop the value under `namespace:name`, saved or decoded; clients hear of it if `sync`.
     fn discard(
@@ -350,23 +401,51 @@ impl<H: AttachmentHost + ?Sized> AttachmentStore for H {
     fn store(
         &mut self,
         holder: Holder,
-        namespace: &str,
-        name: &str,
-        value: AttachmentValue,
-        form: AttachmentForm,
+        prepared: AttachmentStoreWrite<'_>,
     ) -> Result<(), AttachmentError> {
-        AttachmentHost::validate_attachment(self, namespace, name, form.policy.sync)?;
-        let AttachmentForm {
-            encoded,
-            synced,
-            policy,
-            write,
-        } = form;
+        AttachmentHost::validate_attachment_write(self, &prepared)?;
+        let (
+            (namespace, name),
+            value,
+            AttachmentForm {
+                mut encoded,
+                mut synced,
+                policy,
+                write,
+            },
+        ) = prepared.into_parts();
         if matches!(holder, Holder::OriginalPlayer(_)) {
             return Err(AttachmentError::MissingHolder);
         }
+        let map = self.attachments(holder, AttachmentAccess::Store)?;
+        if write == AttachmentWrite::Decoded {
+            // Preserve only the canonical bytes already stored on this holder. A custom
+            // adapter cannot promote arbitrary NBT into the game's disk or replica state.
+            let raw = match map.entry(namespace, name)?.map(|entry| &entry.state) {
+                Some(Entry::Raw {
+                    saved,
+                    kind: AttachmentRawKind::Saved,
+                    ..
+                }) if encoded.is_some() => {
+                    encoded = Some(raw_value(saved).ok_or(AttachmentError::Decode)?.clone());
+                    true
+                }
+                Some(Entry::Raw {
+                    saved,
+                    kind: AttachmentRawKind::Synced,
+                    ..
+                }) if synced.is_some() => {
+                    synced = Some(raw_value(saved).ok_or(AttachmentError::Decode)?.clone());
+                    true
+                }
+                _ => false,
+            };
+            if !raw {
+                return Err(AttachmentError::Decode);
+            }
+        }
         Attachments::store(
-            self.attachments(holder, AttachmentAccess::Store)?,
+            map,
             namespace,
             name,
             Decoded {
@@ -658,14 +737,17 @@ impl<T: Clone + Send + Sync + 'static> AttachmentOps<'_, T> {
             if !matches!(holder, Holder::OriginalPlayer(_)) {
                 store.store(
                     holder,
-                    raw.namespace,
-                    raw.name,
-                    Arc::new(value.clone()),
-                    AttachmentForm {
-                        encoded: Some(saved),
-                        synced: None,
-                        policy: raw.policy(),
-                        write: AttachmentWrite::Decoded,
+                    AttachmentStoreWrite {
+                        id: (raw.namespace, raw.name),
+                        descriptor: raw,
+                        engine_owned: matches!(self, Self::Raw(_)),
+                        value: Arc::new(value.clone()),
+                        form: AttachmentForm {
+                            encoded: Some(saved),
+                            synced: None,
+                            policy: raw.policy(),
+                            write: AttachmentWrite::Decoded,
+                        },
                     },
                 )?;
             }
@@ -684,10 +766,13 @@ impl<T: Clone + Send + Sync + 'static> AttachmentOps<'_, T> {
             };
             store.store(
                 holder,
-                raw.namespace,
-                raw.name,
-                Arc::new(value.clone()),
-                form,
+                AttachmentStoreWrite {
+                    id: (raw.namespace, raw.name),
+                    descriptor: raw,
+                    engine_owned: matches!(self, Self::Raw(_)),
+                    value: Arc::new(value.clone()),
+                    form,
+                },
             )?;
         }
         Ok(Some(value))
@@ -763,7 +848,16 @@ impl<T: Clone + Send + Sync + 'static> AttachmentOps<'_, T> {
             policy: raw.policy(),
             write,
         };
-        store.store(holder, raw.namespace, raw.name, value, form)
+        store.store(
+            holder,
+            AttachmentStoreWrite {
+                id: (raw.namespace, raw.name),
+                descriptor: raw,
+                engine_owned: matches!(self, Self::Raw(_)),
+                value,
+                form,
+            },
+        )
     }
 }
 
@@ -953,37 +1047,28 @@ impl AttachmentEntry {
         Self::raw(saved)
     }
 
-    /// Rebuild a transferred synced binding for lazy typed reads.
+    /// Rebuild a transferred replica from the original sync payload for lazy typed reads.
     #[doc(hidden)]
-    pub fn from_synced(synced: Compound) -> Self {
-        Self::raw_synced_envelope(synced)
+    pub fn from_synced(payload: Compound) -> Self {
+        Self::raw_synced(payload)
     }
 
-    /// Capture the encoded envelope and its codec kind for batch transfer, if this binding
-    /// has a persistence or sync representation.
+    /// Capture the saved envelope or the replica's original sync payload for batch transfer.
     #[doc(hidden)]
     pub fn transfer_form(&self) -> Option<(AttachmentRawKind, Compound)> {
         match &self.state {
-            Entry::Raw { saved, kind, .. } => Some((*kind, saved.clone())),
-            Entry::Decoded(value) => {
-                if let Some(saved) = envelope(value) {
-                    Some((AttachmentRawKind::Saved, saved))
-                } else {
-                    value.synced.as_ref().map(|synced| {
-                        (
-                            AttachmentRawKind::Synced,
-                            [("value".into(), Tag::Compound(synced.clone()))].into(),
-                        )
-                    })
-                }
+            Entry::Raw {
+                saved,
+                kind: AttachmentRawKind::Saved,
+                ..
+            } => Some((AttachmentRawKind::Saved, saved.clone())),
+            Entry::Decoded(value) if value.encoded.is_some() => {
+                envelope(value).map(|saved| (AttachmentRawKind::Saved, saved))
             }
+            _ => self
+                .synced_value()
+                .map(|payload| (AttachmentRawKind::Synced, payload.clone())),
         }
-    }
-
-    /// Capture the encoded envelope, if this binding has a persistence or sync form.
-    #[doc(hidden)]
-    pub fn saved(&self) -> Option<Compound> {
-        self.transfer_form().map(|(_, envelope)| envelope)
     }
 
     fn raw(saved: Compound) -> Self {
@@ -997,14 +1082,9 @@ impl AttachmentEntry {
     }
 
     fn raw_synced(value: Compound) -> Self {
-        let saved = [("value".into(), Tag::Compound(value))].into();
-        Self::raw_synced_envelope(saved)
-    }
-
-    fn raw_synced_envelope(saved: Compound) -> Self {
         Self {
             state: Entry::Raw {
-                saved,
+                saved: [("value".into(), Tag::Compound(value))].into(),
                 kind: AttachmentRawKind::Synced,
                 reads: ReadCache::default(),
             },

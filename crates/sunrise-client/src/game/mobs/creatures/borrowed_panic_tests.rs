@@ -27,6 +27,7 @@ const LEVEL_SEED: i64 = 0x5eed;
 
 struct Probe {
     family: Family,
+    retained: std::sync::Mutex<Option<mod_api::AttachmentKey<i32>>>,
     calls: AtomicUsize,
     posts: AtomicUsize,
     guest_hits: AtomicUsize,
@@ -56,7 +57,8 @@ impl Probe {
                 host.with_random(|random| random.next_long()),
                 Some(LegacyRandom::new(LEVEL_SEED).next_long())
             );
-            VALUE.set(host.attachments(), Holder::Level, 314).unwrap();
+            let retained = self.retained.lock().unwrap().clone().unwrap();
+            retained.set_in(host, Holder::Level, 314).unwrap();
             eprintln!("BORROWED_NATIVE_PROGRESS:{family:?}");
         }
         self.hear(family, target);
@@ -187,11 +189,13 @@ impl mod_api::Hooks for Hooks {
             .fetch_add(event.entities.len(), Ordering::SeqCst);
     }
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type(mod_api::AttachmentDescriptor::new(
-            "borrowed-panic:retained",
-            || (),
-        ))
-        .unwrap();
+        let retained = r
+            .register_attachment_type(mod_api::AttachmentDescriptor::new(
+                "borrowed-panic:retained",
+                || 0i32,
+            ))
+            .unwrap();
+        *self.0.retained.lock().unwrap() = Some(retained);
         if matches!(self.0.family, Family::Goal | Family::MountedGoal) {
             r.entity_part("minecraft:zombie", GoalPart(self.0.clone()));
         }
@@ -313,6 +317,7 @@ fn run_output(family: Family, output: Output) {
         let payload_address = (&*payload as *const PanicToken) as usize;
         let probe = Arc::new(Probe {
             family,
+            retained: std::sync::Mutex::new(None),
             calls: AtomicUsize::new(0),
             posts: AtomicUsize::new(0),
             guest_hits: AtomicUsize::new(0),

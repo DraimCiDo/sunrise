@@ -251,7 +251,20 @@ impl Game<'_> {
         if senders.is_empty() {
             return;
         }
-        let body = attachment_sync::encode(message).map_err(|e| e.to_string());
+        let body = match attachment_sync::encode_retaining(message, |change, error| {
+            report_attachment_sync_refusal(
+                message.holder,
+                format_args!(
+                    "{}:{}: {error}",
+                    change.namespace.to_string_lossy(),
+                    change.name.to_string_lossy()
+                ),
+            );
+        }) {
+            Ok(Some(body)) => Ok(body),
+            Ok(None) => return,
+            Err(error) => Err(error.to_string()),
+        };
         for sender in senders {
             let Err(error) = self.queue_attachment_sync(sender, &body) else {
                 continue;

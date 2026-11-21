@@ -510,7 +510,7 @@ fn saved_attachment_batch_fields_keep_scoped_identity_and_nbt() {
     let mut saved = Compound::new();
     saved.insert("value".into(), Tag::Int(123));
     let mut synced = Compound::new();
-    synced.insert("value".into(), Tag::Int(456));
+    synced.insert("network_field".into(), Tag::Int(456));
     let saved_row = AttachmentOwner::from_parts(saved_holder, 71).into_row(std::sync::Arc::new(
         AttachmentEntry::from_saved(saved.clone()),
     ));

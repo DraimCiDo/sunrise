@@ -270,8 +270,8 @@ macro_rules! host_attachment_store {
             fn synced_raw(&mut self, holder: Holder, namespace: &str, name: &str) -> AttachmentResult<Option<Compound>> {
                 self.attachments().synced_raw(holder, namespace, name)
             }
-            fn store(&mut self, holder: Holder, namespace: &str, name: &str, value: AttachmentValue, form: AttachmentForm) -> AttachmentResult<()> {
-                self.attachments().store(holder, namespace, name, value, form)
+            fn store(&mut self, holder: Holder, write: AttachmentStoreWrite<'_>) -> AttachmentResult<()> {
+                self.attachments().store(holder, write)
             }
             fn discard(&mut self, holder: Holder, namespace: &str, name: &str, sync: bool) -> AttachmentResult<()> {
                 self.attachments().discard(holder, namespace, name, sync)

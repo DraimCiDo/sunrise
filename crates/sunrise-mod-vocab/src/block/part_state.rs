@@ -91,10 +91,12 @@ pub trait BlockEntityPartState: BlockEntityPart + Sized {
         entity: BlockEntityRef,
     ) -> Result<Option<Self::Data>, PartStateError> {
         let key = self.state_key();
-        let checked = key.live().map_err(|error| attachment(key, error))?;
+        let (checked, epoch) = key
+            .live_with_epoch()
+            .map_err(|error| attachment(key, error))?;
         level
             .block_entity_part_snapshot(entity, checked.namespace(), checked.name())?
-            .query_checked(checked)
+            .query_checked(checked, epoch)
             .get(AttachmentHolder::BlockEntity(entity))
             .map_err(|error| match error {
                 AttachmentRowError::Value(error) => attachment(key, error),
@@ -389,11 +391,13 @@ pub fn read_state<H: PartStateHolder, T: Clone + Send + Sync + 'static>(
     entity: H,
     key: &AttachmentKey<T>,
 ) -> Result<Option<T>, PartStateError> {
-    let checked = key.live().map_err(|error| attachment(key, error))?;
+    let (checked, epoch) = key
+        .live_with_epoch()
+        .map_err(|error| attachment(key, error))?;
     entity.part_state_holder(host)?;
     host.attachment_query(checked.namespace(), checked.name())
         .map_err(|error| attachment(key, error))?
-        .query_checked(checked)
+        .query_checked(checked, epoch)
         .get(entity.attachment_holder())
         .map_err(|error| match error {
             AttachmentRowError::Value(error) => attachment(key, error),

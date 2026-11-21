@@ -16,10 +16,10 @@ pub trait AttachmentQueries: Host {
         &self,
         key: &'key AttachmentKey<T>,
     ) -> Result<AttachmentQuery<'key, T>, AttachmentError> {
-        let checked = key.live()?;
+        let (checked, epoch) = key.live_with_epoch()?;
         Ok(self
             .attachment_query(checked.namespace(), checked.name())?
-            .query_checked(checked))
+            .query_checked(checked, epoch))
     }
 }
 impl<H: Host + ?Sized> AttachmentQueries for H {}

@@ -48,6 +48,12 @@ impl AttachmentHost for Store {
         let _ = (namespace, name, sync);
         Ok(())
     }
+    fn validate_attachment_write(
+        &self,
+        write: &AttachmentStoreWrite<'_>,
+    ) -> Result<(), AttachmentError> {
+        crate::__private::validate_attachment_write(write)
+    }
     fn attachments(
         &mut self,
         holder: Holder,
@@ -218,4 +224,102 @@ fn stale_key_is_refused_by_query_query_mut_and_retained_row_writes() {
         Err(AttachmentRowError::Value(AttachmentError::StaleKey))
     );
     assert_eq!(host.query(&second).unwrap().get(scoped), Ok(Some(17)));
+}
+
+#[test]
+fn retained_raw_query_uses_the_current_installations_decoder() {
+    let first_codec = AttachmentCodec {
+        encode: |_| Err(AttachmentError::Encode),
+        decode: |_| Ok(17u32),
+    };
+    let first = crate::parts::install_attachment_fixture(
+        "mapping",
+        AttachmentDescriptor::new("mapping:raw", || 0u32).sync(first_codec),
+    );
+    let scoped =
+        AttachmentHolder::Level(LevelRef::new(WorldEpoch::new(19), DimensionKey::OVERWORLD));
+    let host = Store::default();
+    let mut map = Attachments::default();
+    map.apply_sync(runtime::AttachmentSync {
+        namespace: "mapping".into(),
+        name: "raw".into(),
+        value: Some(Compound::new()),
+    });
+    map.bind_index(&host.index, scoped);
+    let retained = host.attachment_query("mapping", "raw").unwrap();
+    assert_eq!(
+        retained.clone().query(&first).unwrap().get(scoped),
+        Ok(Some(17))
+    );
+
+    let second = crate::parts::install_attachment_fixture(
+        "mapping",
+        AttachmentDescriptor::new("mapping:raw", || 0u32).sync(AttachmentCodec {
+            decode: |_| Ok(38),
+            ..first_codec
+        }),
+    );
+    assert_eq!(host.query(&second).unwrap().get(scoped), Ok(Some(38)));
+    assert_eq!(
+        *retained
+            .query(&second)
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap()
+            .unwrap()
+            .value,
+        38
+    );
+}
+
+#[test]
+fn public_store_only_writes_the_issued_descriptor_type_and_policy() {
+    const CODEC: AttachmentCodec<u32> = AttachmentCodec {
+        encode: |value| Ok([("projection".into(), Tag::Int(*value as i32 + 100))].into()),
+        decode: |_| Err(AttachmentError::Decode),
+    };
+    let key = crate::parts::install_attachment_fixture(
+        "mapping",
+        AttachmentDescriptor::new("mapping:sync", || 0u32).sync(CODEC),
+    );
+    let mut host = Store::default();
+    host.maps.insert(Holder::Level, Attachments::default());
+    let imposter = runtime::AttachmentType {
+        namespace: "mapping",
+        name: "sync",
+        default: || 0u32,
+        codec: Some(CODEC),
+        copy_on_death: false,
+        sync_codec: Some(CODEC),
+    };
+    assert_eq!(
+        imposter.set(Host::attachments(&mut host), Holder::Level, 8),
+        Err(AttachmentError::StaleKey)
+    );
+    let wrong_type = runtime::AttachmentType {
+        namespace: "mapping",
+        name: "sync",
+        default: || false,
+        codec: None,
+        copy_on_death: false,
+        sync_codec: None,
+    };
+    assert_eq!(
+        wrong_type.set(Host::attachments(&mut host), Holder::Level, true),
+        Err(AttachmentError::StaleKey)
+    );
+    assert_eq!(key.get_existing(&mut host, Holder::Level), Ok(None));
+
+    key.set(&mut host, Holder::Level, 9).unwrap();
+    let map = host.maps.get_mut(&Holder::Level).unwrap();
+    assert!(map.to_nbt().is_empty());
+    let changes = map.take_sync_changes(|namespace, name, input| {
+        crate::__private::project_sync_attachment(namespace, name, input).unwrap()
+    });
+    assert_eq!(changes.len(), 1);
+    assert_eq!(
+        changes[0].value,
+        Some([("projection".into(), Tag::Int(109))].into())
+    );
 }

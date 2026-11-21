@@ -87,9 +87,11 @@ key or a policy mismatch), `Undeclared` (missing attachment registration),
 `StaleKey` (key from an earlier installation), `HolderBusy` (storage temporarily
 unavailable; retry after the pass) and `UnsupportedHolder` (the holder family has
 no attachment storage; retrying does not help).
-`host.attachments()` exposes
-the host's `AttachmentStore`. Reading clones the value; copying a holder's data
-shares its stored values without cloning them.
+`host.attachments()` exposes the host's `AttachmentStore` for custom storage
+adapters. Its `store` method accepts only an `AttachmentStoreWrite` prepared by
+the installed descriptor, not a caller-supplied name, erased value or NBT form.
+Ordinary mods write with `key.set(host, holder, value)`. Reading clones the
+value; copying a holder's data shares its stored values without cloning them.
 
 `AttachmentHolder` keeps an existing typed handle when a system needs to store a holder
 identity: `Entity`, `Player`, `BlockEntity`, `Chunk` or `Level`. It is `Copy`, does not keep
@@ -170,8 +172,10 @@ when it starts seeing it: a chunk sent (with its block entities), a level joined
 re-entered, an entity tracked, and its own player. The wire form is encoded and decoded
 with the sync codec passed to `.sync(...)`, without requiring `.serialize(...)`.
 The send pass encodes the current committed value, including on explicit resync.
-A projection refusal is logged each time with the holder, attachment ID and declaring
-mod; other keys can still be sent. A panic disables the failing sync callback for the
+A codec refusal is logged each time with the holder, attachment ID and declaring
+mod; other keys can still be sent. If a projection succeeds but its NBT cannot
+be written to the network, the send pass reports the holder and key and omits
+only that change. A panic disables the failing sync callback for the
 session and reports the mod in the log and in a local error toast.
 
 Values travel on `sunrise:attachment_sync`, an engine declaration in the negotiated

@@ -1,8 +1,8 @@
 //! Load-owned typed attachment descriptors, issued keys, and registration traits.
 use super::*;
 use crate::{
-    AttachmentCodec, AttachmentError, AttachmentPolicy, Compound, Holder, Identifier,
-    LevelRandomHost,
+    AttachmentCodec, AttachmentError, AttachmentPolicy, AttachmentStoreWrite, Compound, Holder,
+    Identifier, LevelRandomHost,
 };
 use std::fmt;
 use sunrise_mod_runtime::attachments::{
@@ -107,6 +107,8 @@ type ProjectAttachmentSync = fn(
     AttachmentSyncInput<'_>,
 ) -> Result<Option<Compound>, AttachmentError>;
 
+type MatchAttachmentWrite = fn(&(dyn Any + Send + Sync), &AttachmentStoreWrite<'_>) -> bool;
+
 /// Type-erased attachment descriptor accepted by [`AttachmentTypesRegistrar::submit_attachment`].
 ///
 /// Built from a typed [`AttachmentDescriptor<T>`] via [`From`] / [`Into`].
@@ -117,6 +119,7 @@ pub struct ErasedAttachmentDescriptor {
     policy: AttachmentPolicy,
     build: BuildAttachmentRecord,
     project_sync: ProjectAttachmentSync,
+    match_write: MatchAttachmentWrite,
 }
 
 impl<T: Send + Sync + 'static> From<AttachmentDescriptor<T>> for ErasedAttachmentDescriptor {
@@ -129,6 +132,17 @@ impl<T: Send + Sync + 'static> From<AttachmentDescriptor<T>> for ErasedAttachmen
                 .downcast_ref::<AttachmentRegistration<T>>()
                 .ok_or(AttachmentError::TypeMismatch)?;
             registration.checked.as_type().project_sync(input)
+        }
+
+        fn match_write<T: Send + Sync + 'static>(
+            record: &(dyn Any + Send + Sync),
+            write: &AttachmentStoreWrite<'_>,
+        ) -> bool {
+            record
+                .downcast_ref::<AttachmentRegistration<T>>()
+                .is_some_and(|registration| {
+                    write.matches_descriptor(registration.checked.as_type())
+                })
         }
 
         let id = descriptor.id;
@@ -155,6 +169,7 @@ impl<T: Send + Sync + 'static> From<AttachmentDescriptor<T>> for ErasedAttachmen
             policy,
             build,
             project_sync: project_sync::<T>,
+            match_write: match_write::<T>,
         }
     }
 }
@@ -229,6 +244,7 @@ pub struct RegisteredAttachment {
     policy: AttachmentPolicy,
     record: Arc<dyn Any + Send + Sync>,
     project_sync: ProjectAttachmentSync,
+    match_write: MatchAttachmentWrite,
     sync_panicked: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -335,6 +351,7 @@ pub fn check_attachment_descriptor(
         policy: descriptor.policy,
         record,
         project_sync: descriptor.project_sync,
+        match_write: descriptor.match_write,
         sync_panicked: Default::default(),
     })
 }
@@ -415,6 +432,13 @@ impl<T: 'static> AttachmentKey<T> {
 
     pub(crate) fn live(&self) -> Result<&CheckedAttachmentType<T>, AttachmentError> {
         self.live_in(installed().ok_or(AttachmentError::StaleKey)?)
+    }
+
+    pub(crate) fn live_with_epoch(
+        &self,
+    ) -> Result<(&CheckedAttachmentType<T>, u64), AttachmentError> {
+        let parts = installed().ok_or(AttachmentError::StaleKey)?;
+        Ok((self.live_in(parts)?, parts.epoch))
     }
 
     pub(crate) fn live_in(
@@ -665,6 +689,23 @@ pub fn validate_attachment_use(
         name,
         sync,
     )
+}
+
+/// Require a write prepared by this installation's exact typed descriptor.
+#[doc(hidden)]
+pub fn validate_attachment_write(write: &AttachmentStoreWrite<'_>) -> Result<(), AttachmentError> {
+    let (namespace, name) = write.id();
+    let record = installed()
+        .and_then(|parts| parts.attachment_types.get(namespace))
+        .and_then(|types| types.get(name));
+    match record {
+        Some(record) if (record.match_write)(record.record.as_ref(), write) => Ok(()),
+        // Runtime-only attachments used by the engine are not mod declarations.
+        None if write.engine_owned() && crate::content::crash::current_native_mod().is_none() => {
+            Ok(())
+        }
+        _ => Err(AttachmentError::StaleKey),
+    }
 }
 
 // Owner policy: the owner's declaration suffices for all callers.

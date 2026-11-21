@@ -24,15 +24,16 @@ impl AttachmentBatch {
         self,
         key: &'key AttachmentKey<T>,
     ) -> Result<AttachmentQuery<'key, T>, AttachmentError> {
-        let checked = key.live()?;
-        Ok(self.0.query_checked(checked))
+        let (checked, epoch) = key.live_with_epoch()?;
+        Ok(self.0.query_checked(checked, epoch))
     }
 
     pub(crate) fn query_checked<'key, T: Send + Sync + 'static>(
         self,
         checked: &'key runtime::CheckedAttachmentType<T>,
+        epoch: u64,
     ) -> AttachmentQuery<'key, T> {
-        self.0.query_checked(checked)
+        self.0.query_checked(checked, epoch)
     }
 }
 /// A typed snapshot whose iterator borrows values from its captured bindings.
@@ -88,24 +89,25 @@ impl crate::wire::Wire for AttachmentBatch {
     fn put(&self, out: &mut crate::wire::Writer) {
         use runtime::AttachmentRawKind;
         use sunrise_core::nbt::{self, Limits, Tag};
-        let rows: Vec<_> = self
-            .0
-            .rows()
-            .iter()
-            .filter_map(|row| {
-                let (kind, envelope) = row.entry.transfer_form()?;
-                let kind_tag = match kind {
-                    AttachmentRawKind::Saved => 0u8,
-                    AttachmentRawKind::Synced => 1u8,
-                };
-                let bytes = nbt::write_network(&Tag::Compound(envelope), Limits::default()).ok()?;
-                Some((
-                    AttachmentWriteToken::from(row.write_token()),
-                    kind_tag,
-                    bytes,
-                ))
-            })
-            .collect();
+        let mut rows = Vec::new();
+        for row in self.0.rows() {
+            let Some((kind, payload)) = row.entry.transfer_form() else {
+                continue;
+            };
+            let kind_tag = match kind {
+                AttachmentRawKind::Saved => 0u8,
+                AttachmentRawKind::Synced => 1u8,
+            };
+            let Ok(bytes) = nbt::write_network(&Tag::Compound(payload), Limits::default()) else {
+                out.fail(crate::wire::WireError::Invalid("invalid attachment NBT"));
+                return;
+            };
+            rows.push((
+                AttachmentWriteToken::from(row.write_token()),
+                kind_tag,
+                bytes,
+            ));
+        }
         out.put(&rows);
     }
     fn take(input: &mut crate::wire::Reader<'_>) -> Result<Self, crate::wire::WireError> {
@@ -121,15 +123,15 @@ impl crate::wire::Wire for AttachmentBatch {
             }
             let (tag, consumed) = nbt::read_network(&bytes, Limits::default())
                 .map_err(|_| WireError::Invalid("invalid attachment NBT"))?;
-            let Tag::Compound(envelope) = tag else {
-                return Err(WireError::Invalid("invalid attachment envelope"));
+            let Tag::Compound(payload) = tag else {
+                return Err(WireError::Invalid("invalid attachment compound"));
             };
             if consumed != bytes.len() {
                 return Err(WireError::Invalid("trailing attachment NBT"));
             }
             let entry = match kind_tag {
-                0 => runtime::AttachmentEntry::from_saved(envelope),
-                1 => runtime::AttachmentEntry::from_synced(envelope),
+                0 => runtime::AttachmentEntry::from_saved(payload),
+                1 => runtime::AttachmentEntry::from_synced(payload),
                 _ => return Err(WireError::Invalid("invalid attachment payload kind")),
             };
             result.push(token.0.into_row(Arc::new(entry)));
@@ -191,6 +193,41 @@ mod tests {
             Reader::new(out.bytes()).take::<AttachmentBatch>(),
             Err(WireError::Invalid("invalid attachment payload kind"))
         ));
+    }
+
+    #[test]
+    fn wire_attachment_batch_transfers_network_depth_and_reports_unwritable_nbt() {
+        use crate::wire::{Reader, WireError, Writer};
+        use sunrise_core::nbt::{Compound, Tag};
+
+        let holder = AttachmentHolder::Entity(EntityRef::new(WorldEpoch::new(1), 43));
+        let to_batch = |payload: Compound| {
+            let entry = Arc::new(runtime::AttachmentEntry::from_synced(payload));
+            let row = index::AttachmentOwner::from_parts(holder, 8).into_row(entry);
+            AttachmentBatch::from(runtime::AttachmentBatch::new(Arc::new(
+                index::AttachmentSnapshot::from_rows(vec![row]),
+            )))
+        };
+        let leaf = Tag::Int(23);
+        let Tag::Compound(deep) =
+            (0..512).fold(leaf, |child, _| Tag::Compound([("v".into(), child)].into()))
+        else {
+            unreachable!()
+        };
+        let mut writer = Writer::new();
+        writer.put(&to_batch(deep.clone()));
+        assert_eq!(writer.error(), None);
+        let decoded: AttachmentBatch = Reader::new(writer.bytes()).take().unwrap();
+        assert_eq!(decoded.0.rows().len(), 1);
+        assert_eq!(decoded.0.rows()[0].entry.transfer_form().unwrap().1, deep);
+
+        let bad = [("s".into(), Tag::String("x".repeat(65_536).as_str().into()))].into();
+        let mut writer = Writer::new();
+        writer.put(&to_batch(bad));
+        assert_eq!(
+            writer.error(),
+            Some(WireError::Invalid("invalid attachment NBT"))
+        );
     }
 
     #[test]
