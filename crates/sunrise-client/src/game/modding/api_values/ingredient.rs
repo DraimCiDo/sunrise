@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Ingredient conversions retain concrete predicates and slot displays.
 use super::*;
 impl TryIntoApi for crate::crafting::Ingredient {

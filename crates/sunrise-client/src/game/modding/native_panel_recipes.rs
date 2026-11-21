@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A mod's recipes shown in its item panel's place (`native_panel_recipes`),
 //! laid out by the game with its own slots, arrows and
 //! buttons, paged to the panel's height, under a title and a back button.

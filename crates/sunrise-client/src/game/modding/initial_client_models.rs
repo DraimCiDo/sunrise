@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Initial-load publication boundary shared by startup and its resource fixture.
 use super::Game;
 impl Game<'_> {

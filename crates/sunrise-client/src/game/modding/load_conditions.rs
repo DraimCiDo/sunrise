@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! Load-scoped registration and per-candidate condition lookup.
 #[path = "load_conditions/reload.rs"]
 mod reload;

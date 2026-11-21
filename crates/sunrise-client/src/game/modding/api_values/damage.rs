@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Scalar-only damage snapshots at the subscribed combat boundary.
 use super::{TryIntoApi, TryIntoEngine};
 use mod_api::{DamageContainer, DamageValues, Reduction};

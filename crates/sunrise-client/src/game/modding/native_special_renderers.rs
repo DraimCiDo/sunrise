@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! Special item models drawn by mods' renderers on the client:
 //! `native_register_special_model_renderer` (NeoForge's `RegisterSpecialModelRendererEvent`) is
 //! asked once at start, before resources load, and its types are what a `minecraft:special` model

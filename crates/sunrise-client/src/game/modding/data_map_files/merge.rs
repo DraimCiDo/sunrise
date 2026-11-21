@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Application of validated data-map layers in pack order.
 use super::{File, Key, Tags};
 use std::collections::BTreeMap;

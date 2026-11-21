@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Shape queries for a supplied state without replacing the block in the world.
 use super::{Game, perspective};
 use mod_api::BlockShapeKind;

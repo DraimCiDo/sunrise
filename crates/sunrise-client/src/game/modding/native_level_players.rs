@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The players of a level and of a chunk through `LevelRef::online_players` and
 //! `ChunkRef::watchers` (docs/modding/src/how-to/native-mods.md, "Entity and level
 //! handles"). Both name players by the same UUID enumeration the spawn code

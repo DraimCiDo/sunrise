@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! Server commands and players for native mods (docs/modding/src/how-to/native-mods.md,
 //! "Server commands and players"): the commands mods add to the
 //! server's command tree (`native_register_commands`), a player's command

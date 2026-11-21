@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 use super::{Game, commands::Target};
 use crate::game::api_values::TryIntoEngine;
 

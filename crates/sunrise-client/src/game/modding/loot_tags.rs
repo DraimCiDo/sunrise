@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Adapt the current loot evaluator's tag reads to the existing API resource.
 use mod_api::{BlockKey, FluidKey, Identifier, ItemKey, TagKey, TagMembers, Tags};
 

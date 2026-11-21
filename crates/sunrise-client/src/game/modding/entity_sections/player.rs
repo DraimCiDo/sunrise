@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! File and tell each player move before `Entity.move` resumes.
 
 use super::{EntitySections, Game, PlayerMoveState, Scope, SectionWriter, tell_live};

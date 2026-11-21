@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Biome colours a client mod changes (`native_biome_colors`), for seasons:
 //! the grass, foliage, dry foliage and water tints the mesher blends, as a
 //! resource pack's colormaps and biome effects set them, changed while the

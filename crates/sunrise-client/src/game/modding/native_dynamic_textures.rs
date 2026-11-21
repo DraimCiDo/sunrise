@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! `ClientRenderClientHost::create_dynamic_texture`, `update_dynamic_texture`,
 //! `free_dynamic_texture` and `dynamic_texture_budget`: a client mod's dynamic textures (vanilla's
 //! `DynamicTexture` in the `TextureManager`), held in the GUI atlas's pool of slots for the mod

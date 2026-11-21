@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 use super::{
     Game,
     api_values::{BlockEntitySnapshotError, TryIntoApi, finish_block_entity_writeback},

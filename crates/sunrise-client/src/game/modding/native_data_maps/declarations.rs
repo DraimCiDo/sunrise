@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! File and entry shapes for mod data-map declarations.
 use super::{DataMapType, DataMaps, MapRegistries, MapValues, full_id};
 use serde_json::Value;

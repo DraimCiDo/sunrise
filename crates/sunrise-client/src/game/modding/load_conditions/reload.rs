@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! Native condition registration and reload lifecycle.
 use super::{candidate_registries, candidate_registry_files};
 use crate::game::{Game, functions, mods, server_reload};

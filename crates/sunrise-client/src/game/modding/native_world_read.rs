@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Read-only block, tag and fluid queries for native mods.
 use super::native_level_signals::ReadLevel;
 use super::{Dim, Game};

@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! Recipe ingredient shapes at the network projection's input boundary.
 use serde_json::Value;
 

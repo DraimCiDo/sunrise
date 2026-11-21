@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A remote catalogue supplies recipe membership, never the client's local recipe JSON.
 use super::native_book_displays::Resources;
 use super::*;

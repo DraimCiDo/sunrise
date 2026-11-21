@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Mobs for native server mods (docs/modding/src/how-to/native-mods.md, "Mobs"): spawn one,
 //! read the mobs of the level in place, and move, hurt or remove one by its id.
 //! They act where the world is simulated, never on a client's copy, and only on

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Datapack registry reads through a level handle.
 use super::Game;
 use mod_api::LevelRef;

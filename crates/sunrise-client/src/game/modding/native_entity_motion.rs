@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! An entity's motion and shape for native server mods, through an
 //! `EntityRef` (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387):
 //! velocity, ground, box, eyes and view. They read the entity a handle names

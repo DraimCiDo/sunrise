@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Reuse the game's stack model resolution for mod particle requests.
 use super::Game;
 use sunrise_client::{items::ItemStack, particles::ParticleOptions};

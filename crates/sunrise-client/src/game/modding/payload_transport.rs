@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Sole-owner main execution and root-commit raw publication.
 use super::Game;
 use mod_api::{

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The integrated command inventory shares the frozen custom statistic declarations.
 use super::Game;
 

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The clip stack of one GUI drawing hook call: `DrawContext::push_clip` and `pop_clip`
 //! (`GuiGraphics.enableScissor`, `disableScissor`), cut on the batch as the game's own
 //! screens cut theirs (`HudBatch::clip_since`).

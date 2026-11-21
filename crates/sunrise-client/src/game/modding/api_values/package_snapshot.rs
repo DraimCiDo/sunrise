@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The loaded packages' manifests as the `PackageInfo` snapshots mods read.
 use super::TryIntoApi;
 use sunrise_mod_package::manifest::{Manifest, Property};

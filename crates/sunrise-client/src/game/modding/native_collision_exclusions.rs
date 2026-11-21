@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A player's collision exclusions for mods (#3717): boxes of its own level in which that level's
 //! blocks don't stop it, as a portal in a wall needs. The server keeps them on the guest, and its
 //! body takes them at each turn; a client keeps its own player's on the body it moves. Neither

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The server's ContainerOpenersCounter for declared mod containers.
 use super::Game;
 use sunrise_client::mobs::{Species, Who};

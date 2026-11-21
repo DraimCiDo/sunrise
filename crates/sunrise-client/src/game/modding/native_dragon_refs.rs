@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Ender dragon handles for native server mods: the `Mob` state the dragon
 //! keeps, its phase and the fight it belongs to.
 use super::{

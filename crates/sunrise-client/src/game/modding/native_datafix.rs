@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Saved data from older versions upgraded for mods: one block entity's or entity's NBT through the datafixers the
 //! chunk loaders run (`upgrade_block_entity_nbt`, `upgrade_entity_nbt`).
 use super::Game;

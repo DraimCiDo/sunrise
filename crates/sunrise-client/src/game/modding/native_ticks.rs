@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Entities ticking for native mods (`native_entity_tick_pre`, `native_entity_tick_post`:
 //! NeoForge's `EntityTickEvent.Pre` and `.Post`), on the server and on a client. An entity of a
 //! type a mod named (`entity_tick_each`) is told alone, right before and right after its own

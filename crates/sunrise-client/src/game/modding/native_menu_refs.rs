@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Handles to supported menus: shared reads, server storage and client clicks.
 use super::{
     Game,

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The `WorldDrawContext::name_tag` scene (#4171). It draws only at
 //! `AfterLevel` in a view whose game time is `SCENE_TIME`, so other tests' views stay empty.
 use mod_api::{

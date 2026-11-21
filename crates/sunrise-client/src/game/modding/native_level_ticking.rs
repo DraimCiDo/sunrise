@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Ticking eligibility through the same predicates as the server's tick phases.
 use super::Game;
 use mod_api::LevelRef;

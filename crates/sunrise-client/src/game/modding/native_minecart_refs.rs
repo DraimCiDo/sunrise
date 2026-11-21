@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Minecart handles for native server mods.
 use super::{
     Game,

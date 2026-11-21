@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Reads that combine a lent mob with authoritative game state.
 use super::{GoalCx, Resolved};
 use crate::mobs::Mob;

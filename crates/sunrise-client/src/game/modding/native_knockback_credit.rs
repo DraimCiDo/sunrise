@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Narrow, per-victim context prepared before the hit borrows its victim.
 use super::{Game, combat::PlayerCredit};
 use std::collections::HashMap;

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Server capture seams. Disk callbacks run only in the persistence owner.
 use super::*;
 use sunrise_client::chunk::Chunk;

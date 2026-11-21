@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Scoreboard team handles for native server mods, and the client's teams.
 //!
 //! As the objectives of `native_scoreboard.rs`: every write is made on the same `Scoreboard`

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Registration's type-only view of the game's stock capability providers.
 //!
 //! These queries share the factories/catalogs used by the runtime defaults, not a

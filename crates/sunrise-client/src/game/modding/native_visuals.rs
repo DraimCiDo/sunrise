@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 use super::Game;
 use sunrise_client::{dynamic_light, gizmos};
 

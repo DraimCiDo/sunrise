@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A player's break for native mods (`PlayerRef::destroy_block`): what a vein miner needs to
 //! break the blocks around the one its player broke as that player breaks them, taking their
 //! drops and experience in `block_drops`.

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Blockless server menus for native mods: vanilla chest displays or declared mod menus.
 //! Owned slots run ordinary clicks; display slots move nothing by default. Menu parts can
 //! replace a click, and a close listener receives any detached owned contents.

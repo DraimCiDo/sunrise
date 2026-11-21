@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Reads from the actual mob loaned to the active goal, or a disjoint live mob.
 use super::super::api_values::TryIntoApi;
 use super::{GoalCx, Resolved};

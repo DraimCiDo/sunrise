@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Save visibility while authoritative rows are lent out.
 use super::*;
 

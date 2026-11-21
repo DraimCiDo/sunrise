@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! What a server mod reads of the tick times and sets of the view and simulation distance.
 use super::Game;
 

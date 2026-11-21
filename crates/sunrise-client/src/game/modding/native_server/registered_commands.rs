@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! The mods' commands as the session holds them (`register_commands`). As on the reference
 //! loader, the mods are asked whenever the session's command tree is built: when a world opens,
 //! before its functions load, and on each `/reload`. The tree lives on `Game`, so a function

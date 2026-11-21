@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! Owned loot values at the guarded game boundary. No inventory count rules apply.
 use super::{TryIntoApi, TryIntoEngine};
 use mod_api::world::snapshots as api;

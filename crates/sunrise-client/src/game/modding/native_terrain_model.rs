@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Standalone models under a block entity's pose with the terrain's own materials
 //! (`BlockEntityDrawContext::terrain_model`): explicit solid/cutout/cutout-mipped selection,
 //! directional shading, UV shift and shrink, and tint.

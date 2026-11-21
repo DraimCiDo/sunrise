@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! Game-owned dimension codec and registered pack-entry conversion.
 use mod_api::{BiomeSourceKind, DimensionSettings};
 use serde_json::{Value, json};

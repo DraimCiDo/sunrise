@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Mods' selector tokens (`@allies`, NeoForge's `EntitySelectorManager`): the base selections
 //! the command registries parse them with, and their types' filter over the candidates.
 use super::Game;

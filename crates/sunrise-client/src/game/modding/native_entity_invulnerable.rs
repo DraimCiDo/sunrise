@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! An entity's invulnerability for native server mods, through an
 //! `EntityRef` (docs/modding/src/how-to/native-mods.md, "Entity and level handles"): the
 //! `Invulnerable` flag (`Entity.permanentlyInvulnerable`) and

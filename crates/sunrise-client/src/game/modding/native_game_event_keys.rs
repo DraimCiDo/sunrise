@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Startup game-event registry reads.
 use super::Game;
 impl Game<'_> {

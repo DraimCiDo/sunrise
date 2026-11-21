@@ -1,3 +1,4 @@
+// stable-line: no-content-declarations
 impl Game<'_> {
     pub(super) fn unscoped_level_all_entities(&self, level: LevelRef) -> Option<Vec<EntityRef>> {
         if !self.is_logical_server()

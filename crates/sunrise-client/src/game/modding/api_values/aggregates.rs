@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Whole-aggregate block-state boundaries. No partial snapshot or draw is admitted.
 use super::{TryIntoApi, block_state};
 use crate::game::{native_scene::SceneBlock, native_structures::TemplateSnapshot};

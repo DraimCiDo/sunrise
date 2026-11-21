@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Reload-owned item providers and baked humanoid equipment trees.
 use super::*;
 use mod_api::{

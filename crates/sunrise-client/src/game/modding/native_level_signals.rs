@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Shared level input for the canonical signal evaluator and its block Parts.
 use super::Game;
 use super::api_values::{TryIntoApi, TryIntoEngine};

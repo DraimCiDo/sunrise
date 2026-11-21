@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The typed submission surface; renderer storage is never exposed to mods.
 use super::Game;
 use super::mods;

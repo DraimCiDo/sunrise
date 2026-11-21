@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Direct move-control wishes, independent of navigation and terrain availability.
 use super::{Game, commands::Target};
 use mod_api::{MobRef, WantedPositionError};

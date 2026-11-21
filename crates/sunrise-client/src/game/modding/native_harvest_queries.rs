@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The correct-tool queries a mod can call: `BlockStates::is_correct_tool_for_drops` (a stack
 //! alone) and `PlayerRef::has_correct_tool_for_drops` (the answer the game's own digs and
 //! breaks use, `Game::acting_can_harvest`).

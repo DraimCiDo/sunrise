@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! `Entity.extinguishFire`, distinct from the silent `clearFire` write.
 use super::{Game, commands::Target, powder_snow::extinguish_pitch};
 use mod_api::{EntityRef, SoundSource};

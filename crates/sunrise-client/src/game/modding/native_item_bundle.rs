@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Bundle-backed ITEM_ITEMS operations; the place handler owns transactional writes.
 use super::Game;
 use sunrise_client::items::ItemStack;

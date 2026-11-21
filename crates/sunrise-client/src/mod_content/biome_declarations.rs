@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! NeoForge and Sunrise biome modifier declaration codecs.
 use super::{Action, Changes, Modifier, Result, Selector, Spawner, full};
 use serde::Deserialize;

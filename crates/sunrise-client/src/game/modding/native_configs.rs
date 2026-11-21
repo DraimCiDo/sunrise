@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Native mods' config files, loaded and reloaded (NeoForge's `ModConfig`
 //! and `ModConfigEvent`, docs/modding/src/how-to/native-mods.md). A mod lists its configs
 //! (`native_register_configs`), each a file of a kind: `Client` on the

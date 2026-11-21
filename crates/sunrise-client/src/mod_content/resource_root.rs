@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! Cache acquisition and publication for the generated content root.
 use super::*;
 

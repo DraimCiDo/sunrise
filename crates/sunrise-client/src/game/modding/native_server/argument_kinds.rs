@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! The argument kinds a native command usage names: the built-in ones, each a Brigadier
 //! parser, and the types mods registered, with the dispatcher type each node parses as.
 

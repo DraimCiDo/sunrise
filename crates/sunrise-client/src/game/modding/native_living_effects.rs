@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A living entity's active effects for native server mods, through a
 //! `LivingRef` (docs/modding/src/how-to/native-mods.md, "Entity and level handles"): vanilla's
 //! `activeEffects` read whole, and `addEffect`, `removeEffect`,

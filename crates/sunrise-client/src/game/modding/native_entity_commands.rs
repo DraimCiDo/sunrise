@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Entity command execution shared by the bool and feedback-returning mod API methods.
 use super::{Game, commands::execute, native_server::system_chat};
 use sunrise_client::text::Text;

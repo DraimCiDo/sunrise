@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The level sound queue (`Vec<NativeSound>`, a `SoundQueue`) as the sink of a hit's sounds (`HitHost::play_sound_at`,
 //! `play_sound_from`): the same `lan_sounds` queue, sound-seed stream and validation as a
 //! `LevelRef`'s sounds, reached through the hit's [`HitEffects`](sunrise_client::health::HitEffects).

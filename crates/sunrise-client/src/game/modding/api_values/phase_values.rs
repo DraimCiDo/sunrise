@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Phase vocabulary enters through the same game-local conversion boundary.
 use super::TryIntoApi;
 use std::convert::Infallible;

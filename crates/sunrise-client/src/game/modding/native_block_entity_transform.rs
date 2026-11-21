@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The game owns mod callback dispatch; the world owns the placement seam.
 use std::{collections::HashMap, sync::Arc};
 use sunrise_core::nbt::{Compound, JavaString, Tag};

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A mod's game rule declaration as the engine's rule: its type, default and range.
 use super::TryIntoEngine;
 use sunrise_client_core::gamerules::{Rule, Value};

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Player-owned custom recipe book settings, separate from vanilla ordinals.
 use super::Game;
 use mod_api::{

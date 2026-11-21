@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 /// An id with its namespace: `stone` is `minecraft:stone`.
 pub(super) fn namespaced(id: &str) -> String {
     if id.contains(':') {

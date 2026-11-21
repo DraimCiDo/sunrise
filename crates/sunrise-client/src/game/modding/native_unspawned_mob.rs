@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A mob the game has made but not yet added to a level, lent to one hook call
 //! (`finalize_spawn`'s `mob`, docs/modding/src/how-to/world/spawning.md): the lend,
 //! the handle's reads (`UnspawnedMobRef`), the scoped editor handed out with it

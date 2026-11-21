@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! `menu_slot_rules` on the game's side. A menu click cannot reach the game, so the game lends
 //! itself to the click as its [`SlotRules`] (`Env::slot_rules`), with the read-only `Host`
 //! behind it: the click asks while it plans, once for each slot and stack it consults, and the

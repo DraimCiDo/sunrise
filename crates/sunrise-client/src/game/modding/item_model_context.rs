@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The item model's surroundings (`item_model::Context`) as the values `item_model_update` gives a
 //! mod: where the item is drawn, its owner and its level, as `ItemModel.update` reads them.
 use super::api_values::TryIntoApi;

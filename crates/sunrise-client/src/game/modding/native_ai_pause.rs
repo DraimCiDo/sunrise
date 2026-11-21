@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A mob whose AI step a mod paused while its physics runs on, for
 //! `MobRef::set_ai_paused` (#4478). Vanilla's `NoAI` skips `travel` with the
 //! AI step, so a `NoAI` mob neither falls nor carries a push; this is

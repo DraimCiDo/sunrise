@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A server mod's chunk areas for one player (#3716, step 9b'): `PlayerRef::set_chunk_areas`
 //! on the hub's viewed areas (`lan::viewed_levels`), which own the caps, the tickets and what is
 //! sent. Each mod's areas are kept apart by the id of the mod whose call this is.

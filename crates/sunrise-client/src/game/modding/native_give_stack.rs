@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Whole stacks for server mods: one given to a player as `/give` gives it
 //! (`player_give_stack`), and one read from SNBT as a saved item is (`item_from_snbt`).
 use super::Game;

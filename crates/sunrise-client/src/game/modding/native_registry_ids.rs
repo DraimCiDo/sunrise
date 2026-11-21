@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Network ids of registry entries for mods (`registry_protocol_id`).
 use super::Game;
 use sunrise_core::identifier::Identifier;

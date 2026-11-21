@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! `LivingRef` line of sight, random teleport and the box of a pose (#944):
 //! the engine's own clip and `randomTeleport` paths, for players and mobs
 //! alike.

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Entity spawning and a level's natural spawning policy through a `LevelRef`
 //! (docs/modding/src/how-to/world/spawning.md, "Spawning from a level"): an entity made
 //! as its family's own spawn makes one, the per-category limits and the flags

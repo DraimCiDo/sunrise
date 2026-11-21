@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Attachment sync (docs/modding/src/how-to/native-mods.md, "Server attachments"): the server
 //! sends the synced values of the holders a level pass lent to mods, and whole
 //! snapshots to the players who started seeing a holder; a client keeps them.

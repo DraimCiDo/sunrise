@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! Built-in NeoForge mob data-map names and value codecs.
 use super::{BuiltinMap, EMPTY_SOUND, Kind, VILLAGER_TYPES, full_id, local_id};
 use serde_json::Value;

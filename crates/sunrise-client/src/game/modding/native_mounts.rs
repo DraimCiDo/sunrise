@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Mounting for native mods (`native_entity_mount`: NeoForge's `EntityMountEvent`). Each place
 //! the acting player or a mob gets on or off a vehicle asks `native_may_board` or
 //! `native_may_leave` first, and does nothing when a mod says no.

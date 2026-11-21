@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Client mods' audio streams (`open_audio_stream`): the game opens them on the mixer's own pool and
 //! places the entity-following ones each frame.
 use super::Game;

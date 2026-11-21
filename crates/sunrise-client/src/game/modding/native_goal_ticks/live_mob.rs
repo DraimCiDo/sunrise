@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Reads of live mobs lent to the target-hook context during a mob tick.
 //!
 //! These use the same mob state and methods as the game's ordinary host. A

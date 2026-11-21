@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A client mod's hotbar selection (`ClientHost::select_hotbar_slot`): the local player picks a
 //! slot as a number key does, and the game's own carried-item path tells the server when it does
 //! for a key press. Nothing is sent here.

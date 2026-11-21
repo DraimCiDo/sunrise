@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! What a liquid block turns into beside another fluid or block (NeoForge's
 //! `FluidInteractionRegistry`): vanilla's two lava rules for each fluid of the lava tag, the interactions native mods declare
 //! (`Registrar::fluid_interaction`) and the files of content mods

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The player's motion for mods (docs/modding/src/how-to/native-mods.md, "A player's motion"): a push for the local player, on a
 //! client.
 use super::Game;

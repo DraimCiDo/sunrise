@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! Native worker adapters for API-owned structure behaviours.
 use super::native_worldgen::WorkerResources;
 use mod_api::{

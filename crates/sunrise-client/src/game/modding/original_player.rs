@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The old `ServerPlayer` retained across `restoreFrom`, independently of its replacement.
 use super::Game;
 use mod_api::__private::game::Fields;

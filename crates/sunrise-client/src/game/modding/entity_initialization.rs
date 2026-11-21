@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! `entity_constructing` (`EntityEvent.EntityConstructing`): vanilla's `Entity.<init>`, once per
 //! entity on the side that makes it. Sunrise has no one constructor, so the hook is told where
 //! each kind of entity starts: a spawned mob (`spawn_mob`), an entity read from disk or a

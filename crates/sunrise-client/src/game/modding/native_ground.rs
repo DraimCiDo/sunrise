@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The engine side of `alter_ground`: the tree decorator's callback, and a mod's ground
 //! provider as the decorator asks it. `mod_api` keeps only the API's provider traits.
 use mod_api::{

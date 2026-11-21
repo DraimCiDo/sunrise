@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Placement transport state belongs to the actual connection and open menu.
 use super::*;
 use std::collections::{BTreeMap, HashMap};

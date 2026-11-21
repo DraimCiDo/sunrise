@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Block state ids and names, and item tags, for native mods:
 //! registry queries with no level, so they answer anywhere a host is given.
 use super::Game;

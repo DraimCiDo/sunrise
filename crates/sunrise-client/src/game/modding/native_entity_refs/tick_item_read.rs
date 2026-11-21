@@ -1,3 +1,4 @@
+// stable-line: no-content-declarations
 impl Game<'_> {
     pub(super) fn unscoped_native_entity_target(&self, entity: EntityRef) -> Option<Target> {
         if self.held_out.contains(&entity.id())

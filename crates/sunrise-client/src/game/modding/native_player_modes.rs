@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A player's permission level for native server mods, through a
 //! `PlayerRef` (docs/modding/src/how-to/native-mods.md): the `Player` reads the handle's game
 //! mode reads don't give, and what the player may do to blocks and other

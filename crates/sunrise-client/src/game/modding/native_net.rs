@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Private custom-book connection state and client network services.
 use super::Game;
 #[path = "native_net/packet_hold.rs"]

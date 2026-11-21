@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! Per-recipient recipe selection on the server thread.
 use crate::game::Game;
 

@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! Replay biome modifiers over the world's selected layers.
 use super::*;
 

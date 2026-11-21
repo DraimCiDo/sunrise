@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Explosions for native server mods (docs/modding/src/how-to/native-mods.md, "Explosions"): a mod
 //! sets one off as `Level.explode(source, ...)` does, in the level in place, and the blast's
 //! causing entity comes from its source as vanilla's `Explosion.getIndirectSourceEntity` has it.

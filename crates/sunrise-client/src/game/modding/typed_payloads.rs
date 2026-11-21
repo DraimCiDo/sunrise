@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The host's typed payload token check: what every typed send and reply runs first.
 use super::Game;
 use mod_api::{PayloadSendError, PayloadToken};

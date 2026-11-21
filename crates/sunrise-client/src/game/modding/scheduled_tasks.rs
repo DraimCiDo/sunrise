@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The delayed tasks mods scheduled in the running world (`schedule_task`): a queue counted in
 //! server ticks, owned by the world's lifecycle and dropped with it.
 

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Mod API GUI commands to and from the engine's: every variant, field for field.
 use super::{TryIntoApi, TryIntoEngine};
 

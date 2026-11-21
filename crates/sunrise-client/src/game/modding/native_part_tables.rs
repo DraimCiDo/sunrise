@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The client `BlockPart` answers the fluid mesher reads (`mesher::part_tables`), resolved by the
 //! per-state resolver where `refresh_render_visibility` resolves the hidden states, so meshing
 //! reads tables and never a mod.

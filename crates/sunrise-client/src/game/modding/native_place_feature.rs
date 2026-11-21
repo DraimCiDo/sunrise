@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A feature placed by a native mod (`LevelRef::place_feature`), as `/place feature` places one:
 //! `PlaceCommand.placeFeature` without the command's feedback.
 use super::Game;

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The receivers a mod keeps a public chat line from (`chat_recipient`), asked before the hub
 //! broadcasts it.
 use super::Game;

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! `text_from_legacy`: legacy `§` formatting codes read as the font draws them.
 use super::Game;
 use sunrise_client::text::Text;

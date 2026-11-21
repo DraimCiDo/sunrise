@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Mod-supplied repository sources. Discovery owns the metadata and retained
 //! readers; selection and resource/data reloads use the ordinary pack paths.
 use super::{Game, api_values::TryIntoEngine, mods::ModsState};

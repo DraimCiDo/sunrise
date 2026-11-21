@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! Data maps for native server mods (docs/modding/src/how-to/native-mods.md): values a data pack
 //! attaches to the entries of a registry, under the types a mod registered
 //! (`native_data_map_types`). Vanilla has no data maps; the contract is

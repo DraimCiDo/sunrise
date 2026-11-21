@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Layers on living entity renderers, added by mods on the client: `native_register_entity_layers`
 //! (NeoForge's `EntityRenderersEvent.AddLayers`) is asked on every resource load, after the entity
 //! renderers resolve, and the layers it collects are resolved to the slot each draw reads: a mob's

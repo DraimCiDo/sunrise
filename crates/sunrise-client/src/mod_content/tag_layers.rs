@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Tag layers collected during content-root assembly.
 use super::J;
 

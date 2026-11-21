@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Server-side `menu_slot_take`: the slot has delivered its stack and the click is paused. The
 //! listener borrows a detached backing entity while the click's savepoint keeps all tentative
 //! storage and effects.

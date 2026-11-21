@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! The entity types of a resource root's `entity-types.json`: vanilla's and the content mods' (each
 //! mod type has its template's row). A living entity's row lists its default attributes, so a row
 //! with `attributes` is a living type (`LivingEntity`), and one without is not (a boat, an arrow, a

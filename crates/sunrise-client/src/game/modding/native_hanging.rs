@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Turning hanging entities for mods: a painting's or item frame's facing
 //! (`entity_set_hanging_direction`) and an item frame's item (`entity_set_item_frame_rotation`).
 use super::{Game, commands::Target};

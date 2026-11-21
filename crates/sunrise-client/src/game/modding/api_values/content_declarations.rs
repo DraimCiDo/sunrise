@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! Content declaration conversion. Admission retains the content loader's validation.
 use super::TryIntoEngine;
 #[path = "arm_pose.rs"]

@@ -1,4 +1,4 @@
-//! stable-line: content-declarations
+//! stable-line: decodes-other-data
 //! Content mods in the resource root (docs/modpacks.md, registries 0.2).
 //!
 //! Every loader reads one resource root, and most of its block and item

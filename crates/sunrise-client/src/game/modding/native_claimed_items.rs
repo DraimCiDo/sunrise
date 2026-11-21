@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A client mod's view and its own items (docs/modding/src/how-to/native-mods.md, "A client mod's view and items"): the
 //! first block along the view in the loaded chunks, and items whose
 //! right-click is the mod's alone, heard as use events the mod polls.

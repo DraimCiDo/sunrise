@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Mob handles for native server mods.
 use super::{Game, commands::Target};
 use mod_api::{EntityRef, LivingRef, MobRef};

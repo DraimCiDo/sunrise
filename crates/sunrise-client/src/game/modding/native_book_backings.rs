@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Canonical physical storage behind a detached custom placement.
 use super::api_values::TryIntoEngine;
 use super::{

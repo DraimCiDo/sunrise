@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Drawing values returned by the engine's item property readers.
 use super::TryIntoApi;
 

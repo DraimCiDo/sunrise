@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Mod reads share the fluid capability's resource-rebuilt content table.
 use super::Game;
 use crate::game::machines::cauldron_contents::{self, CauldronContent};

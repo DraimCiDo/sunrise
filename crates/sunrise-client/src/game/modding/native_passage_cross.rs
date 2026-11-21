@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Crossing a passage within a level (#3775, docs/modding/src/how-to/passages.md): the client
 //! moves its own player through (`ClientHost::cross_passage`) and tells its server the passage
 //! and where it crossed from; the server checks that move as any move (the hub,

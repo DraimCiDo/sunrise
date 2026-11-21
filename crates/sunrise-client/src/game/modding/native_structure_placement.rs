@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Structure templates placed for server mods: `/place template`'s path, for a
 //! template the game has by id or for vanilla structure NBT a mod carries.
 use super::{

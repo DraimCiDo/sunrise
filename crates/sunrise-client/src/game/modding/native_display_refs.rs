@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Display handles for native server mods: block, item and text displays.
 //!
 //! Sunrise keeps a display unsimulated, as the compound vanilla saves

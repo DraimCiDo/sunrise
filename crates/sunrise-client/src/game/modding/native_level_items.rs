@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Item entities and experience orbs a native mod adds to a level through a
 //! `LevelRef` (docs/modding/src/how-to/native-mods.md, "Entity and level handles"): a block's
 //! drop (`Block.popResource`), a plain item entity (`new ItemEntity` and

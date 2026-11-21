@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! States a client mod hides from the mesher (`native_block_render_visibility`): ore
 //! scanners, builder cutaways, cinematic shots. The answer is per state and resolved here, so
 //! meshing reads one table and never a mod.

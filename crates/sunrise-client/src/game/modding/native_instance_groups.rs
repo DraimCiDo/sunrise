@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Retained copies feed the same per-view submission route as transient batches.
 use super::Game;
 use mod_api::__private::game::Fields;

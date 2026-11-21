@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Client mods' own sounds (`play_local_sound`) and their `SoundRef` handles: what each is
 //! doing, stopping, fading, moving and re-pitching it, and the sounds and devices the client has.
 use super::Game;

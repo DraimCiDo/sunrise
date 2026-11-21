@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The server's console for native mods: every logged line (`console_line`)
 //! and a console command whose feedback comes back (`run_command_with_output`).
 use super::Game;

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Sounds to one player and sounds that follow an entity, for native server
 //! mods, through a `PlayerRef` and an `EntityRef` (docs/modding/src/how-to/native-mods.md):
 //! `StopSoundCommand`'s packet, a `ClientboundSoundPacket` for one player

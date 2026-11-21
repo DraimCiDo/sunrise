@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Read-only projections of the connected client's existing state.
 
 use super::{Game, remote::Remote};

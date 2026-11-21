@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! The Sunrise blockstate-layer field shared by the pack overlay and loader.
 use serde_json::Value;
 

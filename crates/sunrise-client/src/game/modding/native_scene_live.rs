@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Living screen scenes (`DrawContext::draw_scene` with entities, particles or a clock):
 //! a scene's blocks as `native_scene` draws them, with entities standing in them and
 //! particles that live in them, as GuideME's guide scenes and Ponder show. The game keeps,

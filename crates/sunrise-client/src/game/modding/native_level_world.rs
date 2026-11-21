@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A level's world settings through a `LevelRef`
 //! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): the seed,
 //! difficulty and game rules on the server, and weather on both sides.

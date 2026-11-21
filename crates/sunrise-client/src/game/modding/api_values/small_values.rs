@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! Small API-owned recipe and input values.
 use super::{TryIntoApi, TryIntoEngine};
 use std::convert::Infallible;

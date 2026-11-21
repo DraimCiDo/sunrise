@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The separately stored dragon participates in Level.getEntities; parts follow the walk.
 use super::*;
 

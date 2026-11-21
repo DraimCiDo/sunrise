@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Placement-state reads, placement writes and the `Block.setPlacedBy` step.
 use super::{Game, api_values::block_state::block_listens, native_server::PlayerRead};
 use mod_api::{

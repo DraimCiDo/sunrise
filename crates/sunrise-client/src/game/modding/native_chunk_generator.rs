@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Native terrain adapter for the API's worker context.
 use super::native_worldgen::WorkerResources;
 use mod_api::{BlockKey, BlockMetadata, BlockState, ChunkAccess, ChunkGenerator, ChunkPos};

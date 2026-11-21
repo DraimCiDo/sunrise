@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! NeoForge and native ingredient declaration codecs.
 use super::{Ingredient, IngredientRule, Items, RESOLVED_ITEMS, components::validate};
 use crate::crafting::native_hooks::native_ingredient;

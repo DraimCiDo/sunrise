@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! NeoForge removal entries while resolving biome modifier tags.
 use super::{Registry, extend, full};
 use serde_json::Value;

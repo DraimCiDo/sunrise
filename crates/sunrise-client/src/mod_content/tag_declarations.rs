@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! NeoForge tag removals and their layered representation.
 use super::{J, Known, Result, TagLayers};
 

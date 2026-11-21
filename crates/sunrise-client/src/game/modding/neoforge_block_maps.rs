@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! NeoForge's built-in block data maps (`NeoForgeDataMaps`): `neoforge:flammable`,
 //! `neoforge:oxidizables` and `neoforge:waxables`, merged from the world's
 //! data packs and mods' files as a mod's own data maps are, and installed on

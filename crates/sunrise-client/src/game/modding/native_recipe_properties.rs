@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! One mod-created property-set generation shared by Host and menu prediction.
 use super::*;
 use std::{

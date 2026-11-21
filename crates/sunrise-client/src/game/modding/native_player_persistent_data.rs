@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The compound mods keep on a server player (NeoForge's `Entity.getPersistentData`), read and
 //! replaced whole, for mods that carry a player between servers.
 use super::{Game, native_server::PlayerRead};

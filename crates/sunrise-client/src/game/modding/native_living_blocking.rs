@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! `LivingEntity.isBlocking` for native mods through a `LivingRef`: a player or a mob holding up
 //! an item that blocks attacks, past the item's block delay.
 use super::{Game, commands::Target, shield::block_delay_passed};

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The level in place during a transaction. Reads see tentative storage;
 //! updates, scheduled ticks and effects are published only at the root commit.
 use super::Game;

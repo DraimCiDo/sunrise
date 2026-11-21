@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! An item or a standalone model drawn in a screen in 3D under a caller's turn
 //! (`DrawContext::model_3d`): what a symmetry wand's screen shows its wand and its mirror with.
 //! The item is the slot's own item (`item_render::gui::draw_posed`) under a pose with the turn in

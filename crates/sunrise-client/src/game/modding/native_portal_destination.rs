@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Where a portal leads, asked through a level handle (`LevelRef::portal_destination`,
 //! `LevelRef::find_or_create_portal_exit`). Both read the level in place and the parked
 //! levels only: a level that is not open, or a chunk the search reads that is not loaded,

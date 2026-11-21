@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Private custom-book synchronization, admitted by its own configuration capability.
 use super::Game;
 use std::{

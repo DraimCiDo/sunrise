@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 use super::*;
 
 impl TryIntoApi for engine::Style {

@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! Worldgen files that declare additions to other registry entries.
 use super::{Addition, J, Result};
 

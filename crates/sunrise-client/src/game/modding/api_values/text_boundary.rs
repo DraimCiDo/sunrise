@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 #[path = "text_style_capture.rs"]
 mod text_style_capture;
 use super::{TryIntoApi, TryIntoEngine};

@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! Server pack declaration locations and resource ids.
 use super::resource_id;
 

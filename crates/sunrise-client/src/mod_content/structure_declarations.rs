@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! NeoForge structure modifier declaration codecs.
 use super::{Action, Modifier, Result, Value, biomes};
 

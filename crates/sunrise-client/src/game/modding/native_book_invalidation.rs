@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Reloads and authoritative knowledge changes revoke published display identities.
 use super::*;
 use sunrise_client::recipe_book::placement_sync::Frame;

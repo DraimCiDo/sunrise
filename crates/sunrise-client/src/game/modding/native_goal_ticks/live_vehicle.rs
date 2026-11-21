@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Passenger reads over the mob tick's disjoint live entity loan.
 use super::GoalCx;
 use mod_api::{EntityRef, LivingRef};

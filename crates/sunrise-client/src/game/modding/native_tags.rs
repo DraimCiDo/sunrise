@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! One membership implementation for full-game and in-write tag services.
 use mod_api::{ItemKey, TagKey, TagMembers};
 use sunrise_items::items::{Items, TagRegistry};

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Events, explosions and lightning in a level for native server mods,
 //! through a `LevelRef` (docs/modding/src/how-to/native-mods.md, "Entity and level handles"):
 //! `Level.levelEvent`, `Level.gameEvent`, `ServerLevel.blockEvent`,
