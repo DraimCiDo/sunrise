@@ -21,7 +21,7 @@ impl Hooks for Listener {
         fixture::load(host, event.data);
     }
 }
-fn context(save: &SaveDir) {
+pub(super) fn context(save: &SaveDir) {
     use sunrise_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
     let load = LoadContext::new(
         DataLoadOrigin::ServerDataLoad,
@@ -59,7 +59,7 @@ fn root() -> PathBuf {
         NEXT.fetch_add(1, Ordering::Relaxed)
     ))
 }
-fn with_listener(run: impl FnOnce(Arc<AtomicUsize>, Arc<AtomicUsize>)) {
+pub(super) fn with_listener(run: impl FnOnce(Arc<AtomicUsize>, Arc<AtomicUsize>)) {
     let saves = Arc::new(AtomicUsize::new(0));
     let loads = Arc::new(AtomicUsize::new(0));
     let mods = vec![mod_api::ModEntry::new(

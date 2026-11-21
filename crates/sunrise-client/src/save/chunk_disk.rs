@@ -62,6 +62,12 @@ pub(super) struct DiskRecord {
     encoded: OnceLock<std::result::Result<Option<Arc<NamedTag>>, String>>,
 }
 impl DiskRecord {
+    pub(super) fn cancel(&self) {
+        let _ = self
+            .encoded
+            .set(Err("chunk save cancelled before encoding".into()));
+    }
+
     fn encode(&self) -> std::io::Result<Option<Arc<NamedTag>>> {
         self.encoded
             .get_or_init(|| {

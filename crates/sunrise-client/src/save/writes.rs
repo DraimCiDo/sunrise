@@ -118,6 +118,9 @@ impl QueuedWrite {
 
 impl Drop for QueuedWrite {
     fn drop(&mut self) {
+        if let Some(disk) = self.record.disk_job() {
+            disk.cancel();
+        }
         self.record.resolve_block_entity_edits(false);
     }
 }
@@ -553,6 +556,56 @@ mod tests {
         let empty = Record::Poi(Arc::new(Chunk::empty(key.0, key.1)), tables, None);
         save.queue(Folder::Poi, vec![(key, empty)], true).unwrap();
         assert!(!dir.path().join("poi/r.0.0.mca").exists());
+    }
+
+    #[test]
+    fn a_failed_send_leaves_the_pending_disk_snapshot_readable() {
+        let dir = tempfile::tempdir().unwrap();
+        let (registry, biomes) = super::super::loot_tests::fixture();
+        let registry = Box::leak(Box::new(registry));
+        let biomes = Arc::new(biomes);
+        super::super::chunk_disk_tests::with_listener(|saves, _| {
+            let save = SaveDir::new(
+                dir.path().to_path_buf(),
+                LevelShape::OVERWORLD,
+                Some(Default::default()),
+            );
+            super::super::chunk_disk_tests::context(&save);
+            let (send, receive) = mpsc::channel();
+            drop(receive);
+            *save.writer.lock().unwrap() = Some(Writer {
+                send,
+                thread: std::thread::spawn(|| {}),
+            });
+
+            let key = (2, -3);
+            let mut chunk = Chunk::empty(key.0, key.1);
+            let mut extras = ChunkExtras::default();
+            extras.root.insert("test:marker".into(), Tag::Int(42));
+            chunk.saved = Some(Arc::new(extras));
+            assert!(
+                save.save_later(&[Arc::new(chunk)], registry, &biomes)
+                    .is_err()
+            );
+            assert!(
+                save.pending.lock().unwrap()[&(Folder::Region, key.0, key.1)]
+                    .1
+                    .disk_job()
+                    .is_some()
+            );
+
+            let (send, receive) = mpsc::channel();
+            let reader = std::thread::spawn(move || {
+                send.send(save.raw_chunk(key.0, key.1)).unwrap();
+            });
+            let snapshot = receive
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .expect("pending reader waited for a disconnected writer")
+                .unwrap();
+            reader.join().unwrap();
+            assert_eq!(snapshot.tag.get("test:marker"), Some(&Tag::Int(42)));
+            assert_eq!(saves.load(Ordering::Relaxed), 0);
+        });
     }
 
     #[test]
