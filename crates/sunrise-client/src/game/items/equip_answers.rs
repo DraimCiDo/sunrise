@@ -75,7 +75,12 @@ impl Game<'_> {
     }
 
     fn capture_equip_read(&self, id: u32) -> Option<EquipSnapshot> {
-        let entity = self.entity(id)?;
+        use mod_api::{EntityRef, EntityView};
+        let entity = EntityRef::new(self.native_lifecycle.epoch()?, id);
+        let view = self
+            .resolve_entity_view(entity)
+            .filter(|view| view.is_current())?;
+        let (position, kind) = (view.position(), view.kind());
         let living = mod_api::LivingRef::new(entity);
         let slots = [
             mod_api::EquipmentSlot::MainHand,
@@ -89,8 +94,8 @@ impl Game<'_> {
         ];
         Some(EquipSnapshot {
             entity,
-            kind: self.entity_kind(entity),
-            position: self.entity_position(entity),
+            kind,
+            position,
             health: self.living_health(living),
             max_health: self.living_max_health(living),
             alive: self.living_alive(living),
@@ -315,8 +320,12 @@ mod tests {
     impl mod_api::ItemPart for FeetOnly {
         fn can_equip(&self, host: &dyn mod_api::Host, event: &mut mod_api::CanEquipEvent<'_>) {
             let entity = event.entity.entity();
-            assert!(entity.position(host).is_some());
-            assert!(entity.kind(host).is_some());
+            entity
+                .with_view(host, |view| {
+                    assert!(view.position().is_some());
+                    assert!(view.kind().is_some());
+                })
+                .expect("the prepared entity resolves");
             let _health = event.entity.health(host);
             let _alive = event.entity.alive(host);
             let _equipment = event.entity.equipment(host, mod_api::EquipmentSlot::Head);

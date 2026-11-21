@@ -446,7 +446,7 @@ mod tests {
             assert_eq!(game.entity(part.id()), Some(*part));
             assert_ne!(*part, dragon);
             assert_eq!(
-                (*part).with_view(game, |view| view.position()).flatten(),
+                part.with_view(game, |view| view.position()).flatten(),
                 Some([x, y, z])
             );
             assert_eq!(
@@ -457,15 +457,14 @@ mod tests {
                 ])
             );
             assert_eq!(
-                (*part)
-                    .with_view(game, |view| view.kind())
+                part.with_view(game, |view| view.kind())
                     .flatten()
                     .map(|kind| kind.id(game))
                     .as_deref(),
                 Some("minecraft:ender_dragon")
             );
             assert_eq!(
-                (*part).with_view(game, |view| view.rotation()).flatten(),
+                part.with_view(game, |view| view.rotation()).flatten(),
                 Some([0.0, 0.0])
             );
             assert_eq!(game.entity_velocity(*part), Some([0.0; 3]));
@@ -530,10 +529,7 @@ mod tests {
             // A dragon a mod removed takes its parts with it, before the sweep.
             assert!(game.entity_discard(entity));
             for part in &parts {
-                assert_eq!(
-                    (*part).with_view(game, |view| view.position()).flatten(),
-                    None
-                );
+                assert_eq!(part.with_view(game, |view| view.position()).flatten(), None);
                 assert!(game.entity(part.id()).is_none());
             }
             assert_eq!(game.entity_parts(entity), None);

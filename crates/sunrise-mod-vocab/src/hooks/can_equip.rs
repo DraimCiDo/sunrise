@@ -20,9 +20,9 @@ pub trait Hooks {
     /// whether the entity may wear one at all (`canUseSlot`) or the dispenser's
     /// own rules for the entity. Only the `ItemPart`s attached to `stack`'s
     /// item are asked, on both sides, as the client's menu predicts the slot.
-    /// `host` is read-only. Use it with the target handle's getters to read
-    /// the prepared target snapshot, for example `entity.entity().position(host)`.
-    /// Reads of other entities use the ordinary host. The stack is converted
+    /// `host` is read-only. Use `entity.entity().with_view(host, |view| ...)` to read
+    /// the prepared target position and type together. Other entities and fields not in the
+    /// snapshot use the ordinary host. The stack is converted
     /// once and lent to each slot and entity a native menu click, dispense or pickup
     /// asks about. Mutable access invalidates the source revision; replacing or
     /// removing it changes its identity. Stale preparation and stale apply

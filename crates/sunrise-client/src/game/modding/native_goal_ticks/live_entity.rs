@@ -203,12 +203,13 @@ impl GoalCx<'_, '_> {
 
     pub(super) fn r_entity_level(&self, entity: EntityRef) -> Option<mod_api::LevelRef> {
         self.entity_mob(entity)?;
-        self.host.level(self.w.level.id())
+        self.game_host().level(self.w.level.id())
     }
 
     pub(super) fn r_entity_vehicle(&self, entity: EntityRef) -> Option<EntityRef> {
         let id = self.entity_mob(entity)?.extra.mount?;
-        self.lookup_entity(id).or_else(|| self.host.entity(id))
+        self.lookup_entity(id)
+            .or_else(|| self.game_host().entity(id))
     }
 
     pub(super) fn r_entity_is_passenger(&self, entity: EntityRef) -> Option<bool> {
@@ -236,13 +237,14 @@ impl GoalCx<'_, '_> {
             None => mod_api::LeashHolder::Unleashed,
             Some(Holder::Knot(pos)) => mod_api::LeashHolder::Knot(pos),
             Some(Holder::Mob(id) | Holder::Boat(id)) => mod_api::LeashHolder::Entity(
-                self.lookup_entity(id).or_else(|| self.host.entity(id))?,
+                self.lookup_entity(id)
+                    .or_else(|| self.game_host().entity(id))?,
             ),
             Some(Holder::Player) => {
                 let uuid = sunrise_client::lan::playerdata::ints_uuid(mob.extra.leash_player?);
                 mod_api::LeashHolder::Entity(
                     self.lookup_player(uuid)
-                        .or_else(|| self.host.player(uuid))?
+                        .or_else(|| self.game_host().player(uuid))?
                         .entity(),
                 )
             }
@@ -262,7 +264,7 @@ impl GoalCx<'_, '_> {
         let look = self.r_entity_view_vector(entity)?;
         let to = std::array::from_fn(|i| from[i] + look[i] * distance);
         let level = self.r_entity_level(entity)?;
-        mod_api::__private::backend_read(self.host, |backend| {
+        mod_api::__private::backend_read(self.game_host(), |backend| {
             backend.level_clip(
                 level,
                 from,

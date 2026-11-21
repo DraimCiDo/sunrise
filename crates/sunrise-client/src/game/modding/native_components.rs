@@ -328,11 +328,8 @@ impl Game<'_> {
         {
             return None;
         }
-        self.native_entity_read_target(target)?;
-        let target = self
-            .resolve_entity_view(target)
-            .and_then(|view| mod_api::EntityView::kind(&view))
-            .map(|kind| kind.id(self))?;
+        let target = self.native_entity_read_target(target)?;
+        let target = self.native_entity_kind_key(target)?.id(self);
         let actor = self
             .resolve_entity_view(attacker.entity())
             .and_then(|view| mod_api::EntityView::kind(&view))

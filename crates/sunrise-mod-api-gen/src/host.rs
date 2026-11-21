@@ -10,10 +10,7 @@ use std::fmt::Write as _;
 /// disjoint live mob loans. Players are read from the game's backend; other
 /// entity reads not supported by the scoped context remain typed refusals.
 pub(super) const GOAL_VIEW_READS: &[&str] = &[
-    "entity_position",
-    "entity_block_position",
     "entity_velocity",
-    "entity_rotation",
     "entity_head_yaw",
     "entity_body_yaw",
     "entity_bounding_box",
@@ -21,7 +18,6 @@ pub(super) const GOAL_VIEW_READS: &[&str] = &[
     "entity_eye_position",
     "entity_distance_to_sqr",
     "entity_on_ground",
-    "entity_kind",
     "living_health",
     "living_max_health",
     "living_alive",
@@ -641,9 +637,11 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                     let call = format!(
                         "<Game<'_> as mod_api::prelude::{area_trait}>::{name}(self.game{tail})"
                     );
+                    if name == "with_entity_view" {
+                        writeln!(code, "{sig} {{ if mod_api::__private::access_allowed({name:?}, mod_api::__private::LoadAccess::WorldOnly) {{ crate::game::equip_host::EquipHost::{name}(self{tail}); }} }}").unwrap();
+                        continue;
+                    }
                     let cached = match name.as_str() {
-                        "entity_kind" => Some(("entity", "self.row.kind")),
-                        "entity_position" => Some(("entity", "self.row.position")),
                         "living" => Some((
                             "entity",
                             "self.row.living.then_some(LivingRef::new(entity))",
@@ -1017,7 +1015,7 @@ fn refusal(entry: &Entry) -> Result<Option<&'static str>, String> {
     })
 }
 
-/// `entity_position(entity)` on a backend is also `EntityRef::position(self, host)`: the handle
+/// `entity_velocity(entity)` on a backend is also `EntityRef::velocity(self, host)`: the handle
 /// a method is of, when its first argument is one and its name starts with the handle's.
 fn handle_method(
     entry: &Entry,
@@ -1227,6 +1225,13 @@ fn goal_view(
         let refusal = refusal(entry)?;
         let mut sig = entry.sig.clone();
         sig.ident = syn::parse_str(name).map_err(|e| format!("{name}: {e}"))?;
+        if name == "with_entity_view" {
+            impls.add(
+                area.trait_name(*tier),
+                format!("{} {{ if mod_api::__private::access_allowed({name:?}, mod_api::__private::LoadAccess::WorldOnly) {{ super::GoalCx::{name}(self, {args}); }} }}\n", sig.to_token_stream()),
+            );
+            continue;
+        }
         // Entity data answers the tick's view; everything else forwards to the real backend the
         // view carries.
         let entity_data = matches!(
@@ -1242,7 +1247,7 @@ fn goal_view(
         // How a forwarded read answers a host without a backend: the typed refusal, or the empty
         // string of a metadata read.
         let forward = format!(
-            "mod_api::__private::backend_read(self.host, |backend| backend.{name}({args}))"
+            "mod_api::__private::backend_read(self.game_host(), |backend| backend.{name}({args}))"
         );
         let forwarded = match refusal {
             Some("()") => format!("let _ = {forward};"),
@@ -1350,7 +1355,7 @@ fn goal_view(
         let body = if GOAL_VIEW_LOOKUPS.contains(&name) {
             format!("self.lookup_{name}({args})")
         } else {
-            format!("self.host.{name}({args})")
+            format!("self.game_host().{name}({args})")
         };
         impls.add(
             area.trait_name(Tier::Host),
@@ -1494,15 +1499,15 @@ mod tests {
     fn a_method_is_a_handles_when_it_takes_one_first_and_is_named_for_it() {
         let handles = handles("pub struct EntityRef; pub struct LevelRef; pub struct BlockKey;");
         let read = entry(
-            "/// Where it is.\nfn entity_position(&self, entity: EntityRef, scale: f64) -> Option<[f64; 3]>;",
+            "/// How fast it moves.\nfn entity_velocity(&self, entity: EntityRef, scale: f64) -> Option<[f64; 3]>;",
         );
         let (handle, code) = handle_method(&read, Tier::Backend, &handles)
             .unwrap()
             .unwrap();
         assert_eq!(handle, "EntityRef");
-        assert!(code.starts_with("/// Where it is.\n"));
-        assert!(code.contains("pub fn position (self , host : & dyn Host , scale : f64)"));
-        assert!(code.contains("backend_of(host)?.entity_position(self, scale)"));
+        assert!(code.starts_with("/// How fast it moves.\n"));
+        assert!(code.contains("pub fn velocity (self , host : & dyn Host , scale : f64)"));
+        assert!(code.contains("backend_of(host)?.entity_velocity(self, scale)"));
         // A client read borrows the client host, a write the mutable one of its side.
         let (_, client) = handle_method(&read, Tier::ClientBackend, &handles)
             .unwrap()

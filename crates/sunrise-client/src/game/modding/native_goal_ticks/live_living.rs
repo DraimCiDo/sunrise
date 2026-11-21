@@ -139,7 +139,7 @@ impl GoalCx<'_, '_> {
     ) -> Option<bool> {
         let read_eye = |entity| {
             if self.is_game_entity(entity) {
-                mod_api::__private::backend_read(self.host, |backend| {
+                mod_api::__private::backend_read(self.game_host(), |backend| {
                     backend.entity_eye_position(entity)
                 })
                 .flatten()
@@ -148,14 +148,9 @@ impl GoalCx<'_, '_> {
             }
         };
         let from_entity = living.entity();
-        let feet = if self.is_game_entity(from_entity) {
-            mod_api::__private::backend_read(self.host, |backend| {
-                backend.entity_position(from_entity)
-            })
-            .flatten()?
-        } else {
-            self.r_entity_position(from_entity)?
-        };
+        let feet = from_entity
+            .with_view(self, |view| view.position())
+            .flatten()?;
         let from = read_eye(from_entity)?;
         let to = read_eye(target)?;
         Some(self.w.line_of_sight_for(
@@ -172,7 +167,7 @@ impl GoalCx<'_, '_> {
     ) -> Option<bool> {
         let mob = self.live_living_mob(living)?;
         let [min, max] = if self.is_game_entity(target) {
-            mod_api::__private::backend_read(self.host, |backend| {
+            mod_api::__private::backend_read(self.game_host(), |backend| {
                 backend.entity_bounding_box(target)
             })
             .flatten()?

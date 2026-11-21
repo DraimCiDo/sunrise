@@ -57,8 +57,9 @@ impl Hooks for MyMod {
 Implement `ItemPart::can_equip` to allow or refuse a stack in the candidate slot for a living
 entity. `event.can_equip` starts with the vanilla data answer; set it to override the answer, or
 leave it alone. Read the target through its handle and the supplied read-only `Host`, for example
-`event.entity.health(host)` or `event.entity.entity().position(host)`. Target type, position,
-health, living status and equipment come from the same snapshot across slot checks in a decision.
+`event.entity.health(host)` or `event.entity.entity().with_view(host, |view| view.position()).flatten()`.
+Group position and type reads in the same `with_view` call. Target type, position, health, living
+status and equipment come from the same snapshot across slot checks in a decision.
 
 ## Fire eligibility
 

@@ -31,8 +31,10 @@ impl GoalCx<'_, '_> {
             let vehicle = if self.entity_mob(root).is_some() {
                 self.r_entity_vehicle(root)
             } else {
-                mod_api::__private::backend_read(self.host, |backend| backend.entity_vehicle(root))
-                    .flatten()
+                mod_api::__private::backend_read(self.game_host(), |backend| {
+                    backend.entity_vehicle(root)
+                })
+                .flatten()
             };
             match vehicle {
                 Some(vehicle) => root = vehicle,
@@ -91,7 +93,7 @@ impl GoalCx<'_, '_> {
             let children = if self.entity_mob(passenger).is_some() {
                 self.r_entity_passengers(passenger)
             } else {
-                mod_api::__private::backend_read(self.host, |backend| {
+                mod_api::__private::backend_read(self.game_host(), |backend| {
                     backend.entity_passengers(passenger)
                 })
                 .flatten()
@@ -115,7 +117,7 @@ impl GoalCx<'_, '_> {
         }
         // The game only lets a player control this kind when the relevant
         // saddle, steering item or harness is present.
-        if self.host.mob(first).is_some() || self.host.living(first).is_none() {
+        if self.game_host().mob(first).is_some() || self.game_host().living(first).is_none() {
             return None;
         }
         self.w

@@ -624,7 +624,8 @@ handle, an entity the client doesn't track and a level it doesn't show:
 
 - `host.entity(id)` and `host.level(dimension)`: the local player or an entity the server told the client of, and the
   one level the client shows. `host.living(entity)` is the local player only.
-- `entity.position(host)`, `rotation(host)` and `velocity(host)`: the client's copy, interpolated as it draws it.
+- `entity.with_view(host, |view| …)` lends the client's own entity position and kind; a client that keeps
+  the entity's body can also read its rotation. `entity.velocity(host)` remains a separate read.
 - `entity.name(host)`: the synced custom name or type name, and a player's profile name, from either side's host.
 - `level.block_state(host, pos)`, `block`, `block_property` and `is_loaded`: blocks of the chunks the client holds.
   A chunk it doesn't hold reads as unloaded; no read loads one.
@@ -650,8 +651,10 @@ handle, an entity the client doesn't track and a level it doesn't show:
   is skipped when its menu is closed or replaced (a reused window id included), on respawn, dimension change, logout
   and reconnect. Nothing here sends a packet or changes the menu.
 
-- `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
-  an entity with no UUID yet gets its own) and `level` read the entity.
+- `entity.with_view(host, |view| …)` resolves the entity once for `view.position()`, `block_position()`,
+  `rotation()` (yaw and pitch in degrees) and `kind()` (a type key, e.g. `minecraft:zombie`). It skips the
+  callback when the entity cannot be lent; individual fields can still be absent. `uuid` (`&mut`: an entity
+  with no UUID yet gets its own) and `level` are separate handle operations.
 - `level.block_state(host, pos)` returns a typed `BlockState` without allocating a state string. For text such as
   `minecraft:oak_stairs[facing=east,…]`, pass the ID to `host.block_state_string(id)`. `block` (the name alone),
   `block_property(host, pos, key)`, `is_loaded`, `height` (lowest `y` and height), `game_time` and `day_time` read any
@@ -966,7 +969,7 @@ still runs once before either outcome; tool enchantments and vanilla random orde
 `level.set_break_progress(host, breaker, pos, stage)` shows stages 0..9 or clears the crack otherwise;
 a machine uses a stable negative breaker id.
 
-A helper whose catalog entry names a `receiver` (`entity`, `level`, `block_entity`) is called on that handle (for example `entity.position(host)`), rather than as an ID-based `Host` method.
+A helper whose catalog entry names a `receiver` (`entity`, `level`, `block_entity`) is called on that handle (for example `entity.velocity(host)`), rather than as an ID-based `Host` method.
 
 ### Client menu input
 

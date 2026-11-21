@@ -65,10 +65,12 @@ impl Goal for Counter {
         record(cx.mob().entity().id(), "tick");
         if let Some(other) = OTHER.lock().unwrap().as_ref().copied() {
             let health = LivingRef::new(other).health(cx.host());
-            let position = other.position(cx.host());
-            // A read the view refuses: the snapshot carries no rotation of
-            // another mob (only the ticking mob's own answers).
-            let refused = other.rotation(cx.host()).is_some();
+            // The snapshot carries position but no rotation of another mob.
+            let (position, refused) = other
+                .with_view(cx.host(), |view| {
+                    (view.position(), view.rotation().is_some())
+                })
+                .unwrap_or_default();
             READS.lock().unwrap().push((health, position, refused));
         }
     }

@@ -113,8 +113,10 @@ impl GoalCx<'_, '_> {
 
     pub(super) fn r_mob_raid(&self, mob: MobRef) -> Option<RaidRef> {
         let raid_id = mobs::raider::state(self.live_mob(mob)?)?.raid_id?;
-        let level = self.host.level(self.w.level.id())?;
-        mod_api::__private::backend_read(self.host, |backend| backend.level_raid(level, raid_id))
-            .flatten()
+        let level = self.game_host().level(self.w.level.id())?;
+        mod_api::__private::backend_read(self.game_host(), |backend| {
+            backend.level_raid(level, raid_id)
+        })
+        .flatten()
     }
 }

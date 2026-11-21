@@ -30,6 +30,7 @@ fn scoped_host_reads_live_other_mob_before_stale_snapshot() {
             crate::game::creatures::seen(&other, game.level.player_uuid, game.items()),
             crate::game::creatures::seen(&stale, game.level.player_uuid, game.items()),
         ];
+        other.position = Vec3::new(-2.5, 65.0, 4.25);
         other.yaw = 37.0;
         other.head_pitch = -12.0;
         other.attrs.max_health = 73.0;
@@ -42,12 +43,27 @@ fn scoped_host_reads_live_other_mob_before_stale_snapshot() {
         let context = GoalCx {
             m: &mut actor,
             w: &world,
-            host: game,
+            game,
         };
-        assert_eq!(entity.rotation(&context), Some([37.0, -12.0]));
+        entity
+            .with_view(&context, |view| {
+                assert_eq!(view.position(), Some([-2.5, 65.0, 4.25]));
+                assert_eq!(view.block_position(), Some([-3, 65, 4]));
+                assert_eq!(
+                    view.kind().expect("the live mob lends its kind").id(game),
+                    "minecraft:zombie"
+                );
+                assert_eq!(view.rotation(), Some([37.0, -12.0]));
+            })
+            .expect("the live other mob resolves");
         assert_eq!(LivingRef::new(entity).max_health(&context), Some(73.0));
         assert!(context.lookup_entity(other.id).is_some());
         assert!(context.lookup_entity(stale.id).is_none());
+        assert_eq!(
+            EntityRef::new(epoch, stale.id)
+                .with_view(&context, |_| panic!("stale snapshot lent a view")),
+            None::<()>,
+        );
         assert!(context.lookup_entity(9999).is_none());
     });
 }
@@ -101,14 +117,17 @@ fn scoped_host_resolves_other_real_players_from_the_game() {
         let context = GoalCx {
             m: &mut actor,
             w: &world,
-            host: game,
+            game,
         };
         let player = context.lookup_player(13).expect("other guest is online");
         assert_eq!(player.entity().id(), 13);
         assert_eq!(context.lookup_entity(13), Some(player.entity()));
         assert!(context.lookup_living(player.entity()).is_some());
         assert_eq!(
-            player.entity().position(&context),
+            player
+                .entity()
+                .with_view(&context, |view| view.position())
+                .flatten(),
             player
                 .entity()
                 .with_view(game, |view| view.position())
@@ -200,7 +219,7 @@ fn body_yaw_is_the_raw_mob_yaw_and_none_for_others() {
         let context = GoalCx {
             m: &mut actor,
             w: &world,
-            host: game,
+            game,
         };
         assert_eq!(own.body_yaw(&context), Some(815.25));
         assert_eq!(entity.body_yaw(&context), Some(-725.5));

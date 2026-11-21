@@ -3,8 +3,8 @@
 //! entity id into an `EntityRef`, and each `native_entity_*` helper reads the
 //! entity a handle names. They read where the world is simulated: on a client,
 //! with no world open, or for a handle of an earlier open, they return `None`,
-//! except the reads marked side `both` (`entity`, `level`, `entity_position`,
-//! `entity_rotation`, `entity_velocity`), which on a client answer from its own
+//! except the reads marked side `both` (`entity`, `level`, `with_entity_view`,
+//! `entity_velocity`), which on a client answer from its own
 //! copy: the local player and the entities the server told it of, in the level
 //! it shows. The entities are those of the level in place (the one a hook runs
 //! in) and the server's players, whatever their level.
@@ -26,7 +26,11 @@ use super::{
 };
 use mod_api::{
     BlockFace, BlockShapeKind, BlockUpdateFlags, ClipBlock, ClipFluid, ClipHit, DimensionKey,
-    EntityRayHit, EntityRef, LevelRef, NeighbourUpdate,
+    EntityRayHit, EntityRef, EntityTypeKey, EntityView, LevelRef, NeighbourUpdate,
+};
+use sunrise_client::join_seq::residency::{
+    Kind,
+    table::{EntityLookup, Location},
 };
 use sunrise_core::geometry::{Aabb, Vec3};
 use sunrise_items::items::ItemStack;
@@ -82,6 +86,76 @@ fn entity_ray_hits(
     hits
 }
 
+/// A validated read source. The residency table has already released its borrow before a
+/// view is lent. `Target` projections use only the selected owner, not another handle lookup.
+pub(super) struct NativeEntityView<'g, 'a> {
+    game: &'g Game<'a>,
+    source: EntityReadSource<'g>,
+    write_position: Option<[f64; 3]>,
+}
+
+enum EntityReadSource<'g> {
+    Body(Target, Option<Location>),
+    Mob(&'g super::Mob),
+    Tracked(&'g str, [f64; 3]),
+    Parked(&'g super::Mob),
+    WriterOnly,
+}
+
+impl NativeEntityView<'_, '_> {
+    /// Current-world entity membership (`Host::entity`), excluding identity-only and writer-only views.
+    pub(super) fn is_current(&self) -> bool {
+        matches!(
+            self.source,
+            EntityReadSource::Body(..) | EntityReadSource::Mob(_) | EntityReadSource::Tracked(..)
+        )
+    }
+
+    pub(super) fn is_parked_mob(&self) -> bool {
+        matches!(self.source, EntityReadSource::Parked(_))
+    }
+
+    /// The same narrowing as `Game::mob`, over the source already selected for this view.
+    pub(super) fn is_level_mob(&self) -> bool {
+        self.game.is_logical_server()
+            && matches!(
+                self.source,
+                EntityReadSource::Mob(_) | EntityReadSource::Body(Target::Dragon(_), _)
+            )
+    }
+}
+
+impl EntityView for NativeEntityView<'_, '_> {
+    fn position(&self) -> Option<[f64; 3]> {
+        self.write_position.or_else(|| match self.source {
+            EntityReadSource::Body(target, location) => {
+                self.game.target_position_at(target, location)
+            }
+            EntityReadSource::Mob(mob) => Some([mob.position.x, mob.position.y, mob.position.z]),
+            EntityReadSource::Tracked(_, position) => Some(position),
+            EntityReadSource::Parked(_) | EntityReadSource::WriterOnly => None,
+        })
+    }
+
+    fn rotation(&self) -> Option<[f32; 2]> {
+        match self.source {
+            EntityReadSource::Body(target, _) => Some(self.game.target_rotation(target)),
+            EntityReadSource::Mob(mob) => Some([mob.yaw, mob.head_pitch]),
+            _ => None,
+        }
+    }
+
+    fn kind(&self) -> Option<EntityTypeKey> {
+        let kind = match self.source {
+            EntityReadSource::Body(target, _) => return self.game.native_entity_kind_key(target),
+            EntityReadSource::Tracked(kind, _) => kind,
+            EntityReadSource::Mob(mob) | EntityReadSource::Parked(mob) => &mob.kind.id,
+            EntityReadSource::WriterOnly => return None,
+        };
+        mod_api::__private::resolved_entity_type_key(kind)
+    }
+}
+
 impl Game<'_> {
     /// The logged-in window and network id for an entity handle in its current world.
     pub(super) fn native_client_entity_context(&self, entity: EntityRef) -> Option<(&Remote, i32)> {
@@ -98,10 +172,9 @@ impl Game<'_> {
 
     /// What a handle names now, or None for a stale or foreign one.
     pub(super) fn native_entity_target(&self, entity: EntityRef) -> Option<Target> {
-        if self.block_entity_tick_items.is_some() {
-            return self.scoped_native_entity_target(entity);
-        }
-        self.unscoped_native_entity_target(entity)
+        let (location, target) = self.native_server_entity_location(entity)?;
+        self.current_native_entity(location, target)
+            .then_some(target)
     }
     /// What a handle names on a client: the local player, or an entity the
     /// server told this client of (`ClientLevel.getEntity`, whose entities are
@@ -109,18 +182,40 @@ impl Game<'_> {
     /// login, or for an entity the client doesn't have.
     pub(super) fn native_client_entity_target(&self, entity: EntityRef) -> Option<Target> {
         let (remote, id) = self.native_client_entity_context(entity)?;
+        self.native_client_entity_source(remote, id)
+            .map(|(target, _)| target)
+    }
+
+    fn native_client_entity_source(
+        &self,
+        remote: &Remote,
+        id: i32,
+    ) -> Option<(Target, Option<Location>)> {
         if id == remote.entity_id {
-            return self.player.as_ref().map(|_| Target::Player);
+            return self.player.as_ref().map(|_| (Target::Player, None));
         }
         // The server tracks the dragon alone; its parts are the client's own copies of it.
-        if let Some(part) = self.level_dragon_part(entity.id()) {
-            return Some(part);
+        let resident = self.server_resident_entity(id as u32);
+        if let EntityLookup::Found {
+            location,
+            value: part @ Target::DragonPart(_),
+        } = resident
+            && location.owner.dimension == self.dim.key()
+        {
+            return Some((part, Some(location)));
         }
         remote.tracked(id)?;
-        match self.level_entity(id)? {
-            Target::Mob(mob) if !self.mobs.iter().any(|m| m.id == mob && !m.removed) => None,
-            target => Some(target),
+        if let EntityLookup::Found { location, value } = resident
+            && location.owner.dimension == self.dim.key()
+            && !matches!(
+                location.owner.kind,
+                Kind::Player | Kind::Hook | Kind::DragonPart
+            )
+        {
+            return Some((value, Some(location)));
         }
+        self.shown_remote_general(id)
+            .map(|_| (Target::General(id as u32), None))
     }
     /// What a handle names for a read that works on both sides: the server's
     /// entity (`native_entity_target`) or, on a client, its own copy of it.
@@ -828,32 +923,74 @@ impl Game<'_> {
         })
     }
 
-    /// The entity's position (`Entity.position`): its feet, the middle of
-    /// its box for a painting or an item frame.
-    pub(super) fn entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
-        if self.native_lifecycle.epoch() == Some(entity.epoch())
-            && let Some((id, position)) = self.native_lifecycle.entity_sections.write_position
-            && id == entity.id()
-        {
-            return Some(position);
-        }
-        match self.native_entity_read_target(entity) {
-            Some(target) => self.target_position(target),
-            None => self
-                .native_client_tracked(entity)
-                .map(|(_, position)| position),
+    pub(super) fn with_entity_view(
+        &self,
+        entity: EntityRef,
+        read: &mut dyn FnMut(&dyn EntityView),
+    ) {
+        if let Some(view) = self.resolve_entity_view(entity) {
+            read(&view);
         }
     }
-    /// The block the entity's position is in (`Entity.blockPosition`). API
-    /// 373.
-    pub(super) fn entity_block_position(&self, entity: EntityRef) -> Option<[i32; 3]> {
-        self.entity_position(entity)
-            .map(|p| p.map(|v| v.floor() as i32))
+
+    fn entity_read_source(
+        &self,
+        target: Target,
+        location: Option<Location>,
+    ) -> Option<EntityReadSource<'_>> {
+        if matches!(target, Target::Mob(_)) {
+            let mob = self.mobs.get(self.mobs.locate(location?.join)?)?;
+            return Some(EntityReadSource::Mob(mob));
+        }
+        Some(EntityReadSource::Body(target, location))
     }
-    /// The entity's yaw and pitch in degrees (`Entity.getYRot`, `getXRot`); 0
-    /// for the kinds that don't turn. API 373.
-    pub(super) fn entity_rotation(&self, entity: EntityRef) -> Option<[f32; 2]> {
-        Some(self.target_rotation(self.native_entity_read_target(entity)?))
+
+    pub(super) fn resolve_entity_view(
+        &self,
+        entity: EntityRef,
+    ) -> Option<NativeEntityView<'_, '_>> {
+        let write_position = self
+            .native_lifecycle
+            .entity_sections
+            .write_position
+            .filter(|(id, _)| {
+                *id == entity.id() && self.native_lifecycle.epoch() == Some(entity.epoch())
+            })
+            .map(|(_, position)| position);
+        let source = if self.is_logical_server() {
+            self.native_server_entity_location(entity)
+                .and_then(|(location, target)| {
+                    if self.current_native_entity(location, target) {
+                        self.entity_read_source(target, Some(location))
+                    } else if matches!(target, Target::Mob(_)) {
+                        self.parked_mob(location)
+                            .map(|(_, mob)| EntityReadSource::Parked(mob))
+                    } else {
+                        None
+                    }
+                })
+                .or_else(|| {
+                    self.native_client_tracked(entity)
+                        .map(|(kind, position)| EntityReadSource::Tracked(kind, position))
+                })
+        } else {
+            self.native_client_entity_context(entity)
+                .and_then(|(remote, id)| {
+                    self.native_client_entity_source(remote, id)
+                        .and_then(|(target, location)| self.entity_read_source(target, location))
+                        .or_else(|| {
+                            remote
+                                .tracked_entity(id)
+                                .map(|(kind, position)| EntityReadSource::Tracked(kind, position))
+                        })
+                })
+        };
+        let source = source.or(write_position.map(|_| EntityReadSource::WriterOnly))?;
+        Some(NativeEntityView {
+            game: self,
+            source,
+            write_position,
+        })
     }
 
     pub(super) fn native_client_general(
@@ -863,27 +1000,10 @@ impl Game<'_> {
         let (remote, id) = self.native_client_entity_context(entity)?;
         remote.general.shown(id)
     }
-    /// The entity's type (`Entity.getType`): `minecraft:zombie`. API
-    /// 373.
-    pub(super) fn entity_kind(&self, entity: EntityRef) -> Option<mod_api::EntityTypeKey> {
-        match self.native_entity_read_target(entity) {
-            Some(target) => self.native_entity_kind_key(target),
-            None => {
-                if self.native_lifecycle.epoch() == Some(entity.epoch())
-                    && let Some((_, mob)) = self.mob_in_other_level(entity.id())
-                {
-                    return mod_api::__private::resolved_entity_type_key(&mob.kind.id);
-                }
-                mod_api::__private::resolved_entity_type_key(self.native_client_tracked(entity)?.0)
-            }
-        }
-    }
     /// A mob of this game that is resident in a loaded level other than the
     /// one in place, as a kill credit can name one (`getEntityInAnyDimension`):
-    /// its identity reads (`entity_kind`, `entity_uuid`, `entity_level`)
-    /// answer from there. None on a client or for anything else.
+    /// its type, UUID and level reads answer from there. None on a client or for anything else.
     pub(super) fn mob_in_other_level(&self, id: u32) -> Option<(super::Dim, &super::Mob)> {
-        use sunrise_client::join_seq::residency::table::EntityLookup;
         if !self.is_logical_server() {
             return None;
         }
@@ -894,6 +1014,10 @@ impl Game<'_> {
         else {
             return None;
         };
+        self.parked_mob(location)
+    }
+
+    fn parked_mob(&self, location: Location) -> Option<(super::Dim, &super::Mob)> {
         let (dim, parked) = self
             .levels
             .parked

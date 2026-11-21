@@ -1,32 +1,46 @@
 impl Game<'_> {
     pub(super) fn unscoped_native_entity_target(&self, entity: EntityRef) -> Option<Target> {
+        let (location, target) = self.unscoped_native_entity_location(entity)?;
+        self.current_native_entity(location, target)
+            .then_some(target)
+    }
+
+    fn unscoped_native_entity_location(&self, entity: EntityRef) -> Option<(Location, Target)> {
         if self.held_out.contains(&entity.id())
             || !self.is_logical_server()
             || self.native_lifecycle.epoch() != Some(entity.epoch())
         {
             return None;
         }
-        let sunrise_client::join_seq::residency::table::EntityLookup::Found { location, value } =
-            self.server_resident_entity(entity.id())
-        else {
-            return None;
-        };
+        match self.server_resident_entity(entity.id()) {
+            EntityLookup::Found { location, value } => Some((location, value)),
+            EntityLookup::Missing | EntityLookup::Taken => None,
+        }
+    }
+
+    fn current_native_entity(&self, location: Location, target: Target) -> bool {
         // Players are server-wide records. Ordinary body operations retain
         // their existing current-level domain; source membership is global.
-        (matches!(value, Target::Player | Target::Guest(_))
-            || location.owner.dimension == self.dim.key())
-        .then_some(value)
+        target.is_player() || location.owner.dimension == self.dim.key()
     }
+
+    fn native_server_entity_location(&self, entity: EntityRef) -> Option<(Location, Target)> {
+        if self.block_entity_tick_items.is_some() {
+            return self.scoped_native_entity_location(entity);
+        }
+        self.unscoped_native_entity_location(entity)
+    }
+
     #[cold]
     #[inline(never)]
-    fn scoped_native_entity_target(&self, entity: EntityRef) -> Option<Target> {
+    fn scoped_native_entity_location(&self, entity: EntityRef) -> Option<(Location, Target)> {
         if self
             .tick_item_view(entity.id())
             .is_some_and(|stack| stack.is_none())
         {
             return None;
         }
-        self.unscoped_native_entity_target(entity)
+        self.unscoped_native_entity_location(entity)
     }
 }
 

@@ -209,10 +209,30 @@ impl mod_api::prelude::MenusClientHost for LiveSectionHost {
     }
 }
 
+impl mod_api::EntityView for SectionWriter {
+    fn position(&self) -> Option<[f64; 3]> {
+        Some(self.position)
+    }
+
+    fn block_position(&self) -> Option<[i32; 3]> {
+        // This host lends only the current write, not the entity's level state.
+        None
+    }
+
+    fn rotation(&self) -> Option<[f32; 2]> {
+        None
+    }
+
+    fn kind(&self) -> Option<mod_api::EntityTypeKey> {
+        None
+    }
+}
+
 impl mod_api::prelude::EntityPositionBackend for LiveSectionHost {
-    fn entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
-        let writer = self.0.filter(|writer| writer.entity == entity)?;
-        Some(writer.position)
+    fn with_entity_view(&self, entity: EntityRef, read: &mut dyn FnMut(&dyn mod_api::EntityView)) {
+        if let Some(writer) = self.0.as_ref().filter(|writer| writer.entity == entity) {
+            read(writer);
+        }
     }
 
     fn entity_on_ground(&self, entity: EntityRef) -> Option<bool> {

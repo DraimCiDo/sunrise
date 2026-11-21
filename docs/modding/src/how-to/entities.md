@@ -4,6 +4,15 @@ Pages for mods that work with players, mobs and other entities, and with the ser
 
 For custom status-effect behaviour, see [Ticking a registered mob effect](entities/effect-ticks.md).
 
+Use `entity.with_view(host, |view| (view.position(), view.rotation(), view.kind()))` to read
+related spatial and type data after resolving the entity once. The closure is skipped when the
+entity cannot be lent. Each field returns its own `Option`: a client-tracked entity can have a
+position and type but no rotation, and a parked mob can lend its type without a position. Use
+`view.block_position()` for the containing block, flooring each coordinate even for negatives.
+Yaw and pitch are in degrees. For a single field, for example `view.position()`, use `.flatten()`
+after `with_view` if you do not need to distinguish an absent field from an unavailable entity.
+The view stays in the closure; take the values out before writing through the host.
+
 `EntityRef::body_yaw(host)` reads a mob's stored body rotation on the server, in degrees without normalization. This is separate from its head rotation. It returns `None` for stale or removed entities, clients, players and other non-mobs, including dragon parts. The ender dragon returns its stored flight/body yaw. In a mob goal, the active mob and disjoint live mobs are read from the goal's view.
 
 Use `entity.set_persistent(host, false)` from a server hook to keep a temporary entity, such as a display,

@@ -42,7 +42,7 @@ mod redirect_tests;
 pub(super) struct GoalCx<'a, 'w> {
     m: &'a mut Mob,
     w: &'a MobWorld<'w>,
-    host: &'a dyn Host,
+    game: &'a Game<'a>,
 }
 
 /// What a handle names in the goal view: the ticking mob itself, the player
@@ -69,11 +69,22 @@ impl GoalCx<'_, '_> {
     /// player view names it — the game's own player, or the guest a server's
     /// mob sees — and a fake player resolves as none.
     fn resolve(&self, entity: EntityRef) -> Option<Resolved<'_>> {
-        let host = self.w.goal_host?;
-        if host.epoch() != Some(entity.epoch()) {
+        if self.w.goal_host?.epoch() != Some(entity.epoch()) {
             return None;
         }
-        let id = entity.id();
+        self.resolve_tick_row(entity.id()).or_else(|| {
+            // The snapshot-only path excludes a mob buffered in Game after the list was
+            // lifted, but leaves other players and non-mob entities to the ordinary host.
+            (self.w.live_mobs.is_none() && self.game_host().mob(entity).is_some())
+                .then_some(Resolved::Unavailable)
+        })
+    }
+
+    fn game_host(&self) -> &dyn Host {
+        self.game
+    }
+
+    fn resolve_tick_row(&self, id: u32) -> Option<Resolved<'_>> {
         if id == self.m.id {
             return Some(Resolved::Own);
         }
@@ -107,13 +118,6 @@ impl GoalCx<'_, '_> {
         match seen {
             Some(seen) if seen.removed => Some(Resolved::Unavailable),
             Some(seen) => Some(Resolved::Seen(seen)),
-            // The snapshot is authoritative for mobs on this path. A spawn
-            // buffered in Game after the list was lifted can already have a
-            // resident handle, but it is not part of this pass's view. Classify
-            // only the missing entity: other players and non-mob entities must
-            // retain their ordinary game-host fallback. The live_mobs path
-            // above, and dispatch directly on Game, do not use this rule.
-            None if self.host.mob(entity).is_some() => Some(Resolved::Unavailable),
             None => None,
         }
     }
@@ -147,7 +151,7 @@ impl GoalCx<'_, '_> {
             ) => Some(entity),
             // An unavailable mob is the view's own answer: never ask the host.
             Some(Resolved::Unavailable) => None,
-            None => self.host.entity(id),
+            None => self.game_host().entity(id),
         }
     }
 
@@ -156,7 +160,7 @@ impl GoalCx<'_, '_> {
         match self.resolve(entity) {
             Some(Resolved::Unavailable) => None,
             Some(_) => Some(LivingRef::new(entity)),
-            None => self.host.living(entity),
+            None => self.game_host().living(entity),
         }
     }
 
@@ -167,14 +171,14 @@ impl GoalCx<'_, '_> {
         match self.resolve(entity) {
             Some(Resolved::Player | Resolved::Unavailable) => None,
             Some(_) => Some(MobRef::new(entity)),
-            None => self.host.mob(entity),
+            None => self.game_host().mob(entity),
         }
     }
 
     /// `Host::player`: resolve any online player, including the one the tick
     /// sees, by UUID.
     pub(crate) fn lookup_player(&self, uuid: u128) -> Option<PlayerRef> {
-        self.host.player(uuid).or_else(|| {
+        self.game_host().player(uuid).or_else(|| {
             let (uuid_seen, id) = self.w.selected_player_identity()?;
             let epoch = self.w.goal_host?.epoch()?;
             (self.w.selected_player().is_some()
@@ -185,7 +189,7 @@ impl GoalCx<'_, '_> {
 
     /// `Host::item_entity`: items remain in the game during mob ticks.
     pub(crate) fn lookup_item_entity(&self, entity: EntityRef) -> Option<mod_api::ItemEntityRef> {
-        self.host.item_entity(entity)
+        self.game_host().item_entity(entity)
     }
 
     /// `Host::block_entity`: block entities live in the world's chunks, which
@@ -195,12 +199,11 @@ impl GoalCx<'_, '_> {
         level: mod_api::LevelRef,
         pos: [i32; 3],
     ) -> Option<mod_api::BlockEntityRef> {
-        self.host.block_entity(level, pos)
+        self.game_host().block_entity(level, pos)
     }
 
-    /// The entity's position, or None where unresolvable.
-    fn position(&self, entity: EntityRef) -> Option<sunrise_core::geometry::Vec3> {
-        match self.resolve(entity)? {
+    fn resolved_position(&self, resolved: &Resolved<'_>) -> Option<sunrise_core::geometry::Vec3> {
+        match resolved {
             Resolved::Own => Some(self.m.position),
             Resolved::Live(mob) => Some(mob.position),
             Resolved::Player => self.w.selected_player().map(|p| p.position),
@@ -212,15 +215,6 @@ impl GoalCx<'_, '_> {
 
     // --- the snapshot-backed reads the generated view forwards to ----------
 
-    fn r_entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
-        self.position(entity).map(|p| [p.x, p.y, p.z])
-    }
-
-    fn r_entity_block_position(&self, entity: EntityRef) -> Option<[i32; 3]> {
-        self.position(entity)
-            .map(|p| [p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32])
-    }
-
     fn r_entity_velocity(&self, entity: EntityRef) -> Option<[f64; 3]> {
         match self.resolve(entity)? {
             Resolved::Own => Some(self.m.velocity),
@@ -231,16 +225,6 @@ impl GoalCx<'_, '_> {
             Resolved::Unavailable => None,
         }
         .map(|v| [v.x, v.y, v.z])
-    }
-
-    fn r_entity_rotation(&self, entity: EntityRef) -> Option<[f32; 2]> {
-        match self.resolve(entity)? {
-            // `getYRot` and `getXRot`: the snapshot carries no pitch and a
-            // player's view no pitch either, so only the mob in hand answers.
-            Resolved::Own => Some([self.m.yaw, self.m.head_pitch]),
-            Resolved::Live(mob) => Some([mob.yaw, mob.head_pitch]),
-            _ => None,
-        }
     }
 
     fn r_entity_head_yaw(&self, entity: EntityRef) -> Option<f32> {
@@ -300,7 +284,7 @@ impl GoalCx<'_, '_> {
     }
 
     fn r_entity_distance_to_sqr(&self, entity: EntityRef, pos: [f64; 3]) -> Option<f64> {
-        self.position(entity).map(|p| {
+        self.resolved_position(&self.resolve(entity)?).map(|p| {
             (p.x - pos[0]).mul_add(p.x - pos[0], 0.0)
                 + (p.y - pos[1]).mul_add(p.y - pos[1], 0.0)
                 + (p.z - pos[2]).mul_add(p.z - pos[2], 0.0)
@@ -312,15 +296,6 @@ impl GoalCx<'_, '_> {
             Resolved::Own => Some(self.m.on_ground),
             Resolved::Live(mob) => Some(mob.on_ground),
             // Not carried by the snapshot or a player's view.
-            _ => None,
-        }
-    }
-
-    fn r_entity_kind(&self, entity: EntityRef) -> Option<mod_api::EntityTypeKey> {
-        match self.resolve(entity)? {
-            // The snapshot carries the species, not its type id.
-            Resolved::Own => mod_api::__private::resolved_entity_type_key(&self.m.kind.id),
-            Resolved::Live(mob) => mod_api::__private::resolved_entity_type_key(&mob.kind.id),
             _ => None,
         }
     }
@@ -909,7 +884,7 @@ impl Game<'_> {
         let context = GoalCx {
             m: mob,
             w: &world,
-            host: self,
+            game: self,
         };
         super::native_hooks::NativeHookHost { host: &context }
             .native_mob_despawn(dimension, entity, kind, pos, result);
@@ -926,7 +901,7 @@ impl Game<'_> {
         read(&GoalCx {
             m: mob,
             w: &world,
-            host: self,
+            game: self,
         })
     }
     /// Dispatch a target change against the mob tick's scoped read view. The
@@ -960,7 +935,7 @@ impl Game<'_> {
         let context = GoalCx {
             m: mob,
             w: world,
-            host: self,
+            game: self,
         };
         let mut new_target = original;
         let mut cancel = false;

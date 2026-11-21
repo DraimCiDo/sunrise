@@ -46,7 +46,7 @@ pub enum AttributeRegistrationError {
 pub struct EffectKey(pub(crate) u32);
 
 /// An entity type (`minecraft:zombie`) in the built-in entity-type registry, in
-/// registration order. Returned by `EntityRef::kind`; Copy/Eq comparisons do not
+/// registration order. Returned by [`EntityView::kind`]; Copy/Eq comparisons do not
 /// allocate. Request `key.id(host)` for its namespaced name (an owned diagnostic
 /// string). A key stays valid until the game exits.
 // no wire: the manual scalar codec validates host slots.
@@ -118,7 +118,7 @@ pub struct ServerPlayer {
 pub struct EntityUuid(pub u128);
 
 /// An entity of the open world, for the `Host` methods that read or change one
-/// (`entity.position(host)`). It holds the world's epoch and the entity's id: ids
+/// (see [`Self::with_view`]). It holds the world's epoch and the entity's id: ids
 /// are shared by every server level and never reused while the server world is
 /// open. An entity that changes dimension on its own (a lone mob, a general entity)
 /// is rebuilt under a new id, as in vanilla, so its old handle goes stale; a vehicle a
@@ -151,6 +151,26 @@ impl EntityRef {
     pub fn epoch(self) -> WorldEpoch {
         self.epoch
     }
+    /// Resolve this entity once and lend its spatial and type reads to `read`.
+    /// Returns `None` without calling `read` if the host cannot lend the entity, such as for a
+    /// stale handle. An available view can still lack individual fields. The view cannot escape
+    /// the callback; copy the values you need before making a write through the host.
+    pub fn with_view<R>(
+        self,
+        host: &dyn Host,
+        read: impl FnOnce(&dyn EntityView) -> R,
+    ) -> Option<R> {
+        let backend = backend_of(host)?;
+        let mut read = Some(read);
+        let mut result = None;
+        backend.with_entity_view(self, &mut |view| {
+            if let Some(read) = read.take() {
+                result = Some(read(view));
+            }
+        });
+        result
+    }
+
     /// A float from the entity's own random (`Entity.getRandom().nextFloat()`), drawn from the
     /// actual stream, which keeps it. None where the hit does not lend the entity.
     pub fn next_float(self, hit: &mut dyn HitHost) -> Option<f32> {
@@ -169,6 +189,30 @@ impl EntityRef {
     pub fn next_int(self, hit: &mut dyn HitHost, bound: i32) -> Option<i32> {
         hit.entity_next_int(self, bound)
     }
+}
+
+/// Read-only spatial and type data for a resolved entity, lent by [`EntityRef::with_view`].
+/// A client-tracked row, a parked mob in another loaded level or a borrowed tick may carry
+/// only some of these fields. In a [goal tick](GoalContext::host), live mobs lent to the tick
+/// take precedence over stale snapshot rows; players use game data when available.
+// no wire: a scoped entity read, not a transported value.
+pub trait EntityView {
+    /// The entity's position (`Entity.position`): its feet, or the middle of its box for a
+    /// painting or item frame.
+    fn position(&self) -> Option<[f64; 3]>;
+
+    /// The block containing the position (`Entity.blockPosition`), flooring each coordinate.
+    fn block_position(&self) -> Option<[i32; 3]> {
+        self.position().map(|p| p.map(|v| v.floor() as i32))
+    }
+
+    /// Yaw and pitch in degrees (`Entity.getYRot`, `Entity.getXRot`), zero for kinds that don't
+    /// turn. `None` if this view does not carry rotation.
+    fn rotation(&self) -> Option<[f32; 2]>;
+
+    /// The resolved type key (`Entity.getType`), including the declared type of a general entity.
+    /// Compare keys directly; request `key.id(host)` only when the namespaced name is needed.
+    fn kind(&self) -> Option<EntityTypeKey>;
 }
 
 /// The resolved holder of a mob's or a boat's leash, or its absence.

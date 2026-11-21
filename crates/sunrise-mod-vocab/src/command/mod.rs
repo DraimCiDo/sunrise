@@ -100,7 +100,7 @@ pub enum CommandArgumentValue {
     /// floored.
     ColumnPos([i32; 2]),
     /// A `rotation` argument as yaw and pitch in degrees, `~` resolved against the source's
-    /// rotation, as `entity_rotation` returns them.
+    /// rotation, as [`crate::EntityView::rotation`] returns them.
     Rotation([f32; 2]),
     /// A `dimension` argument: the level of a dimension the world has loaded. An unknown one is
     /// refused with `argument.dimension.invalid`. Side: server.

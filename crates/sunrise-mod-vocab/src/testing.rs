@@ -615,15 +615,34 @@ impl crate::prelude::FluidsEnergyBackend for FakeHost {
             .map_or(0, |energy| energy.capacity)
     }
 }
-impl crate::prelude::EntityIdentityBackend for FakeHost {
-    fn entity_kind(&self, entity: EntityRef) -> Option<crate::EntityTypeKey> {
-        let kind = if self.players.by_entity(entity.id()).is_some() {
-            "minecraft:player"
-        } else {
-            &self.level.entity_at(entity.id())?.kind
-        };
-        crate::content::registry_keys::resolved_entity_type_key(kind)
+struct FakeEntityView<'a>(&'a str);
+
+impl crate::EntityView for FakeEntityView<'_> {
+    fn position(&self) -> Option<[f64; 3]> {
+        None
     }
+    fn rotation(&self) -> Option<[f32; 2]> {
+        None
+    }
+    fn kind(&self) -> Option<crate::EntityTypeKey> {
+        crate::content::registry_keys::resolved_entity_type_key(self.0)
+    }
+}
+
+impl crate::prelude::EntityPositionBackend for FakeHost {
+    fn with_entity_view(&self, entity: EntityRef, read: &mut dyn FnMut(&dyn crate::EntityView)) {
+        if entity.epoch() != WorldEpoch::new(FAKE_EPOCH) {
+            return;
+        }
+        if self.players.by_entity(entity.id()).is_some() {
+            read(&FakeEntityView("minecraft:player"));
+        } else if let Some(entity) = self.level.entity_at(entity.id()) {
+            read(&FakeEntityView(&entity.kind));
+        }
+    }
+}
+
+impl crate::prelude::EntityIdentityBackend for FakeHost {
     fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
         if let Some((_, player)) = self.players.by_entity(entity.id()) {
             return Some(player.level);
@@ -677,6 +696,7 @@ crate::impl_backend_areas!(
     except(
         block_entities,
         entity_identity,
+        entity_position,
         fluids_energy,
         items,
         keys,

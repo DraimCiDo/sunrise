@@ -85,9 +85,25 @@ impl crate::prelude::EntityIdentityBackend for Double {
         self.trackers.get(&entity.id()).cloned()
     }
 }
+struct Position([f64; 3]);
+
+impl crate::EntityView for Position {
+    fn position(&self) -> Option<[f64; 3]> {
+        Some(self.0)
+    }
+    fn rotation(&self) -> Option<[f32; 2]> {
+        None
+    }
+    fn kind(&self) -> Option<crate::EntityTypeKey> {
+        None
+    }
+}
+
 impl crate::prelude::EntityPositionBackend for Double {
-    fn entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
-        self.positions.get(&entity.id()).copied()
+    fn with_entity_view(&self, entity: EntityRef, read: &mut dyn FnMut(&dyn crate::EntityView)) {
+        if let Some(&position) = self.positions.get(&entity.id()) {
+            read(&Position(position));
+        }
     }
 }
 crate::impl_backend_areas!(
