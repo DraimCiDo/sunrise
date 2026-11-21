@@ -7198,24 +7198,26 @@ mod tests {
     }
 
     #[test]
-    fn failed_async_writes_are_readable_and_never_reported_durable() {
-        let dir = std::env::temp_dir().join(format!("sunrise-save-failure-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+    fn an_async_io_failure_retires_the_pending_snapshot_without_retrying_it() {
+        let dir = tempfile::tempdir().unwrap();
         // A file where a directory is needed causes a real writer I/O error.
-        std::fs::write(dir.join("entities"), b"blocked").unwrap();
-        let save =
-            super::SaveDir::new(dir.clone(), LevelShape::OVERWORLD, Some(Default::default()));
+        let blocked = dir.path().join("entities");
+        std::fs::write(&blocked, b"blocked").unwrap();
+        let save = super::SaveDir::new(dir.path().to_path_buf(), LevelShape::OVERWORLD, None);
         let entity = Tag::compound([("version", Tag::Int(3))]);
-        save.save_entities_later(vec![((0, 0), vec![entity.clone()])])
+        save.save_entities_later(vec![((0, 0), vec![entity])])
             .unwrap();
-        assert!(save.flush().is_err());
-        assert!(save.writes_finished().is_err());
-        assert_eq!(save.load_entities(0, 0), vec![entity]);
-        // The failure stays visible on subsequent barriers too.
-        assert!(save.flush().is_err());
-        drop(save);
-        let _ = std::fs::remove_dir_all(dir);
+        save.flush().unwrap();
+        assert!(save.writes_finished().unwrap());
+        assert_eq!(save.record_save_failures(), 1);
+
+        // Fix the directory without submitting another snapshot. A fresh read
+        // does not see the unpersisted entity and a barrier does not retry it.
+        std::fs::remove_file(&blocked).unwrap();
+        save.flush().unwrap();
+        assert!(save.load_entities(0, 0).is_empty());
+        assert!(!blocked.exists());
+        assert_eq!(save.record_save_failures(), 1);
     }
 
     #[test]
