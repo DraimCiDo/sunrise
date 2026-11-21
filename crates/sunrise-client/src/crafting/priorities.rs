@@ -128,4 +128,5 @@ impl ResolvedSources {
 }
 
 #[cfg(test)]
+#[path = "priorities_tests.rs"]
 mod tests;
