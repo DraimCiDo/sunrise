@@ -2,10 +2,12 @@
 //! Shared by the supervisor and launcher without starting either or loading supervisor services.
 
 pub mod config;
+mod contract;
 mod install;
 pub mod prune;
 
 use config::Config;
+pub use contract::{ContractRange, GameContract, SUPPORTED_CONTRACTS, probe_contract};
 pub use install::Install;
 use std::{
     fmt, io,
