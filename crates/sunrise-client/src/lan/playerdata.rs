@@ -1100,7 +1100,7 @@ mod tests {
         ));
         let binding = loaded.attachments.bind_index(&index, loaded.uuid);
         assert!(load(&mut loaded, &dir));
-        let copy = loaded.attachments.copy_on_death().unwrap();
+        let copy = loaded.attachments.copy_on_death(|_, _| None);
         loaded.attachments.replace_contents(copy);
         assert_eq!(
             keep.get(

@@ -89,8 +89,10 @@ that generation even if another update replaces or removes its values. If the ge
 over the render budget, the engine submits the row with `attachments: None` rather than dropping
 individual fields or reusing stale ones. The next generation that fits is available normally.
 Use a draw default when the snapshot is absent or `get` returns `Ok(None)` for a missing key.
-The first typed read can allocate to decode the value. Two snapshots compare by key and canonical
-NBT value, not by their identity, compound iteration order, or decode cache.
+A retained snapshot and the key must both belong to the active installation, or `get` returns
+`AttachmentError::StaleKey`. The first typed read can allocate to decode the value. Within one
+installation, snapshots compare by key and canonical NBT value, not by generation identity,
+compound iteration order, or decode cache.
 
 `EntityRenderState`, its family-specific state types, and `EntityRenderAttachments` are native
 render input, not `Wire` payloads. The attachment's save and sync codecs still apply. `yaw`,

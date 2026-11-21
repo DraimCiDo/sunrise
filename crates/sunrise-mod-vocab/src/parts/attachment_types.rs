@@ -229,6 +229,7 @@ pub struct RegisteredAttachment {
     policy: AttachmentPolicy,
     record: Arc<dyn Any + Send + Sync>,
     project_sync: ProjectAttachmentSync,
+    sync_panicked: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl RegisteredAttachment {
@@ -334,6 +335,7 @@ pub fn check_attachment_descriptor(
         policy: descriptor.policy,
         record,
         project_sync: descriptor.project_sync,
+        sync_panicked: Default::default(),
     })
 }
 
@@ -412,8 +414,16 @@ impl<T: 'static> AttachmentKey<T> {
     }
 
     pub(crate) fn live(&self) -> Result<&CheckedAttachmentType<T>, AttachmentError> {
-        let current = installed()
-            .and_then(|parts| parts.attachment_types.get(self.namespace()))
+        self.live_in(installed().ok_or(AttachmentError::StaleKey)?)
+    }
+
+    pub(crate) fn live_in(
+        &self,
+        parts: &crate::parts::Installed,
+    ) -> Result<&CheckedAttachmentType<T>, AttachmentError> {
+        let current = parts
+            .attachment_types
+            .get(self.namespace())
             .and_then(|types| types.get(self.name()))
             .ok_or(AttachmentError::StaleKey)?;
         if !std::ptr::addr_eq(Arc::as_ptr(&current.record), Arc::as_ptr(&self.0)) {
@@ -592,17 +602,47 @@ impl dyn Registrar + '_ {
 
 /// Project one attachment entry for client sync through the active registered descriptor.
 ///
-/// Returns `None` when no active descriptor is registered for `namespace:name`, when the
-/// active descriptor is not configured to sync, or when projection fails.
+/// Missing or unsynced registrations are absent; a codec refusal is a separate error.
 // hidden: engine-owned attachment sync projection; not an authoring method.
 #[doc(hidden)]
 pub fn project_sync_attachment(
     namespace: &str,
     name: &str,
     input: AttachmentSyncInput<'_>,
-) -> Option<Compound> {
+) -> Result<Option<Compound>, String> {
+    use std::sync::atomic::Ordering;
+    let Some(record) = installed()
+        .and_then(|parts| parts.attachment_types.get(namespace))
+        .and_then(|types| types.get(name))
+        .filter(|record| record.is_synced() && !record.sync_panicked.load(Ordering::Acquire))
+    else {
+        return Ok(None);
+    };
+    let owner = record.owner();
+    let _scope = crate::mark_mod(owner, "attachment_sync");
+    match crate::content::crash::recover_attachment_callback(owner, || record.project_sync(input)) {
+        Ok(Ok(result)) => result.map_err(|error| format!("mod {owner}: {error:?}")),
+        Ok(Err(refusal)) => Err(refusal.to_string()),
+        Err(panic) => {
+            record.sync_panicked.store(true, Ordering::Release);
+            crate::content::crash::report_attachment_callback_panic(
+                owner,
+                "attachment_sync",
+                &*panic,
+            );
+            Err(format!(
+                "mod {owner}: attachment sync callback panicked and was disabled"
+            ))
+        }
+    }
+}
+
+/// Resolve an attachment's copy-on-death policy independently of its saved envelope.
+// hidden: engine-owned respawn copy policy lookup.
+#[doc(hidden)]
+pub fn registered_copy_on_death(namespace: &str, name: &str) -> Option<bool> {
     let record = installed()?.attachment_types.get(namespace)?.get(name)?;
-    record.project_sync(input).ok().flatten()
+    Some(record.policy().copy_on_death)
 }
 
 /// Validate use against the installed owner's declaration.
@@ -864,12 +904,12 @@ mod tests {
             name: "dual".into(),
             value: Some([("net".into(), Tag::Int(107))].into()),
         }];
-        assert_eq!(reloaded.0.synced(project_sync_attachment), expected_v1);
+        let project = |namespace: &str, name: &str, input: AttachmentSyncInput<'_>| {
+            project_sync_attachment(namespace, name, input).unwrap()
+        };
+        assert_eq!(reloaded.0.synced(project), expected_v1);
         key_v1.sync_data_in(&mut reloaded, Holder::Level).unwrap();
-        assert_eq!(
-            reloaded.0.take_sync_changes(project_sync_attachment),
-            expected_v1
-        );
+        assert_eq!(reloaded.0.take_sync_changes(project), expected_v1);
 
         // Migrating the active descriptor's sync codec re-projects the unread saved entry.
         let key_v2 = install_attachment_fixture(
@@ -883,19 +923,105 @@ mod tests {
             name: "dual".into(),
             value: Some([("net_v2".into(), Tag::Int(70))].into()),
         }];
-        assert_eq!(reloaded.0.synced(project_sync_attachment), expected_v2);
+        assert_eq!(reloaded.0.synced(project), expected_v2);
         key_v2.sync_data_in(&mut reloaded, Holder::Level).unwrap();
-        assert_eq!(
-            reloaded.0.take_sync_changes(project_sync_attachment),
-            expected_v2
-        );
+        assert_eq!(reloaded.0.take_sync_changes(project), expected_v2);
 
         // Unsyncing the active descriptor stops sending while keeping saved NBT intact.
         let _unsynced = install_attachment_fixture(
             "mod_a",
             AttachmentDescriptor::new("mod_a:dual", || 0i32).serialize(disk_codec),
         );
-        assert!(reloaded.0.synced(project_sync_attachment).is_empty());
+        assert!(reloaded.0.synced(project).is_empty());
         assert_eq!(reloaded.0.to_nbt(), saved);
+    }
+
+    #[test]
+    fn unread_projection_refusals_are_reported_on_tracking_and_resync_without_stopping_other_keys()
+    {
+        let descriptor = |id| AttachmentDescriptor::new(id, || 0i32);
+        let (bad, bad_key) = registered_attachment_fixture(
+            "disk_owner",
+            descriptor("shared:bad")
+                .serialize(AttachmentCodec {
+                    decode: |_| Err(AttachmentError::Decode),
+                    ..i32_codec()
+                })
+                .sync(i32_codec()),
+        );
+        let (good, good_key) = registered_attachment_fixture(
+            "other",
+            descriptor("shared:good")
+                .serialize(i32_codec())
+                .sync(i32_codec()),
+        );
+        crate::parts::install_input(crate::parts::installation::InstalledInput {
+            attachment_types: HashMap::from([(
+                "shared",
+                HashMap::from([("bad", bad), ("good", good)]),
+            )]),
+            ..Default::default()
+        });
+        let mut level = FakeLevel(Attachments::default());
+        bad_key.set_in(&mut level, Holder::Level, 19).unwrap();
+        good_key.set_in(&mut level, Holder::Level, 42).unwrap();
+        level.0 = Attachments::from_nbt(level.0.to_nbt());
+        let mut failures = Vec::new();
+        let mut project =
+            |ns: &str, name: &str, input: AttachmentSyncInput<'_>| match project_sync_attachment(
+                ns, name, input,
+            ) {
+                Ok(value) => value,
+                Err(error) => {
+                    failures.push(format!("{ns}:{name}: {error}"));
+                    None
+                }
+            };
+        let expected = [sunrise_mod_runtime::attachments::AttachmentSync {
+            namespace: "shared".into(),
+            name: "good".into(),
+            value: Some([("v".into(), Tag::Int(42))].into()),
+        }];
+        assert_eq!(level.0.synced(&mut project), expected);
+        bad_key.sync_data_in(&mut level, Holder::Level).unwrap();
+        good_key.sync_data_in(&mut level, Holder::Level).unwrap();
+        assert_eq!(level.0.take_sync_changes(&mut project), expected);
+        assert!(level.0.take_sync_changes(&mut project).is_empty());
+        assert_eq!(failures, ["shared:bad: mod disk_owner: Decode"; 2]);
+    }
+
+    #[test]
+    fn respawn_uses_registered_policy_even_if_saved_metadata_says_the_opposite() {
+        let descriptor =
+            || AttachmentDescriptor::new("shared:respawn", || 0i32).serialize(i32_codec());
+        for saved_copy in [false, true] {
+            let saved = if saved_copy {
+                descriptor().copy_on_death()
+            } else {
+                descriptor()
+            };
+            let old = install_attachment_fixture("owner", saved);
+            let mut level = FakeLevel(Attachments::default());
+            old.set_in(&mut level, Holder::Level, 17).unwrap();
+            let mut level = FakeLevel(Attachments::from_nbt(level.0.to_nbt()));
+
+            let current = if saved_copy {
+                descriptor()
+            } else {
+                descriptor().copy_on_death()
+            };
+            let fresh = install_attachment_fixture("owner", current);
+            let expected = (!saved_copy).then_some(17);
+            let read_copy = |level: &FakeLevel| {
+                let mut copy = FakeLevel(level.0.copy_on_death(registered_copy_on_death));
+                fresh.get_existing_in(&mut copy, Holder::Level)
+            };
+            assert_eq!(read_copy(&level), Ok(expected));
+            assert_eq!(
+                fresh.get_existing_in(&mut level, Holder::Level),
+                Ok(Some(17))
+            );
+            assert_eq!(read_copy(&level), Ok(expected));
+        }
     }
 }

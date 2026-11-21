@@ -6,9 +6,6 @@ use sunrise_client_render::api_context::WorldgenReader;
 use sunrise_mod_runtime::attachments::Attachments;
 
 pub(super) struct DiskRuntime {
-    /// Chunks whose load listener failed: their stored record is kept as it was read and no
-    /// save listener runs for them for the rest of the session.
-    save_suppressed: Mutex<HashSet<(i32, i32)>>,
     /// Chunks whose captured save did not reach disk; the game marks them dirty again.
     failed_saves: Mutex<Vec<(i32, i32)>>,
     world: WorldEpoch,
@@ -152,24 +149,11 @@ impl SaveDir {
             return;
         }
         let _ = self.disk.set(Arc::new(DiskRuntime {
-            save_suppressed: Mutex::default(),
             failed_saves: Mutex::default(),
             world,
             dimension,
             resources,
         }));
-    }
-
-    /// Whether `x`, `z` failed its load listener this session. Such a chunk loads with its stored
-    /// attachments untouched and is saved without any save listener, so half-initialised state
-    /// never replaces the stored record. A poisoned set suppresses, never lets a listener run.
-    pub(super) fn chunk_save_suppressed(&self, x: i32, z: i32) -> bool {
-        self.disk.get().is_some_and(|runtime| {
-            runtime
-                .save_suppressed
-                .lock()
-                .map_or(true, |suppressed| suppressed.contains(&(x, z)))
-        })
     }
 
     pub(super) fn capture_disk_record(&self, record: Record) -> Result<Record> {
@@ -178,9 +162,7 @@ impl SaveDir {
             Record::Proto(proto, ..) => (&proto.column, ChunkDiskKind::Proto),
             _ => return Ok(record),
         };
-        if !mod_api::__private::listened(mod_api::HookId::ChunkDataSave)
-            || self.chunk_save_suppressed(chunk.x, chunk.z)
-        {
+        if !mod_api::__private::listened(mod_api::HookId::ChunkDataSave) {
             return Ok(record);
         }
         admit_disk_save()?;
@@ -223,20 +205,12 @@ impl SaveDir {
                 Ok(())
             }
             Err(error) => {
-                // The chunk loads with the attachments it was stored with.
-                let first = runtime
-                    .save_suppressed
-                    .lock()
-                    .map_err(|_| "chunk disk suppression poisoned")?
-                    .insert((chunk.x, chunk.z));
-                if first {
-                    log::error!(
-                        "chunk {},{}: a chunk_data_load listener failed ({error}); the stored record \
-                         is kept unchanged and no chunk_data_save listener runs for this chunk this session",
-                        chunk.x,
-                        chunk.z
-                    );
-                }
+                // The captured input could not be edited; leave the decoded record as read.
+                log::error!(
+                    "chunk {},{}: attachment input refused: {error}",
+                    chunk.x,
+                    chunk.z
+                );
                 Ok(())
             }
         }
@@ -262,11 +236,7 @@ impl SaveDir {
                 .ok_or("chunk disk worker context is not bound")?;
             let jobs: Vec<_> = chunks
                 .iter()
-                .map(|chunk| {
-                    (!self.chunk_save_suppressed(chunk.x, chunk.z))
-                        .then(|| runtime.capture(chunk, ChunkDiskKind::Full, ChunkDiskPhase::Save))
-                        .flatten()
-                })
+                .map(|chunk| runtime.capture(chunk, ChunkDiskKind::Full, ChunkDiskPhase::Save))
                 .collect();
             let work = || -> std::io::Result<Vec<_>> {
                 chunks

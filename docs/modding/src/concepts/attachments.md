@@ -72,9 +72,9 @@ entity, chunk or level. Call `key.get`, `key.set`, `key.remove`, `key.has`,
 first access. `has` and `get_existing` read without inserting (NeoForge's `hasData`
 and `getExistingData`): `has` says whether a value is stored, saved or set, even
 before it decodes, and `get_existing` returns `None` instead of the default. Neither
-adds anything to the holder's saved data. `set` runs the optional persistence and
-sync codecs before changing the value, returning an `AttachmentError` if encoding
-fails.
+adds anything to the holder's saved data. `set` runs the optional persistence codec
+before changing the value, returning an `AttachmentError` if persistence encoding
+fails. The sync codec runs only when there is a value to send to tracking clients.
 Keys are identified by `(namespace, name)` and bound to the installation that
 issued them; a key already decoded as another Rust type is an error, and a key
 from an earlier installation fails with `AttachmentError::StaleKey`. On a server,
@@ -169,6 +169,10 @@ everyone in the level for the level. A client also gets all of a holder's synced
 when it starts seeing it: a chunk sent (with its block entities), a level joined or
 re-entered, an entity tracked, and its own player. The wire form is encoded and decoded
 with the sync codec passed to `.sync(...)`, without requiring `.serialize(...)`.
+The send pass encodes the current committed value, including on explicit resync.
+A projection refusal is logged each time with the holder, attachment ID and declaring
+mod; other keys can still be sent. A panic disables the failing sync callback for the
+session and reports the mod in the log and in a local error toast.
 
 Values travel on `sunrise:attachment_sync`, an engine declaration in the negotiated
 payload table (play, to the client, version 1, optional): only a client whose connection
@@ -190,13 +194,14 @@ A general entity row (`declare_general_entity`) has no data of its own on a clie
 synced attachments are what a Sunrise client knows of it beyond its type, position and
 rotation. They arrive with the row, when the client starts tracking it, and go with it. Its
 [renderer](../how-to/client/entity-renderers.md#a-general-entitys-frame) reads a frozen generation
-of those values rather than consulting the client holder.
+of those values rather than consulting the client holder. It accepts only keys issued by the
+installation that captured the generation.
 
 ## Copying on respawn and conversion
 
 `.copy_on_death()` requires `.serialize(codec)`. Player respawn copies opted-in entries via their
-encoded representation, including raw entries of an absent mod; other entries are
-removed. A mob's conversion (a villager struck into a witch, a zombie villager cured, a
+encoded representation. Whether to copy is decided by the currently registered descriptor,
+even for unread saved values. An absent mod's opaque entries still use the saved copy flag. A mob's conversion (a villager struck into a witch, a zombie villager cured, a
 piglin zombified, a tadpole grown) copies every entry with a codec, raw entries of an absent
 mod included, to the new mob through its encoded form, over what its construction set; entries
 without a codec stay on the removed mob. A cancelled `living_conversion_pre` copies nothing,

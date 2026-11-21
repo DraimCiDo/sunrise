@@ -74,6 +74,7 @@ impl ServerPackState {
             .filter_map(|n| n.toast.as_ref())
             .chain(self.load_fail.as_ref())
             .chain(self.chunk_io.iter().flatten())
+            .chain(self.attachment_errors.iter().flatten())
             .filter_map(|t| t.slot)
     }
 }
@@ -98,6 +99,7 @@ pub(super) struct ServerPackState {
     /// `SystemToastId.LOW_DISK_SPACE`, `CHUNK_LOAD_FAILURE` and `CHUNK_SAVE_FAILURE`:
     /// the toasts the integrated server's chunk IO reports add (`chunk_io`).
     pub(super) chunk_io: [Option<SystemToast>; 3],
+    attachment_errors: Vec<Option<SystemToast>>,
 }
 /// `DownloadedPackSource.createDownloadNotifier`: one batch's progress in its
 /// own `SystemToast`.
@@ -532,6 +534,23 @@ impl Game<'_> {
     pub(super) fn draw_pack_toasts(&mut self, batch: &mut HudBatch, hidden: bool) {
         let multiplier = self.settings.notification_display_time;
         self.add_chunk_io_toasts();
+        // Failure notices bypass the mod-controlled toast admission hook.
+        self.server_packs.attachment_errors.extend(
+            mod_api::content::crash::take_attachment_panic_notices()
+                .into_iter()
+                .map(|(owner, callback)| {
+                    Some(
+                        SystemToast::new(
+                            Text::tr("sunrise.mods.attachment_error.title", &[]),
+                            Some(Text::tr(
+                                "sunrise.mods.attachment_error.description",
+                                &[&owner, &callback],
+                            )),
+                        )
+                        .with_title_color(sunrise_client::hud::rgba(255, 85, 85, 255)),
+                    )
+                }),
+        );
         let mut used = self.toast_slots_used();
         let packs = &mut self.server_packs;
         for slot_toast in packs
@@ -540,6 +559,7 @@ impl Game<'_> {
             .map(|n| &mut n.toast)
             .chain(std::iter::once(&mut packs.load_fail))
             .chain(packs.chunk_io.iter_mut())
+            .chain(packs.attachment_errors.iter_mut())
         {
             let Some(toast) = slot_toast else {
                 continue;
@@ -565,6 +585,7 @@ impl Game<'_> {
                 toast.draw(&self.gui.atlas, batch, 32.0 * slot as f32);
             }
         }
+        packs.attachment_errors.retain(Option::is_some);
         self.draw_controller_notice(batch);
     }
     /// A left click on the prompt: its answer when it hit a button.

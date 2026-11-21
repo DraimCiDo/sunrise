@@ -39,10 +39,15 @@
     "category": "immutable cache",
     "reason": "Empty or set-once resolved registry lookup returned when no installed Parts inventory supplies one."
   },
+  "content/crash.rs::ATTACHMENT_PANIC_NOTICES": {
+    "type": "std::sync::Mutex<Option<Vec<AttachmentPanicNotice>>>",
+    "category": "crash owner",
+    "reason": "Delivers already-contained attachment callback panics to the local window from sync and chunk workers. Headless servers do not collect notices."
+  },
   "content/crash.rs::CURRENT_CRASH_OWNER": {
     "type": "Cell<CrashOwner>",
     "category": "crash owner",
-    "reason": "The one addition to #2587: call and frame ownership stay local to avoid indirect callbacks on every subscribed dispatch."
+    "reason": "Call and frame ownership stay local to avoid indirect callbacks on every subscribed dispatch; the same cell identifies contained attachment callback panics."
   },
   "content/registry_keys.rs::ENCHANTMENTS": {
     "type": "std::sync::LazyLock<std::sync::RwLock<Option<sunrise_mod_runtime::registry_keys::Names>>,>",

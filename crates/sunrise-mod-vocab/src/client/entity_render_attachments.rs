@@ -6,27 +6,33 @@ use sunrise_mod_runtime::attachments::{Attachments, snapshot::SyncedAttachmentSn
 /// A general entity's synced fields as they were at render-state extraction.
 /// Clones share the captured generation and do not see later sync updates.
 /// Snapshots compare by attachment key and canonical NBT value, regardless of generation
-/// identity, compound iteration order, or which typed values have been read.
+/// identity within the same installation, compound iteration order, or which typed values
+/// have been read.
 // no wire: native render input; attachments keep their separate disk and sync codecs.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub struct EntityRenderAttachments {
+    epoch: Option<u64>,
     data: SyncedAttachmentSnapshot,
 }
 
 impl EntityRenderAttachments {
     /// Borrows the synced value of `key`, or returns `Ok(None)` if the key is absent from this
-    /// generation. Never inserts a default or reads the live world. The first typed read may
-    /// allocate when it decodes the value using the key's sync codec.
+    /// generation. Returns [`AttachmentError::StaleKey`] unless the key and capture belong to
+    /// the current installation. Never inserts a default or reads the live world. The first
+    /// typed read may allocate when it decodes the value using the key's sync codec.
     pub fn get<T: Send + Sync + 'static>(
         &self,
         key: &AttachmentKey<T>,
     ) -> Result<Option<&T>, AttachmentError> {
-        let checked = key.live()?;
+        let parts = crate::parts::installed()
+            .filter(|parts| Some(parts.epoch) == self.epoch)
+            .ok_or(AttachmentError::StaleKey)?;
+        let checked = key.live_in(parts)?;
         if !checked.is_synced() {
             return Err(AttachmentError::InvalidSyncPolicy);
         }
-        self.data.get_checked(checked)
+        self.data.get_checked(checked, parts.epoch)
     }
 }
 
@@ -38,6 +44,7 @@ pub fn capture_entity_render_attachments(
     compound_heap_bytes: impl Fn(&Compound) -> usize,
 ) -> Option<EntityRenderAttachments> {
     Some(EntityRenderAttachments {
+        epoch: crate::parts::installed().map(|parts| parts.epoch),
         data: SyncedAttachmentSnapshot::capture(attachments, max_bytes, compound_heap_bytes)?,
     })
 }
@@ -99,10 +106,18 @@ mod tests {
         .unwrap();
         assert_eq!(empty.get(&glow), Ok(None));
 
-        let _fresh = crate::parts::install_attachment_fixture(
+        let fresh = crate::parts::install_attachment_fixture(
             "render_test",
-            AttachmentDescriptor::new("render_test:glow", || 0i32).sync(i32_codec()),
+            AttachmentDescriptor::new("render_test:glow", || 0i32).sync(AttachmentCodec {
+                decode: |tag| (i32_codec().decode)(tag).map(|n| n + 100),
+                ..i32_codec()
+            }),
         );
+        let recaptured =
+            capture_entity_render_attachments(&store, usize::MAX, Compound::storage_bytes).unwrap();
         assert_eq!(snapshot.get(&glow), Err(AttachmentError::StaleKey));
+        assert_eq!(snapshot.get(&fresh), Err(AttachmentError::StaleKey));
+        assert_eq!(recaptured.get(&glow), Err(AttachmentError::StaleKey));
+        assert_eq!(recaptured.get(&fresh), Ok(Some(&119)));
     }
 }

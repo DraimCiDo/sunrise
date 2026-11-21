@@ -27,9 +27,6 @@ impl SyncedAttachmentSnapshot {
         let mut left = limit.checked_sub(arc_header + align_of::<Binding>() - 1)?;
         let mut entries = Vec::new();
         for (key, binding) in &holder.entries {
-            if !binding.is_synced() {
-                continue;
-            }
             let Some(value) = binding.synced_value() else {
                 continue;
             };
@@ -50,9 +47,8 @@ impl SyncedAttachmentSnapshot {
                     ..
                 }
                 | Entry::Decoded(_) => {
-                    // A live read can promote the replica to a typed binding, and a disk-loaded
-                    // entry carries a saved envelope. Freeze the sync codec input so render reads
-                    // always decode via the key's sync_codec.
+                    // A live read can promote the replica to a typed binding. Freeze its
+                    // original sync input, not the typed value or any disk encoding.
                     let mut saved =
                         Compound::from([("value".into(), Tag::Compound(Compound::new()))]);
                     left = left.checked_sub(compound_heap_bytes(&saved))?;
@@ -81,10 +77,11 @@ impl SyncedAttachmentSnapshot {
             .transpose()
     }
 
-    /// Read a captured binding using a pre-validated attachment type.
+    /// Read a captured binding with an issued type, scoping cached decodes to its installation.
     pub fn get_checked<T: Send + Sync + 'static>(
         &self,
         key: &CheckedAttachmentType<T>,
+        epoch: u64,
     ) -> Result<Option<&T>, AttachmentError> {
         let lookup = (key.namespace(), key.name());
         self.0
@@ -92,7 +89,7 @@ impl SyncedAttachmentSnapshot {
                 (key as &dyn AttachmentKeyView).cmp(&lookup as &dyn AttachmentKeyView)
             })
             .ok()
-            .map(|i| self.0[i].1.read_checked(key))
+            .map(|i| self.0[i].1.read_in_installation(key.as_type(), Some(epoch)))
             .transpose()
     }
 }
@@ -234,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshots_of_live_decoded_bindings_still_read_through_the_sync_codec() {
+    fn snapshots_keep_replica_bytes_after_promotion_but_skip_local_values() {
         static CODEC: AttachmentType<i32> = AttachmentType {
             namespace: "test",
             name: "fuel",
@@ -254,9 +251,18 @@ mod tests {
         };
         let mut holder = Attachments::default();
         CODEC.set(&mut holder, Holder::Level, 27).unwrap();
-        let frame =
-            SyncedAttachmentSnapshot::capture(&holder, 8_192, Compound::storage_bytes).unwrap();
-        assert_eq!(CODEC.get_existing(&mut holder, Holder::Level), Ok(Some(27)));
+        let capture = |holder: &Attachments| {
+            SyncedAttachmentSnapshot::capture(holder, 8_192, Compound::storage_bytes).unwrap()
+        };
+        assert_eq!(capture(&holder).get(&CODEC), Ok(None));
+
+        sync(
+            &mut holder,
+            "fuel",
+            Some([("n".into(), Tag::Int(2))].into()),
+        );
+        assert_eq!(CODEC.get_existing(&mut holder, Holder::Level), Ok(Some(20)));
+        let frame = capture(&holder);
         assert_eq!(frame.get(&CODEC), Ok(Some(&20)));
         let checked = CheckedAttachmentType::new(AttachmentType {
             namespace: "test",
@@ -267,6 +273,6 @@ mod tests {
             sync_codec: CODEC.sync_codec,
         })
         .unwrap();
-        assert_eq!(frame.get_checked(&checked), Ok(Some(&20)));
+        assert_eq!(frame.get_checked(&checked, 1), Ok(Some(&20)));
     }
 }

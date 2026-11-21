@@ -439,10 +439,9 @@ fn disk_write_failure_keeps_old_disk_7_and_snapshot_8_for_recovery() {
     fs::remove_dir_all(path).unwrap();
 }
 
-/// A chunk whose load listener failed loads with its stored attachments and is saved by every
-/// path with no save listener, so the stored value 8 is written back unchanged.
+/// A panicking load listener does not suppress a separate save listener on any save path.
 #[test]
-fn failed_load_keeps_stored_8_and_runs_no_save_listener_for_every_save_path() {
+fn panicking_load_listener_keeps_saved_value_and_does_not_disable_save_hook() {
     let (registry, biomes) = super::loot_tests::fixture();
     let registry = Box::leak(Box::new(registry));
     let biomes = Arc::new(biomes);
@@ -476,9 +475,7 @@ fn failed_load_keeps_stored_8_and_runs_no_save_listener_for_every_save_path() {
             let mut loaded = save
                 .load(2, -3, registry, &biomes)
                 .expect("the chunk loads");
-            assert!(save.chunk_save_suppressed(2, -3));
-            assert!(!save.chunk_save_suppressed(0, 0));
-            // The failed job's edits were dropped: the stored value is still there.
+            // The stored value is still there.
             assert_eq!(value(&mut loaded), 8);
             let chunks = [Arc::new(loaded)];
             if sync {
@@ -489,7 +486,7 @@ fn failed_load_keeps_stored_8_and_runs_no_save_listener_for_every_save_path() {
             }
             assert!(save.take_failed_chunk_saves().is_empty());
         });
-        assert_eq!(saves.load(Ordering::Relaxed), 0);
+        assert_eq!(saves.load(Ordering::Relaxed), usize::from(!load_only));
         mod_platform::testing::with_mods(Vec::new().into(), || {
             assert_eq!(disk_value(&path, registry, &biomes), Some(8));
         });

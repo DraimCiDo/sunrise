@@ -525,6 +525,8 @@
   "sunrise.modprofile.started": "Mod profiling started.",
   "sunrise.modprofile.stopped": "Mod profiling stopped. Saved %s",
   "sunrise.modprofile.writeFailed": "Could not save the mod profile: %s",
+  "sunrise.mods.attachment_error.description": "%s's %s callback stopped and was disabled for this session.",
+  "sunrise.mods.attachment_error.title": "Mod attachment error",
   "sunrise.mods.browse": "Browse Mods...",
   "sunrise.mods.browse.by": "by %s",
   "sunrise.mods.browse.changelog": "Changelog",

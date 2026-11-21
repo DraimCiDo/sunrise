@@ -65,7 +65,7 @@ impl ChunkDiskContext {
 }
 
 // no wire: local refusal of an in-process chunk disk job.
-/// Why a chunk disk job refused, with the failing mod and attachment when known.
+/// A refused chunk attachment operation or invalid job input, naming its mod and key when known.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ChunkDiskFailure {
@@ -157,11 +157,26 @@ pub use job::ChunkDiskJob;
 #[path = "chunk_disk/tests.rs"]
 mod tests;
 
-/// Fence listener unwinds before publication.
-pub(crate) fn invoke(mod_id: &str, call: impl FnOnce()) -> Result<(), ChunkDiskFailure> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)).map_err(|_| ChunkDiskFailure {
-        mod_id: mod_id.into(),
-        key: String::new(),
-        reason: "native listener unwound".into(),
-    })
+/// Fence one listener; a refusal or panic asks the dispatcher to restore only its edits.
+pub(crate) fn invoke(
+    hook: HookId,
+    name: &'static str,
+    mod_id: &'static str,
+    call: impl FnOnce(),
+) -> bool {
+    if crate::runtime::poisoned(hook, mod_id) {
+        return false;
+    }
+    match crate::content::crash::recover_attachment_callback(mod_id, call) {
+        Ok(Ok(())) => true,
+        Ok(Err(refusal)) => {
+            log::warn!("mod {mod_id} hook {name} refused: {refusal}");
+            false
+        }
+        Err(panic) => {
+            crate::runtime::poison(hook, mod_id);
+            crate::content::crash::report_attachment_callback_panic(mod_id, name, &*panic);
+            false
+        }
+    }
 }

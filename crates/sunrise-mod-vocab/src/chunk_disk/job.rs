@@ -55,7 +55,7 @@ impl ChunkDiskJob {
                 ChunkDiskPhase::Load => native_chunk_data_load(&context, &mut data),
                 ChunkDiskPhase::Save => native_chunk_data_save(&context, &mut data),
             }
-            data.finish()
+            Ok(data.finish())
         })
     }
 

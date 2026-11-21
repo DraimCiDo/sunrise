@@ -26,9 +26,10 @@ the callback, or copy it if it must outlive the callback. Neither metadata gette
 `ConfigHost::setting` still returns an owned `Option<String>` from the same snapshot.
 
 A captured record caches its callback result. Disk encoding and pending reads
-reuse it; they cannot invoke the callback twice. A refusal keeps the original
-capture and prevents the writer from replacing the prior region record. A chunk
-whose `chunk_data_load` listener failed is saved without any save listener.
+reuse it; they cannot invoke the callback twice. A panicking listener loses only
+its edits and is disabled for this hook for the session. The log and local error
+toast name the mod. Edits from the remaining listeners go to the ordinary writer;
+a callback panic does not stop the save.
 
 Every captured record runs the callback exactly once, for full saves (explicit,
 forced, late, unload and closing) and proto saves alike. Saves are refused, with

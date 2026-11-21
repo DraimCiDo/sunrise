@@ -5,17 +5,17 @@ pub trait Hooks {
     /// `data` belongs only to that snapshot: typed edits change the disk record,
     /// never the live chunk. Exactly once per captured record, for full and proto
     /// chunks alike. The restricted Host cannot resolve live chunks or mutate the
-    /// world; `host.job()` borrows the captured metadata. A failed job (for example
-    /// an unwinding listener or invalid disk NBT) retains its snapshot and the prior
-    /// disk record; codec and key errors on `data` return locally without poisoning
-    /// unrelated edits.
+    /// world; `host.job()` borrows the captured metadata. Codec and key errors refuse
+    /// only that operation. A listener that panics loses only its edits and is disabled
+    /// for this hook for the session. Other listeners' edits still reach the ordinary
+    /// disk writer, whose limits and failure handling are unchanged.
     #[hook(
         side = "server",
         contract = "listen",
         context = "chunk_disk",
         target = "mod_api::chunk_disk::native_chunk_data_save",
         neoforge = "ChunkDataEvent.Save",
-        version = 2
+        version = 3
     )]
     fn chunk_data_save(data: &mut ChunkDiskData);
 }

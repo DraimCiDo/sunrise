@@ -5,8 +5,9 @@ use sunrise_mod_runtime::attachments::{self as runtime, index};
 /// A SNAPSHOT of membership and value bindings in the host's current dimension.
 /// Later changes require a fresh query. This is a residency view: removed but
 /// unswept entities may appear, and stale writes fail. Acquisition neither clones values nor
-/// decodes saved payloads; iteration decodes lazily.
-// no wire: transfers saved or synced rows as scoped tokens, payload kind tags, and network NBT; decode requires a complete compound envelope and rebuilds runtime entries.
+/// decodes saved payloads; iteration decodes lazily. The Wire form includes only rows with a
+/// persistence encoding or original replica bytes. It does not run a sync codec or transfer
+/// live, unsaved values from the server.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct AttachmentBatch(runtime::AttachmentBatch<AttachmentHolder>);
@@ -230,10 +231,19 @@ mod tests {
             .set(&mut server, runtime::Holder::Level, 19)
             .unwrap();
         server.bind_index(&index, holder);
-        let batch = round_trip(AttachmentBatch::from(runtime::AttachmentBatch::new(
+        let batch = AttachmentBatch::from(runtime::AttachmentBatch::new(
             index.lock().unwrap().snapshot_named("test", "sync_only"),
-        )));
-        assert_eq!(batch.query(&sync_only).unwrap().get(holder), Ok(Some(19)));
+        ));
+        assert_eq!(
+            batch.clone().query(&sync_only).unwrap().get(holder),
+            Ok(Some(19))
+        );
+        // No disk encoding or received sync bytes exist on the server. Wire must not call
+        // the network handler outside the actual attachment send pass.
+        assert_eq!(
+            round_trip(batch).query(&sync_only).unwrap().get(holder),
+            Ok(None)
+        );
 
         let client_index = Arc::new(std::sync::Mutex::new(index::AttachmentIndex::default()));
         let mut client = runtime::Attachments::default();

@@ -1,5 +1,6 @@
 //! The callback's typed store: only encoded values cross the worker boundary.
 use super::*;
+use std::sync::Arc;
 use sunrise_core::nbt::{self, Limits, NamedTag};
 use sunrise_mod_runtime::attachments::{ATTACHMENTS_KEY, CheckedAttachmentType};
 
@@ -10,18 +11,16 @@ use sunrise_mod_runtime::attachments::{ATTACHMENTS_KEY, CheckedAttachmentType};
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct ChunkDiskData {
-    entries: Compound,
-    failure: Option<ChunkDiskFailure>,
+    entries: Arc<Compound>,
 }
 
 impl ChunkDiskData {
     /// Check the captured encoded envelopes against the disk NBT writer's limits
     /// before opening the transaction. This does not run any attachment codec.
     pub fn from_nbt(entries: Compound) -> Result<Self, ChunkDiskFailure> {
-        validate_disk(&entries)?;
+        validate_disk(&entries).map_err(|error| failure("", error.reason))?;
         Ok(Self {
-            entries,
-            failure: None,
+            entries: Arc::new(entries),
         })
     }
 
@@ -58,9 +57,6 @@ impl ChunkDiskData {
         key: &AttachmentKey<T>,
         apply: impl FnOnce(&CheckedAttachmentType<T>, &mut Attachments) -> Result<R, AttachmentError>,
     ) -> Result<R, ChunkDiskFailure> {
-        if let Some(failure) = &self.failure {
-            return Err(failure.clone());
-        }
         let key_name = key.id();
         let checked = key
             .live()
@@ -69,61 +65,34 @@ impl ChunkDiskData {
             return Err(failure(key_name, "missing persistence codec"));
         }
         let disk = checked.disk_only();
-        let mut store = Attachments::from_nbt(self.entries.clone());
+        let mut store = Attachments::from_nbt((*self.entries).clone());
         let value =
             apply(&disk, &mut store).map_err(|error| failure(key_name, &format!("{error:?}")))?;
         let encoded = store.to_nbt();
-        validate_disk(&encoded)?;
-        self.entries = encoded;
+        validate_disk(&encoded).map_err(|error| failure(key_name, error.reason))?;
+        self.entries = Arc::new(encoded);
         Ok(value)
     }
 
-    /// Run a nested local savepoint. An explicit abort restores the prior envelopes.
-    pub fn transaction<R, E>(
-        &mut self,
-        apply: impl FnOnce(&mut Self) -> Result<R, E>,
-    ) -> Result<R, E> {
-        let previous = self.entries.clone();
-        let result = apply(self);
-        if result.is_err() {
-            self.entries = previous;
-        }
-        result
-    }
-
-    /// The first job-wide refusal (for example an unwinding listener), if any.
-    pub fn failure(&self) -> Option<&ChunkDiskFailure> {
-        self.failure.as_ref()
-    }
-
-    pub(crate) fn refuse(&mut self, error: ChunkDiskFailure) {
-        if self.failure.is_none() {
-            self.failure = Some(error);
-        }
-    }
-
-    pub(crate) fn attribute_failure(&mut self, error: ChunkDiskFailure) {
-        self.failure = Some(error);
-    }
-
-    /// Publish a fully successful snapshot, or return its structured refusal.
-    pub fn finish(self) -> Result<Compound, ChunkDiskFailure> {
-        match self.failure {
-            Some(error) => Err(error),
-            None => Ok(self.entries),
-        }
+    /// Publish the accepted edits from this snapshot.
+    pub fn finish(self) -> Compound {
+        Arc::unwrap_or_clone(self.entries)
     }
 }
 
 fn failure(key: &str, reason: &str) -> ChunkDiskFailure {
+    let mod_id = crate::content::crash::current_native_mod().unwrap_or_default();
+    if !mod_id.is_empty() && !key.is_empty() {
+        log::warn!("mod {mod_id}: chunk attachment {key} operation refused: {reason}");
+    }
     ChunkDiskFailure {
-        mod_id: String::new(),
+        mod_id: mod_id.into(),
         key: key.into(),
         reason: reason.into(),
     }
 }
 
-fn validate_disk(entries: &Compound) -> Result<(), ChunkDiskFailure> {
+fn validate_disk(entries: &Compound) -> Result<(), nbt::Error> {
     let limits = Limits {
         // The chunk root compound wraps `sunrise:attachments`.
         max_depth: nbt::DISK_WRITE_NESTING_GUARD.max(Limits::saved().max_depth) - 1,
@@ -137,5 +106,4 @@ fn validate_disk(entries: &Compound) -> Result<(), ChunkDiskFailure> {
         limits,
     )
     .map(|_| ())
-    .map_err(|error| failure("", error.reason))
 }

@@ -18,15 +18,12 @@ persistence codec, not `Wire`, and disk operations never invoke `sync_codec`.
 Unknown attachment entries are preserved opaquely.
 
 A codec error, missing persistence codec, or stale key on `event.data` returns
-`Err` locally without modifying stored envelopes or poisoning unrelated edits.
-Invalid disk NBT or an unwinding panic refuses the entire store: none of its
-edits are kept. The chunk still loads, with the attachments
-exactly as they were stored, so a mod bug leaves no gap in the world. No
-`chunk_data_save` listener runs for that chunk for the rest of the session, so
-half-initialised state never replaces the stored record, and the chunk's later
-saves write its stored attachments back unchanged. The failure is logged once
-per chunk, naming the chunk and the mod. Fix the mod and rejoin the world to run
-its listeners on that chunk again.
+`Err` for that operation without modifying its stored envelope. If a listener
+panics, only its edits are discarded, and its load callback is disabled for the
+session. The log and local error toast name the mod. Edits from listeners before
+and after it still publish; a load callback cannot suppress the save hook.
+If the captured input fails disk NBT validation, it is reported and the chunk
+keeps its attachments as read.
 
 The load runs on the thread that decodes the record, never with access to live
 world state. [Disk NBT validation](chunk-data-save.md#disk-nbt-validation)

@@ -21,8 +21,8 @@ impl Game<'_> {
             .lan
             .as_mut()
             .and_then(|host| host.hub.guests.attachments_mut(conn))
-            && let Ok(copy) = attachments.copy_on_death()
         {
+            let copy = attachments.copy_on_death(mod_api::__private::registered_copy_on_death);
             attachments.replace_contents(copy);
         }
         // NeoForge's clone keeps only the `PlayerPersisted` part of a mod's saved compound.

@@ -761,9 +761,12 @@ pub fn worker_panic_report(info: &std::panic::PanicHookInfo, side: &'static str)
 /// does. The default hook still prints the panic. A panic inside `contain` is only logged. A
 /// panic inside a native mod's hook names the mod and the hook.
 pub fn install(home: PathBuf, side: &'static str) {
+    if side == "client" {
+        mod_api::content::crash::enable_attachment_panic_toasts();
+    }
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        if contained_panic(info) {
+        if mod_api::content::crash::recovering_attachment_callback() || contained_panic(info) {
             return;
         }
         default(info);

@@ -10,10 +10,11 @@ struct CrashOwner {
     call: Option<ModCall>,
     frame: u64,
     next_frame: u64,
+    recovering_attachment: bool,
 }
 thread_local! {
     static CURRENT_CRASH_OWNER: Cell<CrashOwner> = const { Cell::new(CrashOwner {
-        call: None, frame: 0, next_frame: 0,
+        call: None, frame: 0, next_frame: 0, recovering_attachment: false,
     }) };
 }
 // hidden: platform-owned instrumentation plumbing, not a mod authoring surface.
@@ -165,6 +166,73 @@ pub fn current_native_call() -> Option<ModCall> {
 pub fn current_native_mod() -> Option<&'static str> {
     current_native_call().map(|call| call.id)
 }
+
+pub(crate) fn recover_attachment_callback<T>(
+    owner: &'static str,
+    invoke: impl FnOnce() -> T,
+) -> std::thread::Result<Result<T, crate::world::phase_refusal::PhaseRefusal>> {
+    CURRENT_CRASH_OWNER.with(|state| {
+        let mut entered = state.get();
+        let previous = std::mem::replace(&mut entered.recovering_attachment, true);
+        state.set(entered);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::world::phase_refusal::contain_refusal(owner, invoke)
+        }));
+        let mut left = state.get();
+        left.recovering_attachment = previous;
+        state.set(left);
+        result
+    })
+}
+
+/// Whether the attachment boundary is catching this panic and will report it itself.
+#[doc(hidden)]
+pub fn recovering_attachment_callback() -> bool {
+    CURRENT_CRASH_OWNER
+        .try_with(|state| state.get().recovering_attachment)
+        .unwrap_or(false)
+}
+
+type AttachmentPanicNotice = (&'static str, &'static str);
+static ATTACHMENT_PANIC_NOTICES: std::sync::Mutex<Option<Vec<AttachmentPanicNotice>>> =
+    std::sync::Mutex::new(None);
+
+pub(crate) fn report_attachment_callback_panic(
+    owner: &'static str,
+    operation: &'static str,
+    panic: &(dyn std::any::Any + Send),
+) {
+    let message = panic
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("non-string panic payload");
+    log::error!("mod {owner} callback {operation} panicked and was disabled: {message}");
+    if let Some(notices) = ATTACHMENT_PANIC_NOTICES.lock().unwrap().as_mut() {
+        notices.push((owner, operation));
+    }
+}
+
+/// Start collecting attachment callback panics for the local window; headless servers only log.
+#[doc(hidden)]
+pub fn enable_attachment_panic_toasts() {
+    ATTACHMENT_PANIC_NOTICES
+        .lock()
+        .unwrap()
+        .get_or_insert_with(Vec::new);
+}
+
+/// Drain the attachment callback panic notices, as `(mod_id, callback)`.
+#[doc(hidden)]
+pub fn take_attachment_panic_notices() -> Vec<AttachmentPanicNotice> {
+    ATTACHMENT_PANIC_NOTICES
+        .lock()
+        .unwrap()
+        .as_mut()
+        .map(std::mem::take)
+        .unwrap_or_default()
+}
+
 /// Enter an instrumented native call, or an inert scope without a backend.
 #[inline]
 pub fn enter_native_mod(call: ModCall) -> ModGuard {

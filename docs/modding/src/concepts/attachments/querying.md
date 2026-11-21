@@ -51,7 +51,10 @@ not scan rows. Decode and type errors use `AttachmentRowError::Value`.
 `Ok(None)` means the holder is absent from the snapshot, including when its data
 has not arrived through synchronization. It does not prove the holder is alive:
 `get` performs no host liveness check. A retained query reads its captured value
-even after a live replacement or removal.
+even after a live replacement or removal. Transferring an `AttachmentBatch` through
+`Wire` transfers disk-encoded entries and original client replica bytes only; a value
+that exists only in a server holder has no transferable encoding. Ordinary native
+queries can still read those live values.
 
 ## Write explicitly on the server
 

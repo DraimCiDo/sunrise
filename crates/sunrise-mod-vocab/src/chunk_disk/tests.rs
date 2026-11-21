@@ -54,17 +54,20 @@ fn run(job: &ChunkDiskJob) -> Result<Compound, ChunkDiskFailure> {
 }
 struct Listener {
     calls: Arc<AtomicUsize>,
-    mode: u8,
+    save_expected: i32,
+    save_value: i32,
+    panics: bool,
     value: AttachmentKey<i32>,
+    save_target: AttachmentKey<i32>,
 }
 #[crate::__subscriptions]
 impl Hooks for Listener {
     fn chunk_data_save(&self, host: &dyn ChunkDiskHost, event: &mut ChunkDataSaveEvent<'_>) {
         self.calls.fetch_add(1, Ordering::Relaxed);
         assert!(host.backend().is_none());
-        assert_eq!(event.data.get(&self.value).unwrap(), 7);
-        event.data.set(&self.value, 8).unwrap();
-        if self.mode == 1 {
+        assert_eq!(event.data.get(&self.value).unwrap(), self.save_expected);
+        event.data.set(&self.save_target, self.save_value).unwrap();
+        if self.panics {
             panic!("fixture unwind after tentative write");
         }
     }
@@ -74,7 +77,7 @@ impl Hooks for Listener {
         event.data.set(&self.value, value + 1).unwrap();
     }
 }
-fn with_listener(mode: u8, apply: impl FnOnce(Arc<AtomicUsize>, AttachmentKey<i32>)) {
+fn with_listener(apply: impl FnOnce(Arc<AtomicUsize>, AttachmentKey<i32>)) {
     let calls = Arc::new(AtomicUsize::new(0));
     let value = install_value();
     testing::with_dispatch(
@@ -82,8 +85,11 @@ fn with_listener(mode: u8, apply: impl FnOnce(Arc<AtomicUsize>, AttachmentKey<i3
             "disk_fixture",
             Box::new(Listener {
                 calls: calls.clone(),
-                mode,
+                save_expected: 7,
+                save_value: 8,
+                panics: false,
                 value: value.clone(),
+                save_target: value.clone(),
             }),
         )]
         .into(),
@@ -102,7 +108,7 @@ fn host_borrows_the_captured_context() {
 
 #[test]
 fn capture_7_callback_8_live_9() {
-    with_listener(0, |calls, value| {
+    with_listener(|calls, value| {
         let mut live = store(&value, 7);
         let job = ChunkDiskJob::capture(&context(ChunkDiskPhase::Save), &live).unwrap();
         value
@@ -123,7 +129,7 @@ fn capture_7_callback_8_live_9() {
 
 #[test]
 fn load_disk_8_callback_increment_publishes_9_once() {
-    with_listener(0, |calls, value| {
+    with_listener(|calls, value| {
         let job = ChunkDiskJob::capture(&context(ChunkDiskPhase::Load), &store(&value, 8)).unwrap();
         assert_eq!(read(&value, &run(&job).unwrap()), 9);
         assert_eq!(read(&value, &run(&job).unwrap()), 9);
@@ -132,16 +138,58 @@ fn load_disk_8_callback_increment_publishes_9_once() {
 }
 
 #[test]
-fn unwind_after_setting_8_refuses_partial_publication_and_codec_error_is_local() {
-    with_listener(1, |calls, value| {
-        let job = ChunkDiskJob::capture(&context(ChunkDiskPhase::Save), &store(&value, 7)).unwrap();
-        let refusal = run(&job).unwrap_err();
-        assert_eq!(refusal.mod_id, "disk_fixture");
-        assert_eq!(refusal.reason, "native listener unwound");
-        assert_eq!(read(&value, job.captured()), 7);
-        assert_eq!(run(&job).unwrap_err(), refusal);
-        assert_eq!(calls.load(Ordering::Relaxed), 1);
+fn panicking_chunk_listener_restores_only_its_edits_and_poison_does_not_stop_other_listeners() {
+    let (before_record, value) = crate::parts::registered_attachment_fixture(
+        "before",
+        AttachmentDescriptor::new("disk_fixture:value", || 0i32).serialize(value_codec()),
+    );
+    let (after_record, other) = crate::parts::registered_attachment_fixture(
+        "after",
+        AttachmentDescriptor::new("disk_fixture:other", || 0i32).serialize(value_codec()),
+    );
+    crate::parts::install_input(crate::parts::installation::InstalledInput {
+        attachment_types: HashMap::from([(
+            "disk_fixture",
+            HashMap::from([("value", before_record), ("other", after_record)]),
+        )]),
+        ..Default::default()
     });
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mods = [
+        ("before", 7, 8, false, &value),
+        ("broken", 8, 99, true, &value),
+        ("after", 8, 18, false, &other),
+    ]
+    .into_iter()
+    .map(|(id, save_expected, save_value, panics, save_target)| {
+        ModEntry::new(
+            id,
+            Box::new(Listener {
+                calls: calls.clone(),
+                save_expected,
+                save_value,
+                panics,
+                value: value.clone(),
+                save_target: save_target.clone(),
+            }),
+        )
+    })
+    .collect::<Vec<_>>();
+    testing::with_dispatch(mods.into(), || {
+        let original = store(&value, 7);
+        let first = ChunkDiskJob::capture(&context(ChunkDiskPhase::Save), &original).unwrap();
+        let entries = run(&first).unwrap();
+        assert_eq!(read(&value, &entries), 8);
+        assert_eq!(read(&other, &entries), 18);
+        assert_eq!(calls.load(Ordering::Relaxed), 3);
+        let second = ChunkDiskJob::capture(&context(ChunkDiskPhase::Save), &original).unwrap();
+        assert_eq!(run(&second).unwrap(), entries);
+        assert_eq!(calls.load(Ordering::Relaxed), 5);
+    });
+}
+
+#[test]
+fn codec_failure_is_local_to_its_typed_operation() {
     let (broken_record, broken) = crate::parts::registered_attachment_fixture(
         "disk_fixture",
         AttachmentDescriptor::new("disk_fixture:broken", || 0i32).serialize(AttachmentCodec {
@@ -165,7 +213,7 @@ fn unwind_after_setting_8_refuses_partial_publication_and_codec_error_is_local()
     assert!(data.set(&broken, 8).is_err());
     // A local codec failure must not poison unrelated edits in the same job.
     data.set(&good, 9).unwrap();
-    assert_eq!(read(&good, &data.finish().unwrap()), 9);
+    assert_eq!(read(&good, &data.finish()), 9);
 }
 
 fn opaque(value: Tag) -> Compound {
@@ -183,10 +231,7 @@ fn disk_validation_allows_vanilla_sized_values_and_enforces_writer_nesting_guard
     // Values above the old ad hoc 65,536-byte and depth-64 caps pass real disk validation.
     let large = opaque(Tag::ByteArray(vec![0; 70_000]));
     assert_eq!(
-        ChunkDiskData::from_nbt(large.clone())
-            .unwrap()
-            .finish()
-            .unwrap(),
+        ChunkDiskData::from_nbt(large.clone()).unwrap().finish(),
         large
     );
     let mut deep = Tag::Int(1);
@@ -197,8 +242,7 @@ fn disk_validation_allows_vanilla_sized_values_and_enforces_writer_nesting_guard
     assert_eq!(
         ChunkDiskData::from_nbt(deep_entries.clone())
             .unwrap()
-            .finish()
-            .unwrap(),
+            .finish(),
         deep_entries
     );
 
@@ -225,11 +269,11 @@ fn disk_operations_use_only_persistence_codec_and_never_invoke_sync_codec() {
     assert_eq!(data.get(&dual).unwrap(), 5);
     data.set(&dual, 12).unwrap();
     assert_eq!(data.get(&dual).unwrap(), 12);
-    let saved = data.clone().finish().unwrap();
+    let saved = data.finish();
     let mut reload = ChunkDiskData::from_nbt(saved).unwrap();
     assert_eq!(reload.get(&dual).unwrap(), 12);
     assert_eq!(reload.remove(&dual).unwrap(), Some(12));
-    let after_remove = reload.finish().unwrap();
+    let after_remove = reload.finish();
     let mut verify = ChunkDiskData::from_nbt(after_remove).unwrap();
     assert_eq!(verify.remove(&dual).unwrap(), None);
 }
@@ -239,7 +283,7 @@ fn unknown_attachment_survives_typed_edit() {
     let value = install_value();
     let mut data = ChunkDiskData::from_nbt(opaque(Tag::Int(7))).unwrap();
     data.set(&value, 8).unwrap();
-    let result = data.finish().unwrap();
+    let result = data.finish();
     assert_eq!(
         result.get(&"unknown".into()),
         opaque(Tag::Int(7)).get(&"unknown".into())
@@ -256,18 +300,6 @@ fn zero_subscribers_over_100_saves_creates_no_jobs_or_callbacks() {
             assert!(ChunkDiskJob::capture(&context, &snapshot).is_none());
         }
     });
-}
-
-#[test]
-fn local_transaction_abort_preserves_prior_snapshot() {
-    let value = install_value();
-    let mut data = ChunkDiskData::from_nbt(store(&value, 7).to_nbt()).unwrap();
-    let result: Result<(), ()> = data.transaction(|data| {
-        data.set(&value, 8).unwrap();
-        Err(())
-    });
-    assert_eq!(result, Err(()));
-    assert_eq!(read(&value, &data.finish().unwrap()), 7);
 }
 
 #[test]
@@ -294,7 +326,7 @@ fn type_without_persistence_codec_refuses_locally_naming_type_and_capability() {
     assert_eq!(refusal.reason, "missing persistence codec");
     // The local refusal does not poison unrelated valid edits.
     data.set(&value, 10).unwrap();
-    assert_eq!(read(&value, &data.finish().unwrap()), 10);
+    assert_eq!(read(&value, &data.finish()), 10);
 }
 
 #[test]
@@ -327,7 +359,7 @@ fn stale_key_refuses_locally_without_poisoning_unrelated_edits() {
     // Unrelated valid edits on live keys still succeed and publish cleanly.
     data.set(&other, 42).unwrap();
     assert_eq!(data.get(&fresh).unwrap(), 7);
-    let published = data.finish().unwrap();
+    let published = data.finish();
     assert_eq!(read(&fresh, &published), 7);
     assert_eq!(read(&other, &published), 42);
 }

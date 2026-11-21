@@ -14,7 +14,7 @@ use crate::lan::{
 };
 use mod_api::{PayloadBytes, PayloadId, PayloadSendError};
 use sunrise_client::raw_payloads::Endpoint;
-use sunrise_mod_runtime::attachments::{Attachments, Holder};
+use sunrise_mod_runtime::attachments::{AttachmentSyncInput, Attachments, Holder};
 use sunrise_protocol::attachment_sync::{self, Message};
 
 /// Whether `guest` reads attachment sync: placed, and its connection's play epoch
@@ -50,6 +50,24 @@ fn recipient_senders(hub: &Hub, holder: Holder) -> Vec<PlayerSender> {
     recipients(hub, holder).map(|g| g.sender.clone()).collect()
 }
 
+fn report_attachment_sync_refusal(holder: Holder, error: impl std::fmt::Display) {
+    log::warn!("Sunrise: attachment sync for {holder:?} not sent: {error}");
+}
+
+fn projection_for(
+    holder: Holder,
+) -> impl FnMut(&str, &str, AttachmentSyncInput<'_>) -> Option<mod_api::Compound> {
+    move |namespace, name, input| match mod_api::__private::project_sync_attachment(
+        namespace, name, input,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            report_attachment_sync_refusal(holder, format_args!("{namespace}:{name}: {error}"));
+            None
+        }
+    }
+}
+
 impl Game<'_> {
     /// The messages that give a player `holder`'s synced attachments whole: its
     /// own, and for a chunk those of its block entities. A player holder with
@@ -62,20 +80,16 @@ impl Game<'_> {
                 .chunks
                 .get(&(x, z))
                 .and_then(|chunk| chunk.saved.as_ref())
-                .map(|extras| {
-                    extras
-                        .attachments
-                        .synced(mod_api::__private::project_sync_attachment)
-                }),
+                .map(|extras| extras.attachments.synced(projection_for(holder))),
             // Read in place: lending the map would give the entity one.
             Holder::Entity(id) => self
                 .entity_attachments
                 .get(&id)
-                .map(|map| map.synced(mod_api::__private::project_sync_attachment)),
+                .map(|map| map.synced(projection_for(holder))),
             _ => self
                 .attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
                 .ok()
-                .map(|map| map.synced(mod_api::__private::project_sync_attachment)),
+                .map(|map| map.synced(projection_for(holder))),
         }
         .unwrap_or_default();
         let mut holders = vec![(holder, changes)];
@@ -86,10 +100,8 @@ impl Game<'_> {
                     .chunk_attachments(x, z)
                     .into_iter()
                     .map(|((x, y, z), map)| {
-                        (
-                            Holder::BlockEntity([x, y, z]),
-                            map.synced(mod_api::__private::project_sync_attachment),
-                        )
+                        let holder = Holder::BlockEntity([x, y, z]);
+                        (holder, map.synced(projection_for(holder)))
                     }),
             );
         }
@@ -192,21 +204,31 @@ impl Game<'_> {
         // A landed block entity is a new holder: what its clients held of it
         // went with their moving piston's copy.
         for holder in landings {
-            let messages = self.attachment_snapshot(holder);
             let senders = self
                 .lan
                 .as_ref()
                 .map_or_else(Vec::new, |host| recipient_senders(&host.hub, holder));
-            for message in &messages {
-                self.send_attachment_sync(&senders, message);
+            if senders.is_empty() {
+                continue;
+            }
+            for message in self.attachment_snapshot(holder) {
+                self.send_attachment_sync(&senders, &message);
             }
         }
         for holder in std::mem::take(&mut self.world.attachment_syncs) {
+            let senders = self
+                .lan
+                .as_ref()
+                .map_or_else(Vec::new, |host| recipient_senders(&host.hub, holder));
             let Ok(map) = self.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
             else {
                 continue;
             };
-            let changes = map.take_sync_changes(mod_api::__private::project_sync_attachment);
+            if senders.is_empty() {
+                map.discard_sync_changes();
+                continue;
+            }
+            let changes = map.take_sync_changes(projection_for(holder));
             if changes.is_empty() {
                 continue;
             }
@@ -215,10 +237,6 @@ impl Game<'_> {
                 replace: false,
                 changes,
             };
-            let senders = self
-                .lan
-                .as_ref()
-                .map_or_else(Vec::new, |host| recipient_senders(&host.hub, holder));
             self.send_attachment_sync(&senders, &message);
         }
     }
@@ -246,10 +264,7 @@ impl Game<'_> {
                 .epoch()
                 .is_none_or(|epoch| epoch.first_engine_refusal())
             {
-                log::warn!(
-                    "Sunrise: attachment sync for {:?} not sent: {error:?}",
-                    message.holder
-                );
+                report_attachment_sync_refusal(message.holder, format_args!("{error:?}"));
             }
             if matches!(error, PayloadSendError::Backpressure) {
                 sender.close();
