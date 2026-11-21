@@ -3138,7 +3138,7 @@ impl Game<'_> {
         let dimension = self.dim.level();
         let rules = self.level_rules();
         let native_authoritative = self.native_authoritative();
-        let liquid_transaction_open = self.transaction_current().is_some();
+        let liquid_transaction_open = !self.transactions.is_empty();
         let environment = self.res.environment_of(&self.dimension_type().id);
         let other_entities = entity::entity_lists_of!(self, without_carts);
         let mut level = GameLevel {

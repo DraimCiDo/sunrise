@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Debt 2w3, mechanical step: rename the write type, not its representation.
+"""Debt 2w3 mechanical migrations.
 
-Run with no arguments to apply the reviewed rename. --audit only prints a
-tracked Rust inventory; it does not infer changes to Result handling. To also
+Run with no arguments to apply the write-type rename, or with --engine-callers
+for the straightforward concrete Game calls. --audit only prints a tracked
+Rust inventory; it does not infer changes to Result handling. To also
 check cumulative working-tree changes against wave 3, pass --audit
 --wave3-hunks PATH [--base REV]. The hunk manifest uses wave-3 coordinates,
 not the debt checkout's coordinates.
@@ -40,6 +41,24 @@ RENAME = {
         modding/native_capability_cache_tests.rs modding/native_item_places.rs
         runtime/transactions.rs runtime/transactions/scratch.rs
     """,
+}
+# Only the concrete production callers from step 3. Tests with concrete Game
+# receivers move in step 4; dyn ServerHost remains on the public API.
+ENGINE_CALLS = {
+    "blocks/cauldron_interactions.rs": ("self", 1),
+    "blocks/cauldrons.rs": ("self", 1),
+    "blocks/machines/mod.rs": ("self", 3),
+    "blocks/machines/native_items.rs": ("self", 1),
+    "entities/general/tick.rs": ("self", 1),
+    "items/consume.rs": ("self", 2),
+    "mobs/creatures/mod.rs": ("self", 1),
+    "modding/native_item_places.rs": ("self", 1),
+    "modding/native_lifecycle.rs": ("game", 1),
+    "modding/native_quick_move.rs": ("self", 1),
+    "modding/slot_takes.rs": ("self", 1),
+    "native_hooks/farmland_trample.rs": ("self", 1),
+    "native_hooks/living_breathe.rs": ("self", 1),
+    "network/lan_crafting.rs": ("self", 1),
 }
 OLD = re.compile(r"(?<![\w'])Transaction\b")
 NEW = re.compile(r"(?<![\w'])TransactionContext\b")
@@ -184,6 +203,23 @@ def apply_rename():
         print(path.relative_to(ROOT))
 
 
+def apply_engine_calls():
+    updates = {}
+    for name, (receiver, expected) in ENGINE_CALLS.items():
+        path = ROOT / "crates/sunrise-client/src/game" / name
+        source = path.read_bytes().decode()
+        old = f"mod_api::run_transaction({receiver}, "
+        hits = list(re.finditer(re.escape(old), rust_code(source, docs=False)))
+        if len(hits) != expected:
+            raise SystemExit(f"{name}: expected {expected} concrete calls, found {len(hits)}; no files written")
+        for hit in reversed(hits):
+            source = source[:hit.start()] + f"{receiver}.storage_transaction(" + source[hit.end():]
+        updates[path] = source
+    for path, source in updates.items():
+        path.write_bytes(source.encode())
+        print(path.relative_to(ROOT))
+
+
 def audit():
     for name in source_files("Transaction", "transaction", *RAW_NAMES):
         source = (ROOT / name).read_bytes().decode()
@@ -272,7 +308,9 @@ def audit_wave3(manifest, base, extra_preimage):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--audit", action="store_true", help="report Rust sites without editing")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--audit", action="store_true", help="report Rust sites without editing")
+    mode.add_argument("--engine-callers", action="store_true", help="migrate the step-3 engine callers")
     parser.add_argument("--wave3-hunks", type=Path, help="also check changed lines against this manifest")
     parser.add_argument("--base", default=DEBT_BASE, help="debt diff base (default: item start)")
     parser.add_argument("--wave3-base", help="preimage revision for any additional changed wave-3 file")
@@ -280,7 +318,10 @@ def main():
     if not args.audit:
         if args.wave3_hunks or args.wave3_base or args.base != DEBT_BASE:
             parser.error("wave-3 and diff options require --audit")
-        apply_rename()
+        if args.engine_callers:
+            apply_engine_calls()
+        else:
+            apply_rename()
         return
     if (args.wave3_base or args.base != DEBT_BASE) and not args.wave3_hunks:
         parser.error("diff and preimage revisions require --wave3-hunks")

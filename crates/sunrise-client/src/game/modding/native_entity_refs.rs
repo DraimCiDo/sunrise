@@ -580,7 +580,7 @@ impl Game<'_> {
         collect: bool,
     ) -> Option<Vec<ItemStack>> {
         // Loot and break effects cannot be rolled back by the level journal.
-        if self.transaction_current().is_some()
+        if !self.transactions.is_empty()
             || !self.native_level_write_allowed(level, pos)
             || self.dim.key() != level.dimension()
         {

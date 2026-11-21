@@ -26,7 +26,7 @@ pub(super) struct JournalLevelWrite<'g, 'a> {
 
 impl<'g, 'a> JournalLevelWrite<'g, 'a> {
     pub(super) fn new(game: &'g mut Game<'a>, level: LevelRef) -> Option<Self> {
-        (game.level_in_place(level) && game.transaction_current().is_some())
+        (game.level_in_place(level) && !game.transactions.is_empty())
             .then_some(Self { game, level })
     }
 

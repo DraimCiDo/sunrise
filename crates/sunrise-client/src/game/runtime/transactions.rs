@@ -129,6 +129,38 @@ impl std::ops::DerefMut for OpenTransactions {
     }
 }
 
+/// Owns a storage frame until it is finished. Unwinding past the scope aborts the frame.
+pub(in crate::game) struct StorageScope<'borrow, 'game> {
+    game: &'borrow mut Game<'game>,
+    frame: (u64, u64),
+    commit: bool,
+}
+
+impl<'borrow, 'game> StorageScope<'borrow, 'game> {
+    pub(in crate::game) fn open(game: &'borrow mut Game<'game>) -> Self {
+        let frame = game.open_storage_transaction();
+        Self {
+            game,
+            frame,
+            commit: false,
+        }
+    }
+
+    pub(in crate::game) fn game(&mut self) -> &mut Game<'game> {
+        self.game
+    }
+
+    pub(in crate::game) fn finish(mut self, commit: bool) {
+        self.commit = commit;
+    }
+}
+
+impl Drop for StorageScope<'_, '_> {
+    fn drop(&mut self) {
+        self.game.close_storage_frame(self.frame, self.commit);
+    }
+}
+
 /// Puts the closing phase back when a close ends, however it ends.
 struct ClosingPhase<'a, 'g> {
     game: &'a mut Game<'g>,
@@ -516,6 +548,20 @@ impl Game<'_> {
             trace.lock().unwrap().push(entry);
         }
     }
+    /// Runs an engine action in a storage frame, committing on `Ok` and aborting on `Err` or
+    /// unwind. This is also used for internal actions outside the mod server's world phase.
+    pub(in crate::game) fn storage_transaction<T, E>(
+        &mut self,
+        f: impl for<'loan> FnOnce(&'loan mut Self, &'loan TransactionContext) -> Result<T, E>,
+    ) -> Result<T, E> {
+        let mut scope = StorageScope::open(self);
+        let (token, _) = scope.frame;
+        let context = mod_api::__private::transaction_of(token);
+        let result = f(scope.game(), &context);
+        scope.finish(result.is_ok());
+        result
+    }
+
     /// Opens a transaction, nested in the open one if any (`Transaction.open`), and gives back
     /// the seal that ends it.
     pub(in crate::game) fn transaction_open(&mut self) -> TransactionSeal {
@@ -547,12 +593,13 @@ impl Game<'_> {
         }
         (token, close_token)
     }
-    /// Closes the transaction `seal` ends, first aborting every one opened inside it and left
-    /// open, so a guard closing its own is never stranded behind a child a mod abandoned.
-    /// Refused when `seal` names no open transaction: only whoever opened one ends it, never a
-    /// handler lent its `Transaction` (a hopper's move lends the game's own).
+    /// Closes the transaction named by `seal`; a write context alone cannot end it.
     pub(in crate::game) fn transaction_close(&mut self, seal: &TransactionSeal, commit: bool) {
-        let (token, close) = mod_api::__private::seal_tokens(seal);
+        self.close_storage_frame(mod_api::__private::seal_tokens(seal), commit);
+    }
+
+    /// Closes only the named frame, first aborting any abandoned children above it.
+    fn close_storage_frame(&mut self, (token, close): (u64, u64), commit: bool) {
         let Some(at) = self
             .transactions
             .iter()

@@ -106,10 +106,9 @@ impl Game<'_> {
         if !before.known.contains(selection.display.recipe.as_str()) {
             return Err(R::Denied);
         }
-        let seal = self.transaction_open();
-        let result = self.stage_mod_book_place(&before, selection, &plan, use_max);
-        self.transaction_close(&seal, result.is_ok());
-        result
+        self.storage_transaction(|game, _| {
+            game.stage_mod_book_place(&before, selection, &plan, use_max)
+        })
     }
     fn mod_book_placement_context(
         &self,

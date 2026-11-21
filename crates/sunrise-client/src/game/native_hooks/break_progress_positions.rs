@@ -1,6 +1,6 @@
 //! One validated, stored display answer per crack stage, never per frame.
 use super::*;
-use crate::game::api_values::block_state::block_listens;
+use crate::game::{api_values::block_state::block_listens, transactions::StorageScope};
 
 impl Game<'_> {
     pub(in crate::game) fn with_break_progress_positions(
@@ -18,9 +18,10 @@ impl Game<'_> {
             publish(self, Vec::new());
             return;
         };
-        let seal = self.transaction_open();
+        let mut scope = StorageScope::open(self);
+        let game = scope.game();
         let mut positions = Vec::new();
-        self.native_break_progress_positions(super::fire::BreakProgressPositionsCall {
+        game.native_break_progress_positions(super::fire::BreakProgressPositionsCall {
             level,
             pos: mod_api::BlockPos::new(pos[0], pos[1], pos[2]),
             state,
@@ -53,12 +54,12 @@ impl Game<'_> {
                 "break_progress_positions refused {refused} extras outside the crack display bounds or duplicated positions"
             );
         }
-        if self.native_client_level() == Some(level) {
-            publish(self, extras);
+        if game.native_client_level() == Some(level) {
+            publish(game, extras);
         } else {
             log::debug!("break_progress_positions discarded extras after the client level changed");
         }
-        self.transaction_close(&seal, true);
+        scope.finish(true);
     }
 
     pub(in crate::game) fn native_break_progress_positions(

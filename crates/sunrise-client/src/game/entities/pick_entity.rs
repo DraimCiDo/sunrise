@@ -1,7 +1,7 @@
 //! Pick Block on an entity (`Minecraft.pickBlockOrEntity`'s entity case and
 //! `ServerGamePacketListenerImpl.handlePickItemFromEntity`): the client aims,
 //! the server answers with `Entity.getPickResult`.
-use super::Game;
+use super::{Game, transactions::StorageScope};
 use mod_api::{BlockPos, CrosshairTarget, EntityRef};
 use sunrise_client::{items::ItemStack, save::uuid_text};
 
@@ -123,9 +123,10 @@ impl Game<'_> {
         };
         self.collect_pick_candidates(&mut pick);
         if subscribed {
-            let seal = self.transaction_open();
-            self.client_pick.rider_candidates = pick.dispatch(self);
-            self.transaction_close(&seal, true);
+            let mut scope = StorageScope::open(self);
+            let game = scope.game();
+            game.client_pick.rider_candidates = pick.dispatch(game);
+            scope.finish(true);
         }
         let hit = pick.hovered?;
         let (eye, direction) = self.aim()?;

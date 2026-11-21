@@ -1,6 +1,6 @@
 //! The one stored pick, refreshed before tick inputs and frame extraction.
 use super::*;
-use crate::game::{Dim, view_vector};
+use crate::game::{Dim, transactions::StorageScope, view_vector};
 use mod_api::CrosshairTarget;
 
 #[cfg(test)]
@@ -179,10 +179,11 @@ impl Game<'_> {
         // Capture the same forward-movement envelope as the vanilla item ray,
         // before listeners can change the player or held item.
         self.client_pick.entity_reach = self.client_pick_entity_reach(direction);
-        let seal = self.transaction_open();
-        self.client_pick.dispatching = true;
+        let mut scope = StorageScope::open(self);
+        let game = scope.game();
+        game.client_pick.dispatching = true;
         let mut result = original;
-        self.native_client_pick(mod_api::__private::ClientPickCall {
+        game.native_client_pick(mod_api::__private::ClientPickCall {
             partial_tick,
             origin,
             original,
@@ -190,14 +191,14 @@ impl Game<'_> {
             entity_candidate,
             result: &mut result,
         });
-        self.client_pick.dispatching = false;
-        let valid_context = self.client_pick.epoch == self.native_lifecycle.epoch()
-            && self.client_pick.dimension == Some(self.dim);
+        game.client_pick.dispatching = false;
+        let valid_context = game.client_pick.epoch == game.native_lifecycle.epoch()
+            && game.client_pick.dimension == Some(game.dim);
         let result = result.filter(|&result| {
-            valid_context && (Some(result) == original || self.accept_client_pick(result))
+            valid_context && (Some(result) == original || game.accept_client_pick(result))
         });
-        self.publish_client_pick(result);
-        self.transaction_close(&seal, true);
+        game.publish_client_pick(result);
+        scope.finish(true);
     }
 
     /// Whether Pick Block (middle click) can name an item for the entity: a projectile, a dragon
