@@ -1,26 +1,12 @@
-//! Load-time attachment declarations, before any registration is installed.
+//! Load-time typed attachment registration and admission validation.
 use super::*;
 
-struct LoadedAttachmentDeclarations;
-impl crate::AttachmentDeclarations for LoadedAttachmentDeclarations {
-    fn validate_attachment_type(
-        &self,
-        namespace: &str,
-        name: &str,
-        sync: bool,
-    ) -> Result<(), crate::AttachmentError> {
-        mod_vocab::__private::validate_attachment_use(namespace, name, sync)
-    }
-}
-
-/// The immutable attachment type registry, with no world borrow.
-pub fn attachment_declarations() -> &'static dyn crate::AttachmentDeclarations {
-    static LOOKUP: LoadedAttachmentDeclarations = LoadedAttachmentDeclarations;
-    &LOOKUP
-}
-
 impl AttachmentTypesRegistrar for PartRegistrar {
-    fn register_attachment_type(&mut self, id: &str, has_sync_codec: bool) -> Result<(), String> {
+    fn submit_attachment(
+        &mut self,
+        descriptor: crate::ErasedAttachmentDescriptor,
+    ) -> Result<crate::RegisteredAttachment, String> {
+        let id = descriptor.id();
         let result = (|| {
             // A new registration epoch can be collected while the previous immutable
             // snapshot remains installed. Only the live registrar scope authorizes
@@ -30,36 +16,48 @@ impl AttachmentTypesRegistrar for PartRegistrar {
             {
                 return Err("declarations are frozen".to_owned());
             }
-            let identifier = crate::Identifier::parse_namespaced(id)
-                .ok_or("explicit lowercase namespaced id required")?;
-            if self
+            let record =
+                mod_vocab::__private::check_attachment_descriptor(descriptor, self.mod_id)?;
+            if let Some(existing) = self
                 .attachment_types
-                .get(identifier.namespace())
-                .is_some_and(|types| types.contains_key(identifier.path()))
+                .get(record.namespace())
+                .and_then(|types| types.get(record.name()))
             {
-                return Err(format!(
-                    "already declared by package {}",
-                    identifier.namespace()
-                ));
-            }
-            if identifier.namespace() != self.mod_id {
-                return Err(format!(
-                    "namespace belongs to package {}, not {}",
-                    identifier.namespace(),
-                    self.mod_id
-                ));
+                return Err(format!("already declared by package {}", existing.owner()));
             }
             self.attachment_types
-                .entry(identifier.namespace().into())
+                .entry(record.namespace())
                 .or_default()
-                .insert(identifier.path().into(), has_sync_codec);
-            Ok(())
+                .insert(record.name(), record.clone());
+            Ok(record)
         })();
         result.map_err(|reason| {
             let message = format!("package {} attachment {id}: {reason}", self.mod_id);
             self.refused.push(message.clone());
             message
         })
+    }
+
+    fn lookup_attachment(
+        &self,
+        id: &str,
+    ) -> Result<crate::RegisteredAttachment, crate::AttachmentError> {
+        let Some((namespace, name)) =
+            crate::Identifier::parse_namespaced(id).and_then(|_| id.split_once(':'))
+        else {
+            return Err(crate::AttachmentError::Undeclared {
+                package_id: self.mod_id.into(),
+                attachment_id: id.into(),
+            });
+        };
+        self.attachment_types
+            .get(namespace)
+            .and_then(|types| types.get(name))
+            .cloned()
+            .ok_or_else(|| crate::AttachmentError::Undeclared {
+                package_id: self.mod_id.into(),
+                attachment_id: id.into(),
+            })
     }
 }
 
@@ -90,15 +88,21 @@ impl PartRegistrar {
             .iter()
             .filter(|p| p.side() == crate::Side::Server)
         {
-            if let Some(types) = self.attachment_types.get(package.id()) {
-                for name in types
-                    .iter()
-                    .filter(|(_, sync)| **sync)
-                    .map(|(name, _)| name)
-                    .collect::<std::collections::BTreeSet<_>>()
-                {
-                    errors.push(format!("package {} attachment {}:{name}: a side = \"server\" package cannot declare a synced attachment", package.id(), package.id()));
-                }
+            for (namespace, name) in self
+                .attachment_types
+                .iter()
+                .flat_map(|(namespace, types)| {
+                    types
+                        .iter()
+                        .filter(|(_, record)| record.is_synced() && record.owner() == package.id())
+                        .map(move |(name, _)| (*namespace, *name))
+                })
+                .collect::<std::collections::BTreeSet<_>>()
+            {
+                errors.push(format!(
+                    "package {} attachment {namespace}:{name}: a side = \"server\" package cannot declare a synced attachment",
+                    package.id()
+                ));
             }
         }
         if errors.is_empty() {
@@ -112,6 +116,24 @@ impl PartRegistrar {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    fn reg(registrar: &mut PartRegistrar) -> &mut dyn crate::Registrar {
+        registrar
+    }
+
+    fn u32_codec() -> crate::AttachmentCodec<u32> {
+        crate::AttachmentCodec {
+            encode: |n| Ok([("n".into(), crate::Tag::Long(i64::from(*n)))].into()),
+            decode: |saved| match saved.get(&"n".into()) {
+                Some(crate::Tag::Long(n)) => {
+                    u32::try_from(*n).map_err(|_| crate::AttachmentError::Decode)
+                }
+                _ => Err(crate::AttachmentError::Decode),
+            },
+        }
+    }
+
     struct Store(crate::Attachments);
     impl crate::AttachmentHost for Store {
         fn validate_attachment(
@@ -130,15 +152,75 @@ mod tests {
             Ok(&mut self.0)
         }
     }
+
     #[test]
-    fn foreign_attachment_declaration_is_named_and_not_added() {
-        let mut registrar = PartRegistrar::new("b");
+    fn sync_without_persistence_codec_is_accepted_and_copy_on_death_without_codec_is_refused() {
+        let mut registrar = PartRegistrar::new("a");
+        let sync_only = reg(&mut registrar)
+            .register_attachment_type(
+                crate::AttachmentDescriptor::new("a:sync_only", || 7u32).sync(u32_codec()),
+            )
+            .expect("sync without persistence codec must be accepted");
+        assert!(sync_only.is_synced());
+        assert!(!sync_only.has_codec());
+
         assert_eq!(
-            registrar.register_attachment_type("a:mana", false),
-            Err("package b attachment a:mana: namespace belongs to package a, not b".into())
+            reg(&mut registrar).register_attachment_type(
+                crate::AttachmentDescriptor::new("a:bad_copy", || 0u32).copy_on_death(),
+            ),
+            Err("package a attachment a:bad_copy: copy_on_death requires a serializer".into())
         );
-        assert!(registrar.attachment_types.is_empty());
     }
+
+    #[test]
+    fn foreign_namespace_attachment_is_accepted_and_owner_is_tracked_for_duplicates_and_server_side()
+     {
+        let mut registrar = PartRegistrar::new("b");
+        let key = reg(&mut registrar)
+            .register_attachment_type(crate::AttachmentDescriptor::new("a:mana", || 5u32))
+            .expect("any valid lowercase namespace:name is accepted");
+        assert_eq!(key.owner(), "b");
+        assert_eq!(key.namespace(), "a");
+        assert_eq!(key.name(), "mana");
+
+        registrar.mod_id = "c";
+        assert_eq!(
+            reg(&mut registrar)
+                .register_attachment_type(crate::AttachmentDescriptor::new("a:mana", || 5u32)),
+            Err("package c attachment a:mana: already declared by package b".into())
+        );
+
+        crate::load_state::with_test_package_inventory(
+            vec![package("srv", crate::Side::Server)],
+            || {
+                let mut srv = PartRegistrar::new("srv");
+                reg(&mut srv)
+                    .register_attachment_type(
+                        crate::AttachmentDescriptor::new("shared:flag", || 0u32).sync(u32_codec()),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    super::super::install_registrar(srv, &crate::parts::tests::rule_schema()),
+                    Err(vec![
+                        "package srv attachment shared:flag: a side = \"server\" package cannot declare a synced attachment".into()
+                    ])
+                );
+            },
+        );
+
+        let mut both = PartRegistrar::new("owner_pkg");
+        reg(&mut both)
+            .register_attachment_type(
+                crate::AttachmentDescriptor::new("shared:flag", || 0u32).sync(u32_codec()),
+            )
+            .unwrap();
+        super::super::install_registrar(both, &crate::parts::tests::rule_schema()).unwrap();
+        assert_eq!(
+            crate::__private::client_requirement("owner_pkg"),
+            Some("declares the synced attachment shared:flag".into())
+        );
+    }
+
     #[test]
     fn server_synced_attachment_refuses_all_registration_and_plain_is_admitted() {
         crate::load_state::with_test_package_inventory(
@@ -153,10 +235,24 @@ mod tests {
             || {
                 let mut bad = PartRegistrar::new("test_pkg");
                 bad.register_custom_stat("marker").unwrap();
-                bad.register_attachment_type("test_pkg:session", false)
+                reg(&mut bad)
+                    .register_attachment_type(crate::AttachmentDescriptor::new(
+                        "test_pkg:session",
+                        || 0u32,
+                    ))
                     .unwrap();
-                bad.register_attachment_type("test_pkg:mana", true).unwrap();
-                assert_eq!(super::super::install_registrar(bad, &crate::parts::tests::rule_schema()), Err(vec!["package test_pkg attachment test_pkg:mana: a side = \"server\" package cannot declare a synced attachment".into()]));
+                reg(&mut bad)
+                    .register_attachment_type(
+                        crate::AttachmentDescriptor::new("test_pkg:mana", || 0u32)
+                            .sync(u32_codec()),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    super::super::install_registrar(bad, &crate::parts::tests::rule_schema()),
+                    Err(vec![
+                        "package test_pkg attachment test_pkg:mana: a side = \"server\" package cannot declare a synced attachment".into()
+                    ])
+                );
                 assert!(mod_vocab::__private::custom_stat_declarations().is_empty());
                 assert!(!mod_vocab::__private::parts_installation::parts_installed());
                 let _caller =
@@ -170,7 +266,11 @@ mod tests {
                         .is_err()
                 );
                 let mut good = PartRegistrar::new("test_pkg");
-                good.register_attachment_type("test_pkg:mana", false)
+                reg(&mut good)
+                    .register_attachment_type(crate::AttachmentDescriptor::new(
+                        "test_pkg:mana",
+                        || 0u32,
+                    ))
                     .unwrap();
                 super::super::install_registrar(good, &crate::parts::tests::rule_schema()).unwrap();
                 assert_eq!(
@@ -193,7 +293,9 @@ mod tests {
                 registrar: &mut dyn crate::Registrar,
                 _: &crate::RegistrationContext,
             ) {
-                registrar.register_attachment_type("a:mana", false).unwrap();
+                registrar
+                    .register_attachment_type(crate::AttachmentDescriptor::new("a:mana", || 37u32))
+                    .unwrap();
             }
         }
         let packages = [crate::ModEntry::new("a", Box::new(Owner))];
@@ -234,11 +336,93 @@ mod tests {
             sunrise_mod_runtime::attachments::AttachmentBatch::empty().into();
         assert_eq!(batch.query(&missing).err(), Some(error));
     }
+
+    #[test]
+    fn dependency_looks_up_typed_key_and_detects_type_mismatch_and_stale_key() {
+        struct Owner(Arc<Mutex<Option<crate::AttachmentKey<u32>>>>);
+        impl crate::Hooks for Owner {
+            fn subscribed(&self) -> &'static [Option<crate::HookId>] {
+                &[]
+            }
+            fn register(
+                &self,
+                registrar: &mut dyn crate::Registrar,
+                _: &crate::RegistrationContext,
+            ) {
+                let key = registrar
+                    .register_attachment_type(crate::AttachmentDescriptor::new("a:mana", || 37u32))
+                    .unwrap();
+                *self.0.lock().unwrap() = Some(key);
+            }
+        }
+        struct Consumer(Arc<Mutex<Option<crate::AttachmentKey<u32>>>>);
+        impl crate::Hooks for Consumer {
+            fn subscribed(&self) -> &'static [Option<crate::HookId>] {
+                &[]
+            }
+            fn register(
+                &self,
+                registrar: &mut dyn crate::Registrar,
+                _: &crate::RegistrationContext,
+            ) {
+                assert_eq!(
+                    registrar.attachment_key::<i64>("a:mana"),
+                    Err(crate::AttachmentError::TypeMismatch)
+                );
+                assert_eq!(
+                    registrar.attachment_key::<u32>("a:missing"),
+                    Err(crate::AttachmentError::Undeclared {
+                        package_id: "b".into(),
+                        attachment_id: "a:missing".into(),
+                    })
+                );
+                let key = registrar.attachment_key::<u32>("a:mana").unwrap();
+                *self.0.lock().unwrap() = Some(key);
+            }
+        }
+        let owner_key = Arc::new(Mutex::new(None));
+        let consumer_key = Arc::new(Mutex::new(None));
+        let packages = [
+            crate::ModEntry::new("a", Box::new(Owner(Arc::clone(&owner_key)))),
+            crate::ModEntry::new("b", Box::new(Consumer(Arc::clone(&consumer_key)))),
+        ];
+        crate::__private::install_parts(&packages, &crate::parts::tests::rule_schema(), |_| false)
+            .unwrap();
+        let owner_key = owner_key.lock().unwrap().take().unwrap();
+        let consumer_key = consumer_key.lock().unwrap().take().unwrap();
+        assert_eq!(owner_key, consumer_key);
+
+        let mut host = crate::testing::FakeHost::default();
+        assert_eq!(consumer_key.get(&mut host, crate::Holder::Level), Ok(37));
+
+        // Reinstall: previously issued keys become stale even with the same ID and Rust type.
+        let owner_key_next = Arc::new(Mutex::new(None));
+        let packages_next = [crate::ModEntry::new(
+            "a",
+            Box::new(Owner(Arc::clone(&owner_key_next))),
+        )];
+        crate::__private::install_parts(
+            &packages_next,
+            &crate::parts::tests::rule_schema(),
+            |_| false,
+        )
+        .unwrap();
+        let owner_key_next = owner_key_next.lock().unwrap().take().unwrap();
+        assert_ne!(owner_key, owner_key_next);
+        assert_eq!(
+            consumer_key.get(&mut host, crate::Holder::Level),
+            Err(crate::AttachmentError::StaleKey)
+        );
+        assert_eq!(owner_key_next.get(&mut host, crate::Holder::Level), Ok(37));
+    }
+
     #[test]
     fn synced_attachment_is_named_to_server_package_admission() {
         let mut registrar = PartRegistrar::new("test_pkg");
-        registrar
-            .register_attachment_type("test_pkg:mana", true)
+        reg(&mut registrar)
+            .register_attachment_type(
+                crate::AttachmentDescriptor::new("test_pkg:mana", || 0u32).sync(u32_codec()),
+            )
             .unwrap();
         super::super::install_registrar(registrar, &crate::parts::tests::rule_schema()).unwrap();
         assert_eq!(
@@ -246,6 +430,7 @@ mod tests {
             Some("declares the synced attachment test_pkg:mana".into())
         );
     }
+
     fn package(id: &str, side: crate::Side) -> crate::PackageInfo {
         crate::PackageInfo::new(
             id.into(),
@@ -256,21 +441,30 @@ mod tests {
             vec![],
         )
     }
+
     struct SyncedOwner;
     impl crate::Hooks for SyncedOwner {
         fn subscribed(&self) -> &'static [Option<crate::HookId>] {
             &[]
         }
         fn register(&self, registrar: &mut dyn crate::Registrar, _: &crate::RegistrationContext) {
-            registrar.register_attachment_type("a:mana", true).unwrap();
+            registrar
+                .register_attachment_type(
+                    crate::AttachmentDescriptor::new("a:mana", || 37u32)
+                        .serialize(u32_codec())
+                        .sync(u32_codec()),
+                )
+                .unwrap();
         }
     }
+
     struct ServerUser;
     impl crate::Hooks for ServerUser {
         fn subscribed(&self) -> &'static [Option<crate::HookId>] {
             &[]
         }
     }
+
     #[test]
     fn server_b_loads_and_uses_a_synced_mana() {
         crate::load_state::with_test_package_inventory(
@@ -294,15 +488,7 @@ mod tests {
                         hook: "test",
                         part: None,
                     });
-                let codec: crate::AttachmentCodec<u32> = crate::AttachmentCodec {
-                    encode: |n| Ok([("n".into(), crate::Tag::Long(i64::from(*n)))].into()),
-                    decode: |saved| match saved.get(&"n".into()) {
-                        Some(crate::Tag::Long(n)) => {
-                            u32::try_from(*n).map_err(|_| crate::AttachmentError::Decode)
-                        }
-                        _ => Err(crate::AttachmentError::Decode),
-                    },
-                };
+                let codec = u32_codec();
                 let key = crate::AttachmentType {
                     namespace: "a",
                     name: "mana",
@@ -321,6 +507,7 @@ mod tests {
             },
         );
     }
+
     #[test]
     fn server_declarer_a_is_refused_instead_of_server_user_b() {
         crate::load_state::with_test_package_inventory(
@@ -333,25 +520,54 @@ mod tests {
                     crate::ModEntry::new("a", Box::new(SyncedOwner)),
                     crate::ModEntry::new("b", Box::new(ServerUser)),
                 ];
-                assert_eq!(crate::__private::install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false), Err(vec!["package a attachment a:mana: a side = \"server\" package cannot declare a synced attachment".into()]));
+                assert_eq!(
+                    crate::__private::install_parts(&mods, &crate::parts::tests::rule_schema(), |_| {
+                        false
+                    }),
+                    Err(vec![
+                        "package a attachment a:mana: a side = \"server\" package cannot declare a synced attachment".into()
+                    ])
+                );
                 assert!(!mod_vocab::__private::parts_installation::parts_installed());
             },
         );
     }
+
     #[test]
     fn load_checks_conflicts_then_undeclared_uses_then_server_declarations() {
         crate::load_state::with_test_package_inventory(
             vec![package("test_pkg", crate::Side::Server)],
             || {
                 let mut conflict = PartRegistrar::new("test_pkg");
-                conflict
-                    .register_attachment_type("test_pkg:mana", true)
+                reg(&mut conflict)
+                    .register_attachment_type(
+                        crate::AttachmentDescriptor::new("test_pkg:mana", || 0u32)
+                            .sync(u32_codec()),
+                    )
                     .unwrap();
-                assert_eq!(conflict.register_attachment_type("a:mana", false), Err("package test_pkg attachment a:mana: namespace belongs to package a, not test_pkg".into()));
-                assert_eq!(super::super::install_registrar(conflict, &crate::parts::tests::rule_schema()), Err(vec!["package test_pkg attachment a:mana: namespace belongs to package a, not test_pkg".into()]));
+                assert_eq!(
+                    reg(&mut conflict).register_attachment_type(crate::AttachmentDescriptor::new(
+                        "test_pkg:mana",
+                        || 0u32
+                    )),
+                    Err(
+                        "package test_pkg attachment test_pkg:mana: already declared by package test_pkg"
+                            .into()
+                    )
+                );
+                assert_eq!(
+                    super::super::install_registrar(conflict, &crate::parts::tests::rule_schema()),
+                    Err(vec![
+                        "package test_pkg attachment test_pkg:mana: already declared by package test_pkg"
+                            .into()
+                    ])
+                );
                 let mut missing = PartRegistrar::new("test_pkg");
-                missing
-                    .register_attachment_type("test_pkg:mana", true)
+                reg(&mut missing)
+                    .register_attachment_type(
+                        crate::AttachmentDescriptor::new("test_pkg:mana", || 0u32)
+                            .sync(u32_codec()),
+                    )
                     .unwrap();
                 let key = crate::AttachmentType {
                     namespace: "test_pkg",
@@ -378,13 +594,19 @@ mod tests {
             },
         );
     }
+
     #[test]
     fn duplicate_declaration_names_the_caller_and_original_owner() {
         let mut registrar = PartRegistrar::new("a");
-        registrar.register_attachment_type("a:mana", true).unwrap();
+        reg(&mut registrar)
+            .register_attachment_type(
+                crate::AttachmentDescriptor::new("a:mana", || 0u32).sync(u32_codec()),
+            )
+            .unwrap();
         registrar.mod_id = "b";
         assert_eq!(
-            registrar.register_attachment_type("a:mana", false),
+            reg(&mut registrar)
+                .register_attachment_type(crate::AttachmentDescriptor::new("a:mana", || 0u32)),
             Err("package b attachment a:mana: already declared by package a".into())
         );
     }

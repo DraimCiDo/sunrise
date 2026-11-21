@@ -17,7 +17,7 @@ use sunrise_protocol::{
 const NAME: &str =
     "game::attachment_sync::transport_tests::attachment_sync_follows_the_negotiated_route";
 
-const VALUE_CODEC: AttachmentCodec<i32> = AttachmentCodec {
+pub(super) const VALUE_CODEC: AttachmentCodec<i32> = AttachmentCodec {
     encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
     decode: |c| match c.get(&"n".into()) {
         Some(Tag::Int(n)) => Ok(*n),
@@ -56,10 +56,18 @@ pub(super) struct Route;
 impl mod_api::Hooks for Route {
     fn register(&self, registrar: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
         registrar
-            .register_attachment_type("sync_route:value", true)
+            .register_attachment_type(
+                mod_api::AttachmentDescriptor::new("sync_route:value", || 0i32)
+                    .serialize(VALUE_CODEC)
+                    .sync(VALUE_CODEC),
+            )
             .unwrap();
         registrar
-            .register_attachment_type("sync_route:blob", true)
+            .register_attachment_type(
+                mod_api::AttachmentDescriptor::new("sync_route:blob", Vec::<u8>::new)
+                    .serialize(BLOB_CODEC)
+                    .sync(BLOB_CODEC),
+            )
             .unwrap();
     }
 }

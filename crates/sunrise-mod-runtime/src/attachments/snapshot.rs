@@ -1,7 +1,7 @@
 //! Read-only generations of a holder's synced bindings, detached from the holder itself.
 use super::{
-    AttachmentEntry, AttachmentError, AttachmentKeyView, AttachmentType, Attachments, Compound,
-    Entry, RawKind, Tag, index::AttachmentKey,
+    AttachmentEntry, AttachmentError, AttachmentKeyView, AttachmentType, Attachments,
+    CheckedAttachmentType, Compound, Entry, RawKind, Tag, index::AttachmentKey,
 };
 use std::{fmt, sync::Arc};
 
@@ -80,6 +80,21 @@ impl SyncedAttachmentSnapshot {
             })
             .ok()
             .map(|i| self.0[i].1.read(key))
+            .transpose()
+    }
+
+    /// Read a captured binding using a pre-validated attachment type.
+    pub fn get_checked<T: Send + Sync + 'static>(
+        &self,
+        key: &CheckedAttachmentType<T>,
+    ) -> Result<Option<&T>, AttachmentError> {
+        let lookup = (key.namespace(), key.name());
+        self.0
+            .binary_search_by(|(key, _)| {
+                (key as &dyn AttachmentKeyView).cmp(&lookup as &dyn AttachmentKeyView)
+            })
+            .ok()
+            .map(|i| self.0[i].1.read_checked(key))
             .transpose()
     }
 }
@@ -245,5 +260,15 @@ mod tests {
             SyncedAttachmentSnapshot::capture(&holder, 8_192, Compound::storage_bytes).unwrap();
         assert_eq!(CODEC.get_existing(&mut holder, Holder::Level), Ok(Some(27)));
         assert_eq!(frame.get(&CODEC), Ok(Some(&20)));
+        let checked = CheckedAttachmentType::new(AttachmentType {
+            namespace: "test",
+            name: "fuel",
+            default: || 0,
+            codec: None,
+            copy_on_death: false,
+            sync_codec: CODEC.sync_codec,
+        })
+        .unwrap();
+        assert_eq!(frame.get_checked(&checked), Ok(Some(&20)));
     }
 }

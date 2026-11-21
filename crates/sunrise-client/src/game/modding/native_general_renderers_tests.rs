@@ -157,7 +157,12 @@ struct Scene {
 #[mod_api::__subscriptions]
 impl mod_api::Hooks for Scene {
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type("test:fuel", true).unwrap();
+        r.register_attachment_type(
+            mod_api::AttachmentDescriptor::new("test:fuel", || 0i32)
+                .serialize(FUEL_CODEC)
+                .sync(FUEL_CODEC),
+        )
+        .unwrap();
         for path in ["missile", "bomb", "plain"] {
             r.declare_general_entity(
                 path,

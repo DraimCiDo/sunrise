@@ -81,9 +81,12 @@ impl BlockEntityPartState for Counter {
 }
 
 pub fn register(registrar: &mut dyn Registrar) {
-    for name in ["part_state_count", "part_state_mark"] {
+    for id in [
+        "part_state_fixture:part_state_count",
+        "part_state_fixture:part_state_mark",
+    ] {
         registrar
-            .register_attachment_type(&format!("part_state_fixture:{name}"), false)
+            .register_attachment_type(mod_api::AttachmentDescriptor::new(id, || ()))
             .unwrap();
     }
     let kind = registrar

@@ -25,7 +25,11 @@ pub static FUEL: AttachmentType<i32> = AttachmentType {
 
 pub fn register(registrar: &mut dyn Registrar) {
     registrar
-        .register_attachment_type("general_render_fixture:render_fuel", true)
+        .register_attachment_type(
+            mod_api::AttachmentDescriptor::new("general_render_fixture:render_fuel", || 0i32)
+                .serialize(FUEL_CODEC)
+                .sync(FUEL_CODEC),
+        )
         .unwrap();
     registrar
         .declare_general_entity(

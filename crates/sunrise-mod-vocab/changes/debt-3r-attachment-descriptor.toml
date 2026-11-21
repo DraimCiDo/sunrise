@@ -1,0 +1,61 @@
+# The AttachmentTypesRegistrar member records changed, not the call-only trait record.
+# The removed AttachmentDeclarations lookup was doc-hidden, so it has no exported ID.
+ids = [
+    "method:AttachmentTypesRegistrar::register_attachment_type",
+    "method:AttachmentTypesRegistrar::submit_attachment",
+    "method:AttachmentTypesRegistrar::lookup_attachment",
+    "handle:Registrar::register_attachment_type",
+    "handle:Registrar::attachment_key",
+    "type:AttachmentDescriptor",
+    "handle:AttachmentDescriptor::new",
+    "handle:AttachmentDescriptor::serialize",
+    "handle:AttachmentDescriptor::sync",
+    "handle:AttachmentDescriptor::copy_on_death",
+    "handle:AttachmentDescriptor::id",
+    "handle:AttachmentDescriptor::has_codec",
+    "handle:AttachmentDescriptor::is_synced",
+    "handle:AttachmentDescriptor::copy_on_death_enabled",
+    "type:ErasedAttachmentDescriptor",
+    "handle:ErasedAttachmentDescriptor::id",
+    "handle:ErasedAttachmentDescriptor::has_codec",
+    "handle:ErasedAttachmentDescriptor::is_synced",
+    "handle:ErasedAttachmentDescriptor::copy_on_death_enabled",
+    "type:RegisteredAttachment",
+    "handle:RegisteredAttachment::id",
+    "handle:RegisteredAttachment::namespace",
+    "handle:RegisteredAttachment::name",
+    "handle:RegisteredAttachment::owner",
+    "handle:RegisteredAttachment::has_codec",
+    "handle:RegisteredAttachment::is_synced",
+    "handle:RegisteredAttachment::policy",
+    "type:AttachmentKey",
+    "handle:AttachmentKey::id",
+    "handle:AttachmentKey::namespace",
+    "handle:AttachmentKey::name",
+    "handle:AttachmentKey::owner",
+    "handle:AttachmentKey::has_codec",
+    "handle:AttachmentKey::is_synced",
+    "handle:AttachmentKey::policy",
+    "handle:AttachmentKey::is_live",
+    "handle:AttachmentKey::get",
+    "handle:AttachmentKey::has",
+    "handle:AttachmentKey::get_existing",
+    "handle:AttachmentKey::set",
+    "handle:AttachmentKey::remove",
+    "handle:AttachmentKey::sync_data",
+    "handle:AttachmentKey::get_in",
+    "handle:AttachmentKey::has_in",
+    "handle:AttachmentKey::get_existing_in",
+    "handle:AttachmentKey::set_in",
+    "handle:AttachmentKey::remove_in",
+    "handle:AttachmentKey::sync_data_in",
+    "type:AttachmentError",
+    "type:AttachmentError.StaleKey",
+]
+why = "Register typed attachment descriptors once during Hooks::register, matching NeoForge's AttachmentType.Builder (net.neoforged.neoforge.attachment.AttachmentType) and RegisterEvent.register for NeoForgeRegistries.Keys.ATTACHMENT_TYPES. Each registration returns an issued AttachmentKey<T> tied by identity to the active installation so keys from prior installations are refused with AttachmentError::StaleKey. Sync codecs (.sync(codec)) are independent of persistence codecs (.serialize(codec)); only copy_on_death requires a persistence codec. Any valid lowercase namespace:name not already registered is accepted, while the registering package ID is stored as owner for duplicate diagnostics and server-side synced-attachment admission checks. The doc-hidden AttachmentDeclarations trait is removed."
+migrate = '''
+- Replace `r.register_attachment_type("ns:name", false)` with `let key = r.register_attachment_type(AttachmentDescriptor::new("ns:name", default))?`, and replace `r.register_attachment_type("ns:name", true)` with `.sync(sync_codec)` (plus `.serialize(codec)` if persisted and `.copy_on_death()` if copied on player death).
+- To use another package's attachment, declare a dependency on its owner and call `r.attachment_key::<T>("ns:name")?` during registration after the owner registers it.
+- Keep the returned `AttachmentKey<T>` on the mod or Part and call `key.{get,has,get_existing,set,remove,sync_data}(host, holder)` (or `*_in(level, holder)` on a `LevelRandomHost`). Discard any key that returns `AttachmentError::StaleKey`.
+- Replace `AttachmentTypesRegistrar::register_attachment_type` implementations with `submit_attachment(&mut self, descriptor: ErasedAttachmentDescriptor) -> Result<RegisteredAttachment, String>` and `lookup_attachment(&self, id: &str) -> Result<RegisteredAttachment, AttachmentError>`.
+'''

@@ -201,14 +201,18 @@ pub fn client_requirement(id: &str) -> Option<String> {
             "attaches the part {part}, which listens to the client hook {hook}"
         ));
     }
-    if let Some(types) = installed.attachment_types.get(id)
-        && let Some(name) = types
-            .iter()
-            .filter(|(_, sync)| **sync)
-            .map(|(name, _)| name)
-            .min()
+    if let Some((namespace, name)) = installed
+        .attachment_types
+        .iter()
+        .flat_map(|(namespace, types)| {
+            types
+                .iter()
+                .filter(|(_, record)| record.is_synced() && record.owner() == id)
+                .map(move |(name, _)| (*namespace, *name))
+        })
+        .min()
     {
-        return Some(format!("declares the synced attachment {id}:{name}"));
+        return Some(format!("declares the synced attachment {namespace}:{name}"));
     }
     let channel = installed.keys.payloads.as_ref()?.client_bound(id)?;
     Some(format!("sends the required payload {channel} to clients"))
