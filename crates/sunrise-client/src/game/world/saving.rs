@@ -452,7 +452,13 @@ impl Game<'_> {
                 sunrise_client::streaming::SaveStep::Pending => unreachable!(),
             }
         }
-        let keys: Vec<_> = self.world.modified.iter().copied().collect();
+        let keys: Vec<_> = self
+            .world
+            .modified
+            .iter()
+            .filter(|key| wait || self.world.modified.queued_for_save(key))
+            .copied()
+            .collect();
         self.save.save_attachments(&self.world.attachments)?;
         let chunks = self.with_entities(keys.iter().filter_map(|k| self.world.chunks.get(k)));
         self.native_full_chunk_snapshots(&chunks);

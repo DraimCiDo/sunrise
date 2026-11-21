@@ -32,6 +32,7 @@ no callback, while an action savepoint is open, and chunk unloading waits for
 it to close. An explicit flush reports any unresolved refusals. If shutdown
 finishes with a partial save because a record was refused, it logs the refusal
 and continues rather than treating it as fatal. Storage I/O errors still
-propagate. A failed full chunk that is still resident is marked modified for
-another save attempt. This automatic retry does not cover unloaded chunks or
-proto chunks.
+propagate. A failed resident full chunk is kept for an explicit, unload or
+shutdown save. Until the chunk is edited again, eager and periodic saves do
+not retry the same refused snapshot. This retry tracking does not cover
+unloaded chunks or proto chunks.

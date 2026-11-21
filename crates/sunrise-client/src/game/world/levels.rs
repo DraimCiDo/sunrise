@@ -199,6 +199,8 @@ pub(super) struct Parked {
     spawn_scratch: super::natural_spawning::SpawnScratch,
     /// Server ticks since a player was last in the level.
     idle: u32,
+    /// Do not repeat a refused idle close until the level is edited or entered again.
+    idle_close_refused_at: Option<u64>,
     /// The level's own world border (`ServerLevel.getWorldBorder`), and what its players were
     /// last told of it (`LanHost::border_sent`).
     border: sunrise_client::worldborder::WorldBorder,
@@ -811,6 +813,7 @@ impl Game<'_> {
             creaking: Default::default(),
             spawn_scratch: Default::default(),
             idle: 0,
+            idle_close_refused_at: None,
             border: self.load_border(dim),
             border_sent: None,
         })
@@ -1049,6 +1052,7 @@ impl Game<'_> {
             std::mem::swap(&mut h.border_sent, &mut p.border_sent);
         }
         p.idle = 0;
+        p.idle_close_refused_at = None;
         std::mem::replace(&mut self.dim, target)
     }
 
@@ -1631,6 +1635,9 @@ impl Game<'_> {
                 p.idle = 0;
                 continue;
             }
+            if p.idle_close_refused_at == Some(p.world.modified.edit_sequence()) {
+                continue;
+            }
             p.idle += 1;
             if *dim != Dim::Overworld && p.idle >= IDLE_TICKS {
                 closing.push(*dim);
@@ -1647,6 +1654,7 @@ impl Game<'_> {
                 log::warn!("Leaving {} open after a partial save: {error}", dim.id());
                 if let Some(level) = self.levels.parked.get_mut(&dim) {
                     level.idle = 0;
+                    level.idle_close_refused_at = Some(level.world.modified.edit_sequence());
                 }
             }
         }
@@ -1919,6 +1927,25 @@ mod tests {
                     disk.raw_chunk(0, 0).is_some(),
                     "the healthy chunk was still saved"
                 );
+
+                // A newer durable entity record clears the old refusal, but the idle
+                // tick must not try another close unless somebody changes the level.
+                nether.save.save_entities(vec![((2, 0), vec![])]).unwrap();
+                for _ in 0..IDLE_TICKS {
+                    game.close_idle_levels().unwrap();
+                }
+                assert!(game.levels.parked.contains_key(&Dim::Nether));
+                game.levels
+                    .parked
+                    .get_mut(&Dim::Nether)
+                    .unwrap()
+                    .world
+                    .modified
+                    .insert((0, 0));
+                for _ in 0..IDLE_TICKS {
+                    game.close_idle_levels().unwrap();
+                }
+                assert!(!game.levels.parked.contains_key(&Dim::Nether));
             });
         });
     }
