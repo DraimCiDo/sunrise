@@ -87,7 +87,7 @@ class Ref:
 
 
 def git(*args: str) -> str:
-    return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout.strip()
+    return subprocess.run(["git", *args], cwd=REPOSITORY, check=True, capture_output=True, text=True).stdout.strip()
 
 
 def gh(*args: str, check: bool = True) -> str:
@@ -98,7 +98,7 @@ def gh(*args: str, check: bool = True) -> str:
 
 
 def is_ancestor(a: str, b: str) -> bool:
-    return subprocess.run(["git", "merge-base", "--is-ancestor", a, b]).returncode == 0
+    return subprocess.run(["git", "merge-base", "--is-ancestor", a, b], cwd=REPOSITORY).returncode == 0
 
 
 def output(**values: str) -> None:

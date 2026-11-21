@@ -615,6 +615,7 @@ class SdkPairTests(unittest.TestCase):
             os.chdir(repo)
             try:
                 with mock.patch.dict(nightly.os.environ, {"GITHUB_REPOSITORY": "sunrise-org/sunrise"}), \
+                        mock.patch.object(nightly, "REPOSITORY", Path(repo)), \
                         mock.patch.object(nightly.ns, "fetch_heads", return_value=[]), \
                         mock.patch.object(nightly.ns, "assemble", return_value=published), \
                         mock.patch.object(nightly.ns, "builds_today", return_value=["nightly/build-2026-11-17-1"]), \

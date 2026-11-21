@@ -21,6 +21,11 @@ CONDITIONAL = {**SURFACE, "behaviours": [{**DECLARATION, "version": 2}]}
 BREAKING = {**SURFACE, "behaviours": []}
 
 
+def git(*args):
+    """Git for building fixture repositories in the current folder; `nightly.git` always runs in its checkout."""
+    return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout.strip()
+
+
 def release(tag, *, draft=False, prerelease=False, body=""):
     return {"tag_name": tag, "draft": draft, "prerelease": prerelease, "published_at": "2026-11-20T10:00:00Z",
             "body": body}
@@ -316,7 +321,6 @@ class StableModApiTests(unittest.TestCase):
     def test_same_line_accepts_pr_merges_of_backports_but_not_new_main_history(self):
         repo, checkout = (self.notes.with_name(name) for name in ("upstream", "checkout"))
         repo.mkdir()
-        git = nightly.git
         with chdir(repo):
             git("init", "--initial-branch=main")
             for key, default in (("user.name", "Release Test"), ("user.email", "release-test@example.invalid")):
@@ -341,7 +345,7 @@ class StableModApiTests(unittest.TestCase):
             git("merge", "--no-ff", "main", "-m", "bring in main")
             imported = git("rev-parse", "HEAD")
         git("clone", "--depth", "1", "--branch", "release", repo.as_uri(), str(checkout))
-        with chdir(checkout):
+        with chdir(checkout), mock.patch.object(nightly, "REPOSITORY", checkout):
             tag = "26.3-0.1.11"
             nightly.require_stable_lineage(candidate, tag, previous, PREVIOUS)
             self.assertEqual(git("rev-parse", "--is-shallow-repository"), "false")
@@ -353,7 +357,6 @@ class StableModApiTests(unittest.TestCase):
     def test_same_line_accepts_backport_already_merged_back_into_main(self):
         repo, checkout = (self.notes.with_name(name) for name in ("upstream", "checkout"))
         repo.mkdir()
-        git = nightly.git
         with chdir(repo):
             git("init", "--initial-branch=main")
             for key, default in (("user.name", "Release Test"), ("user.email", "release-test@example.invalid")):
@@ -369,7 +372,7 @@ class StableModApiTests(unittest.TestCase):
             git("commit", "--allow-empty", "-m", "another release fix")
             candidate = git("rev-parse", "HEAD")
         git("clone", "--depth", "1", "--branch", "release", repo.as_uri(), str(checkout))
-        with chdir(checkout):
+        with chdir(checkout), mock.patch.object(nightly, "REPOSITORY", checkout):
             nightly.require_stable_lineage(candidate, "26.3-0.1.11", previous, PREVIOUS)
 
     def test_only_a_new_major_can_change_content_declaration_files(self):
@@ -379,7 +382,6 @@ class StableModApiTests(unittest.TestCase):
         declaration = "crates/sunrise-mod-package/src/content/entity_type.rs"
         unrelated = "crates/sunrise-mod-package/src/content/entity_sounds_tests.rs"
         with chdir(repo):
-            git = nightly.git
             git("init", "--initial-branch=main")
             git("config", "user.name", "Release Test")
             git("config", "user.email", "release-test@example.invalid")
@@ -467,7 +469,6 @@ class JudgeBuildTests(unittest.TestCase):
             # The tree is a plain extraction: the checkout gains no worktree.
             repo = work / "repo"
             repo.mkdir()
-            git = nightly.git
             with chdir(repo), mock.patch.object(nightly, "REPOSITORY", repo):
                 git("init", "-q")
                 Path("a.txt").write_text("a\n")
