@@ -1319,9 +1319,6 @@ enum Merge {
     /// it binds. Kept as its layers ([`BLOCKSTATE_LAYERS`]) for the catalog.
     BlockStates,
 }
-/// The key of a stacked blockstate file: its definitions, bottom first, each
-/// as the pack wrote it.
-pub const BLOCKSTATE_LAYERS: &str = "sunrise:layers";
 /// Whether the packs merger stacks this file's every layer (atlases, lang,
 /// sounds, blockstates) instead of letting the topmost one win.
 pub fn merge_stacks(name: &str) -> bool {
