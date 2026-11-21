@@ -193,7 +193,7 @@ fn data_slot_sizing_after_creation_and_load_joins_the_existing_journal() {
                     assert_eq!(entity.set_data_slots(host, vec![30, 40]), Ok(true));
                     host.transaction(|host, _| {
                         assert!(entity.set_data_slot(host, 0, 50).unwrap());
-                        Ok(())
+                        Ok::<_, ()>(())
                     })
                     .unwrap();
                     Err(())

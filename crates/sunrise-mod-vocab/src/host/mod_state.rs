@@ -34,32 +34,10 @@ pub trait ModStateServerHost {
         token: AttachmentWriteToken,
     ) -> Result<(), AttachmentRowError>;
     /// Side: server.
-    /// Opens a transaction, nested in the open one if any (`Transaction.open`), and gives back
-    /// the seal that ends it. `host.transaction` calls it; use that instead.
-    #[access(WorldOnly)]
-    fn transaction_open(&mut self) -> TransactionSeal;
-    /// Side: server.
-    /// Closes the transaction `seal` ends, committed or aborted, aborting first any opened
-    /// inside it and left open. Refused when `seal` names no open transaction, so a mod ends
-    /// only a transaction it opened. `host.transaction` calls it.
-    #[access(WorldOnly)]
-    fn transaction_close(&mut self, seal: &TransactionSeal, commit: bool);
-    /// Side: server.
     /// Where the transaction system is (`Transaction.getLifecycle`): none open, one open, a
     /// nested one closing, or the outermost closing while the game tells the world of a commit.
     #[access(WorldOnly)]
     fn transaction_lifecycle(&self) -> TransactionLifecycle;
-    /// Side: server.
-    /// The innermost open transaction, to write in (`Transaction.getCurrentOpenedTransaction`);
-    /// none when none is open. It names the transaction only: ending it still takes the seal its
-    /// opener holds.
-    #[access(WorldOnly)]
-    fn transaction_current(&self) -> Option<TransactionContext>;
-    /// Side: server.
-    /// How deeply `tx` is nested (`TransactionContext.depth`): 0 for the outermost, none for a
-    /// transaction that is not open.
-    #[access(WorldOnly)]
-    fn transaction_depth(&self, tx: &TransactionContext) -> Option<u32>;
     /// Side: server.
     /// Runs the calling mod's `task` once after `delay_ticks` server ticks, after the due tick's
     /// start hook. Both 0 and 1 mean the next tick; a paused server does not advance the delay.

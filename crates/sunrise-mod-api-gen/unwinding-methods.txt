@@ -860,11 +860,7 @@ mod_state::attachment_query
 mod_state::attachment_validate_write
 mod_state::attachments
 mod_state::cancel_task
-mod_state::transaction_close
-mod_state::transaction_current
-mod_state::transaction_depth
 mod_state::transaction_lifecycle
-mod_state::transaction_open
 network::chat_line
 network::container_click
 network::disconnect

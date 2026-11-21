@@ -326,8 +326,11 @@ pub mod tests {
             BlockSide { pos, .. }: BlockSide,
             _: usize,
             fluid: FluidStack,
-            _: &TransactionContext,
+            tx: &TransactionContext,
         ) -> Option<FluidStack> {
+            if !self.journal.holds(tx) {
+                return Some(fluid).filter(|fluid| fluid.amount > 0);
+            }
             let Some(tank) = self.tanks.get_mut(&pos).filter(|tank| tank.fills) else {
                 return Some(fluid);
             };
@@ -363,8 +366,11 @@ pub mod tests {
             BlockSide { pos, .. }: BlockSide,
             _: usize,
             max: u32,
-            _: &TransactionContext,
+            tx: &TransactionContext,
         ) -> Option<FluidStack> {
+            if !self.journal.holds(tx) {
+                return None;
+            }
             let tank = self.tanks.get_mut(&pos).filter(|tank| tank.drains)?;
             let held = tank.held.clone()?;
             let asked = if tank.short {
@@ -408,26 +414,31 @@ pub mod tests {
                 self,
             ))
         }
+
+        fn with_transaction_scope(
+            &mut self,
+            mode: TransactionScope,
+            callback: &mut dyn for<'loan> FnMut(
+                &'loan mut dyn ServerHost,
+                &'loan TransactionContext,
+            ) -> bool,
+        ) -> Result<bool, TransactionUnavailable> {
+            Ok(FakeJournal::with_scope(
+                self,
+                mode,
+                callback,
+                |host| &mut host.journal,
+                |host| host.tanks.clone(),
+                |host, before| host.tanks = before,
+            ))
+        }
+
+        fn transaction_matches(&self, expected: Option<&TransactionContext>) -> bool {
+            self.journal.matches(expected)
+        }
     }
     #[cfg(test)]
-    mod_api::impl_server_host_areas!(TankWorld, except(mod_state));
-    #[cfg(test)]
-    impl crate::prelude::ModStateServerHost for TankWorld {
-        fn transaction_open(&mut self) -> TransactionSeal {
-            self.journal.open(self.tanks.clone())
-        }
-        fn transaction_close(&mut self, seal: &TransactionSeal, commit: bool) {
-            if let Some(tanks) = self.journal.close(seal, commit) {
-                self.tanks = tanks;
-            }
-        }
-        fn transaction_current(&self) -> Option<TransactionContext> {
-            self.journal.current()
-        }
-        fn transaction_depth(&self, tx: &TransactionContext) -> Option<u32> {
-            self.journal.depth_of(tx)
-        }
-    }
+    mod_api::impl_server_host_areas!(TankWorld);
 
     #[cfg(test)]
     pub(crate) fn potion(amount: u32, potion: &str) -> FluidStack {
@@ -567,7 +578,7 @@ pub mod tests {
             let moved = host.transaction(|host, tx| {
                 let first = move_resources(host, &other, &tank, |_| true, 300, Some(tx))?;
                 let second = move_resources(host, &source, &tank, |_| true, 300, Some(tx))?;
-                Ok(first + second)
+                Ok::<_, Overanswered>(first + second)
             });
             let crate::TransactionError::Aborted(error) = moved.unwrap_err() else {
                 panic!("expected {liar} to overanswer")

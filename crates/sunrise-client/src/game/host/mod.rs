@@ -6,6 +6,7 @@
 #![allow(clippy::useless_conversion, clippy::unit_arg)]
 use super::Game;
 use mod_api::__private::game::*;
+use mod_api::__private::{LoadAccess, access_allowed};
 use mod_api::*;
 
 include!(concat!(env!("OUT_DIR"), "/game_host_modules.rs"));
@@ -19,6 +20,40 @@ impl Host for Game<'_> {
 impl ServerHost for Game<'_> {
     fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
         Some(BackendMutRef::of(self))
+    }
+
+    fn with_transaction_scope(
+        &mut self,
+        mode: TransactionScope,
+        callback: &mut dyn for<'loan> FnMut(
+            &'loan mut dyn ServerHost,
+            &'loan TransactionContext,
+        ) -> bool,
+    ) -> Result<bool, TransactionUnavailable> {
+        if !access_allowed("with_transaction_scope", LoadAccess::WorldOnly) {
+            return Err(TransactionUnavailable);
+        }
+        match mode {
+            TransactionScope::New => {
+                let _ =
+                    self.storage_transaction(|game, tx| callback(game, tx).then_some(()).ok_or(()));
+            }
+            TransactionScope::Join => {
+                let Some(frame) = self.current_storage_frame() else {
+                    return Ok(false);
+                };
+                frame.lend(|tx| callback(self, tx));
+            }
+        }
+        Ok(true)
+    }
+
+    fn transaction_matches(&self, expected: Option<&TransactionContext>) -> bool {
+        match (self.current_storage_frame(), expected) {
+            (Some(frame), Some(tx)) => frame.matches(tx),
+            (None, None) => true,
+            _ => false,
+        }
     }
 }
 

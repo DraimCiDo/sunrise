@@ -2,77 +2,93 @@
 //! capability helpers inside one are kept by the game and made final only when the outermost
 //! transaction commits; an abort puts back everything its closure changed.
 use crate::ServerHost;
+use std::{
+    fmt,
+    marker::PhantomData,
+    rc::Rc,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
-/// An open transaction, as NeoForge's `TransactionContext`: what every write of a handler or a
-/// place takes. `host.transaction` gets one from the game and lends it to its closure alone.
-///
-/// It lets its holder write in the transaction, not end it: ending one takes its
-/// [`TransactionSeal`], which only whoever opened it holds. The authority is the game's, not
-/// this value's: it names one transaction the game opened by a token that cannot be guessed in
-/// practice (a randomly keyed 64-bit hash), and the game checks it on every write. A write
-/// given a transaction that is not open changes nothing, so a value decoded from bytes or kept
-/// past its closure cannot write outside the journal.
-// exhaustive: its field is private, so mods cannot build or destructure it
-#[derive(Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
-pub struct TransactionContext(pub(crate) u64);
-
-/// What ends a transaction:
-/// [`transaction_open`](crate::prelude::ModStateServerHost::transaction_open) gives it to whoever opened
-/// the transaction (`host.transaction`'s guard), and
-/// [`transaction_close`](crate::prelude::ModStateServerHost::transaction_close) takes it. A
-/// write handler lent only the [`TransactionContext`] cannot end the transaction around it, the game's
-/// own (a hopper's move) or another mod's.
-///
-/// It carries the transaction's write token and a second token, as unguessable, that only
-/// closing checks.
-///
-/// ```compile_fail
-/// use mod_api::{HostTransaction, ServerHost};
-/// fn handler(host: &mut dyn ServerHost) {
-///     let _ = host.transaction(|host, tx| -> Result<(), ()> {
-///         host.transaction_close(tx, true);
-///         Ok(())
-///     });
-/// }
-/// ```
-// exhaustive: its fields are private, so mods cannot build or destructure it
-#[derive(Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
-pub struct TransactionSeal {
-    pub(crate) tx: TransactionContext,
-    pub(crate) close: u64,
+// no wire: only the host can lend this thread-bound authority over a live journal.
+/// A loan of write authority in one open transaction, as NeoForge's `TransactionContext`.
+/// Pass it to handler and item-place writes. It cannot close the transaction or outlive the
+/// callback it was lent to. A write refuses a loan that does not belong to the host's journal.
+// exhaustive: its fields are private, so mods cannot build or destructure it.
+pub struct TransactionContext {
+    frame: TransactionFrame,
+    _thread: PhantomData<Rc<()>>,
 }
 
-impl TransactionSeal {
-    /// The transaction this seal ends, to write in it.
-    pub fn transaction(&self) -> &TransactionContext {
-        &self.tx
+impl TransactionContext {
+    /// The nesting depth in its owning journal. The root transaction has depth zero.
+    pub fn depth(&self) -> usize {
+        self.frame.depth
     }
 }
 
-/// The seal of the transaction the game opened with write token `token` and close token
-/// `close`, for its raw open helper.
-// hidden: the game's side of the seal, re-exported through `__private`.
-#[doc(hidden)]
-pub fn transaction_seal(token: u64, close: u64) -> TransactionSeal {
-    TransactionSeal {
-        tx: TransactionContext(token),
-        close,
+impl fmt::Debug for TransactionContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TransactionContext")
+            .field("depth", &self.depth())
+            .finish_non_exhaustive()
     }
 }
 
-/// The transaction the game opened with write token `token`, for its
-/// `transaction_current` answer: a write token alone, never a seal.
-// hidden: the game's side of the seal, re-exported through `__private`.
-#[doc(hidden)]
-pub fn transaction_of(token: u64) -> TransactionContext {
-    TransactionContext(token)
+// no wire: process-local identity of a journal frame.
+/// A key for the host that owns a journal frame, not a write capability or close handle.
+#[derive(Clone, Copy, Debug)]
+pub struct TransactionFrame {
+    namespace: &'static AtomicU64,
+    sequence: u64,
+    depth: usize,
 }
 
+impl PartialEq for TransactionFrame {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.namespace, other.namespace) && self.sequence == other.sequence
+    }
+}
+
+impl Eq for TransactionFrame {}
+
+impl TransactionFrame {
+    /// Mints a fresh identity at `depth`. Separately linked copies use different namespaces.
+    pub fn fresh(depth: usize) -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let sequence = NEXT
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .expect("transaction frame identities exhausted");
+        Self {
+            namespace: &NEXT,
+            sequence,
+            depth,
+        }
+    }
+
+    /// The depth at which this frame was installed.
+    pub fn depth(self) -> usize {
+        self.depth
+    }
+
+    /// Whether the loan came from this journal frame.
+    pub fn matches(self, context: &TransactionContext) -> bool {
+        self == context.frame
+    }
+
+    /// Lends write authority without handing out an owned context.
+    pub fn lend<T>(self, f: impl for<'loan> FnOnce(&'loan TransactionContext) -> T) -> T {
+        f(&TransactionContext {
+            frame: self,
+            _thread: PhantomData,
+        })
+    }
+}
+
+// no wire: observes the process-local transaction journal.
 /// Where the transaction system is (`Transaction.Lifecycle`), as
 /// [`transaction_lifecycle`](crate::prelude::ModStateServerHost::transaction_lifecycle) reads it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-#[derive(sunrise_mod_api_macros::Wire)]
 pub enum TransactionLifecycle {
     /// No transaction is open.
     None,
@@ -86,18 +102,15 @@ pub enum TransactionLifecycle {
     RootClosing,
 }
 
-/// The write token `tx` names, for the game's checks.
-// hidden: the game's side of the seal, re-exported through `__private`.
-#[doc(hidden)]
-pub fn transaction_token(tx: &TransactionContext) -> u64 {
-    tx.0
-}
-
-/// The write and close tokens `seal` carries, for the game's checks.
-// hidden: the game's side of the seal, re-exported through `__private`.
-#[doc(hidden)]
-pub fn seal_tokens(seal: &TransactionSeal) -> (u64, u64) {
-    (seal.tx.0, seal.close)
+// no wire: selects how the host lends access to its process-local journal.
+// exhaustive: the host either opens a savepoint or lends the active frame.
+/// Whether to open a savepoint or join the current transaction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransactionScope {
+    /// Open a new transaction, nested if one is already open.
+    New,
+    /// Join the innermost transaction without opening or closing anything.
+    Join,
 }
 
 // no wire: a local refusal to lend transaction authority, not a mod boundary payload.
@@ -116,15 +129,22 @@ pub enum TransactionError<E> {
     Aborted(E),
 }
 
-/// Transactions are available only on the logical server and preserve the receiver type.
+/// Transactions are available only on the logical server. Both the host and the context are
+/// lent to the callback; neither can escape it.
 ///
 /// ```
-/// use mod_api::{BlockEntityError, BlockEntityRef, HostTransaction, ServerHost, TransactionError};
+/// use mod_api::{
+///     BlockEntityError, BlockEntityRef, HostTransaction, ServerHost, TransactionError,
+///     TransactionUnavailable,
+/// };
 /// fn write(host: &mut dyn ServerHost, block: BlockEntityRef) {
 ///     let _: Result<(), TransactionError<BlockEntityError>> = host.transaction(|host, _tx| {
 ///         block.set_changed(host)?;
 ///         Ok(())
 ///     });
+/// }
+/// fn active_depth(host: &mut dyn ServerHost) -> Result<Option<usize>, TransactionUnavailable> {
+///     host.join_transaction(|_, tx| tx.depth())
 /// }
 /// ```
 /// ```compile_fail
@@ -142,162 +162,143 @@ pub enum TransactionError<E> {
 ///     let _: Result<(), TransactionError<()>> = host.transaction(|_, _| Ok(()));
 /// }
 /// ```
+/// ```compile_fail
+/// use mod_api::{HostTransaction, ServerHost, TransactionContext, TransactionError};
+/// fn escape(host: &mut dyn ServerHost) {
+///     let _: Result<&TransactionContext, TransactionError<()>> = host.transaction(|_, tx| Ok(tx));
+/// }
+/// ```
+/// ```compile_fail
+/// use mod_api::{HostTransaction, ServerHost, TransactionContext, TransactionUnavailable};
+/// fn stash(host: &mut dyn ServerHost) {
+///     let mut saved: Option<&TransactionContext> = None;
+///     let _: Result<Option<()>, TransactionUnavailable> = host.join_transaction(|_, tx| {
+///         saved = Some(tx);
+///     });
+///     let _ = saved;
+/// }
+/// ```
+/// ```compile_fail
+/// use mod_api::{HostTransaction, ServerHost, TransactionError};
+/// fn close(host: &mut dyn ServerHost) {
+///     let _: Result<(), TransactionError<()>> = host.transaction(|host, tx| {
+///         host.transaction_close(tx, true);
+///         Ok(())
+///     });
+/// }
+/// ```
 pub trait HostTransaction: ServerHost {
     /// Runs `f` in a transaction, nested in the open one if any (`Transaction.openRoot` and
-    /// `open`): `Ok` commits it (`commit`), into the transaction around it or, at the
-    /// outermost, for good, with the world told of each change once; `Err` aborts it
-    /// (`close` without `commit`), putting every storage it wrote back as it was. A panic
-    /// unwinding out of `f` aborts this transaction as it passes, so whoever catches it sees
-    /// nothing `f` changed, and the transaction around it stays open. A transaction `f` opened
-    /// itself and left open is aborted first, when this one closes.
+    /// `open`). `Ok` commits into the transaction around it or, at the outermost, for good,
+    /// with the world told of each change once. `Err` aborts, restoring every storage it wrote.
+    /// An unwind out of `f` aborts this transaction before reaching the caller; the transaction
+    /// around it stays open.
     ///
     /// An error returned by `f` becomes [`TransactionError::Aborted`]. If a transaction cannot
     /// be opened, [`TransactionError::Unavailable`] means `f` did not run.
     ///
-    /// `f` gets the [`TransactionContext`] to write in, never its [`TransactionSeal`]: only this
-    /// guard ends the transaction.
+    /// `f` gets a loan of the server host and [`TransactionContext`] to write in. Only the
+    /// host's owning scope ends the transaction.
     ///
     /// Covered: block entities (item slots, saved compound, custom name and attachments), cauldrons,
     /// players' inventories and cursors, entities' inventories
     /// ([`ItemPlace::EntitySlot`](crate::ItemPlace::EntitySlot)) and item entities' stacks.
     fn transaction<T, E>(
         &mut self,
-        f: impl FnOnce(&mut Self, &TransactionContext) -> Result<T, E>,
-    ) -> Result<T, TransactionError<E>>;
+        f: impl for<'loan> FnOnce(&'loan mut dyn ServerHost, &'loan TransactionContext) -> Result<T, E>,
+    ) -> Result<T, TransactionError<E>> {
+        let mut f = Some(f);
+        let mut result = None;
+        self.with_transaction_scope(TransactionScope::New, &mut |host, tx| {
+            let Some(f) = f.take() else { return false };
+            let outcome = f(host, tx);
+            let commit = outcome.is_ok();
+            result = Some(outcome);
+            commit
+        })
+        .map_err(|TransactionUnavailable| TransactionError::Unavailable)?;
+        result
+            .ok_or(TransactionError::Unavailable)?
+            .map_err(TransactionError::Aborted)
+    }
 
     /// Lends the innermost open action's context, or returns `Ok(None)` without calling `f`
-    /// if there is no open action. Returns [`TransactionUnavailable`] outside world access.
+    /// if there is no open action. Returns [`TransactionUnavailable`] outside world access
+    /// or when the host does not support scoped transactions.
     ///
     /// Joining opens and closes nothing. Writes take effect in the opener's journal, and
-    /// `f`'s return value does not commit or abort it. Use [`Self::transaction`] for a new
-    /// savepoint that can roll back independently.
+    /// `f`'s return value does not commit or abort it, even when that value is an `Err`.
+    /// Use [`Self::transaction`] for a new savepoint that can roll back independently.
     fn join_transaction<T>(
         &mut self,
-        f: impl for<'loan> FnOnce(&'loan mut Self, &'loan TransactionContext) -> T,
+        f: impl for<'loan> FnOnce(&'loan mut dyn ServerHost, &'loan TransactionContext) -> T,
     ) -> Result<Option<T>, TransactionUnavailable> {
-        use crate::world::phase::{LoadAccess, access_allowed};
-        if !access_allowed("join_transaction", LoadAccess::WorldOnly) {
-            return Err(TransactionUnavailable);
-        }
-        Ok(self.transaction_current().map(|context| f(self, &context)))
+        let mut f = Some(f);
+        let mut result = None;
+        self.with_transaction_scope(TransactionScope::Join, &mut |host, tx| {
+            if let Some(f) = f.take() {
+                result = Some(f(host, tx));
+            }
+            // A join never decides the action's outcome.
+            false
+        })?;
+        Ok(result)
     }
 }
 
-impl<H: ServerHost + ?Sized> HostTransaction for H {
-    fn transaction<T, E>(
-        &mut self,
-        f: impl FnOnce(&mut Self, &TransactionContext) -> Result<T, E>,
-    ) -> Result<T, TransactionError<E>> {
-        run_transaction(self, f).map_err(TransactionError::Aborted)
-    }
-}
-
-/// `host.transaction` for a host of a known type, which `f` gets back: the game's own moves (a
-/// hopper's) run in one through this.
-pub fn run_transaction<H: ServerHost + ?Sized, T, E>(
-    host: &mut H,
-    f: impl FnOnce(&mut H, &TransactionContext) -> Result<T, E>,
-) -> Result<T, E> {
-    /// Closes its transaction when dropped: committed when `f` gave `Ok`, else aborted, as on
-    /// a panic unwinding past it.
-    struct Open<'a, H: ServerHost + ?Sized> {
-        host: &'a mut H,
-        seal: TransactionSeal,
-        commit: bool,
-    }
-    impl<H: ServerHost + ?Sized> Drop for Open<'_, H> {
-        fn drop(&mut self) {
-            self.host.transaction_close(&self.seal, self.commit);
-        }
-    }
-    let seal = host.transaction_open();
-    let mut open = Open {
-        host,
-        seal,
-        commit: false,
-    };
-    let result = f(&mut *open.host, open.seal.transaction());
-    open.commit = result.is_ok();
-    result
-}
+impl<H: ServerHost + ?Sized> HostTransaction for H {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testing::FakeHost;
+    use crate::{ITEMS, Identifier, ItemResource, ItemStack, ResourceHandler, prelude::ItemsHost};
 
-    /// A seal built from bytes: from the write token a handler is lent and any guessed close
-    /// token, outside any transaction and inside nested ones.
-    fn forged(token: u64, close: u64) -> TransactionSeal {
-        let mut bytes = token.to_le_bytes().to_vec();
-        bytes.extend(close.to_le_bytes());
-        crate::wire::Reader::decode(&bytes).unwrap()
+    const AT: [i32; 3] = [0, 64, 0];
+
+    fn fake_with_stone() -> (FakeHost, ItemResource) {
+        let mut fake = FakeHost::new();
+        let stone = Identifier::parse("minecraft:stone").unwrap();
+        fake.registries.resolve_items([stone.clone()]).unwrap();
+        let stone = ItemStack::new(fake.item_key(&stone).unwrap(), 1).unwrap();
+        let resource = ItemResource::of(&stone);
+        fake.level
+            .block_entity(AT)
+            .with_items(1)
+            .items
+            .as_mut()
+            .unwrap()
+            .slots[0] = Some(stone);
+        (fake, resource)
     }
 
     #[test]
-    fn a_handler_lent_the_transaction_cannot_end_it_or_the_one_around() {
-        assert!(
-            crate::wire::Reader::decode::<TransactionSeal>(&7u64.to_le_bytes()).is_err(),
-            "no seal from a write token alone"
-        );
-        let mut fake = FakeHost::new();
-        let host: &mut dyn ServerHost = &mut fake;
-        host.transaction_close(&forged(1, 1), true);
-        let outer = host.transaction(|host, outer_tx| {
-            let outer_token = transaction_token(outer_tx);
-            host.transaction(|host, tx| {
-                // The handler knows both write tokens, not the close tokens.
-                for token in [outer_token, transaction_token(tx)] {
-                    for close in [0, 1, token, !token, u64::MAX] {
-                        host.transaction_close(&forged(token, close), true);
-                    }
-                }
+    fn a_live_context_from_another_host_cannot_write() {
+        let (mut owner, resource) = fake_with_stone();
+        let mut other = owner.clone();
+        let level = owner.level.level();
+        let items = level.capability(&mut owner, &ITEMS, AT, None).unwrap();
+
+        other
+            .transaction(|other, foreign| {
+                owner
+                    .transaction(|host, own| {
+                        assert_eq!((foreign.depth(), own.depth()), (0, 0));
+                        assert!(!host.transaction_matches(Some(foreign)));
+                        assert_eq!(items.extract_at(host, foreign, 0, &resource, 1), 0);
+                        assert_eq!(items.amount(host, 0), 1);
+                        assert_eq!(items.extract_at(host, own, 0, &resource, 1), 1);
+                        Ok::<_, ()>(())
+                    })
+                    .unwrap();
+                assert!(other.transaction_matches(Some(foreign)));
                 Ok::<_, ()>(())
             })
             .unwrap();
-            Err::<(), ()>(())
-        });
-        assert_eq!(outer, Err(TransactionError::Aborted(())));
-        assert_eq!(
-            fake.journal.closed(),
-            [(2, true), (1, false)],
-            "only each guard closed its own, and the caller's abort stood"
-        );
-        assert_eq!(fake.journal.depth(), 0);
-    }
-
-    #[test]
-    fn a_transaction_left_open_inside_aborts_when_its_caller_closes() {
-        use std::panic::{AssertUnwindSafe, catch_unwind};
-        let mut fake = FakeHost::new();
-        let host: &mut dyn ServerHost = &mut fake;
-        // The caller aborts: the child it left open aborts first.
-        let outer = host.transaction(|host, _| {
-            let _left_open = host.transaction_open();
-            Err::<(), ()>(())
-        });
-        assert_eq!(outer, Err(TransactionError::Aborted(())));
-        assert_eq!(fake.journal.closed(), [(2, false), (1, false)]);
-        assert_eq!(fake.journal.depth(), 0);
-        // The caller commits: the abandoned child still aborts.
-        let host: &mut dyn ServerHost = &mut fake;
-        let outer = host.transaction(|host, _| {
-            let _left_open = host.transaction_open();
-            Ok::<_, ()>(())
-        });
-        assert_eq!(outer, Ok(()));
-        assert_eq!(fake.journal.closed()[2..], [(2, false), (1, true)]);
-        // A panic: the rollback is done before whoever catches it looks.
-        let host: &mut dyn ServerHost = &mut fake;
-        let caught = catch_unwind(AssertUnwindSafe(|| {
-            host.transaction(|host, _| -> Result<(), ()> {
-                let _left_open = host.transaction_open();
-                panic!("a broken handler")
-            })
-        }));
-        assert!(caught.is_err());
-        assert_eq!(fake.journal.closed()[4..], [(2, false), (1, false)]);
-        assert_eq!(fake.journal.depth(), 0);
+        assert_eq!(items.amount(&mut owner, 0), 0);
+        assert_eq!(items.amount(&mut other, 0), 1);
+        assert_eq!(owner.journal.closed(), [(1, true)]);
+        assert_eq!(other.journal.closed(), [(1, true)]);
     }
 
     #[test]
@@ -317,29 +318,24 @@ mod tests {
 
     #[test]
     fn joining_lends_the_open_frame_and_does_not_control_rollback() {
-        use crate::{
-            ITEMS, Identifier, ItemResource, ItemStack, ResourceHandler, prelude::ItemsHost,
-        };
-        let mut fake = FakeHost::new();
+        let (mut fake, resource) = fake_with_stone();
         let level = fake.level.level();
-        let at = [0, 64, 0];
-        let stone = Identifier::parse("minecraft:stone").unwrap();
-        fake.registries.resolve_items([stone.clone()]).unwrap();
-        let stone = ItemStack::new(fake.item_key(&stone).unwrap(), 1).unwrap();
-        let resource = ItemResource::of(&stone);
-        fake.level.block_entity(at).with_items(1);
-        fake.level.block_entity(at).items.as_mut().unwrap().slots[0] = Some(stone);
-        let items = level.capability(&mut fake, &ITEMS, at, None).unwrap();
+        let items = level.capability(&mut fake, &ITEMS, AT, None).unwrap();
         let host: &mut dyn ServerHost = &mut fake;
 
         assert_eq!(
             host.join_transaction::<()>(|_, _| panic!("no open action")),
             Ok(None)
         );
-        let result = host.transaction(|host, _| {
-            let joined =
-                host.join_transaction(|host, tx| items.extract_at(host, tx, 0, &resource, 1));
-            assert_eq!(joined, Ok(Some(1)));
+        let result = host.transaction(|host, outer| {
+            let joined = host.join_transaction(|host, tx| {
+                assert_eq!(tx.depth(), 0);
+                assert!(host.transaction_matches(Some(outer)));
+                assert!(host.transaction_matches(Some(tx)));
+                assert_eq!(items.extract_at(host, tx, 0, &resource, 1), 1);
+                Err::<(), _>("only the opener can abort")
+            });
+            assert_eq!(joined, Ok(Some(Err("only the opener can abort"))));
             assert_eq!(items.amount(host, 0), 0);
             Err::<(), _>("leave the item in place")
         });

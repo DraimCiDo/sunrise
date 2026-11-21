@@ -100,7 +100,7 @@ fn internal_slots_preserve_automation_limits_and_nested_transactions() {
                     );
                     host.transaction(|host, child| {
                         assert_eq!(set(host, child, 1, Some(diamond.clone())), Ok(true));
-                        Ok(())
+                        Ok::<_, ()>(())
                     })
                     .unwrap();
                     assert_eq!(get(host, 1), Ok(Some(diamond.clone())));

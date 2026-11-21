@@ -278,6 +278,16 @@ mod tests {
                     mod_api::__private::current_phase(),
                     mod_api::__private::ModPhase::Config
                 );
+                if let HostSide::Server(host) = &mut host {
+                    assert_eq!(
+                        host.transaction::<(), ()>(|_, _| panic!("config must not open a scope")),
+                        Err(mod_api::TransactionError::Unavailable)
+                    );
+                    assert_eq!(
+                        host.join_transaction::<()>(|_, _| panic!("config must not join a scope")),
+                        Err(mod_api::TransactionUnavailable)
+                    );
+                }
                 let read: &dyn Host = match &host {
                     HostSide::Server(host) => &**host,
                     HostSide::Client(host) => &**host,
@@ -292,19 +302,6 @@ mod tests {
                         .map(|refusal| refusal.phase),
                     Some(mod_api::__private::ModPhase::Config)
                 );
-                if let HostSide::Server(host) = &mut host {
-                    let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        let _: Result<(), mod_api::TransactionError<()>> =
-                            host.transaction(|_, _| Ok(()));
-                    }))
-                    .unwrap_err();
-                    assert_eq!(
-                        refused
-                            .downcast_ref::<mod_api::__private::PhaseRefusal>()
-                            .map(|refusal| refusal.phase),
-                        Some(mod_api::__private::ModPhase::Config)
-                    );
-                }
                 self.0.lock().unwrap().push((true, event.config.kind));
             }
             fn config_unloading(

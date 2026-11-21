@@ -1,21 +1,26 @@
 //! The transaction journal fake: what a host keeps on each transaction it opens.
 
+use crate::item::transaction::TransactionFrame;
+use crate::{ServerHost, TransactionContext, TransactionScope};
+
 // no wire: in-process testing harness state, not a mod boundary payload.
-/// A test host's transaction journal, as the game's keeps its storages: the state each open
-/// transaction began with, put back when it aborts, and every close in order.
-///
-/// [`FakeHost`](super::FakeHost) keeps one over its players and level. A test host of its own
-/// keeps one over its state: it returns what [`open`](Self::open) gives from `transaction_open`,
-/// and puts back what [`close`](Self::close) returns from `transaction_close`. Like the game's,
-/// it names each transaction by a write token and a close token, refuses a close whose seal
-/// names no open transaction, and aborts the transactions left open inside the one it closes.
-#[derive(Clone, Debug)]
+/// A test host's transaction journal: stores the starting state at each depth and records each
+/// close in order. Implement a test host's scope by delegating to [`Self::with_scope`].
+/// Cloning copies the history, not the open frames: a cloned host is a separate journal owner.
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct FakeJournal<S> {
-    /// Each open transaction's write token, close token and starting state, outermost first.
-    kept: Vec<(u64, u64, S)>,
+    kept: Vec<(TransactionFrame, S)>,
     closed: Vec<(usize, bool)>,
-    next: u64,
+}
+
+impl<S> Clone for FakeJournal<S> {
+    fn clone(&self) -> Self {
+        Self {
+            kept: Vec::new(),
+            closed: self.closed.clone(),
+        }
+    }
 }
 
 impl<S> Default for FakeJournal<S> {
@@ -23,62 +28,92 @@ impl<S> Default for FakeJournal<S> {
         Self {
             kept: Vec::new(),
             closed: Vec::new(),
-            next: 1,
+        }
+    }
+}
+
+struct Scope<'a, H, S> {
+    host: &'a mut H,
+    journal: fn(&mut H) -> &mut FakeJournal<S>,
+    restore: fn(&mut H, S),
+    frame: TransactionFrame,
+    commit: bool,
+}
+
+impl<H, S> Drop for Scope<'_, H, S> {
+    fn drop(&mut self) {
+        let journal = (self.journal)(self.host);
+        if let Some((_, before)) = journal.kept.pop_if(|(frame, _)| *frame == self.frame) {
+            journal.closed.push((self.frame.depth() + 1, self.commit));
+            if !self.commit {
+                (self.restore)(self.host, before);
+            }
         }
     }
 }
 
 impl<S> FakeJournal<S> {
-    /// Opens a transaction, nested in the open one if any, that began with state `now`, and
-    /// gives back the seal that ends it.
-    pub fn open(&mut self, now: S) -> crate::TransactionSeal {
-        let token = self.next;
-        // A close token no write token equals, as the game's are drawn apart.
-        let close = token | 1 << 63;
-        self.next += 1;
-        self.kept.push((token, close, now));
-        crate::item::transaction::transaction_seal(token, close)
-    }
-    /// Closes the transaction `seal` ends, committed or aborted, aborting first every one
-    /// opened inside it and left open. What the host puts back: the state the first transaction
-    /// aborted began with, if any. Nothing when `seal` names no open transaction.
-    pub fn close(&mut self, seal: &crate::TransactionSeal, commit: bool) -> Option<S> {
-        let (token, close) = crate::item::transaction::seal_tokens(seal);
-        let at = self
-            .kept
-            .iter()
-            .position(|(t, c, _)| *t == token && *c == close)?;
-        let mut back = None;
-        while self.kept.len() > at + 1 {
-            let (_, _, was) = self.kept.pop()?;
-            self.closed.push((self.kept.len() + 1, false));
-            back = Some(was);
+    /// Lends a single journal loan, returning whether the callback ran. `New` snapshots the
+    /// owner before invoking it and restores on refusal or unwind; `Join` only lends the current
+    /// context, if any. Test hosts using this helper represent the world phase.
+    pub fn with_scope<H: ServerHost>(
+        host: &mut H,
+        mode: TransactionScope,
+        callback: &mut dyn for<'loan> FnMut(
+            &'loan mut dyn ServerHost,
+            &'loan TransactionContext,
+        ) -> bool,
+        journal: fn(&mut H) -> &mut Self,
+        snapshot: impl FnOnce(&H) -> S,
+        restore: fn(&mut H, S),
+    ) -> bool {
+        match mode {
+            TransactionScope::New => {
+                let before = snapshot(host);
+                let owner = journal(host);
+                let frame = TransactionFrame::fresh(owner.depth());
+                owner.kept.push((frame, before));
+                let mut scope = Scope {
+                    host,
+                    journal,
+                    restore,
+                    frame,
+                    commit: false,
+                };
+                scope.commit = frame.lend(|tx| callback(&mut *scope.host, tx));
+                true
+            }
+            TransactionScope::Join => {
+                let Some(&(frame, _)) = journal(host).kept.last() else {
+                    return false;
+                };
+                frame.lend(|tx| callback(host, tx));
+                true
+            }
         }
-        let (_, _, was) = self.kept.pop()?;
-        self.closed.push((at + 1, commit));
-        if !commit {
-            back = Some(was);
+    }
+
+    /// Whether `tx` belongs to this journal, including any open ancestor of the top frame.
+    pub fn holds(&self, tx: &TransactionContext) -> bool {
+        self.kept
+            .get(tx.depth())
+            .is_some_and(|(frame, _)| frame.matches(tx))
+    }
+
+    /// Whether `expected` is the top frame. `None` matches an empty journal.
+    pub fn matches(&self, expected: Option<&TransactionContext>) -> bool {
+        match (self.kept.last(), expected) {
+            (Some((frame, _)), Some(tx)) => frame.matches(tx),
+            (None, None) => true,
+            _ => false,
         }
-        back
     }
-    /// Whether `tx` names an open transaction, for a write to check.
-    pub fn holds(&self, tx: &crate::TransactionContext) -> bool {
-        self.kept.iter().any(|(token, _, _)| *token == tx.0)
-    }
-    /// The innermost open transaction, its write token only.
-    pub fn current(&self) -> Option<crate::TransactionContext> {
-        let (token, _, _) = self.kept.last()?;
-        Some(crate::TransactionContext(*token))
-    }
-    /// How deeply `tx` is nested, 0 for the outermost; none when it is not open.
-    pub fn depth_of(&self, tx: &crate::TransactionContext) -> Option<u32> {
-        let at = self.kept.iter().position(|(token, _, _)| *token == tx.0)?;
-        u32::try_from(at).ok()
-    }
+
     /// How many transactions are open.
     pub fn depth(&self) -> usize {
         self.kept.len()
     }
+
     /// Each transaction closed, in order: the depth it was open at (1 for the outermost), and
     /// whether it committed.
     pub fn closed(&self) -> &[(usize, bool)] {

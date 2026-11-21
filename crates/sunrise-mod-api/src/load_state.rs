@@ -394,7 +394,7 @@ mod tests {
     }
 
     #[test]
-    fn early_world_handle_and_transaction_calls_panic_naming_the_phase() {
+    fn early_world_handles_panic_and_transaction_scopes_refuse() {
         crate::__private::initialize().unwrap();
         use crate::{Host, HostTransaction, ServerHost, prelude::*};
         struct HostDouble;
@@ -409,7 +409,16 @@ mod tests {
             ModPhase::Setup,
         ] {
             let _owner = PhaseOwner::new(phase);
-            for action in [0, 1, 2, 3] {
+            let mut host = HostDouble;
+            assert_eq!(
+                host.transaction::<(), ()>(|_, _| panic!("early access must not open a scope")),
+                Err(crate::TransactionError::Unavailable)
+            );
+            assert_eq!(
+                host.join_transaction::<()>(|_, _| panic!("early access must not join a scope")),
+                Err(crate::TransactionUnavailable)
+            );
+            for action in [0, 1, 2] {
                 let panic = std::panic::catch_unwind(|| {
                     let mut host = HostDouble;
                     match action {
@@ -419,12 +428,8 @@ mod tests {
                         1 => {
                             let _ = host.level("minecraft:overworld");
                         }
-                        2 => {
-                            let _ = host.player(1);
-                        }
                         _ => {
-                            let _: Result<(), crate::TransactionError<()>> =
-                                host.transaction(|_, _| Ok(()));
+                            let _ = host.player(1);
                         }
                     }
                 })

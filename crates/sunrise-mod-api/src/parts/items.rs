@@ -742,8 +742,11 @@ pub mod tests {
             slot: usize,
             resource: &ItemResource,
             amount: u32,
-            _: &TransactionContext,
+            tx: &TransactionContext,
         ) -> Result<Option<ItemStack>, crate::StackWriteError> {
+            if !self.journal.holds(tx) {
+                return Ok(resource.to_stack(amount));
+            }
             let Some(stack) = resource.to_stack(amount) else {
                 return Ok(None);
             };
@@ -772,8 +775,11 @@ pub mod tests {
             _: BlockSide,
             slot: usize,
             max: u32,
-            _: &TransactionContext,
+            tx: &TransactionContext,
         ) -> Option<ItemStack> {
+            if !self.journal.holds(tx) {
+                return None;
+            }
             let most = if self.whole_extract { max } else { 1 };
             let split = self.slots.get_mut(slot)?.take()?.split(most);
             self.slots[slot] = split.remainder;
@@ -820,23 +826,31 @@ pub mod tests {
                 self,
             ))
         }
+
+        fn with_transaction_scope(
+            &mut self,
+            mode: TransactionScope,
+            callback: &mut dyn for<'loan> FnMut(
+                &'loan mut dyn ServerHost,
+                &'loan TransactionContext,
+            ) -> bool,
+        ) -> Result<bool, TransactionUnavailable> {
+            Ok(FakeJournal::with_scope(
+                self,
+                mode,
+                callback,
+                |host| &mut host.journal,
+                |host| host.slots.clone(),
+                |host, before| host.slots = before,
+            ))
+        }
+
+        fn transaction_matches(&self, expected: Option<&TransactionContext>) -> bool {
+            self.journal.matches(expected)
+        }
     }
     #[cfg(test)]
-    mod_api::impl_server_host_areas!(Shelf, except(mod_state));
-    #[cfg(test)]
-    impl crate::prelude::ModStateServerHost for Shelf {
-        fn transaction_open(&mut self) -> TransactionSeal {
-            self.journal.open(self.slots.clone())
-        }
-        fn transaction_close(&mut self, seal: &TransactionSeal, commit: bool) {
-            if let Some(slots) = self.journal.close(seal, commit) {
-                self.slots = slots;
-            }
-        }
-        fn transaction_current(&self) -> Option<TransactionContext> {
-            self.journal.current()
-        }
-    }
+    mod_api::impl_server_host_areas!(Shelf);
 
     #[cfg(test)]
     impl Shelf {

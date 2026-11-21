@@ -28,7 +28,8 @@
 //! An entity added inside one goes at an abort, one removed is only marked until the root
 //! commit, and mods hear of joins and leaves at the root commit (`transactions/entities.rs`).
 use super::{BlockEntity, BlockStateId, Game, machines::HopperState, maps::MapData};
-use mod_api::{LevelRef, TransactionContext, TransactionLifecycle, TransactionSeal};
+use mod_api::__private::TransactionFrame;
+use mod_api::{LevelRef, TransactionContext, TransactionLifecycle};
 use std::collections::{BTreeMap, HashMap};
 use sunrise_client::{
     effects::EffectInstance,
@@ -132,7 +133,7 @@ impl std::ops::DerefMut for OpenTransactions {
 /// Owns a storage frame until it is finished. Unwinding past the scope aborts the frame.
 pub(in crate::game) struct StorageScope<'borrow, 'game> {
     game: &'borrow mut Game<'game>,
-    frame: (u64, u64),
+    frame: TransactionFrame,
     commit: bool,
 }
 
@@ -202,12 +203,8 @@ fn merge_block_update_flags(earlier: i32, later: i32) -> i32 {
 /// One open transaction.
 #[derive(Default)]
 pub(super) struct Level {
-    /// What names it to the mods that write in it (`Transaction`): unguessable in practice, so
-    /// only the value the game handed out names it.
-    token: u64,
-    /// What ends it (`TransactionSeal`), drawn apart from `token`: only whoever opened it holds
-    /// it, never a handler lent the `Transaction`.
-    close_token: u64,
+    /// Installed when the journal level is opened; `None` only in the default initializer.
+    frame: Option<TransactionFrame>,
     dimension: Option<super::Dim>,
     /// Each block entity as it was before this transaction first wrote it.
     block_entities: HashMap<Pos, Kept>,
@@ -503,8 +500,7 @@ pub(super) enum DeferredEffect {
     },
 }
 
-/// A fresh transaction token: a process-wide count through a randomly keyed 64-bit hash, so a
-/// mod cannot guess, in practice, the token of a transaction it was not handed.
+/// A fresh opaque scratch or internal action ID, separate from the journal frame identity.
 fn frame_token() -> u64 {
     use std::hash::BuildHasher;
     use std::sync::{OnceLock, atomic::AtomicU64, atomic::Ordering};
@@ -555,9 +551,7 @@ impl Game<'_> {
         f: impl for<'loan> FnOnce(&'loan mut Self, &'loan TransactionContext) -> Result<T, E>,
     ) -> Result<T, E> {
         let mut scope = StorageScope::open(self);
-        let (token, _) = scope.frame;
-        let context = mod_api::__private::transaction_of(token);
-        let result = f(scope.game(), &context);
+        let result = scope.frame.lend(|tx| f(scope.game(), tx));
         scope.finish(result.is_ok());
         result
     }
@@ -568,25 +562,18 @@ impl Game<'_> {
         self.open_storage_transaction();
     }
 
-    /// Opens a transaction, nested in the open one if any (`Transaction.open`), and gives back
-    /// the seal that ends it.
-    pub(in crate::game) fn transaction_open(&mut self) -> TransactionSeal {
-        let (token, close) = self.open_storage_transaction();
-        mod_api::__private::transaction_seal(token, close)
-    }
-    /// Opens a transaction and gives back its write and close tokens.
-    fn open_storage_transaction(&mut self) -> (u64, u64) {
+    /// Installs a journal level and gives its identity to the owning scope.
+    fn open_storage_transaction(&mut self) -> TransactionFrame {
         if let Some(scope) = &mut self.block_entity_tick_items {
             scope.open_transaction();
         }
-        let (token, close_token) = (frame_token(), frame_token());
+        let frame = TransactionFrame::fresh(self.transactions.len());
         if self.transactions.is_empty() {
             self.world.block_entities.defer_retirement();
         }
         let lifetimes = self.entity_journal_open();
         self.transactions.push(Level {
-            token,
-            close_token,
+            frame: Some(frame),
             dimension: Some(self.dim),
             packets: sunrise_client::lan::conn::transaction_packets::Scope::nested(),
             lifetimes,
@@ -597,23 +584,15 @@ impl Game<'_> {
         if let Some(key) = &mut self.block_entity_tick_key {
             key.unbalanced = true;
         }
-        (token, close_token)
-    }
-    /// Closes the transaction named by `seal`; a write context alone cannot end it.
-    pub(in crate::game) fn transaction_close(&mut self, seal: &TransactionSeal, commit: bool) {
-        self.close_storage_frame(mod_api::__private::seal_tokens(seal), commit);
+        frame
     }
 
     /// Closes only the named frame, first aborting any abandoned children above it.
-    fn close_storage_frame(&mut self, (token, close): (u64, u64), commit: bool) {
-        let Some(at) = self
-            .transactions
-            .iter()
-            .position(|level| level.token == token && level.close_token == close)
-        else {
-            log::warn!("Sunrise: refused to close a transaction the seal does not end");
+    fn close_storage_frame(&mut self, frame: TransactionFrame, commit: bool) {
+        let at = frame.depth();
+        if self.transactions.get(at).and_then(|level| level.frame) != Some(frame) {
             return;
-        };
+        }
         if self.transactions.len() > at + 1 {
             log::warn!("Sunrise: aborted a transaction left open inside the one being closed");
         }
@@ -625,8 +604,10 @@ impl Game<'_> {
     /// Whether `tx` names an open transaction: a write given any other changes nothing, so none
     /// happens outside the journal.
     pub(in crate::game) fn transaction_holds(&self, tx: &TransactionContext) -> bool {
-        let named = mod_api::__private::transaction_token(tx);
-        self.transactions.iter().any(|level| level.token == named)
+        self.transactions
+            .get(tx.depth())
+            .and_then(|level| level.frame)
+            .is_some_and(|frame| frame.matches(tx))
     }
     /// `transaction_lifecycle`: the close running, else whether one is open.
     pub(in crate::game) fn transaction_lifecycle(&self) -> TransactionLifecycle {
@@ -636,19 +617,9 @@ impl Game<'_> {
             None => TransactionLifecycle::Open,
         }
     }
-    /// `transaction_current`: the innermost open transaction's write token, never its seal.
-    pub(in crate::game) fn transaction_current(&self) -> Option<TransactionContext> {
-        let level = self.transactions.last()?;
-        Some(mod_api::__private::transaction_of(level.token))
-    }
-    /// `transaction_depth`: how deeply `tx` is nested, 0 for the outermost.
-    pub(in crate::game) fn transaction_depth(&self, tx: &TransactionContext) -> Option<u32> {
-        let named = mod_api::__private::transaction_token(tx);
-        let at = self
-            .transactions
-            .iter()
-            .position(|level| level.token == named)?;
-        u32::try_from(at).ok()
+    /// The active journal's top frame, if any. It has already been popped during root close.
+    pub(in crate::game) fn current_storage_frame(&self) -> Option<TransactionFrame> {
+        self.transactions.last().and_then(|level| level.frame)
     }
     /// Closes the innermost transaction: `commit` hands its changes to the one around it, or
     /// at the root makes them final and tells the world; otherwise every storage it wrote goes
@@ -2686,8 +2657,7 @@ mod tests {
         assert_eq!(chest_items(&game), [(0, 3)]);
         assert_eq!(game.world.block(2, 64, 0), empty);
 
-        // A transaction a mod opened through the helpers and never closed is aborted before
-        // the next tick.
+        // The engine drains leftover frames before the next tick.
         game.open_storage_transaction();
         let host: &mut dyn ServerHost = &mut game;
         let _ = host.transaction(|host, tx| {
@@ -2709,55 +2679,28 @@ mod tests {
         assert_eq!(chest_items(&game), [(0, 3)]);
         assert!(game.transactions.is_empty());
 
-        // A transaction decoded from bytes, which the game never handed out, names no open
-        // transaction (#2424): a write given it changes nothing, and a close given it ends
-        // nothing, so the game's own transaction still puts back everything at its abort.
-        let forged: mod_api::TransactionContext =
-            mod_api::wire::Reader::decode(&0u64.to_le_bytes()).unwrap();
-        let host: &mut dyn ServerHost = &mut game;
-        assert!(insert(host, on([0, 64, 0], None), 0, sticks(1), &forged).is_some());
-        assert_eq!(chest_items(&game), [(0, 3)]);
-        assert_eq!(chest_items(&game), [(0, 3)]);
-
-        // A capability handler is lent the game's own transaction (a hopper's move,
-        // `put_into_part`): it writes in it and tries every seal it can build from what it
-        // knows, the write token and guesses, then the move fails after it. Its writes all go
-        // back with the game's abort, which no close of the handler's got ahead of.
-        let handler = |host: &mut dyn ServerHost, tx: &TransactionContext| {
-            assert!(insert(host, on([0, 64, 0], None), 0, sticks(1), tx).is_none());
-            let token = mod_api::__private::transaction_token(tx);
-            for close in [0, 1, token, !token, u64::MAX] {
-                let mut bytes = token.to_le_bytes().to_vec();
-                bytes.extend(close.to_le_bytes());
-                let seal: mod_api::TransactionSeal = mod_api::wire::Reader::decode(&bytes).unwrap();
-                host.transaction_close(&seal, true);
-            }
-            assert!(insert(host, on([0, 64, 0], None), 0, sticks(1), tx).is_none());
-        };
-        let host: &mut dyn ServerHost = &mut game;
-        let failed: Result<(), ()> = mod_api::run_transaction(host, |host, tx| {
-            handler(host, tx);
-            Err(())
-        });
-        assert_eq!(failed, Err(()));
+        // A real loan from another host cannot write here, even when both live frames have
+        // the same depth. A write in this game's own frame is still rolled back on abort.
+        let mut other = mod_api::testing::FakeHost::new();
+        other
+            .transaction(|other, foreign| {
+                assert!(other.transaction_matches(Some(foreign)));
+                let failed = game.storage_transaction(|game, tx| {
+                    assert_eq!((tx.depth(), foreign.depth()), (0, 0));
+                    assert!(!game.transaction_matches(Some(foreign)));
+                    assert!(insert(game, on([0, 64, 0], None), 0, sticks(1), foreign).is_some());
+                    assert_eq!(chest_items(game), [(0, 3)]);
+                    assert!(insert(game, on([0, 64, 0], None), 0, sticks(1), tx).is_none());
+                    assert_eq!(chest_items(game), [(0, 4)]);
+                    Err::<(), ()>(())
+                });
+                assert_eq!(failed, Err(()));
+                assert!(other.transaction_matches(Some(foreign)));
+                Ok::<_, ()>(())
+            })
+            .unwrap();
         assert_eq!(chest_items(&game), [(0, 3)]);
         assert!(game.transactions.is_empty());
-
-        // A handler that opens a transaction of its own, writes in it and leaves it open does
-        // not strand the game's: the failed move aborts both at once, not at the next tick.
-        let host: &mut dyn ServerHost = &mut game;
-        let failed: Result<(), ()> = mod_api::run_transaction(host, |host, _| {
-            let left_open = host.transaction_open();
-            let inner = left_open.transaction();
-            assert!(insert(host, on([0, 64, 0], None), 0, sticks(1), inner).is_none());
-            Err(())
-        });
-        assert_eq!(failed, Err(()));
-        assert_eq!(chest_items(&game), [(0, 3)]);
-        assert!(
-            game.transactions.is_empty(),
-            "both closed before the next tick"
-        );
 
         // An attachment map a write made inside an aborted transaction is gone with it.
         let chest_holder = mod_api::Holder::BlockEntity([0, 64, 0]);

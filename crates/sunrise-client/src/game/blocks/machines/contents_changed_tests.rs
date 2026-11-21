@@ -91,10 +91,12 @@ impl BlockPart for Observed {
         match self.action {
             NoticeAction::Observe => return,
             NoticeAction::Lifecycle => {
-                LIFECYCLES
-                    .lock()
-                    .unwrap()
-                    .push(host.transaction_lifecycle());
+                let phase = host.transaction_lifecycle();
+                if phase == TransactionLifecycle::RootClosing {
+                    assert!(host.transaction_matches(None));
+                    assert_eq!(host.join_transaction(|_, _| ()), Ok(None));
+                }
+                LIFECYCLES.lock().unwrap().push(phase);
                 return;
             }
             NoticeAction::NestedLifecycle => {
@@ -710,7 +712,7 @@ fn a_mod_reads_the_open_transaction_its_depth_and_the_root_commits_phase() {
     with_changes(
         "game::machines::contents_changed_tests::a_mod_reads_the_open_transaction_its_depth_and_the_root_commits_phase",
         NoticeAction::Lifecycle,
-        |game, level, _| {
+        |game, level, changes| {
             let pos = [0, 64, 0];
             place(game, level, pos, "minecraft:chest");
             let items = level.capability(game, &ITEMS, pos, None).unwrap();
@@ -725,6 +727,7 @@ fn a_mod_reads_the_open_transaction_its_depth_and_the_root_commits_phase() {
             let host: &mut dyn ServerHost = game;
             assert_eq!(host.transaction_lifecycle(), TransactionLifecycle::None);
             assert!(host.transaction_matches(None));
+            changes.0.lock().unwrap().clear();
             // A helper joins the open action; the opener's abort undoes its write.
             let aborted = host.transaction(|host, outer| {
                 assert_eq!(host.transaction_lifecycle(), TransactionLifecycle::Open);
@@ -732,9 +735,14 @@ fn a_mod_reads_the_open_transaction_its_depth_and_the_root_commits_phase() {
                 host.transaction(|host, inner| {
                     assert_eq!(inner.depth(), 1);
                     assert!(host.transaction_matches(Some(inner)));
+                    assert!(!host.transaction_matches(Some(outer)));
+                    // Direct writes may use an active ancestor; the current child journals them.
+                    assert_eq!(items.insert_at(host, outer, 1, &sticks, 1), 1);
                     assert_eq!(
                         host.join_transaction(|host, tx| {
-                            assert_eq!(tx, inner);
+                            assert_eq!(tx.depth(), 1);
+                            assert!(host.transaction_matches(Some(inner)));
+                            assert!(host.transaction_matches(Some(tx)));
                             items.insert_at(host, tx, 0, &sticks, 4)
                         }),
                         Ok(Some(4))
@@ -742,16 +750,14 @@ fn a_mod_reads_the_open_transaction_its_depth_and_the_root_commits_phase() {
                     Ok::<_, ()>(())
                 })
                 .unwrap();
-                assert_eq!(items.amount(host, 0), 4);
+                assert_eq!((items.amount(host, 0), items.amount(host, 1)), (4, 1));
+                assert!(changes.0.lock().unwrap().is_empty());
                 Err::<(), ()>(())
             });
             assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
-            assert_eq!(items.amount(host, 0), 0);
-            // The closed transaction is no longer open.
-            let closed =
-                host.transaction(|_, tx| Ok::<_, ()>(mod_api::__private::transaction_token(tx)));
-            let closed = mod_api::__private::transaction_of(closed.unwrap());
-            assert_eq!(host.transaction_depth(&closed), None);
+            assert_eq!((items.amount(host, 0), items.amount(host, 1)), (0, 0));
+            assert!(changes.0.lock().unwrap().is_empty());
+            assert!(host.transaction_matches(None));
             // The notice of a committed write runs while the root closes.
             LIFECYCLES.lock().unwrap().clear();
             let committed = host.transaction(|host, tx| {
@@ -760,6 +766,14 @@ fn a_mod_reads_the_open_transaction_its_depth_and_the_root_commits_phase() {
                 Ok::<_, ()>(())
             });
             assert_eq!(committed, Ok(()));
+            assert_eq!(items.amount(host, 0), 2);
+            let notice = Notice {
+                level,
+                pos,
+                amount: 2,
+                version: None,
+            };
+            assert_eq!(*changes.0.lock().unwrap(), [notice.clone(), notice]);
             assert_eq!(
                 *LIFECYCLES.lock().unwrap(),
                 [

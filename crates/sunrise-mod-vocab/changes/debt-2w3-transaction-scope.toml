@@ -1,5 +1,16 @@
 ids = [
+    "type:TransactionContext",
+    "type:TransactionSeal",
+    "handle:TransactionSeal::transaction",
+    "type:TransactionLifecycle",
+    "fn:run_transaction",
+    "method:ModStateServerHost::transaction_open",
+    "method:ModStateServerHost::transaction_close",
+    "method:ModStateServerHost::transaction_current",
+    "method:ModStateServerHost::transaction_depth",
+    "trait:HostTransaction",
     "method:HostTransaction::transaction",
+    "method:HostTransaction::join_transaction",
     "type:TransactionError",
     "type:TransactionError.Aborted",
     "type:TransactionError.Unavailable",
@@ -9,5 +20,11 @@ ids = [
     "method:BlockEntityPartState::edit_state",
     "method:EntityPartState::edit_state",
 ]
-why = "A host that cannot open a transaction has not run the closure. Returning a separate error distinguishes that refusal from an application error that rolled back a running transaction. Part-state edits likewise distinguish an unavailable transaction from stale storage."
-migrate = "Keep the closure passed to `host.transaction` returning `Result<T, E>`. Change the call's return type, and any function forwarding it, from `Result<T, E>` to `Result<T, TransactionError<E>>`. Change an outer `Err(error)` arm that handles application errors to `Err(TransactionError::Aborted(error))` and handle `Err(TransactionError::Unavailable)` separately; it has no application error because the closure did not run. If you use `?` in a function with its own error type, map both transaction variants to that type first. Successful values are unchanged. When `edit_state` returns `PartStateError::Unavailable`, handle it as a transaction refusal, not a stale handle; the edit closure did not run."
+why = "Only the host that owns a live journal can lend authority to write in it, and only its owning scope can close it. A host that cannot lend a transaction has not run the closure. This refusal is distinct from a closure error that rolled back a running transaction or a stale handle that refused a part-state edit."
+migrate = """
+Replace `transaction_open`, `seal.transaction()`, `transaction_close` and `run_transaction` with one `host.transaction(|host, tx| { ... })` call. Import `HostTransaction`, return `Ok(value)` to commit or `Err(error)` to roll back, and pass the loan `tx` directly to each write. Annotate explicit callback host parameters as `&mut dyn ServerHost`, not your concrete host type. Do not store or encode the context or the observed `TransactionLifecycle`.
+
+Replace `host.transaction_current()` with a forwarded `tx` or `host.join_transaction(|host, tx| { ... })`. Handle `Ok(None)` for no active action and `Err(TransactionUnavailable)` when joining is unavailable. The join return value does not commit or roll back; use `transaction` for an independent savepoint. Replace exact-current comparisons with `host.transaction_matches(Some(tx))`, absence checks with `host.transaction_matches(None)`, and `host.transaction_depth(tx)` with `tx.depth()` (a `usize`, root `0`).
+
+Keep the callback returning `Result<T, E>` and change the transaction call's result to `Result<T, TransactionError<E>>`. Handle the application error in `Err(TransactionError::Aborted(error))`; handle `Err(TransactionError::Unavailable)` separately. If using `?` in a function with its own error type, map both variants before applying it. `PartStateError::Unavailable` from `edit_state` is a transaction refusal, not a stale handle; the edit closure did not run.
+"""

@@ -40,8 +40,6 @@ when you need a savepoint that can roll back independently.
   including inside a transaction, and survive abort.
 - A panic unwinding out of the closure aborts its transaction. The parent remains
   open if you catch the panic inside the parent closure.
-- Closing a transaction aborts any transactions left open inside it before closing
-  the parent.
 
 The journal covers writes through capability handlers to these storages:
 
@@ -112,24 +110,19 @@ Entities a transaction spawns or removes follow the same commit and rollback rul
 
 ## Transaction authority
 
-`TransactionContext` identifies an open transaction with a game-issued write token. It
-does not grant permission to close it. A write with a token that does not name an
-open transaction changes nothing, including a token retained past its closure.
-
-Closing requires a separate `TransactionSeal`. The `host.transaction` guard holds
-that seal; its closure receives only the write token. If you use the raw
-`transaction_open` method, you receive the seal and must close it with
-`transaction_close`. The game refuses a seal that does not match an open
-transaction and logs `Sunrise: refused to close a transaction the seal does not end`.
+The host lends `&mut dyn ServerHost` and `&TransactionContext` together to the closure.
+Pass the context down to capability and item-place writes. It cannot be copied, encoded,
+returned from the closure or stored for later. A context from another host cannot write
+in this host's journal, even while both hosts have a transaction open. The host owns the
+transaction and closes it on return or unwind; the loan cannot close it.
 
 ## Inspecting a transaction
 
-These methods are server-only:
-
 | Method | Result |
 |---|---|
-| `host.transaction_current()` | Innermost open `TransactionContext`, or `None`; not a closing seal |
-| `host.transaction_depth(tx)` | `Some(0)` for the outermost transaction, increasing by one per nesting level; `None` if it is not open |
+| `tx.depth()` | `0` for a root transaction, increasing by one at each nesting level |
+| `host.transaction_matches(Some(tx))` | Whether this loan names the innermost open frame on this host |
+| `host.transaction_matches(None)` | Whether there is no open frame on this host |
 | `host.transaction_lifecycle()` | `TransactionLifecycle` describing the open or closing phase |
 
 | `TransactionLifecycle` variant | Meaning |
@@ -140,7 +133,8 @@ These methods are server-only:
 | `RootClosing` | The outermost transaction is closing |
 
 Implicit engine-managed container notices run during `RootClosing`, outside the transaction
-whose commit triggered them. Explicit mod notices issued during a transaction run during `Open`.
+whose commit triggered them. A listener cannot join that closed transaction. Explicit mod notices
+issued during a transaction run during `Open`.
 
 ## Entity inventory slots
 
