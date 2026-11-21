@@ -2,8 +2,9 @@
 """Debt 2w3 mechanical migrations.
 
 Run with no arguments to apply the write-type rename, or with --engine-callers
-for the straightforward concrete Game calls. --audit only prints a tracked
-Rust inventory; it does not infer changes to Result handling. To also
+for the straightforward concrete Game calls; --fixture-scopes applies the
+reviewed raw open/close fixture pairs, including their explicitly listed
+outputs. --audit prints a tracked Rust inventory. To also
 check cumulative working-tree changes against wave 3, pass --audit
 --wave3-hunks PATH [--base REV]. The hunk manifest uses wave-3 coordinates,
 not the debt checkout's coordinates.
@@ -60,6 +61,85 @@ ENGINE_CALLS = {
     "native_hooks/living_breathe.rs": ("self", 1),
     "network/lan_crafting.rs": ("self", 1),
 }
+GAME = ROOT / "crates/sunrise-client/src/game"
+
+# Reviewed simple pairs, by file and count. The exceptions below have
+# conditional opening, a deliberately unclosed frame or specialized loans.
+FIXTURE_COUNTS = {
+    "blocks/cauldron_interactions/tests.rs": 1,
+    "blocks/machines/contents_watch_tests.rs": 1,
+    "blocks/world_fluids_tests.rs": 12,
+    "interface/tests/stat_award_tests.rs": 5,
+    "modding/attachment_sync/general_snapshot_tests.rs": 1,
+    "modding/attachment_sync/transport_tests.rs": 2,
+    "modding/block_entity_part_state_tests.rs": 7,
+    "modding/entity_part_state_tests.rs": 7,
+    "modding/grindstone_decisions_tests.rs": 1,
+    "modding/mod_menu_decisions_tests.rs": 3,
+    "modding/native_block_entity_item_tests.rs": 3,
+    "modding/native_book_apply/tests.rs": 6,
+    "modding/native_general_renderers_tests.rs": 2,
+    "modding/native_level_refs.rs": 5,
+    "modding/native_living_absorption.rs": 2,
+    "modding/native_living_refs.rs": 8,
+    "modding/native_menus.rs": 2,
+    "modding/native_portal_destination.rs": 1,
+    "modding/published_shape_game_tests.rs": 1,
+    "modding/stacked_on_other_tests.rs": 5,
+    "native_hooks/death_source_tests.rs": 2,
+    "network/lan_trade_decisions_tests.rs": 4,
+    "runtime/transaction_entities_tests.rs": 34,
+    "runtime/transactions/decision_engine_tests.rs": 6,
+    "runtime/transactions/decision_game_tests.rs": 9,
+}
+FIXTURE_OUTPUTS = {
+    "blocks/world_fluids_tests.rs": {151: "placed"},
+    "modding/block_entity_part_state_tests.rs": {519: "tentative", 612: "tentative"},
+    "modding/entity_part_state_tests.rs": {
+        390: "pig", 587: "moved", 621: "(b, c)", 665: "state", 694: "(second, state)",
+    },
+    "modding/native_general_renderers_tests.rs": {552: "row"},
+    "network/lan_trade_decisions_tests.rs": {544: "trade_id", 546: "trade_id"},
+    "runtime/transaction_entities_tests.rs": {
+        205: "pig", 267: "pig", 291: "sheep", 329: "(held, kept_out)", 457: "pig",
+        458: "pig", 480: "kept", 482: "dropped", 512: "kept", 534: "pig",
+        554: "(aborted, handle)", 653: "aborted", 656: "committed", 832: "fresh",
+        860: "pig", 917: "(a, b)", 953: "kept", 980: "pig", 983: "pig", 1017: "a",
+        1061: "(a, b)", 1100: "pig", 1200: "(a, b)",
+    },
+}
+# Concrete test receivers; explicitly erased `dyn ServerHost` receivers stay
+# on the public API as tests of that API.
+CONCRETE_FIXTURE_CALLS = {
+    "blocks/composter/capability_tests.rs": 18,
+    "blocks/machines/can_place_item_tests.rs": 5,
+    "blocks/machines/contents_changed_tests.rs": 8,
+    "blocks/machines/contents_watch_tests.rs": 5,
+    "blocks/machines/native_fluids.rs": 15,
+    "blocks/machines/tank_reopen_tests.rs": 2,
+    "modding/attachment_index/block_entity_tests.rs": 1,
+    "modding/attachment_index/mob_tests.rs": 2,
+    "modding/attachment_index/mod.rs": 1,
+    "modding/attachment_index/painting_tests.rs": 2,
+    "modding/attachment_index/query_tests.rs": 2,
+    "modding/native_block_entity_refs.rs": 1,
+    "modding/native_item_bundle_tests.rs": 8,
+    "modding/native_item_places.rs": 20,
+    "modding/native_player_inventory_tests.rs": 7,
+    "modding/native_scoreboard.rs": 2,
+    "modding/native_scoreboard_teams.rs": 1,
+    "runtime/transactions.rs": 3,
+}
+CONCRETE_FIXTURE_CALL = re.compile(
+    r"\b(?:(?:mod_api::)?run_transaction\(\s*game\s*,\s*|game\s*\.\s*transaction\s*\(\s*)"
+)
+FIXTURE_EXCEPTIONS = {
+    "blocks/world_fluids_tests.rs": {441, 464, 467},
+    "runtime/transaction_entities_tests.rs": {110, 125, 129},
+}
+FIXTURE_OPEN = re.compile(r"(?P<indent> *)let (?P<seal>\w+) = (?P<game>game|server|host\.game)\.transaction_open\(\);")
+FIXTURE_CLOSE = re.compile(r"(?P<indent> *)(?P<game>game|server|host|host\.game)\.transaction_close\(&(?P<seal>\w+), (?P<commit>true|false|commit)\);")
+
 OLD = re.compile(r"(?<![\w'])Transaction\b")
 NEW = re.compile(r"(?<![\w'])TransactionContext\b")
 
@@ -220,6 +300,91 @@ def apply_engine_calls():
         print(path.relative_to(ROOT))
 
 
+def apply_fixture_scopes():
+    updates = {}
+    for name, count in FIXTURE_COUNTS.items():
+        path = GAME / name
+        source = path.read_text()
+        lines = source.splitlines(keepends=True)
+        code = rust_code(source, docs=False).splitlines()
+        outputs = dict(FIXTURE_OUTPUTS.get(name, {}))
+        exceptions = FIXTURE_EXCEPTIONS.get(name, set())
+        opened = []
+        pairs = []
+        for loc, line in enumerate(code, 1):
+            if loc in exceptions:
+                continue
+            if start := FIXTURE_OPEN.fullmatch(line):
+                opened.append((loc, start))
+            elif end := FIXTURE_CLOSE.fullmatch(line):
+                first, start = opened.pop()
+                if start['seal'] != end['seal'] or start['indent'] != end['indent']:
+                    raise SystemExit(f"{name}:{loc}: mismatched pair from line {first}")
+                expected = start['game']
+                decision_root = end['game'] == 'host.game' and expected == 'game'
+                if end['game'] != expected and not decision_root:
+                    raise SystemExit(f"{name}:{loc}: expected close on {expected}")
+                pairs.append((first, loc, start, end))
+            elif re.search(r"\btransaction_(?:open|close)\(", line) and not (
+                name == 'blocks/world_fluids_tests.rs' and loc == 453
+                or name == 'runtime/transaction_entities_tests.rs' and loc == 99
+            ):
+                raise SystemExit(f"{name}:{loc}: unreviewed lifecycle call")
+        if opened or len(pairs) != count:
+            raise SystemExit(f"{name}: expected {count} complete pairs; found {len(pairs)}")
+        # End order is inside-out. Each buffer entry still represents an
+        # original source line, even when its replacement spans several lines.
+        for first, last, start, end in pairs:
+            value = outputs.pop(first, '()')
+            game, seal, indent = (start[k] for k in ('game', 'seal', 'indent'))
+            tx = '_'
+            pattern = re.compile(rf"\b{seal}\.transaction\(\)")
+            for index in range(first, last - 1):
+                if pattern.search(lines[index]):
+                    lines[index] = pattern.sub('tx', lines[index])
+                    tx = 'tx'
+            commit = end['commit']
+            binding = f"let {value} = " if value != '()' else ''
+            if commit == 'commit':
+                tail = f"if commit {{ Ok({value}) }} else {{ Err({value}) }}"
+                suffix = '.unwrap_or_else(|value| value)' if binding else ''
+                binding = binding or 'let _ = '
+            elif commit == 'true':
+                tail, suffix = f"Ok::<_, ()>({value})", '.unwrap()'
+            else:
+                tail, suffix = f"Err::<(), _>({value})", '.unwrap_err()'
+            receiver = game.split('.')[-1]
+            if game != receiver:
+                for index in range(first, last - 1):
+                    lines[index] = lines[index].replace('host.game', receiver)
+            if end['game'] != game:
+                # GameHost was local to the root fixture and cannot outlive the closure.
+                index = last
+                while index < len(lines) and (
+                    not lines[index].strip() or lines[index].startswith(indent)
+                ):
+                    index += 1
+                after = re.sub(r'\bhost\s*\.game\b', 'game', ''.join(lines[last:index]))
+                lines[last:index] = [after] + [''] * (index - last - 1)
+            lines[first - 1] = f"{indent}{binding}{game}.storage_transaction(|{receiver}, {tx}| {{\n"
+            lines[last - 1] = f"{indent}    {tail}\n{indent}}}){suffix};\n"
+        if outputs:
+            raise SystemExit(f"{name}: missing pairs at output sites {sorted(outputs)}")
+        updates[path] = ''.join(lines)
+    for name, count in CONCRETE_FIXTURE_CALLS.items():
+        path = GAME / name
+        source = updates[path] if path in updates else path.read_text()
+        hits = list(CONCRETE_FIXTURE_CALL.finditer(rust_code(source, docs=False)))
+        if len(hits) != count:
+            raise SystemExit(f"{name}: expected {count} typed Game calls; found {len(hits)}")
+        for hit in reversed(hits):
+            source = source[:hit.start()] + 'game.storage_transaction(' + source[hit.end():]
+        updates[path] = source
+    for path, source in updates.items():
+        path.write_text(source)
+        print(path.relative_to(ROOT))
+
+
 def audit():
     for name in source_files("Transaction", "transaction", *RAW_NAMES):
         source = (ROOT / name).read_bytes().decode()
@@ -311,6 +476,7 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--audit", action="store_true", help="report Rust sites without editing")
     mode.add_argument("--engine-callers", action="store_true", help="migrate the step-3 engine callers")
+    mode.add_argument("--fixture-scopes", action="store_true", help="migrate simple step-4 fixture pairs")
     parser.add_argument("--wave3-hunks", type=Path, help="also check changed lines against this manifest")
     parser.add_argument("--base", default=DEBT_BASE, help="debt diff base (default: item start)")
     parser.add_argument("--wave3-base", help="preimage revision for any additional changed wave-3 file")
@@ -320,6 +486,8 @@ def main():
             parser.error("wave-3 and diff options require --audit")
         if args.engine_callers:
             apply_engine_calls()
+        elif args.fixture_scopes:
+            apply_fixture_scopes()
         else:
             apply_rename()
         return
