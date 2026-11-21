@@ -1,11 +1,11 @@
 use super::*;
 use crate::testing::TestReader;
+use std::collections::HashMap;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
-use sunrise_core::nbt::{Limits, NamedTag, write_named};
-use sunrise_mod_runtime::attachments::ATTACHMENTS_KEY;
+use sunrise_core::nbt::DISK_WRITE_NESTING_GUARD;
 
 fn value_codec() -> AttachmentCodec<i32> {
     AttachmentCodec {
@@ -132,7 +132,7 @@ fn load_disk_8_callback_increment_publishes_9_once() {
 }
 
 #[test]
-fn codec_error_or_unwind_after_setting_8_refuses_partial_publication() {
+fn unwind_after_setting_8_refuses_partial_publication_and_codec_error_is_local() {
     with_listener(1, |calls, value| {
         let job = ChunkDiskJob::capture(&context(ChunkDiskPhase::Save), &store(&value, 7)).unwrap();
         let refusal = run(&job).unwrap_err();
@@ -142,18 +142,30 @@ fn codec_error_or_unwind_after_setting_8_refuses_partial_publication() {
         assert_eq!(run(&job).unwrap_err(), refusal);
         assert_eq!(calls.load(Ordering::Relaxed), 1);
     });
-    let initial = install_value();
-    let saved = store(&initial, 7).to_nbt();
-    let broken = crate::parts::install_attachment_fixture(
+    let (broken_record, broken) = crate::parts::registered_attachment_fixture(
         "disk_fixture",
-        AttachmentDescriptor::new("disk_fixture:value", || 0i32).serialize(AttachmentCodec {
+        AttachmentDescriptor::new("disk_fixture:broken", || 0i32).serialize(AttachmentCodec {
             encode: |_| Err(AttachmentError::Encode),
             decode: |_| Ok(7),
         }),
     );
+    let (good_record, good) = crate::parts::registered_attachment_fixture(
+        "disk_fixture",
+        AttachmentDescriptor::new("disk_fixture:value", || 0i32).serialize(value_codec()),
+    );
+    crate::parts::install_input(crate::parts::installation::InstalledInput {
+        attachment_types: HashMap::from([(
+            "disk_fixture",
+            HashMap::from([("broken", broken_record), ("value", good_record)]),
+        )]),
+        ..Default::default()
+    });
+    let saved = store(&good, 7).to_nbt();
     let mut data = ChunkDiskData::from_nbt(saved).unwrap();
     assert!(data.set(&broken, 8).is_err());
-    assert!(data.finish().is_err());
+    // A local codec failure must not poison unrelated edits in the same job.
+    data.set(&good, 9).unwrap();
+    assert_eq!(read(&good, &data.finish().unwrap()), 9);
 }
 
 fn opaque(value: Tag) -> Compound {
@@ -167,99 +179,59 @@ fn opaque(value: Tag) -> Compound {
 }
 
 #[test]
-fn mixed_list_value_budget_includes_the_name_and_both_wrappers() {
-    let mixed = |len| Tag::List(vec![Tag::Byte(1), Tag::ByteArray(vec![0; len])]);
-    // Eight bytes for the named tag, five for the list header, eight for
-    // the two wrappers, one for the byte and four for the array length.
-    let value = mixed(65_510);
-    let disk = write_named(
-        &NamedTag {
-            name: "value".into(),
-            tag: value.clone(),
-        },
-        Limits::saved(),
-    )
-    .unwrap();
-    assert_eq!(disk.len(), 65_536);
-    assert!(ChunkDiskData::from_nbt(opaque(value)).is_ok());
-    let refusal = ChunkDiskData::from_nbt(opaque(mixed(65_511))).unwrap_err();
-    assert_eq!(refusal.key, "unknown:value");
-    assert_eq!(refusal.reason, "encoded attachment exceeds 65536 bytes");
-}
-
-#[test]
-fn value_depth_budget_includes_the_mixed_list_wrapper() {
-    let mut value = Tag::List(vec![Tag::Byte(1), Tag::Int(2)]);
-    for _ in 0..62 {
-        value = Tag::List(vec![value]);
-    }
-    assert!(ChunkDiskData::from_nbt(opaque(value.clone())).is_ok());
-    let refusal = ChunkDiskData::from_nbt(opaque(Tag::List(vec![value]))).unwrap_err();
-    assert_eq!(refusal.reason, "attachment depth exceeds 64");
-}
-
-#[test]
-fn chunk_budget_counts_framing_and_modified_utf8_for_empty_namespaces() {
-    let empty = || Tag::Compound(Compound::new());
-    let mut entries: Compound = ('a'..='o')
-        .map(|c| (c.to_string().repeat(65_535).as_str().into(), empty()))
-        .collect();
-    // The 23-byte attachment frame and 15 namespaces at 65,539 bytes each
-    // leave 65,468 bytes. The remaining namespace, envelope and value cost
-    // 5 + 5 + 12 bytes before the array, and the last empty namespace costs 20.
-    entries.insert(
-        "x".into(),
-        Tag::compound([(
-            "v",
-            Tag::compound([("value", Tag::ByteArray(vec![0; 65_426]))]),
-        )]),
-    );
-    let mut last = "\0".repeat(8);
-    entries.insert(last.as_str().into(), empty());
-    let disk = write_named(
-        &NamedTag {
-            name: ATTACHMENTS_KEY.into(),
-            tag: Tag::Compound(entries.clone()),
-        },
-        Limits::saved(),
-    )
-    .unwrap();
-    assert_eq!(disk.len(), 1_048_576);
+fn disk_validation_allows_vanilla_sized_values_and_enforces_writer_nesting_guard() {
+    // Values above the old ad hoc 65,536-byte and depth-64 caps pass real disk validation.
+    let large = opaque(Tag::ByteArray(vec![0; 70_000]));
     assert_eq!(
-        ChunkDiskData::from_nbt(entries.clone())
+        ChunkDiskData::from_nbt(large.clone())
             .unwrap()
             .finish()
             .unwrap(),
-        entries
+        large
     );
-    entries.remove(&last.as_str().into());
-    last.push('a');
-    entries.insert(last.as_str().into(), empty());
-    let refusal = ChunkDiskData::from_nbt(entries).unwrap_err();
-    assert_eq!(refusal.reason, "chunk attachments exceed 1048576 bytes");
+    let mut deep = Tag::Int(1);
+    for _ in 0..70 {
+        deep = Tag::List(vec![deep]);
+    }
+    let deep_entries = opaque(deep);
+    assert_eq!(
+        ChunkDiskData::from_nbt(deep_entries.clone())
+            .unwrap()
+            .finish()
+            .unwrap(),
+        deep_entries
+    );
+
+    // Nesting past the real disk writer guard is still rejected.
+    let mut too_deep = Tag::Int(1);
+    for _ in 0..=DISK_WRITE_NESTING_GUARD {
+        too_deep = Tag::List(vec![too_deep]);
+    }
+    assert!(ChunkDiskData::from_nbt(opaque(too_deep)).is_err());
 }
 
 #[test]
-fn codec_output_that_would_truncate_on_disk_refuses_the_job() {
-    let initial = install_value();
-    let saved = store(&initial, 7).to_nbt();
-    let long_string = crate::parts::install_attachment_fixture(
+fn disk_operations_use_only_persistence_codec_and_never_invoke_sync_codec() {
+    let dual = crate::parts::install_attachment_fixture(
         "disk_fixture",
-        AttachmentDescriptor::new("disk_fixture:value", || 0i32).serialize(AttachmentCodec {
-            encode: |_| {
-                Ok(Compound::from_iter([(
-                    "text".into(),
-                    Tag::String("界".repeat(21_846).as_str().into()),
-                )]))
-            },
-            decode: |_| Ok(7),
-        }),
+        AttachmentDescriptor::new("disk_fixture:dual", || 5i32)
+            .serialize(value_codec())
+            .sync(AttachmentCodec {
+                encode: |_| Err(AttachmentError::Encode),
+                decode: |_| Err(AttachmentError::Decode),
+            }),
     );
-    let mut data = ChunkDiskData::from_nbt(saved).unwrap();
-    let refusal = data.set(&long_string, 8).unwrap_err();
-    assert_eq!(refusal.key, "disk_fixture:value");
-    assert_eq!(refusal.reason, "modified UTF-8 exceeds 65535 bytes");
-    assert_eq!(data.finish().unwrap_err(), refusal);
+    let mut data = ChunkDiskData::from_nbt(Compound::new()).unwrap();
+    assert_eq!(data.get(&dual).unwrap(), 5);
+    data.set(&dual, 12).unwrap();
+    assert_eq!(data.get(&dual).unwrap(), 12);
+    let saved = data.clone().finish().unwrap();
+    let mut reload = ChunkDiskData::from_nbt(saved).unwrap();
+    assert_eq!(reload.get(&dual).unwrap(), 12);
+    assert_eq!(reload.remove(&dual).unwrap(), Some(12));
+    let after_remove = reload.finish().unwrap();
+    let mut verify = ChunkDiskData::from_nbt(after_remove).unwrap();
+    assert_eq!(verify.remove(&dual).unwrap(), None);
 }
 
 #[test]
@@ -299,36 +271,63 @@ fn local_transaction_abort_preserves_prior_snapshot() {
 }
 
 #[test]
-fn type_without_persistence_codec_refuses_naming_type_and_capability() {
-    let initial = install_value();
-    let saved = store(&initial, 7).to_nbt();
-    let unsaved = crate::parts::install_attachment_fixture(
+fn type_without_persistence_codec_refuses_locally_naming_type_and_capability() {
+    let (unsaved_record, unsaved) = crate::parts::registered_attachment_fixture(
         "disk_fixture",
-        AttachmentDescriptor::new("disk_fixture:value", || 0i32),
+        AttachmentDescriptor::new("disk_fixture:unsaved", || 0i32),
     );
+    let (saved_record, value) = crate::parts::registered_attachment_fixture(
+        "disk_fixture",
+        AttachmentDescriptor::new("disk_fixture:value", || 0i32).serialize(value_codec()),
+    );
+    crate::parts::install_input(crate::parts::installation::InstalledInput {
+        attachment_types: HashMap::from([(
+            "disk_fixture",
+            HashMap::from([("unsaved", unsaved_record), ("value", saved_record)]),
+        )]),
+        ..Default::default()
+    });
+    let saved = store(&value, 7).to_nbt();
     let mut data = ChunkDiskData::from_nbt(saved).unwrap();
     let refusal = data.get(&unsaved).unwrap_err();
-    assert_eq!(refusal.key, "disk_fixture:value");
+    assert_eq!(refusal.key, "disk_fixture:unsaved");
     assert_eq!(refusal.reason, "missing persistence codec");
-    // The refusal poisons the whole job even if the listener ignores it.
-    assert_eq!(data.finish().unwrap_err(), refusal);
+    // The local refusal does not poison unrelated valid edits.
+    data.set(&value, 10).unwrap();
+    assert_eq!(read(&value, &data.finish().unwrap()), 10);
 }
 
 #[test]
-fn stale_key_refuses_and_poisons_chunk_disk_data() {
-    let first = install_value();
-    let saved = store(&first, 7).to_nbt();
-    let _second = install_value();
-
-    let mut data = ChunkDiskData::from_nbt(saved.clone()).unwrap();
-    let refusal = data.get(&first).unwrap_err();
-    assert_eq!(refusal.key, "disk_fixture:value");
-    assert_eq!(refusal.reason, "StaleKey");
-    assert_eq!(data.finish().unwrap_err(), refusal);
-
-    let mut data = ChunkDiskData::from_nbt(saved.clone()).unwrap();
-    assert_eq!(data.set(&first, 8).unwrap_err(), refusal);
+fn stale_key_refuses_locally_without_poisoning_unrelated_edits() {
+    let stale = install_value();
+    let saved = store(&stale, 7).to_nbt();
+    let (fresh_record, fresh) = crate::parts::registered_attachment_fixture(
+        "disk_fixture",
+        AttachmentDescriptor::new("disk_fixture:value", || 0i32).serialize(value_codec()),
+    );
+    let (other_record, other) = crate::parts::registered_attachment_fixture(
+        "other_mod",
+        AttachmentDescriptor::new("other_mod:other", || 0i32).serialize(value_codec()),
+    );
+    crate::parts::install_input(crate::parts::installation::InstalledInput {
+        attachment_types: HashMap::from([
+            ("disk_fixture", HashMap::from([("value", fresh_record)])),
+            ("other_mod", HashMap::from([("other", other_record)])),
+        ]),
+        ..Default::default()
+    });
 
     let mut data = ChunkDiskData::from_nbt(saved).unwrap();
-    assert_eq!(data.remove(&first).unwrap_err(), refusal);
+    let refusal = data.get(&stale).unwrap_err();
+    assert_eq!(refusal.key, "disk_fixture:value");
+    assert_eq!(refusal.reason, "StaleKey");
+    assert_eq!(data.set(&stale, 8).unwrap_err(), refusal);
+    assert_eq!(data.remove(&stale).unwrap_err(), refusal);
+
+    // Unrelated valid edits on live keys still succeed and publish cleanly.
+    data.set(&other, 42).unwrap();
+    assert_eq!(data.get(&fresh).unwrap(), 7);
+    let published = data.finish().unwrap();
+    assert_eq!(read(&fresh, &published), 7);
+    assert_eq!(read(&other, &published), 42);
 }

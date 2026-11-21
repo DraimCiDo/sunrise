@@ -109,10 +109,12 @@ impl EntityPartState for Robot {
         &self.charge
     }
 }
-let charge = r.register_attachment_type(
+// Inside Hooks::register(&self, r: &mut dyn Registrar, _) (returns `()`):
+if let Ok(charge) = r.register_attachment_type(
     AttachmentDescriptor::new("mymod:charge", || 0).serialize(CHARGE_CODEC),
-)?;
-r.entity_part_with_state("mymod:robot", Robot { charge })?;
+) {
+    let _ = r.entity_part_with_state("mymod:robot", Robot { charge });
+}
 
 let full = self.edit_state(host, robot, |_, charge| {
     *charge += 1;

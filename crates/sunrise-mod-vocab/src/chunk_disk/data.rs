@@ -1,15 +1,12 @@
 //! The callback's typed store: only encoded values cross the worker boundary.
 use super::*;
-use sunrise_core::nbt::{self, JavaString, Limits};
+use sunrise_core::nbt::{self, Limits, NamedTag};
 use sunrise_mod_runtime::attachments::{ATTACHMENTS_KEY, CheckedAttachmentType};
 
 /// A job-local attachment transaction. No decoded value is shared with live state.
-/// Use [`Self::get`] and [`Self::set`] with an issued [`AttachmentKey`].
-/// The uncompressed disk NBT budget is 65,536 bytes per named `value` tag,
-/// 64 container levels in that value, and 1,048,576 bytes for the entire
-/// named attachment compound, including unknown data. Anything that would
-/// exceed a limit or require truncation is refused. Any refusal poisons the
-/// job even if the listener ignores its error.
+/// Use [`Self::get`], [`Self::set`] and [`Self::remove`] with an issued [`AttachmentKey`].
+/// Disk operations consume only the key's persistence codec; any refusal returns locally
+/// without modifying the stored envelopes or poisoning unrelated edits.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct ChunkDiskData {
@@ -18,17 +15,17 @@ pub struct ChunkDiskData {
 }
 
 impl ChunkDiskData {
-    /// Check the captured encoded envelopes, including unknown keys, before
-    /// opening the transaction. This does not run any attachment codec.
+    /// Check the captured encoded envelopes against the disk NBT writer's limits
+    /// before opening the transaction. This does not run any attachment codec.
     pub fn from_nbt(entries: Compound) -> Result<Self, ChunkDiskFailure> {
-        validate(&entries)?;
+        validate_disk(&entries)?;
         Ok(Self {
             entries,
             failure: None,
         })
     }
 
-    /// Read the job's typed value, inserting its default if absent.
+    /// Read the job's typed value through its persistence codec, inserting its default if absent.
     pub fn get<T: Clone + Send + Sync + 'static>(
         &mut self,
         key: &AttachmentKey<T>,
@@ -36,8 +33,8 @@ impl ChunkDiskData {
         self.edit(key, |checked, store| checked.get(store, Holder::Level))
     }
 
-    /// Replace only the snapshot's value. Failed encoding leaves the original
-    /// envelopes intact and refuses publication of the entire job.
+    /// Replace only the snapshot's value through its persistence codec. Failed encoding
+    /// leaves the original envelopes intact and returns locally without poisoning other edits.
     pub fn set<T: Clone + Send + Sync + 'static>(
         &mut self,
         key: &AttachmentKey<T>,
@@ -48,7 +45,7 @@ impl ChunkDiskData {
         })
     }
 
-    /// Remove a snapshot binding through its typed codec.
+    /// Remove a snapshot binding through its persistence codec.
     pub fn remove<T: Clone + Send + Sync + 'static>(
         &mut self,
         key: &AttachmentKey<T>,
@@ -65,29 +62,23 @@ impl ChunkDiskData {
             return Err(failure.clone());
         }
         let key_name = key.id();
-        let result = (|| {
-            let checked = key
-                .live()
-                .map_err(|error| failure(key_name, &format!("{error:?}")))?;
-            if !checked.has_codec() {
-                return Err(failure(key_name, "missing persistence codec"));
-            }
-            let mut store = Attachments::from_nbt(self.entries.clone());
-            let value = apply(checked, &mut store)
-                .map_err(|error| failure(key_name, &format!("{error:?}")))?;
-            let encoded = store.to_nbt();
-            validate(&encoded)?;
-            self.entries = encoded;
-            Ok(value)
-        })();
-        if let Err(error) = &result {
-            self.failure = Some(error.clone());
+        let checked = key
+            .live()
+            .map_err(|error| failure(key_name, &format!("{error:?}")))?;
+        if !checked.has_codec() {
+            return Err(failure(key_name, "missing persistence codec"));
         }
-        result
+        let disk = checked.disk_only();
+        let mut store = Attachments::from_nbt(self.entries.clone());
+        let value =
+            apply(&disk, &mut store).map_err(|error| failure(key_name, &format!("{error:?}")))?;
+        let encoded = store.to_nbt();
+        validate_disk(&encoded)?;
+        self.entries = encoded;
+        Ok(value)
     }
 
-    /// Run a nested local savepoint. An explicit abort restores the prior
-    /// envelopes; a codec or budget refusal still poisons the outer job.
+    /// Run a nested local savepoint. An explicit abort restores the prior envelopes.
     pub fn transaction<R, E>(
         &mut self,
         apply: impl FnOnce(&mut Self) -> Result<R, E>,
@@ -100,7 +91,7 @@ impl ChunkDiskData {
         result
     }
 
-    /// The first refusal. A listener cannot clear it or publish tentative edits.
+    /// The first job-wide refusal (for example an unwinding listener), if any.
     pub fn failure(&self) -> Option<&ChunkDiskFailure> {
         self.failure.as_ref()
     }
@@ -132,87 +123,19 @@ fn failure(key: &str, reason: &str) -> ChunkDiskFailure {
     }
 }
 
-/// Bytes of a disk NBT name, excluding its tag ID. Unlike vanilla's disk
-/// fallback, reject names that would be replaced with an empty string.
-fn name_bytes(name: &JavaString) -> Option<usize> {
-    u16::try_from(name.modified_utf8_len())
-        .ok()
-        .map(|len| 2 + usize::from(len))
-}
-
-fn validate(entries: &Compound) -> Result<(), ChunkDiskFailure> {
-    const TOTAL_EXCEEDED: &str = "chunk attachments exceed 1048576 bytes";
-    const LONG_NAME: &str = "modified UTF-8 exceeds 65535 bytes";
-    // The named `sunrise:attachments` compound: tag ID, u16-prefixed name,
-    // and the closing TAG_End. Each namespace under it has the same framing.
-    let mut remaining = 1_048_576 - (1 + 2 + ATTACHMENTS_KEY.len() + 1);
-    let value_name = "value".into();
-    for (namespace, names) in entries {
-        let Tag::Compound(names) = names else {
-            return Err(failure(
-                &namespace.to_string_lossy(),
-                "invalid attachment namespace",
-            ));
-        };
-        let framing = name_bytes(namespace)
-            .ok_or_else(|| failure(&namespace.to_string_lossy(), LONG_NAME))?;
-        remaining = remaining
-            .checked_sub(1 + framing + 1)
-            .ok_or_else(|| failure(&namespace.to_string_lossy(), TOTAL_EXCEEDED))?;
-        for (name, tag) in names {
-            let refuse = |reason| {
-                let key = format!("{}:{}", namespace.to_string_lossy(), name.to_string_lossy());
-                failure(&key, reason)
-            };
-            let Tag::Compound(envelope) = tag else {
-                return Err(refuse("invalid persistence envelope"));
-            };
-            let value = envelope
-                .get(&value_name)
-                .ok_or_else(|| refuse("missing encoded value"))?;
-
-            // Both NBT writers use the same tag IDs, payload framing and mixed
-            // list wrappers. NaN canonicalization doesn't change the length.
-            // Use the strict writer so too-long strings cannot silently shrink;
-            // add the disk-only root name to its tag ID and payload.
-            nbt::write_network(
-                value,
-                Limits {
-                    max_bytes: 65_536 - (2 + "value".len()),
-                    max_nodes: usize::MAX,
-                    max_depth: 64,
-                },
-            )
-            .map_err(|error| {
-                refuse(match error.reason {
-                    "byte limit exceeded" => "encoded attachment exceeds 65536 bytes",
-                    "depth limit exceeded" => "attachment depth exceeds 64",
-                    reason => reason,
-                })
-            })?;
-
-            let framing = name_bytes(name).ok_or_else(|| refuse(LONG_NAME))?;
-            remaining = remaining
-                .checked_sub(framing)
-                .ok_or_else(|| refuse(TOTAL_EXCEEDED))?;
-            let envelope_len = nbt::write_network(
-                tag,
-                Limits {
-                    max_bytes: remaining,
-                    max_nodes: usize::MAX,
-                    // Root, attachment compound and namespace are outside this envelope.
-                    max_depth: Limits::saved().max_depth - 3,
-                },
-            )
-            .map_err(|error| {
-                refuse(match error.reason {
-                    "byte limit exceeded" => TOTAL_EXCEEDED,
-                    reason => reason,
-                })
-            })?
-            .len();
-            remaining -= envelope_len;
-        }
-    }
-    Ok(())
+fn validate_disk(entries: &Compound) -> Result<(), ChunkDiskFailure> {
+    let limits = Limits {
+        // The chunk root compound wraps `sunrise:attachments`.
+        max_depth: nbt::DISK_WRITE_NESTING_GUARD.max(Limits::saved().max_depth) - 1,
+        ..Limits::saved()
+    };
+    nbt::write_named(
+        &NamedTag {
+            name: ATTACHMENTS_KEY.into(),
+            tag: Tag::Compound(entries.clone()),
+        },
+        limits,
+    )
+    .map(|_| ())
+    .map_err(|error| failure("", error.reason))
 }

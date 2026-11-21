@@ -1,7 +1,7 @@
 //! Read-only generations of a holder's synced bindings, detached from the holder itself.
 use super::{
-    AttachmentEntry, AttachmentError, AttachmentKeyView, AttachmentType, Attachments,
-    CheckedAttachmentType, Compound, Entry, RawKind, Tag, index::AttachmentKey,
+    AttachmentEntry, AttachmentError, AttachmentKeyView, AttachmentRawKind, AttachmentType,
+    Attachments, CheckedAttachmentType, Compound, Entry, Tag, index::AttachmentKey,
 };
 use std::{fmt, sync::Arc};
 
@@ -39,24 +39,22 @@ impl SyncedAttachmentSnapshot {
             let frozen = match &binding.state {
                 Entry::Raw {
                     saved,
-                    kind: RawKind::Synced,
+                    kind: AttachmentRawKind::Synced,
                     ..
                 } => {
                     left = left.checked_sub(compound_heap_bytes(saved))?;
                     Arc::clone(binding)
                 }
                 Entry::Raw {
-                    kind: RawKind::Saved,
+                    kind: AttachmentRawKind::Saved,
                     ..
                 }
                 | Entry::Decoded(_) => {
                     // A live read can promote the replica to a typed binding, and a disk-loaded
                     // entry carries a saved envelope. Freeze the sync codec input so render reads
                     // always decode via the key's sync_codec.
-                    let mut saved = Compound::from([
-                        ("value".into(), Tag::Compound(Compound::new())),
-                        ("sync".into(), Tag::Byte(1)),
-                    ]);
+                    let mut saved =
+                        Compound::from([("value".into(), Tag::Compound(Compound::new()))]);
                     left = left.checked_sub(compound_heap_bytes(&saved))?;
                     left = left.checked_sub(compound_heap_bytes(value))?;
                     saved.insert("value".into(), Tag::Compound(value.clone()));

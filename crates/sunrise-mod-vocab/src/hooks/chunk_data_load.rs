@@ -5,8 +5,9 @@ pub trait Hooks {
     /// Runs on a chunk worker with a restricted Host. Read and edit `data` through
     /// its typed methods; edits become the loaded store only if the entire job
     /// succeeds. Missing records and proto-to-full promotion do not fire this hook.
-    /// Borrow the captured metadata from `host.job()`. A codec error, unwind,
-    /// or invalid or over-budget disk NBT refuses publication of the whole store.
+    /// Borrow the captured metadata from `host.job()`. An unwinding listener or
+    /// invalid disk NBT refuses publication of the whole store; codec and key errors
+    /// on `data` return locally without poisoning unrelated edits.
     #[hook(
         side = "server",
         contract = "listen",

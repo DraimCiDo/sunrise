@@ -9,8 +9,10 @@ cannot be written, the worker retries with stored block-entity payloads and keep
 `chunk_data_save` receives `&dyn ChunkDiskHost` and a `ChunkDataSaveEvent`.
 The event's `data` is a typed, job-local attachment store. Use its `get`, `set`
 and `remove` methods with an issued `AttachmentKey<T>` whose descriptor has a
-persistence codec (`.serialize(codec)`).
-`T` does not need `Wire`. An ignored codec error or stale key still refuses the whole job.
+persistence codec (`.serialize(codec)`). Disk operations consume only the
+persistence codec and never invoke `sync_codec`. `T` does not need `Wire`. A
+codec error, missing persistence codec, or stale key returns `Err` locally
+without modifying stored envelopes or poisoning unrelated edits in the job.
 
 The callback runs on the persistence worker after capture and before encoding.
 For example, capturing 7, writing 8 in the callback and later writing 9 in the
@@ -36,11 +38,8 @@ wait or flush reports the failure; nothing is marked saved early. A
 chunk whose save was refused or failed is marked modified again, so the game
 tries it again at the next save.
 
-## Disk NBT budgets
+## Disk NBT validation
 
-The job checks the uncompressed disk NBT: at most 65,536 bytes per named
-`value` tag, 64 container levels in the value, and 1,048,576 bytes for the
-whole `sunrise:attachments` entry. These budgets include tag IDs, names,
-compound terminators, mixed-list wrappers, empty namespaces and opaque
-unknown data as applicable. Over-budget data or data that would need
-truncation (such as an overlong modified UTF-8 string) refuses the job.
+The job checks the encoded `sunrise:attachments` compound against the disk NBT
+writer's limits (`nbt::write_named` with `Limits::saved()` and the disk writer
+nesting guard). Unknown attachment entries are preserved opaquely.

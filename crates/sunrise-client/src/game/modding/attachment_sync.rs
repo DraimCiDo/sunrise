@@ -62,13 +62,20 @@ impl Game<'_> {
                 .chunks
                 .get(&(x, z))
                 .and_then(|chunk| chunk.saved.as_ref())
-                .map(|extras| extras.attachments.synced()),
+                .map(|extras| {
+                    extras
+                        .attachments
+                        .synced(mod_api::__private::project_sync_attachment)
+                }),
             // Read in place: lending the map would give the entity one.
-            Holder::Entity(id) => self.entity_attachments.get(&id).map(|map| map.synced()),
+            Holder::Entity(id) => self
+                .entity_attachments
+                .get(&id)
+                .map(|map| map.synced(mod_api::__private::project_sync_attachment)),
             _ => self
                 .attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
                 .ok()
-                .map(|map| map.synced()),
+                .map(|map| map.synced(mod_api::__private::project_sync_attachment)),
         }
         .unwrap_or_default();
         let mut holders = vec![(holder, changes)];
@@ -78,7 +85,12 @@ impl Game<'_> {
                     .block_entities
                     .chunk_attachments(x, z)
                     .into_iter()
-                    .map(|((x, y, z), map)| (Holder::BlockEntity([x, y, z]), map.synced())),
+                    .map(|((x, y, z), map)| {
+                        (
+                            Holder::BlockEntity([x, y, z]),
+                            map.synced(mod_api::__private::project_sync_attachment),
+                        )
+                    }),
             );
         }
         // A general row is shown on a client once its first snapshot arrives with it
@@ -194,7 +206,7 @@ impl Game<'_> {
             else {
                 continue;
             };
-            let changes = map.take_sync_changes();
+            let changes = map.take_sync_changes(mod_api::__private::project_sync_attachment);
             if changes.is_empty() {
                 continue;
             }

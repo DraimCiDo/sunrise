@@ -424,7 +424,7 @@ fn spawner_and_attribute_records_have_declared_field_bytes() {
         },
         (vec![(id("minecraft:sharpness"), 3u32)], true),
     );
-    let (rows,): (Vec<(AttachmentWriteToken, Vec<u8>)>,) = decode(AttachmentBatch::from(
+    let (rows,): (Vec<(AttachmentWriteToken, u8, Vec<u8>)>,) = decode(AttachmentBatch::from(
         sunrise_mod_runtime::attachments::AttachmentBatch::<AttachmentHolder>::empty(),
     ));
     assert!(rows.is_empty());
@@ -505,25 +505,43 @@ fn saved_attachment_batch_fields_keep_scoped_identity_and_nbt() {
         AttachmentBatch as Batch, AttachmentEntry,
         index::{AttachmentOwner, AttachmentSnapshot},
     };
-    let holder = AttachmentHolder::Entity(EntityRef::new(WorldEpoch::new(43), 29));
+    let saved_holder = AttachmentHolder::Entity(EntityRef::new(WorldEpoch::new(43), 29));
+    let synced_holder = AttachmentHolder::Entity(EntityRef::new(WorldEpoch::new(43), 30));
     let mut saved = Compound::new();
     saved.insert("value".into(), Tag::Int(123));
-    let row = AttachmentOwner::from_parts(holder, 71).into_row(std::sync::Arc::new(
+    let mut synced = Compound::new();
+    synced.insert("value".into(), Tag::Int(456));
+    let saved_row = AttachmentOwner::from_parts(saved_holder, 71).into_row(std::sync::Arc::new(
         AttachmentEntry::from_saved(saved.clone()),
     ));
+    let synced_row = AttachmentOwner::from_parts(synced_holder, 72).into_row(std::sync::Arc::new(
+        AttachmentEntry::from_synced(synced.clone()),
+    ));
     let batch = AttachmentBatch::from(Batch::new(std::sync::Arc::new(
-        AttachmentSnapshot::from_rows(vec![row]),
+        AttachmentSnapshot::from_rows(vec![saved_row, synced_row]),
     )));
-    let (rows,): (Vec<(AttachmentWriteToken, Vec<u8>)>,) = decode(batch);
-    assert_eq!(rows.len(), 1);
-    let (token, bytes) = rows.into_iter().next().unwrap();
+    let (rows,): (Vec<(AttachmentWriteToken, u8, Vec<u8>)>,) = decode(batch);
+    assert_eq!(rows.len(), 2);
+    let mut rows = rows.into_iter();
+    let (token, kind, bytes) = rows.next().unwrap();
     let (identity, generation): (AttachmentHolder, u64) = decode(token);
-    assert_eq!(identity, holder);
+    assert_eq!(identity, saved_holder);
     assert_eq!(generation, 71);
+    assert_eq!(kind, 0);
     let (tag, used) =
         sunrise_core::nbt::read_network(&bytes, sunrise_core::nbt::Limits::default()).unwrap();
     assert_eq!(used, bytes.len());
     assert_eq!(tag, Tag::Compound(saved));
+
+    let (token, kind, bytes) = rows.next().unwrap();
+    let (identity, generation): (AttachmentHolder, u64) = decode(token);
+    assert_eq!(identity, synced_holder);
+    assert_eq!(generation, 72);
+    assert_eq!(kind, 1);
+    let (tag, used) =
+        sunrise_core::nbt::read_network(&bytes, sunrise_core::nbt::Limits::default()).unwrap();
+    assert_eq!(used, bytes.len());
+    assert_eq!(tag, Tag::Compound(synced));
 }
 
 #[test]

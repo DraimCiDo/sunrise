@@ -104,10 +104,12 @@ impl BlockEntityPartState for Press {
         &self.progress
     }
 }
-let progress = r.register_attachment_type(
+// Inside Hooks::register(&self, r: &mut dyn Registrar, _) (returns `()`):
+if let Ok(progress) = r.register_attachment_type(
     AttachmentDescriptor::new("mymod:press_progress", || 0).serialize(PROGRESS_CODEC),
-)?;
-r.block_entity_part_with_state(&press, Press { progress })?;
+) {
+    let _ = r.block_entity_part_with_state(&press, Press { progress });
+}
 
 // In its tick, where the block entity is out of the world and `block_entity` finds nothing:
 let level = host.level(host.dimension()).unwrap();

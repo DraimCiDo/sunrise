@@ -5,8 +5,10 @@ pub trait Hooks {
     /// `data` belongs only to that snapshot: typed edits change the disk record,
     /// never the live chunk. Exactly once per captured record, for full and proto
     /// chunks alike. The restricted Host cannot resolve live chunks or mutate the
-    /// world; `host.job()` borrows the captured metadata. A failed job, including
-    /// invalid or over-budget disk NBT, retains its snapshot and the prior disk record.
+    /// world; `host.job()` borrows the captured metadata. A failed job (for example
+    /// an unwinding listener or invalid disk NBT) retains its snapshot and the prior
+    /// disk record; codec and key errors on `data` return locally without poisoning
+    /// unrelated edits.
     #[hook(
         side = "server",
         contract = "listen",

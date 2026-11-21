@@ -508,6 +508,20 @@ impl<T: 'static> CheckedAttachmentType<T> {
     pub fn policy(&self) -> AttachmentPolicy {
         self.raw.policy()
     }
+    /// A persistence-only view of this descriptor that never invokes `sync_codec`.
+    #[doc(hidden)]
+    pub fn disk_only(&self) -> Self {
+        Self {
+            raw: AttachmentType {
+                namespace: self.raw.namespace,
+                name: self.raw.name,
+                default: self.raw.default,
+                codec: self.raw.codec,
+                copy_on_death: self.raw.copy_on_death,
+                sync_codec: None,
+            },
+        }
+    }
     /// Borrow a value from an immutable attachment entry without re-running policy checks.
     pub fn read<'a>(&self, entry: &'a AttachmentEntry) -> Result<&'a T, AttachmentError> {
         entry.read_validated(&self.raw)
@@ -755,6 +769,52 @@ pub struct AttachmentSync {
     pub value: Option<Compound>,
 }
 
+/// What an entry holds when a sync send route resolves it against the active registered
+/// attachment descriptor.
+// no wire: in-process projection input borrowed during sync snapshot/change encoding.
+#[doc(hidden)]
+pub enum AttachmentSyncInput<'a> {
+    /// An unread saved binding from disk, carrying its persistence payload (`"value"`).
+    Saved(&'a Compound),
+    /// A client-side synced replica carrying its already-projected wire compound.
+    Synced(&'a Compound),
+    /// A live decoded value, with its cached sync projection if it was already encoded.
+    Decoded {
+        value: &'a (dyn Any + Send + Sync),
+        synced: Option<&'a Compound>,
+    },
+}
+
+impl<T: 'static> AttachmentType<T> {
+    /// Project an entry's current state into its sync payload using this type's codecs.
+    /// Returns `Ok(None)` if this type is not configured to sync.
+    #[doc(hidden)]
+    pub fn project_sync(
+        &self,
+        input: AttachmentSyncInput<'_>,
+    ) -> Result<Option<Compound>, AttachmentError> {
+        let Some(sync_codec) = &self.sync_codec else {
+            return Ok(None);
+        };
+        match input {
+            AttachmentSyncInput::Saved(saved) => {
+                let value = self.decode_saved(saved)?;
+                (sync_codec.encode)(&value).map(Some)
+            }
+            AttachmentSyncInput::Synced(synced) => Ok(Some(synced.clone())),
+            AttachmentSyncInput::Decoded { value, synced } => {
+                if let Some(synced) = synced {
+                    return Ok(Some(synced.clone()));
+                }
+                let typed = value
+                    .downcast_ref::<T>()
+                    .ok_or(AttachmentError::TypeMismatch)?;
+                (sync_codec.encode)(typed).map(Some)
+            }
+        }
+    }
+}
+
 impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
     /// Read a value, inserting its default if absent except on an original-player snapshot;
     /// see `get_existing`.
@@ -829,22 +889,14 @@ struct Decoded {
     policy: AttachmentPolicy,
 }
 
-/// The saved form of a decoded value: its persistence encoding and the policies it was
-/// declared with. `None` when the type has no persistence codec.
+/// The saved form of a decoded value: its persistence encoding and the copy-on-death policy
+/// it was declared with. `None` when the type has no persistence codec.
 fn envelope(value: &Decoded) -> Option<Compound> {
     value.encoded.as_ref().map(|encoded| {
         let mut envelope = Compound::new();
         envelope.insert("value".into(), Tag::Compound(encoded.clone()));
         if value.policy.copy_on_death {
             envelope.insert("copy_on_death".into(), Tag::Byte(1));
-        }
-        if value.policy.sync {
-            envelope.insert("sync".into(), Tag::Byte(1));
-            if let Some(synced) = &value.synced
-                && synced != encoded
-            {
-                envelope.insert("sync_value".into(), Tag::Compound(synced.clone()));
-            }
         }
         envelope
     })
@@ -856,16 +908,12 @@ fn raw_value(raw: &Compound) -> Option<&Compound> {
         _ => None,
     }
 }
-fn raw_sync_value(raw: &Compound) -> Option<&Compound> {
-    static SYNC_VALUE: LazyLock<JavaString> = LazyLock::new(|| "sync_value".into());
-    match raw.get(&SYNC_VALUE) {
-        Some(Tag::Compound(value)) => Some(value),
-        _ => raw_value(raw),
-    }
-}
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum RawKind {
+/// Whether a raw attachment binding holds persistence-encoded or sync-encoded NBT.
+// no wire: internal tag paired with network NBT in AttachmentBatch's Wire impl.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttachmentRawKind {
     Saved,
     Synced,
 }
@@ -873,7 +921,7 @@ enum RawKind {
 enum Entry {
     Raw {
         saved: Compound,
-        kind: RawKind,
+        kind: AttachmentRawKind,
         reads: ReadCache,
     },
     Decoded(Decoded),
@@ -903,31 +951,51 @@ impl AttachmentEntry {
         Self::raw(saved)
     }
 
-    /// Capture the saved envelope, if this binding has a codec.
+    /// Rebuild a transferred synced binding for lazy typed reads.
+    #[doc(hidden)]
+    pub fn from_synced(synced: Compound) -> Self {
+        Self::raw_synced_envelope(synced)
+    }
+
+    /// Capture the encoded envelope and its codec kind for batch transfer, if this binding
+    /// has a persistence or sync representation.
+    #[doc(hidden)]
+    pub fn transfer_form(&self) -> Option<(AttachmentRawKind, Compound)> {
+        match &self.state {
+            Entry::Raw { saved, kind, .. } => Some((*kind, saved.clone())),
+            Entry::Decoded(value) => {
+                if let Some(saved) = envelope(value) {
+                    Some((AttachmentRawKind::Saved, saved))
+                } else {
+                    value.synced.as_ref().map(|synced| {
+                        (
+                            AttachmentRawKind::Synced,
+                            [("value".into(), Tag::Compound(synced.clone()))].into(),
+                        )
+                    })
+                }
+            }
+        }
+    }
+
+    /// Capture the encoded envelope, if this binding has a persistence or sync form.
     #[doc(hidden)]
     pub fn saved(&self) -> Option<Compound> {
-        match &self.state {
-            Entry::Raw { saved, .. } => Some(saved.clone()),
-            Entry::Decoded(value) => envelope(value),
-        }
+        self.transfer_form().map(|(_, envelope)| envelope)
     }
 
     fn raw(saved: Compound) -> Self {
         Self {
             state: Entry::Raw {
                 saved,
-                kind: RawKind::Saved,
+                kind: AttachmentRawKind::Saved,
                 reads: ReadCache::default(),
             },
         }
     }
 
     fn raw_synced(value: Compound) -> Self {
-        let saved = [
-            ("value".into(), Tag::Compound(value)),
-            ("sync".into(), Tag::Byte(1)),
-        ]
-        .into();
+        let saved = [("value".into(), Tag::Compound(value))].into();
         Self::raw_synced_envelope(saved)
     }
 
@@ -935,7 +1003,7 @@ impl AttachmentEntry {
         Self {
             state: Entry::Raw {
                 saved,
-                kind: RawKind::Synced,
+                kind: AttachmentRawKind::Synced,
                 reads: ReadCache::default(),
             },
         }
@@ -975,8 +1043,8 @@ impl AttachmentEntry {
                         None => {
                             let payload = raw_value(saved).ok_or(AttachmentError::Decode)?;
                             let decoded = match kind {
-                                RawKind::Saved => key.decode_saved(payload)?,
-                                RawKind::Synced => key.decode_synced(payload)?,
+                                AttachmentRawKind::Saved => key.decode_saved(payload)?,
+                                AttachmentRawKind::Synced => key.decode_synced(payload)?,
                             };
                             let value = Arc::new(decoded);
                             // Another reader may have initialized this slot with its type.
@@ -992,37 +1060,51 @@ impl AttachmentEntry {
             }
         }
     }
-    /// The encoded value, as clients receive it.
+    /// The already-projected sync value, for client replicas and decoded synced entries.
+    /// Saved disk bindings never supply raw wire data on their own.
     fn synced_value(&self) -> Option<&Compound> {
         match &self.state {
             Entry::Raw {
                 saved,
-                kind: RawKind::Synced,
+                kind: AttachmentRawKind::Synced,
                 ..
             } => raw_value(saved),
             Entry::Raw {
-                saved,
-                kind: RawKind::Saved,
+                kind: AttachmentRawKind::Saved,
                 ..
-            } => raw_sync_value(saved),
+            } => None,
             Entry::Decoded(value) => value.synced.as_ref(),
         }
     }
     fn is_synced(&self) -> bool {
         match &self.state {
             Entry::Raw {
-                kind: RawKind::Synced,
+                kind: AttachmentRawKind::Synced,
                 ..
             } => true,
             Entry::Raw {
-                saved,
-                kind: RawKind::Saved,
+                kind: AttachmentRawKind::Saved,
                 ..
-            } => {
-                static SYNC: LazyLock<JavaString> = LazyLock::new(|| "sync".into());
-                matches!(saved.get(&SYNC), Some(Tag::Byte(1)))
-            }
+            } => false,
             Entry::Decoded(value) => value.policy.sync,
+        }
+    }
+    fn sync_input(&self) -> Option<AttachmentSyncInput<'_>> {
+        match &self.state {
+            Entry::Raw {
+                saved,
+                kind: AttachmentRawKind::Saved,
+                ..
+            } => raw_value(saved).map(AttachmentSyncInput::Saved),
+            Entry::Raw {
+                saved,
+                kind: AttachmentRawKind::Synced,
+                ..
+            } => raw_value(saved).map(AttachmentSyncInput::Synced),
+            Entry::Decoded(decoded) => Some(AttachmentSyncInput::Decoded {
+                value: decoded.value.as_ref(),
+                synced: decoded.synced.as_ref(),
+            }),
         }
     }
 }
@@ -1299,11 +1381,11 @@ impl Attachments {
             let value = match &entry.state {
                 Entry::Raw {
                     saved,
-                    kind: RawKind::Saved,
+                    kind: AttachmentRawKind::Saved,
                     ..
                 } => Some(saved.clone()),
                 Entry::Raw {
-                    kind: RawKind::Synced,
+                    kind: AttachmentRawKind::Synced,
                     ..
                 } => None,
                 Entry::Decoded(value) => envelope(value),
@@ -1327,7 +1409,7 @@ impl Attachments {
             let encoded = match &entry.state {
                 Entry::Raw {
                     saved,
-                    kind: RawKind::Saved,
+                    kind: AttachmentRawKind::Saved,
                     ..
                 } if matches!(saved.get(&"copy_on_death".into()), Some(Tag::Byte(1))) => {
                     Some(saved.clone())
@@ -1396,7 +1478,7 @@ impl Attachments {
         match self.entry(namespace, name)?.map(|entry| &entry.state) {
             Some(Entry::Raw {
                 saved,
-                kind: RawKind::Saved,
+                kind: AttachmentRawKind::Saved,
                 ..
             }) => raw_value(saved)
                 .cloned()
@@ -1409,7 +1491,7 @@ impl Attachments {
         match self.entry(namespace, name)?.map(|entry| &entry.state) {
             Some(Entry::Raw {
                 saved,
-                kind: RawKind::Synced,
+                kind: AttachmentRawKind::Synced,
                 ..
             }) => raw_value(saved)
                 .cloned()
@@ -1463,35 +1545,52 @@ impl Attachments {
     fn queue_sync(&mut self, namespace: &str, name: &str) {
         self.pending.insert((namespace.into(), name.into()));
     }
-    /// The changes to send to clients since the last call: the current value
-    /// of each queued key, or `None` for one that is gone.
-    pub fn take_sync_changes(&mut self) -> Vec<AttachmentSync> {
+    /// The changes to send to clients since the last call: the current projected value
+    /// of each queued key from the active registered descriptor, or `None` for one that
+    /// is gone.
+    pub fn take_sync_changes(
+        &mut self,
+        mut project: impl FnMut(&str, &str, AttachmentSyncInput<'_>) -> Option<Compound>,
+    ) -> Vec<AttachmentSync> {
         std::mem::take(&mut self.pending)
             .into_iter()
-            .map(|(namespace, name)| {
-                let value = self
-                    .entries
-                    .get(&(namespace.clone(), name.clone()))
-                    .and_then(|entry| entry.synced_value())
-                    .cloned();
-                AttachmentSync {
-                    namespace,
-                    name,
-                    value,
+            .filter_map(|key| match self.entries.get(&key) {
+                None => Some(AttachmentSync {
+                    namespace: key.0,
+                    name: key.1,
+                    value: None,
+                }),
+                Some(entry) => {
+                    let input = entry.sync_input()?;
+                    let ns = key.0.to_string().ok()?;
+                    let nm = key.1.to_string().ok()?;
+                    let value = project(&ns, &nm, input)?;
+                    Some(AttachmentSync {
+                        namespace: key.0,
+                        name: key.1,
+                        value: Some(value),
+                    })
                 }
             })
             .collect()
     }
-    /// Every synced value, for a client that starts seeing the holder.
-    pub fn synced(&self) -> Vec<AttachmentSync> {
+    /// Every synced value resolved against the active registered descriptors, for a client
+    /// that starts seeing the holder. Unknown saved entries stay intact and are never sent.
+    pub fn synced(
+        &self,
+        mut project: impl FnMut(&str, &str, AttachmentSyncInput<'_>) -> Option<Compound>,
+    ) -> Vec<AttachmentSync> {
         self.entries
             .iter()
-            .filter(|(_, entry)| entry.is_synced())
             .filter_map(|((namespace, name), entry)| {
+                let input = entry.sync_input()?;
+                let ns = namespace.to_string().ok()?;
+                let nm = name.to_string().ok()?;
+                let value = project(&ns, &nm, input)?;
                 Some(AttachmentSync {
                     namespace: namespace.clone(),
                     name: name.clone(),
-                    value: Some(entry.synced_value()?.clone()),
+                    value: Some(value),
                 })
             })
             .collect()
@@ -1550,6 +1649,27 @@ mod tests {
         copy_on_death: false,
         sync_codec: None,
     };
+    fn project_type<'a, T: 'static>(
+        ty: &'a AttachmentType<T>,
+    ) -> impl FnMut(&str, &str, AttachmentSyncInput<'_>) -> Option<Compound> + 'a {
+        move |namespace, name, input| {
+            (namespace == ty.namespace && name == ty.name)
+                .then(|| ty.project_sync(input).ok().flatten())
+                .flatten()
+        }
+    }
+    fn project_standard(
+        namespace: &str,
+        name: &str,
+        input: AttachmentSyncInput<'_>,
+    ) -> Option<Compound> {
+        match (namespace, name) {
+            ("test", "synced") => SYNCED.project_sync(input).ok().flatten(),
+            ("test", "counter") => COUNTER.project_sync(input).ok().flatten(),
+            ("test", "memory") => MEMORY.project_sync(input).ok().flatten(),
+            _ => None,
+        }
+    }
     fn rows(
         index: &Arc<Mutex<index::AttachmentIndex<u32>>>,
         key: &AttachmentType<i32>,
@@ -1587,7 +1707,7 @@ mod tests {
         assert_eq!(indexed_values(&index, &COUNTER), [(1, 42)]);
         assert_eq!(indexed_values(&index, &SYNCED), [(1, 8)]);
         assert_eq!(map.to_nbt(), saved);
-        assert!(map.take_sync_changes().is_empty());
+        assert!(map.take_sync_changes(project_standard).is_empty());
         assert_eq!(COUNTER.get_existing(&mut map, Holder::Level), Ok(Some(42)));
         let decoded = rows(&index, &COUNTER);
         assert!(!Arc::ptr_eq(&before[0].entry, &decoded[0].entry));
@@ -1597,7 +1717,7 @@ mod tests {
         ));
         assert_eq!(before[0].entry.read(&COUNTER), Ok(&42));
         assert_eq!(map.to_nbt(), saved);
-        assert!(map.take_sync_changes().is_empty());
+        assert!(map.take_sync_changes(project_standard).is_empty());
     }
 
     #[test]
@@ -1608,15 +1728,21 @@ mod tests {
         assert!(rows(&index, &SYNCED).is_empty());
         assert_eq!(SYNCED.get(&mut map, Holder::Level), Ok(7));
         let default = rows(&index, &SYNCED);
-        assert_eq!(map.take_sync_changes(), [change("synced", Some(7))]);
+        assert_eq!(
+            map.take_sync_changes(project_standard),
+            [change("synced", Some(7))]
+        );
         SYNCED.set(&mut map, Holder::Level, 9).unwrap();
         assert_eq!(indexed_values(&index, &SYNCED), [(1, 9)]);
         assert_eq!(SYNCED.remove(&mut map, Holder::Level), Ok(Some(9)));
         assert!(rows(&index, &SYNCED).is_empty());
-        assert_eq!(map.take_sync_changes(), [change("synced", None)]);
+        assert_eq!(
+            map.take_sync_changes(project_standard),
+            [change("synced", None)]
+        );
         map.apply_sync(change("synced", Some(12)));
         assert_eq!(indexed_values(&index, &SYNCED), [(1, 12)]);
-        assert!(map.take_sync_changes().is_empty());
+        assert!(map.take_sync_changes(project_standard).is_empty());
         map.apply_sync(change("synced", None));
         assert!(rows(&index, &SYNCED).is_empty());
         assert_eq!(default[0].entry.read(&SYNCED), Ok(&7));
@@ -1694,7 +1820,10 @@ mod tests {
         let aborted = rows(&index, &SYNCED);
         map.replace_contents(kept);
         assert_eq!(map.to_nbt(), saved);
-        assert_eq!(map.take_sync_changes(), [change("synced", Some(10))]);
+        assert_eq!(
+            map.take_sync_changes(project_standard),
+            [change("synced", Some(10))]
+        );
         assert_eq!(indexed_values(&index, &SYNCED), [(1, 10)]);
         assert_eq!(indexed_values(&index, &MEMORY), [(1, 20)]);
         assert!(rows(&index, &COUNTER).is_empty());
@@ -1906,7 +2035,7 @@ mod tests {
     fn shared_bindings_and_map_snapshots_keep_replaced_and_removed_values() {
         let mut map = Attachments::default();
         SYNCED.set(&mut map, Holder::Level, 1).unwrap();
-        map.take_sync_changes();
+        map.take_sync_changes(project_standard);
         let loaded = Attachments::from_nbt(map.to_nbt());
         for mut map in [map, loaded] {
             let mut snapshot = map.clone();
@@ -1928,8 +2057,11 @@ mod tests {
                 Ok(Some(1))
             );
             assert_eq!(snapshot.to_nbt(), saved);
-            assert!(snapshot.take_sync_changes().is_empty());
-            assert_eq!(map.take_sync_changes(), [change("synced", None)]);
+            assert!(snapshot.take_sync_changes(project_standard).is_empty());
+            assert_eq!(
+                map.take_sync_changes(project_standard),
+                [change("synced", None)]
+            );
         }
     }
     #[test]
@@ -1979,8 +2111,8 @@ mod tests {
         assert_eq!(DECODES.load(Ordering::Relaxed), 1);
         assert!(map.decoded("test", "counter").unwrap().is_none());
         assert_eq!(map.to_nbt(), saved);
-        assert!(map.synced().is_empty());
-        assert!(map.take_sync_changes().is_empty());
+        assert!(map.synced(project_standard).is_empty());
+        assert!(map.take_sync_changes(project_standard).is_empty());
         assert!(
             map.copy_on_death()
                 .unwrap()
@@ -1999,7 +2131,7 @@ mod tests {
             Err(AttachmentError::TypeMismatch)
         ));
         assert_eq!(map.to_nbt(), saved);
-        assert!(map.take_sync_changes().is_empty());
+        assert!(map.take_sync_changes(project_standard).is_empty());
         assert_eq!(entry.read(&key).unwrap().0, 42);
     }
     #[test]
@@ -2017,7 +2149,7 @@ mod tests {
             Err(AttachmentError::InvalidCopyPolicy)
         );
         assert_eq!(entry.read(&SYNCED), Ok(&9));
-        assert!(map.take_sync_changes().is_empty());
+        assert!(map.take_sync_changes(project_standard).is_empty());
     }
     #[test]
     fn failed_query_decodes_are_retried_without_changing_the_saved_binding() {
@@ -2046,7 +2178,7 @@ mod tests {
         assert_eq!(ATTEMPTS.load(Ordering::Relaxed), 2);
         assert!(map.decoded("test", "synced").unwrap().is_none());
         assert_eq!(map.to_nbt(), saved);
-        assert!(map.take_sync_changes().is_empty());
+        assert!(map.take_sync_changes(project_standard).is_empty());
     }
     #[test]
     fn sync_replacement_and_removal_leave_the_shared_old_entry_readable() {
@@ -2167,16 +2299,22 @@ mod tests {
         SYNCED.set(&mut map, Holder::Level, 1).unwrap();
         SYNCED.set(&mut map, Holder::Level, 2).unwrap();
         SYNCED.remove(&mut map, Holder::Level).unwrap();
-        assert_eq!(map.take_sync_changes(), [change("synced", None)]);
-        assert!(map.take_sync_changes().is_empty());
+        assert_eq!(
+            map.take_sync_changes(project_standard),
+            [change("synced", None)]
+        );
+        assert!(map.take_sync_changes(project_standard).is_empty());
     }
     #[test]
     fn default_creation_is_synced_and_a_later_read_is_not() {
         let mut map = Attachments::default();
         assert_eq!(SYNCED.get(&mut map, Holder::Level), Ok(7));
-        assert_eq!(map.take_sync_changes(), [change("synced", Some(7))]);
+        assert_eq!(
+            map.take_sync_changes(project_standard),
+            [change("synced", Some(7))]
+        );
         assert_eq!(SYNCED.get(&mut map, Holder::Level), Ok(7));
-        assert!(map.take_sync_changes().is_empty());
+        assert!(map.take_sync_changes(project_standard).is_empty());
     }
     #[test]
     fn unsynced_types_report_no_changes() {
@@ -2184,7 +2322,7 @@ mod tests {
         COUNTER.set(&mut map, Holder::Level, 1).unwrap();
         COUNTER.remove(&mut map, Holder::Level).unwrap();
         COUNTER.sync_data(&mut map, Holder::Level).unwrap();
-        assert!(map.take_sync_changes().is_empty());
+        assert!(map.take_sync_changes(project_standard).is_empty());
     }
     #[test]
     fn sync_without_persistence_codec_syncs_and_does_not_persist() {
@@ -2198,11 +2336,17 @@ mod tests {
         };
         let mut server = Attachments::default();
         assert_eq!(sync_only.get(&mut server, Holder::Level), Ok(5));
-        assert_eq!(server.take_sync_changes(), [change("ephemeral", Some(5))]);
+        assert_eq!(
+            server.take_sync_changes(project_type(&sync_only)),
+            [change("ephemeral", Some(5))]
+        );
         sync_only.set(&mut server, Holder::Level, 11).unwrap();
         assert_eq!(server.to_nbt(), Compound::new());
-        assert_eq!(server.synced(), [change("ephemeral", Some(11))]);
-        let updates = server.take_sync_changes();
+        assert_eq!(
+            server.synced(project_type(&sync_only)),
+            [change("ephemeral", Some(11))]
+        );
+        let updates = server.take_sync_changes(project_type(&sync_only));
         assert_eq!(updates, [change("ephemeral", Some(11))]);
 
         let mut client = Attachments::default();
@@ -2235,7 +2379,7 @@ mod tests {
         );
     }
     #[test]
-    fn distinct_persistence_and_sync_codecs_use_their_own_forms() {
+    fn distinct_persistence_and_sync_codecs_project_from_active_descriptor_on_both_routes() {
         fn encode_disk(n: &i32) -> Result<Compound, AttachmentError> {
             Ok([(JavaString::from("disk"), Tag::Int(*n))].into())
         }
@@ -2253,6 +2397,9 @@ mod tests {
                 Some(Tag::Int(n)) => Ok(*n - 100),
                 _ => Err(AttachmentError::Decode),
             }
+        }
+        fn encode_net_v2(n: &i32) -> Result<Compound, AttachmentError> {
+            Ok([(JavaString::from("net_v2"), Tag::Int(*n * 10))].into())
         }
         let dual = AttachmentType {
             namespace: "test",
@@ -2275,10 +2422,13 @@ mod tests {
             name: "dual".into(),
             value: Some(encode_net(&7).unwrap()),
         };
-        assert_eq!(server.take_sync_changes(), [expected_sync.clone()]);
-        assert_eq!(server.synced(), [expected_sync.clone()]);
+        assert_eq!(
+            server.take_sync_changes(project_type(&dual)),
+            [expected_sync.clone()]
+        );
+        assert_eq!(server.synced(project_type(&dual)), [expected_sync.clone()]);
 
-        // Saved disk form uses persistence codec and retains the sync form for unread snapshots.
+        // Saved disk envelope carries only persistence data (no sync flag or sync_value).
         let saved = server.to_nbt();
         let Some(Tag::Compound(names)) = saved.get(&"test".into()) else {
             panic!("namespace saved");
@@ -2290,8 +2440,54 @@ mod tests {
             envelope.get(&"value".into()),
             Some(&Tag::Compound(encode_disk(&7).unwrap()))
         );
+        assert!(!envelope.contains_key(&"sync".into()));
+        assert!(!envelope.contains_key(&"sync_value".into()));
+
+        // Reloading without a prior typed read projects through the active descriptor on both
+        // initial tracking (`synced`) and explicit resync (`sync_data` + `take_sync_changes`).
         let mut reloaded = Attachments::from_nbt(saved.clone());
-        assert_eq!(reloaded.synced(), [expected_sync.clone()]);
+        assert_eq!(
+            reloaded.synced(project_type(&dual)),
+            [expected_sync.clone()]
+        );
+        dual.sync_data(&mut reloaded, Holder::Level).unwrap();
+        assert_eq!(
+            reloaded.take_sync_changes(project_type(&dual)),
+            [expected_sync.clone()]
+        );
+
+        // Changing the active descriptor's sync codec re-projects from disk without stale NBT.
+        let dual_v2 = AttachmentType {
+            sync_codec: Some(AttachmentCodec {
+                encode: encode_net_v2,
+                decode: |_| Err(AttachmentError::Decode),
+            }),
+            ..dual
+        };
+        let expected_v2 = AttachmentSync {
+            namespace: "test".into(),
+            name: "dual".into(),
+            value: Some(encode_net_v2(&7).unwrap()),
+        };
+        assert_eq!(
+            reloaded.synced(project_type(&dual_v2)),
+            [expected_v2.clone()]
+        );
+        dual_v2.sync_data(&mut reloaded, Holder::Level).unwrap();
+        assert_eq!(
+            reloaded.take_sync_changes(project_type(&dual_v2)),
+            [expected_v2]
+        );
+
+        // Dropping sync or leaving the entry unregistered sends nothing while keeping disk NBT.
+        let no_sync = AttachmentType {
+            sync_codec: None,
+            ..dual
+        };
+        assert!(reloaded.synced(project_type(&no_sync)).is_empty());
+        assert!(reloaded.synced(|_, _, _| None).is_empty());
+        assert_eq!(reloaded.to_nbt(), saved);
+
         assert_eq!(
             reloaded.entry("test", "dual").unwrap().unwrap().read(&dual),
             Ok(&7)
@@ -2324,20 +2520,42 @@ mod tests {
         assert_eq!(client.to_nbt(), Compound::new());
     }
     #[test]
-    fn a_saved_sync_flag_puts_undecoded_values_in_the_snapshot() {
+    fn saved_entries_sync_only_through_active_descriptors_and_preserve_unknown_entries() {
         let mut map = Attachments::default();
         SYNCED.set(&mut map, Holder::Level, 5).unwrap();
         COUNTER.set(&mut map, Holder::Level, 6).unwrap();
-        let saved = map.to_nbt();
+        let mut saved = map.to_nbt();
         let Some(Tag::Compound(names)) = saved.get(&"test".into()) else {
             panic!("namespace saved");
         };
         let Some(Tag::Compound(envelope)) = names.get(&"synced".into()) else {
             panic!("entry saved");
         };
-        assert_eq!(envelope.get(&"sync".into()), Some(&Tag::Byte(1)));
-        let loaded = Attachments::from_nbt(saved);
-        assert_eq!(loaded.synced(), [change("synced", Some(5))]);
+        assert!(!envelope.contains_key(&"sync".into()));
+        assert!(!envelope.contains_key(&"sync_value".into()));
+        saved.insert(
+            "unknown".into(),
+            Tag::Compound(
+                [(
+                    "opaque".into(),
+                    Tag::Compound([("value".into(), Tag::Compound(encode(&99).unwrap()))].into()),
+                )]
+                .into(),
+            ),
+        );
+
+        let loaded = Attachments::from_nbt(saved.clone());
+        assert_eq!(loaded.synced(project_standard), [change("synced", Some(5))]);
+        // A saved attachment that gains a sync codec on load syncs without a prior typed read.
+        let counter_now_synced = AttachmentType {
+            sync_codec: Some(AttachmentCodec { encode, decode }),
+            ..COUNTER
+        };
+        assert_eq!(
+            loaded.synced(project_type(&counter_now_synced)),
+            [change("counter", Some(6))]
+        );
+        assert_eq!(loaded.to_nbt(), saved);
     }
     #[test]
     fn applied_changes_decode_through_the_codec_and_removals_clear() {
@@ -2428,9 +2646,12 @@ mod tests {
         }
         let mut host = One(Attachments::default());
         SYNCED.set(&mut host, Holder::Level, 4).unwrap();
-        host.0.take_sync_changes();
+        host.0.take_sync_changes(project_standard);
         SYNCED.sync_data(&mut host, Holder::Level).unwrap();
-        assert_eq!(host.0.take_sync_changes(), [change("synced", Some(4))]);
+        assert_eq!(
+            host.0.take_sync_changes(project_standard),
+            [change("synced", Some(4))]
+        );
     }
 
     #[test]
@@ -2475,7 +2696,10 @@ mod tests {
             sync_only.get_existing(&mut store, Holder::Level),
             Ok(Some(11))
         );
-        assert_eq!(store.take_sync_changes(), [change("sync_only", Some(11))]);
+        assert_eq!(
+            store.take_sync_changes(project_type(sync_only.as_type())),
+            [change("sync_only", Some(11))]
+        );
         assert!(store.to_nbt().is_empty());
     }
 }

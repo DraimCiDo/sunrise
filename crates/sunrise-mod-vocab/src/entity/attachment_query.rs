@@ -6,7 +6,7 @@ use sunrise_mod_runtime::attachments::{self as runtime, index};
 /// Later changes require a fresh query. This is a residency view: removed but
 /// unswept entities may appear, and stale writes fail. Acquisition neither clones values nor
 /// decodes saved payloads; iteration decodes lazily.
-// no wire: transfers only saved rows as scoped tokens plus network NBT; decode requires a complete compound envelope and rebuilds runtime entries.
+// no wire: transfers saved or synced rows as scoped tokens, payload kind tags, and network NBT; decode requires a complete compound envelope and rebuilds runtime entries.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct AttachmentBatch(runtime::AttachmentBatch<AttachmentHolder>);
@@ -82,18 +82,27 @@ impl crate::wire::Wire for AttachmentWriteToken {
 }
 
 impl crate::wire::Wire for AttachmentBatch {
-    crate::wire::layout_fields!("rows" => Vec<(crate::AttachmentWriteToken,Vec<u8>)>);
+    crate::wire::layout_fields!("rows" => Vec<(crate::AttachmentWriteToken,u8,Vec<u8>)>);
     const MIN: usize = 4;
     fn put(&self, out: &mut crate::wire::Writer) {
+        use runtime::AttachmentRawKind;
         use sunrise_core::nbt::{self, Limits, Tag};
         let rows: Vec<_> = self
             .0
             .rows()
             .iter()
             .filter_map(|row| {
-                let saved = row.entry.saved()?;
-                let bytes = nbt::write_network(&Tag::Compound(saved), Limits::default()).ok()?;
-                Some((AttachmentWriteToken::from(row.write_token()), bytes))
+                let (kind, envelope) = row.entry.transfer_form()?;
+                let kind_tag = match kind {
+                    AttachmentRawKind::Saved => 0u8,
+                    AttachmentRawKind::Synced => 1u8,
+                };
+                let bytes = nbt::write_network(&Tag::Compound(envelope), Limits::default()).ok()?;
+                Some((
+                    AttachmentWriteToken::from(row.write_token()),
+                    kind_tag,
+                    bytes,
+                ))
             })
             .collect();
         out.put(&rows);
@@ -101,27 +110,28 @@ impl crate::wire::Wire for AttachmentBatch {
     fn take(input: &mut crate::wire::Reader<'_>) -> Result<Self, crate::wire::WireError> {
         use crate::wire::WireError;
         use sunrise_core::nbt::{self, Limits, Tag};
-        let rows: Vec<(AttachmentWriteToken, Vec<u8>)> = input.take()?;
+        let rows: Vec<(AttachmentWriteToken, u8, Vec<u8>)> = input.take()?;
         let mut result = Vec::with_capacity(rows.len());
         let mut identities = std::collections::HashSet::with_capacity(rows.len());
-        for (token, bytes) in rows {
+        for (token, kind_tag, bytes) in rows {
             let (holder, _) = token.0.parts();
             if !identities.insert(*holder) {
                 return Err(WireError::Invalid("duplicate attachment residency"));
             }
             let (tag, consumed) = nbt::read_network(&bytes, Limits::default())
                 .map_err(|_| WireError::Invalid("invalid attachment NBT"))?;
-            let Tag::Compound(saved) = tag else {
+            let Tag::Compound(envelope) = tag else {
                 return Err(WireError::Invalid("invalid attachment envelope"));
             };
             if consumed != bytes.len() {
                 return Err(WireError::Invalid("trailing attachment NBT"));
             }
-            result.push(
-                token
-                    .0
-                    .into_row(Arc::new(runtime::AttachmentEntry::from_saved(saved))),
-            );
+            let entry = match kind_tag {
+                0 => runtime::AttachmentEntry::from_saved(envelope),
+                1 => runtime::AttachmentEntry::from_synced(envelope),
+                _ => return Err(WireError::Invalid("invalid attachment payload kind")),
+            };
+            result.push(token.0.into_row(Arc::new(entry)));
         }
         Ok(Self(runtime::AttachmentBatch::new(Arc::new(
             runtime::index::AttachmentSnapshot::from_rows(result),
@@ -141,7 +151,10 @@ mod tests {
         let token = AttachmentWriteToken(index::AttachmentOwner::from_parts(holder, 7));
         let bytes = nbt::write_network(&Tag::Compound(Compound::new()), Limits::default()).unwrap();
         let mut out = Writer::new();
-        out.put(&vec![(token.clone(), bytes.clone()), (token, bytes)]);
+        out.put(&vec![
+            (token.clone(), 0u8, bytes.clone()),
+            (token, 0u8, bytes),
+        ]);
         assert!(matches!(
             Reader::new(out.bytes()).take::<AttachmentBatch>(),
             Err(WireError::Invalid("duplicate attachment residency"))
@@ -157,11 +170,166 @@ mod tests {
         let bytes = nbt::write_network(&Tag::Compound(Compound::new()), Limits::default()).unwrap();
         let mut out = Writer::new();
         let newer = AttachmentWriteToken(index::AttachmentOwner::from_parts(holder, 8));
-        out.put(&vec![(token, bytes.clone()), (newer, bytes)]);
+        out.put(&vec![(token, 0u8, bytes.clone()), (newer, 0u8, bytes)]);
         assert!(matches!(
             Reader::new(out.bytes()).take::<AttachmentBatch>(),
             Err(WireError::Invalid("duplicate attachment residency"))
         ));
+    }
+
+    #[test]
+    fn wire_attachment_batch_refuses_invalid_payload_kind() {
+        use crate::wire::{Reader, WireError, Writer};
+        use sunrise_core::nbt::{self, Compound, Limits, Tag};
+        let holder = AttachmentHolder::Entity(EntityRef::new(WorldEpoch::new(1), 42));
+        let token = AttachmentWriteToken(index::AttachmentOwner::from_parts(holder, 7));
+        let bytes = nbt::write_network(&Tag::Compound(Compound::new()), Limits::default()).unwrap();
+        let mut out = Writer::new();
+        out.put(&vec![(token, 2u8, bytes)]);
+        assert!(matches!(
+            Reader::new(out.bytes()).take::<AttachmentBatch>(),
+            Err(WireError::Invalid("invalid attachment payload kind"))
+        ));
+    }
+
+    #[test]
+    fn wire_attachment_batch_preserves_synced_only_and_dual_codec_across_replica_promotion() {
+        use crate::wire::{Reader, Writer};
+        use sunrise_core::nbt::{Compound, Tag};
+
+        let disk_codec = runtime::AttachmentCodec {
+            encode: |v: &u32| Ok([("disk".into(), Tag::Int(*v as i32))].into()),
+            decode: |c: &Compound| match c.get(&"disk".into()) {
+                Some(Tag::Int(n)) => Ok(*n as u32),
+                _ => Err(AttachmentError::Decode),
+            },
+        };
+        let sync_codec = runtime::AttachmentCodec {
+            encode: |v: &u32| Ok([("net".into(), Tag::Int(*v as i32 + 100))].into()),
+            decode: |c: &Compound| match c.get(&"net".into()) {
+                Some(Tag::Int(n)) => Ok((*n - 100) as u32),
+                _ => Err(AttachmentError::Decode),
+            },
+        };
+        let round_trip = |batch: AttachmentBatch| -> AttachmentBatch {
+            let mut out = Writer::new();
+            out.put(&batch);
+            Reader::new(out.bytes()).take().unwrap()
+        };
+
+        // 1. Sync-only attachment: server write, client raw replica, and client promoted replica.
+        let sync_only = crate::parts::install_attachment_fixture(
+            "test",
+            AttachmentDescriptor::new("test:sync_only", || 0u32).sync(sync_codec),
+        );
+        let holder = AttachmentHolder::Entity(EntityRef::new(WorldEpoch::new(1), 51));
+        let index = Arc::new(std::sync::Mutex::new(index::AttachmentIndex::default()));
+        let mut server = runtime::Attachments::default();
+        sync_only
+            .descriptor()
+            .set(&mut server, runtime::Holder::Level, 19)
+            .unwrap();
+        server.bind_index(&index, holder);
+        let batch = round_trip(AttachmentBatch::from(runtime::AttachmentBatch::new(
+            index.lock().unwrap().snapshot_named("test", "sync_only"),
+        )));
+        assert_eq!(batch.query(&sync_only).unwrap().get(holder), Ok(Some(19)));
+
+        let client_index = Arc::new(std::sync::Mutex::new(index::AttachmentIndex::default()));
+        let mut client = runtime::Attachments::default();
+        client.bind_index(&client_index, holder);
+        client.apply_sync(runtime::AttachmentSync {
+            namespace: "test".into(),
+            name: "sync_only".into(),
+            value: Some([("net".into(), Tag::Int(123))].into()),
+        });
+        let raw_client_batch = round_trip(AttachmentBatch::from(runtime::AttachmentBatch::new(
+            client_index
+                .lock()
+                .unwrap()
+                .snapshot_named("test", "sync_only"),
+        )));
+        assert_eq!(
+            raw_client_batch.query(&sync_only).unwrap().get(holder),
+            Ok(Some(23))
+        );
+        // Promote the client replica to Decoded { encoded: None, synced: Some(..) }.
+        assert_eq!(
+            sync_only
+                .descriptor()
+                .get_existing(&mut client, runtime::Holder::Level),
+            Ok(Some(23))
+        );
+        let promoted_client_batch =
+            round_trip(AttachmentBatch::from(runtime::AttachmentBatch::new(
+                client_index
+                    .lock()
+                    .unwrap()
+                    .snapshot_named("test", "sync_only"),
+            )));
+        assert_eq!(
+            promoted_client_batch.query(&sync_only).unwrap().get(holder),
+            Ok(Some(23))
+        );
+
+        // 2. Dual-codec attachment with distinct disk and sync shapes across client promotion.
+        let dual = crate::parts::install_attachment_fixture(
+            "test",
+            AttachmentDescriptor::new("test:dual", || 0u32)
+                .serialize(disk_codec)
+                .sync(sync_codec),
+        );
+        let server_dual_index = Arc::new(std::sync::Mutex::new(index::AttachmentIndex::default()));
+        let mut server_dual = runtime::Attachments::default();
+        dual.descriptor()
+            .set(&mut server_dual, runtime::Holder::Level, 31)
+            .unwrap();
+        server_dual.bind_index(&server_dual_index, holder);
+        let server_dual_batch = round_trip(AttachmentBatch::from(runtime::AttachmentBatch::new(
+            server_dual_index
+                .lock()
+                .unwrap()
+                .snapshot_named("test", "dual"),
+        )));
+        assert_eq!(
+            server_dual_batch.query(&dual).unwrap().get(holder),
+            Ok(Some(31))
+        );
+
+        let client_dual_index = Arc::new(std::sync::Mutex::new(index::AttachmentIndex::default()));
+        let mut client_dual = runtime::Attachments::default();
+        client_dual.bind_index(&client_dual_index, holder);
+        client_dual.apply_sync(runtime::AttachmentSync {
+            namespace: "test".into(),
+            name: "dual".into(),
+            value: Some([("net".into(), Tag::Int(144))].into()),
+        });
+        let raw_dual_batch = round_trip(AttachmentBatch::from(runtime::AttachmentBatch::new(
+            client_dual_index
+                .lock()
+                .unwrap()
+                .snapshot_named("test", "dual"),
+        )));
+        assert_eq!(
+            raw_dual_batch.query(&dual).unwrap().get(holder),
+            Ok(Some(44))
+        );
+        // Promote client replica so it holds Decoded { encoded: None, synced: Some(net) }.
+        assert_eq!(
+            dual.descriptor()
+                .get_existing(&mut client_dual, runtime::Holder::Level),
+            Ok(Some(44))
+        );
+        let promoted_dual_batch = round_trip(AttachmentBatch::from(runtime::AttachmentBatch::new(
+            client_dual_index
+                .lock()
+                .unwrap()
+                .snapshot_named("test", "dual"),
+        )));
+        assert_eq!(
+            promoted_dual_batch.query(&dual).unwrap().get(holder),
+            Ok(Some(44))
+        );
     }
 
     #[test]

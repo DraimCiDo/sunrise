@@ -1,10 +1,13 @@
 //! Load-owned typed attachment descriptors, issued keys, and registration traits.
 use super::*;
 use crate::{
-    AttachmentCodec, AttachmentError, AttachmentPolicy, Holder, Identifier, LevelRandomHost,
+    AttachmentCodec, AttachmentError, AttachmentPolicy, Compound, Holder, Identifier,
+    LevelRandomHost,
 };
 use std::fmt;
-use sunrise_mod_runtime::attachments::{AttachmentType, CheckedAttachmentType};
+use sunrise_mod_runtime::attachments::{
+    AttachmentSyncInput, AttachmentType, CheckedAttachmentType,
+};
 
 /// Builder for a typed attachment registered during [`Hooks::register`](crate::Hooks::register).
 ///
@@ -99,6 +102,11 @@ type BuildAttachmentRecord = Box<
         + Send,
 >;
 
+type ProjectAttachmentSync = fn(
+    &(dyn Any + Send + Sync),
+    AttachmentSyncInput<'_>,
+) -> Result<Option<Compound>, AttachmentError>;
+
 /// Type-erased attachment descriptor accepted by [`AttachmentTypesRegistrar::submit_attachment`].
 ///
 /// Built from a typed [`AttachmentDescriptor<T>`] via [`From`] / [`Into`].
@@ -108,10 +116,21 @@ pub struct ErasedAttachmentDescriptor {
     has_codec: bool,
     policy: AttachmentPolicy,
     build: BuildAttachmentRecord,
+    project_sync: ProjectAttachmentSync,
 }
 
 impl<T: Send + Sync + 'static> From<AttachmentDescriptor<T>> for ErasedAttachmentDescriptor {
     fn from(descriptor: AttachmentDescriptor<T>) -> Self {
+        fn project_sync<T: Send + Sync + 'static>(
+            record: &(dyn Any + Send + Sync),
+            input: AttachmentSyncInput<'_>,
+        ) -> Result<Option<Compound>, AttachmentError> {
+            let registration = record
+                .downcast_ref::<AttachmentRegistration<T>>()
+                .ok_or(AttachmentError::TypeMismatch)?;
+            registration.checked.as_type().project_sync(input)
+        }
+
         let id = descriptor.id;
         let has_codec = descriptor.codec.is_some();
         let policy = AttachmentPolicy {
@@ -135,6 +154,7 @@ impl<T: Send + Sync + 'static> From<AttachmentDescriptor<T>> for ErasedAttachmen
             has_codec,
             policy,
             build,
+            project_sync: project_sync::<T>,
         }
     }
 }
@@ -208,6 +228,7 @@ pub struct RegisteredAttachment {
     has_codec: bool,
     policy: AttachmentPolicy,
     record: Arc<dyn Any + Send + Sync>,
+    project_sync: ProjectAttachmentSync,
 }
 
 impl RegisteredAttachment {
@@ -258,6 +279,13 @@ impl RegisteredAttachment {
             .map(AttachmentKey)
             .map_err(|_| AttachmentError::TypeMismatch)
     }
+
+    pub(crate) fn project_sync(
+        &self,
+        input: AttachmentSyncInput<'_>,
+    ) -> Result<Option<Compound>, AttachmentError> {
+        (self.project_sync)(self.record.as_ref(), input)
+    }
 }
 
 impl PartialEq for RegisteredAttachment {
@@ -305,6 +333,7 @@ pub fn check_attachment_descriptor(
         has_codec: descriptor.has_codec,
         policy: descriptor.policy,
         record,
+        project_sync: descriptor.project_sync,
     })
 }
 
@@ -561,6 +590,21 @@ impl dyn Registrar + '_ {
     }
 }
 
+/// Project one attachment entry for client sync through the active registered descriptor.
+///
+/// Returns `None` when no active descriptor is registered for `namespace:name`, when the
+/// active descriptor is not configured to sync, or when projection fails.
+// hidden: engine-owned attachment sync projection; not an authoring method.
+#[doc(hidden)]
+pub fn project_sync_attachment(
+    namespace: &str,
+    name: &str,
+    input: AttachmentSyncInput<'_>,
+) -> Option<Compound> {
+    let record = installed()?.attachment_types.get(namespace)?.get(name)?;
+    record.project_sync(input).ok().flatten()
+}
+
 /// Validate use against the installed owner's declaration.
 // hidden: shared engine and host adapter validation, not an authoring method.
 #[doc(hidden)]
@@ -760,5 +804,98 @@ mod tests {
             Err(AttachmentError::StaleKey)
         );
         assert_eq!(second.get_existing(&mut host, Holder::Level), Ok(Some(9)));
+    }
+
+    #[test]
+    fn active_descriptor_projects_unread_saved_dual_codec_for_tracking_and_resync() {
+        let disk_codec = AttachmentCodec {
+            encode: |n: &i32| Ok([("disk".into(), Tag::Int(*n))].into()),
+            decode: |tag: &Compound| match tag.get(&"disk".into()) {
+                Some(Tag::Int(n)) => Ok(*n),
+                _ => Err(AttachmentError::Decode),
+            },
+        };
+        let sync_v1 = AttachmentCodec {
+            encode: |n: &i32| Ok([("net".into(), Tag::Int(*n + 100))].into()),
+            decode: |tag: &Compound| match tag.get(&"net".into()) {
+                Some(Tag::Int(n)) => Ok(*n - 100),
+                _ => Err(AttachmentError::Decode),
+            },
+        };
+        let sync_v2 = AttachmentCodec {
+            encode: |n: &i32| Ok([("net_v2".into(), Tag::Int(*n * 10))].into()),
+            decode: |_: &Compound| Err(AttachmentError::Decode),
+        };
+
+        let key_v1 = install_attachment_fixture(
+            "mod_a",
+            AttachmentDescriptor::new("mod_a:dual", || 0i32)
+                .serialize(disk_codec)
+                .sync(sync_v1),
+        );
+        let mut level = FakeLevel(Attachments::default());
+        key_v1.set_in(&mut level, Holder::Level, 7).unwrap();
+
+        let mut saved = level.0.to_nbt();
+        let Some(Tag::Compound(names)) = saved.get(&"mod_a".into()) else {
+            panic!("saved namespace missing");
+        };
+        let Some(Tag::Compound(envelope)) = names.get(&"dual".into()) else {
+            panic!("saved entry missing");
+        };
+        assert!(!envelope.contains_key(&"sync".into()));
+        assert!(!envelope.contains_key(&"sync_value".into()));
+
+        // Preserve an unregistered entry alongside the active dual-codec binding.
+        saved.insert(
+            "foreign".into(),
+            Tag::Compound(
+                [(
+                    "opaque".into(),
+                    Tag::Compound([("value".into(), Tag::Compound(Compound::new()))].into()),
+                )]
+                .into(),
+            ),
+        );
+
+        let mut reloaded = FakeLevel(Attachments::from_nbt(saved.clone()));
+        let expected_v1 = vec![sunrise_mod_runtime::attachments::AttachmentSync {
+            namespace: "mod_a".into(),
+            name: "dual".into(),
+            value: Some([("net".into(), Tag::Int(107))].into()),
+        }];
+        assert_eq!(reloaded.0.synced(project_sync_attachment), expected_v1);
+        key_v1.sync_data_in(&mut reloaded, Holder::Level).unwrap();
+        assert_eq!(
+            reloaded.0.take_sync_changes(project_sync_attachment),
+            expected_v1
+        );
+
+        // Migrating the active descriptor's sync codec re-projects the unread saved entry.
+        let key_v2 = install_attachment_fixture(
+            "mod_a",
+            AttachmentDescriptor::new("mod_a:dual", || 0i32)
+                .serialize(disk_codec)
+                .sync(sync_v2),
+        );
+        let expected_v2 = vec![sunrise_mod_runtime::attachments::AttachmentSync {
+            namespace: "mod_a".into(),
+            name: "dual".into(),
+            value: Some([("net_v2".into(), Tag::Int(70))].into()),
+        }];
+        assert_eq!(reloaded.0.synced(project_sync_attachment), expected_v2);
+        key_v2.sync_data_in(&mut reloaded, Holder::Level).unwrap();
+        assert_eq!(
+            reloaded.0.take_sync_changes(project_sync_attachment),
+            expected_v2
+        );
+
+        // Unsyncing the active descriptor stops sending while keeping saved NBT intact.
+        let _unsynced = install_attachment_fixture(
+            "mod_a",
+            AttachmentDescriptor::new("mod_a:dual", || 0i32).serialize(disk_codec),
+        );
+        assert!(reloaded.0.synced(project_sync_attachment).is_empty());
+        assert_eq!(reloaded.0.to_nbt(), saved);
     }
 }

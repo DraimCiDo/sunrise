@@ -19,10 +19,13 @@ const COUNTER_CODEC: AttachmentCodec<i32> = AttachmentCodec {
     },
 };
 
-// Inside Hooks::register(&self, registrar: &mut dyn Registrar, _):
-let counter: AttachmentKey<i32> = registrar.register_attachment_type(
+// Inside Hooks::register(&self, registrar: &mut dyn Registrar, _) (returns `()`):
+// The registrar records any refusal on the load even if the Err branch is not handled.
+if let Ok(counter) = registrar.register_attachment_type(
     AttachmentDescriptor::new("example:counter", || 0).serialize(COUNTER_CODEC),
-)?;
+) {
+    *self.counter.write().unwrap() = Some(counter);
+}
 
 // Inside a server hook, or mixin code, with `host: &mut dyn ServerHost`:
 if !counter.has(host, Holder::Chunk([0, 0]))? { /* no counter stored */ }
@@ -41,9 +44,8 @@ of whether `namespace` matches the registering package's ID; the registering
 package is recorded as the attachment's owner (`key.owner()`), reported on
 duplicate declarations. Another package that depends on the owner looks up the
 same typed handle during `Hooks::register` with
-`registrar.attachment_key::<T>("namespace:name")?`, which refuses missing IDs
-with `AttachmentError::Undeclared` and mismatched Rust types with
-`AttachmentError::TypeMismatch`.
+`registrar.attachment_key::<T>("namespace:name")`, which returns `Err(AttachmentError::Undeclared)`
+for missing IDs and `Err(AttachmentError::TypeMismatch)` for mismatched Rust types.
 
 Cloning an `AttachmentKey<T>` is cheap (it shares the underlying registration)
 and preserves its installation identity. Keys retained from a prior installation
@@ -140,7 +142,9 @@ the acting player. Mutable level
 hosts can access their level, loaded chunks and block entities; read-only level hosts
 cannot access attachments. Unserialized values disappear on unload or restart. A saved
 value is stored under `sunrise:attachments`, then the mod namespace and attachment name,
-as `{value: <compound>, copy_on_death: 1b, sync: 1b}` (a flag is omitted when false).
+as `{value: <compound>, copy_on_death: 1b}` (omitting `copy_on_death` when false;
+client sync policy and sync projections are resolved from the active registered
+descriptor rather than stored in disk NBT).
 Unknown mods' saved entries survive load and save without being decoded. Level
 attachments use the dimension's `data/sunrise/attachments.dat` SavedData
 file, not `level.dat`.
