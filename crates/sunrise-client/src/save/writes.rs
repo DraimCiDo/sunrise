@@ -500,6 +500,16 @@ impl SaveDir {
     }
 }
 
+impl Drop for SaveDir {
+    /// Finish queued writes before the world is let go.
+    fn drop(&mut self) {
+        if let Some(writer) = self.writer.get_mut().ok().and_then(Option::take) {
+            drop(writer.send);
+            let _ = writer.thread.join();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -544,14 +554,32 @@ mod tests {
         save.queue(Folder::Poi, vec![(key, empty)], true).unwrap();
         assert!(!dir.path().join("poi/r.0.0.mca").exists());
     }
-}
 
-impl Drop for SaveDir {
-    /// Finish queued writes before the world is let go.
-    fn drop(&mut self) {
-        if let Some(writer) = self.writer.get_mut().ok().and_then(Option::take) {
-            drop(writer.send);
-            let _ = writer.thread.join();
-        }
+    #[test]
+    fn an_unexpected_writer_panic_releases_both_waits() {
+        let dir = tempfile::tempdir().unwrap();
+        let save = SaveDir::new(dir.path().to_path_buf(), LevelShape::OVERWORLD, None);
+        // Poison only the completion bookkeeping, so the writer unwinds after encoding.
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _errors = save.outstanding.record_errors.lock().unwrap();
+                panic!("injected writer bookkeeping panic");
+            }))
+            .is_err()
+        );
+        let (send, receive) = mpsc::channel();
+        let waiter = std::thread::spawn(move || {
+            save.write_records("region", vec![((0, 0), None)], false)
+                .unwrap();
+            let error = save.flush().unwrap_err();
+            assert!(!error.is::<RecordSaveFailures>());
+            assert_eq!(save.active_chunk_writes(), 0);
+            assert!(save.wait_for_chunk_writes_below(0).is_err());
+            send.send(()).unwrap();
+        });
+        receive
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap();
+        waiter.join().unwrap();
     }
 }

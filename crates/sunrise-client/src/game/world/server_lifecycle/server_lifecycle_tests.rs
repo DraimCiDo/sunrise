@@ -111,6 +111,64 @@ fn integrated_stop_finishes_after_an_unencodable_record() {
     });
 }
 
+#[test]
+#[ignore = "daily"]
+fn integrated_stop_propagates_storage_errors_even_after_a_record_refusal() {
+    use super::super::Dim;
+    use sunrise_client::save::{LevelShape, RecordSaveFailures, SaveDir, SessionLock};
+    use sunrise_core::nbt::{DISK_WRITE_NESTING_GUARD, Tag};
+
+    with_mods(Vec::new().into(), || {
+        with_game(|game| {
+            for mixed in [false, true] {
+                let root = tempfile::tempdir().unwrap();
+                game.world_root = root.path().to_path_buf();
+                game.save = Arc::new(SaveDir::new(
+                    game.world_root.clone(),
+                    LevelShape::OVERWORLD,
+                    Some(Default::default()),
+                ));
+                game.session_lock = Some(SessionLock::acquire(root.path()).unwrap());
+                game.world_adopted = true;
+                if mixed {
+                    // One refused record in the active dimension does not mask the parked
+                    // dimension's real storage error.
+                    let invalid = (0..=DISK_WRITE_NESTING_GUARD)
+                        .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
+                    game.save
+                        .save_entities_later(vec![((2, 0), vec![invalid])])
+                        .unwrap();
+                    assert!(game.save.flush().unwrap_err().is::<RecordSaveFailures>());
+                    game.enter_level(Dim::Nether).unwrap();
+                }
+                let blocked = game.save.root.join("entities");
+                std::fs::create_dir_all(&game.save.root).unwrap();
+                std::fs::write(&blocked, b"not a directory").unwrap();
+                game.save
+                    .save_entities_later(vec![(
+                        (3, 0),
+                        vec![Tag::compound([("marker", Tag::Int(1))])],
+                    )])
+                    .unwrap();
+                if mixed {
+                    game.enter_level(Dim::Overworld).unwrap();
+                }
+                let error = game
+                    .run_server_lifecycle(false, |_, began| {
+                        *began = true;
+                        Ok(())
+                    })
+                    .unwrap_err();
+                assert!(
+                    error.to_string().contains("failed to write entities files"),
+                    "{error}"
+                );
+                assert!(game.session_lock.is_none());
+            }
+        });
+    });
+}
+
 /// Exercise the real stop/save paths, not just direct calls to hook dispatch.
 #[test]
 #[ignore = "daily"]

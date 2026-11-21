@@ -2,4 +2,6 @@ sunrise-client game::levels::tests::an_idle_level_with_a_refused_record_stays_op
 sunrise-client game::levels::tests::save_all_reports_refusals_after_saving_each_level_and_metadata lib daily resources
 sunrise-client game::native_chunk_save::tests::an_unloaded_refusal_cannot_hide_a_later_edit_from_eager_saves lib daily resources
 sunrise-client game::native_chunk_save::tests::eager_ticks_do_not_retry_a_refused_snapshot_without_an_edit lib daily resources
+sunrise-client game::saving::tests::closing_and_control_saves_distinguish_refusals_from_storage_errors lib daily resources
 sunrise-client game::server_lifecycle::tests::integrated_stop_finishes_after_an_unencodable_record lib daily resources
+sunrise-client game::server_lifecycle::tests::integrated_stop_propagates_storage_errors_even_after_a_record_refusal lib daily resources

@@ -388,7 +388,7 @@ fn a_refused_save_keeps_its_disk_record_without_skipping_its_neighbour() {
     let before = read_disk();
     let mods = vec![mod_api::ModEntry::new(
         "chunk_disk_fixture",
-        Box::new(refuses_9::Refuses9),
+        Box::new(refuses_9::Refuses9::default()),
     )]
     .into();
     mod_platform::testing::with_mods(mods, || {
@@ -421,12 +421,16 @@ mod refuses_9 {
     use super::*;
 
     #[derive(Default)]
-    pub struct Refuses9;
+    pub struct Refuses9 {
+        pub seen: Arc<Mutex<Vec<i32>>>,
+    }
 
     #[mod_api::sunrise_mod]
     impl Hooks for Refuses9 {
         fn chunk_data_save(&self, _: &dyn ChunkDiskHost, event: &mut ChunkDataSaveEvent<'_>) {
-            if event.data.get(&fixture::VALUE).unwrap() == 9 {
+            let value = event.data.get(&fixture::VALUE).unwrap();
+            self.seen.lock().unwrap().push(value);
+            if value == 9 {
                 let broken = mod_api::AttachmentType {
                     codec: Some(mod_api::AttachmentCodec {
                         encode: |_| Err(mod_api::AttachmentError::Encode),
@@ -438,6 +442,114 @@ mod refuses_9 {
             }
         }
     }
+}
+
+#[test]
+fn a_coalesced_refusal_runs_its_callback_without_poisoning_the_newer_record() {
+    use std::time::Duration;
+
+    let (registry, biomes) = super::loot_tests::fixture();
+    let registry = Box::leak(Box::new(registry));
+    let biomes = Arc::new(biomes);
+    let dir = tempfile::tempdir().unwrap();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![mod_api::ModEntry::new(
+        "chunk_disk_fixture",
+        Box::new(refuses_9::Refuses9 { seen: seen.clone() }),
+    )]
+    .into();
+    mod_platform::testing::with_mods(mods, || {
+        let save = SaveDir::new(
+            dir.path().to_path_buf(),
+            LevelShape::OVERWORLD,
+            Some(Default::default()),
+        );
+        context(&save);
+        let (entered, wait_for_encoder) = mpsc::channel();
+        let (release, wait_for_release) = mpsc::channel();
+        let wait_for_release = Mutex::new(wait_for_release);
+        let blocker = Record::TestEncode(Arc::new(move || {
+            entered.send(()).unwrap();
+            wait_for_release
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(1))
+                .unwrap();
+            None
+        }));
+        save.queue(Folder::Region, vec![((0, 0), blocker)], false)
+            .unwrap();
+        wait_for_encoder
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        // Enqueue both revisions before the writer can drain its next pass.
+        save.save_later(&[Arc::new(chunk(9))], registry, &biomes)
+            .unwrap();
+        save.save_later(&[Arc::new(chunk(11))], registry, &biomes)
+            .unwrap();
+        release.send(()).unwrap();
+        save.flush().unwrap();
+        assert!(save.take_failed_chunk_saves().is_empty());
+        assert_eq!(*seen.lock().unwrap(), [9, 11]);
+        assert_eq!(disk_value(dir.path(), registry, &biomes), Some(11));
+    });
+}
+
+#[test]
+fn a_biome_admission_refusal_keeps_the_rest_of_the_batch_writable() {
+    let (registry, biomes) = super::loot_tests::fixture();
+    let registry: &'static BlockRegistry = Box::leak(Box::new(registry));
+    let names = (0..u16::MAX)
+        .map(|i| format!("test:biome_{i}"))
+        .collect::<Vec<_>>();
+    let exhausted = biomes.with_packs(
+        names
+            .iter()
+            .map(|name| (name.as_str(), &serde_json::Value::Null)),
+    );
+    assert_eq!(exhausted.saved_id("absent:last"), u16::MAX);
+    exhausted.saved_id("absent:overflow");
+    assert!(exhausted.ensure_saveable().is_err());
+    let biomes = Arc::new(biomes);
+    let encoding = |biomes| {
+        Arc::new(Encoding {
+            registry,
+            biomes,
+            items: Default::default(),
+            tables: None,
+            shape: LevelShape::OVERWORLD,
+        })
+    };
+    let record = |chunk, biomes| Record::Chunk(Arc::new(chunk), encoding(biomes), None);
+    let refused = record(chunk(9), Arc::new(exhausted));
+    let mut healthy = chunk(11);
+    healthy.x = 3;
+    let healthy = record(healthy, biomes.clone());
+    let dir = tempfile::tempdir().unwrap();
+    mod_platform::testing::with_mods(Vec::new().into(), || {
+        let open = || SaveDir::new(dir.path().to_path_buf(), LevelShape::OVERWORLD, None);
+        let save = open();
+        let error = save
+            .queue(
+                Folder::Region,
+                vec![((2, -3), refused), ((3, -3), healthy)],
+                true,
+            )
+            .unwrap_err();
+        assert!(
+            error
+                .downcast::<RecordSaveFailures>()
+                .unwrap()
+                .to_string()
+                .contains("region 2,-3:")
+        );
+        assert_eq!(save.take_failed_chunk_saves(), [(2, -3)]);
+        assert!(open().raw_chunk(2, -3).is_none());
+        assert_eq!(
+            value(&mut open().load(3, -3, registry, &biomes).unwrap()),
+            11
+        );
+    });
 }
 
 #[test]
@@ -486,6 +598,7 @@ fn an_unencodable_record_can_be_retried_without_a_disk_listener() {
             assert_eq!(read(other_region), Some(Tag::Int(4)));
             let error = error.downcast::<RecordSaveFailures>().unwrap().to_string();
             assert!(error.contains("region 2,-3:"), "{error}");
+            save.wait_for_chunk_writes_below(0).unwrap();
             if consume_failure_before_retry {
                 assert_eq!(save.take_failed_chunk_saves(), [key]);
             }
@@ -529,8 +642,9 @@ fn disk_write_failure_keeps_old_disk_7_and_snapshot_8_for_recovery() {
         context(&save);
         save.save_later(&[Arc::new(chunk(7))], registry, &biomes)
             .unwrap();
-        // A failure to write the file itself is not an isolated record refusal.
+        // A failure to write the file itself also fails the backpressure wait.
         assert!(!save.flush().unwrap_err().is::<RecordSaveFailures>());
+        assert!(save.wait_for_chunk_writes_below(0).is_err());
         assert_eq!(saves.load(Ordering::Relaxed), 1);
         // The chunk is marked for another attempt instead of silently clean.
         assert_eq!(save.take_failed_chunk_saves(), [(2, -3)]);

@@ -482,3 +482,66 @@ impl Game<'_> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::native_entity_refs::tests::with_game;
+    use std::sync::{Arc, mpsc};
+    use sunrise_client::save::{LevelShape, SaveDir};
+    use sunrise_core::nbt::{DISK_WRITE_NESTING_GUARD, Tag};
+
+    #[test]
+    #[ignore = "daily"]
+    fn closing_and_control_saves_distinguish_refusals_from_storage_errors() {
+        mod_platform::testing::with_mods(Vec::new().into(), || {
+            with_game(|game| {
+                for (quit, hard) in [(false, false), (true, false), (false, true), (true, true)] {
+                    let dir = tempfile::tempdir().unwrap();
+                    game.save = Arc::new(SaveDir::new(
+                        dir.path().to_path_buf(),
+                        LevelShape::OVERWORLD,
+                        None,
+                    ));
+                    let tag = if hard {
+                        std::fs::write(dir.path().join("entities"), b"not a directory").unwrap();
+                        Tag::compound([("marker", Tag::Int(7))])
+                    } else {
+                        (0..=DISK_WRITE_NESTING_GUARD)
+                            .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]))
+                    };
+                    game.save
+                        .save_entities_later(vec![((2, 0), vec![tag])])
+                        .unwrap();
+                    let error = game.save.flush().unwrap_err();
+                    assert_eq!(error.is::<RecordSaveFailures>(), !hard);
+                    let (send, receive) = mpsc::channel();
+                    game.pending_save = Some(ClosingSave {
+                        quit,
+                        close: quit,
+                        reply: (!quit).then_some(send),
+                        started: Instant::now(),
+                        stage: Stage::Writes,
+                    });
+                    game.saved_for_exit = false;
+                    game.message = None;
+                    let result = game.poll_closing_save();
+                    if hard {
+                        assert_eq!(result.unwrap_err().to_string(), error.to_string());
+                        assert!(game.pending_save.is_some());
+                    } else {
+                        assert_eq!(result.unwrap(), quit);
+                        assert!(game.pending_save.is_none());
+                    }
+                    if !quit {
+                        let reply: serde_json::Value =
+                            serde_json::from_str(&receive.try_recv().unwrap()).unwrap();
+                        assert_eq!(reply, serde_json::json!({"error": error.to_string()}));
+                    }
+                    assert_eq!(game.saved_for_exit, quit && !hard);
+                    assert!(game.message.is_none());
+                }
+            });
+        });
+    }
+}
