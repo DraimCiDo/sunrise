@@ -6,16 +6,18 @@ use std::{
 };
 
 use mod_api::{
-    AttachmentDescriptor, AttachmentKey, AttachmentType, BlockEntityPart, BlockEntityPartState,
-    BlockEntityRef, BlockEntityTickEvent, BlockPart, Hooks, HostTransaction, PartStateError,
-    Registrar, ServerHost, edit_part_state, read_state,
+    AttachmentDescriptor, AttachmentKey, BlockEntityPart, BlockEntityPartState, BlockEntityRef,
+    BlockEntityTickEvent, BlockPart, Hooks, HostTransaction, PartStateError, Registrar, ServerHost,
+    edit_part_state, read_state,
 };
 use sunrise_client::{
     chunk::Chunk,
     containers::{BlockEntity, ModBlockEntity},
 };
 use sunrise_core::nbt::{Compound, Tag};
-use sunrise_mod_runtime::attachments::{AttachmentCodec, AttachmentError, Attachments, Holder};
+use sunrise_mod_runtime::attachments::{
+    AttachmentCodec, AttachmentError, AttachmentType, Attachments, Holder,
+};
 
 use super::{Dim, Game};
 

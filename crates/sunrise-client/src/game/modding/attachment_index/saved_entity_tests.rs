@@ -1,11 +1,11 @@
 use super::*;
 use crate::game::native_entity_refs::tests::with_game;
-use mod_api::{
-    AttachmentDescriptor, AttachmentKey, AttachmentQueries, AttachmentQueriesMut, AttachmentType,
-};
+use mod_api::{AttachmentDescriptor, AttachmentKey, AttachmentQueries, AttachmentQueriesMut};
 use std::collections::HashSet;
 use sunrise_core::nbt::Tag;
-use sunrise_mod_runtime::attachments::{ATTACHMENTS_KEY, AttachmentCodec, AttachmentError};
+use sunrise_mod_runtime::attachments::{
+    ATTACHMENTS_KEY, AttachmentCodec, AttachmentError, AttachmentType,
+};
 
 static PROJECTILE_VALUE: AttachmentType<i32> = AttachmentType {
     namespace: "saved_projectile",

@@ -1,8 +1,7 @@
 use super::*;
 use crate::game::native_entity_refs::tests::with_game;
-use mod_api::{
-    AttachmentDescriptor, AttachmentKey, AttachmentRowError, AttachmentType, AttachmentWriteToken,
-};
+use mod_api::{AttachmentDescriptor, AttachmentKey, AttachmentRowError, AttachmentWriteToken};
+use sunrise_mod_runtime::attachments::AttachmentType;
 
 static VALUE: AttachmentType<u32> = AttachmentType {
     namespace: "boundary",

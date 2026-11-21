@@ -236,23 +236,16 @@ pub mod tests {
         }
     }
 
-    pub(crate) const ROBOT_ENERGY: AttachmentType<u32> = AttachmentType {
-        namespace: "test",
-        name: "energy",
-        default: || 0,
-        codec: None,
-        copy_on_death: false,
-        sync_codec: None,
-    };
-    /// A fluid attachment type for the tests.
-    pub const ROBOT_FLUID: AttachmentType<u32> = AttachmentType {
-        namespace: "test",
-        name: "fluid",
-        default: || 0,
-        codec: None,
-        copy_on_death: false,
-        sync_codec: None,
-    };
+    pub(crate) static ROBOT_FLUID_KEY: std::sync::Mutex<Option<AttachmentKey<u32>>> =
+        std::sync::Mutex::new(None);
+    /// The live fluid attachment key registered by `Doubler` for the tests.
+    pub fn robot_fluid_key() -> AttachmentKey<u32> {
+        ROBOT_FLUID_KEY
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("Doubler must be installed via game_thread() before reading robot_fluid_key()")
+    }
 
     /// A second test mod, sharing `CHEMICALS` and `Chemical` with the first, as a mod depending
     /// on another's `[api]` crate does: its vats answer the same capability.

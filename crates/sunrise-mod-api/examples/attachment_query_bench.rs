@@ -20,7 +20,7 @@ const VALUE_CODEC: AttachmentCodec<u32> = AttachmentCodec {
         _ => Err(AttachmentError::Decode),
     },
 };
-static VALUE_RAW: AttachmentType<u32> = AttachmentType {
+static VALUE_RAW: runtime::AttachmentType<u32> = runtime::AttachmentType {
     namespace: "bench",
     name: "value",
     default: || panic!("no defaults"),

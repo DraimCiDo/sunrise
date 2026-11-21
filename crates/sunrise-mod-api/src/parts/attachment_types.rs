@@ -288,7 +288,7 @@ mod tests {
             hook: "test",
             part: None,
         });
-        let key = crate::AttachmentType {
+        let key = sunrise_mod_runtime::attachments::AttachmentType {
             namespace: "a",
             name: "mana",
             default: || 37u32,
@@ -298,7 +298,7 @@ mod tests {
         };
         let mut store = Store(crate::Attachments::default());
         assert_eq!(key.get(&mut store, crate::Holder::Level), Ok(37));
-        let missing = crate::AttachmentType {
+        let missing = sunrise_mod_runtime::attachments::AttachmentType {
             namespace: "test_pkg",
             ..key
         };
@@ -449,10 +449,15 @@ mod tests {
         }
     }
 
-    struct ServerUser;
+    #[derive(Default)]
+    struct ServerUser(Arc<Mutex<Option<crate::AttachmentKey<u32>>>>);
     impl crate::Hooks for ServerUser {
         fn subscribed(&self) -> &'static [Option<crate::HookId>] {
             &[]
+        }
+        fn register(&self, registrar: &mut dyn crate::Registrar, _: &crate::RegistrationContext) {
+            let key = registrar.attachment_key::<u32>("a:mana").unwrap();
+            *self.0.lock().unwrap() = Some(key);
         }
     }
 
@@ -464,9 +469,10 @@ mod tests {
                 package("b", crate::Side::Server),
             ],
             || {
+                let key_slot = Arc::new(Mutex::new(None));
                 let mods = [
                     crate::ModEntry::new("a", Box::new(SyncedOwner)),
-                    crate::ModEntry::new("b", Box::new(ServerUser)),
+                    crate::ModEntry::new("b", Box::new(ServerUser(Arc::clone(&key_slot)))),
                 ];
                 crate::__private::install_parts(&mods, &crate::parts::tests::rule_schema(), |_| {
                     false
@@ -479,22 +485,9 @@ mod tests {
                         hook: "test",
                         part: None,
                     });
-                let codec = u32_codec();
-                let key = crate::AttachmentType {
-                    namespace: "a",
-                    name: "mana",
-                    default: || 37u32,
-                    codec: Some(codec),
-                    copy_on_death: false,
-                    sync_codec: Some(codec),
-                };
-                assert_eq!(
-                    key.get(
-                        &mut Store(crate::Attachments::default()),
-                        crate::Holder::Level
-                    ),
-                    Ok(37)
-                );
+                let key = key_slot.lock().unwrap().take().unwrap();
+                let mut host = crate::testing::FakeHost::default();
+                assert_eq!(key.get(&mut host, crate::Holder::Level), Ok(37));
             },
         );
     }
@@ -509,7 +502,7 @@ mod tests {
             || {
                 let mods = [
                     crate::ModEntry::new("a", Box::new(SyncedOwner)),
-                    crate::ModEntry::new("b", Box::new(ServerUser)),
+                    crate::ModEntry::new("b", Box::new(ServerUser::default())),
                 ];
                 assert_eq!(
                     crate::__private::install_parts(&mods, &crate::parts::tests::rule_schema(), |_| {

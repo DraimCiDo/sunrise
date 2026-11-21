@@ -7,8 +7,8 @@ use std::{
 };
 
 use mod_api::{
-    AttachmentDescriptor, AttachmentKey, AttachmentType, EntityPart, EntityPartState, EntityRef,
-    Hooks, HostTransaction, PartStateError, Registrar, ServerHost, WorldEpoch, edit_part_state,
+    AttachmentDescriptor, AttachmentKey, EntityPart, EntityPartState, EntityRef, Hooks,
+    HostTransaction, PartStateError, Registrar, ServerHost, WorldEpoch, edit_part_state,
     read_state,
 };
 use sunrise_client::chunk::Chunk;
@@ -16,7 +16,9 @@ use sunrise_core::{
     geometry::Vec3,
     nbt::{Compound, Tag},
 };
-use sunrise_mod_runtime::attachments::{AttachmentCodec, AttachmentError, Attachments, Holder};
+use sunrise_mod_runtime::attachments::{
+    AttachmentCodec, AttachmentError, AttachmentType, Attachments, Holder,
+};
 
 use super::{Dim, Game};
 

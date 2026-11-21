@@ -1,9 +1,8 @@
 use super::*;
 use crate::game::native_entity_refs::tests::with_game;
-use mod_api::{
-    AttachmentDescriptor, AttachmentKey, AttachmentQueries, AttachmentQueriesMut, AttachmentType,
-};
+use mod_api::{AttachmentDescriptor, AttachmentKey, AttachmentQueries, AttachmentQueriesMut};
 use sunrise_core::nbt::Tag;
+use sunrise_mod_runtime::attachments::AttachmentType;
 
 static VALUE: AttachmentType<i32> = AttachmentType {
     namespace: "test",

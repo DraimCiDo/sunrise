@@ -130,10 +130,10 @@ pub mod tests {
         assert_eq!(ok_registrar.entity_part_states.len(), 1);
     }
 
-    pub(crate) struct EntityBattery(pub(crate) EntityRef);
+    pub(crate) struct EntityBattery(pub(crate) EntityRef, pub(crate) AttachmentKey<u32>);
     impl EnergyHandler for EntityBattery {
         fn amount(&self, host: &mut dyn ServerHost) -> u32 {
-            ROBOT_ENERGY
+            self.1
                 .get_existing(host, Holder::Entity(self.0.id()))
                 .unwrap()
                 .unwrap_or(0)
@@ -144,7 +144,7 @@ pub mod tests {
         fn insert(&self, host: &mut dyn ServerHost, _: &Transaction, amount: u32) -> u32 {
             let held = self.amount(host);
             let moved = amount.min(1000 - held);
-            ROBOT_ENERGY
+            self.1
                 .set(host, Holder::Entity(self.0.id()), held + moved)
                 .unwrap();
             moved
@@ -152,14 +152,14 @@ pub mod tests {
         fn extract(&self, host: &mut dyn ServerHost, _: &Transaction, amount: u32) -> u32 {
             let held = self.amount(host);
             let moved = amount.min(held);
-            ROBOT_ENERGY
+            self.1
                 .set(host, Holder::Entity(self.0.id()), held - moved)
                 .unwrap();
             moved
         }
     }
 
-    pub(crate) struct EntityTank(pub(crate) EntityRef);
+    pub(crate) struct EntityTank(pub(crate) EntityRef, pub(crate) AttachmentKey<u32>);
     impl ResourceHandler<FluidResource> for EntityTank {
         fn size(&self, _: &mut dyn ServerHost) -> usize {
             1
@@ -173,7 +173,7 @@ pub mod tests {
             })
         }
         fn amount(&self, host: &mut dyn ServerHost, _: usize) -> u32 {
-            ROBOT_FLUID
+            self.1
                 .get_existing(host, Holder::Entity(self.0.id()))
                 .unwrap()
                 .unwrap_or(0)
@@ -211,7 +211,7 @@ pub mod tests {
                 self.capacity(host, index, Some(resource))
                     .saturating_sub(held),
             );
-            ROBOT_FLUID
+            self.1
                 .set(host, Holder::Entity(self.0.id()), held + moved)
                 .unwrap();
             moved
@@ -230,7 +230,7 @@ pub mod tests {
             } else {
                 0
             };
-            ROBOT_FLUID
+            self.1
                 .set(host, Holder::Entity(self.0.id()), held - moved)
                 .unwrap();
             moved

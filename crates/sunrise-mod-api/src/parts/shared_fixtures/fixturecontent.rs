@@ -2,11 +2,6 @@ pub(crate) struct FixtureContent;
 #[mod_api::__subscriptions]
 impl Hooks for FixtureContent {
     fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
-        for id in ["test:hoard", "test:energy", "test:fluid"] {
-            r.register_attachment_type(crate::AttachmentDescriptor::new(id, || ()))
-                .unwrap();
-        }
-
         r.declare_fluid("potion");
         for id in CAPABILITY_TYPES {
             r.block_entity_type(id)

@@ -1,0 +1,25 @@
+# AttachmentEntry was #[doc(hidden)] on its definition and unnamed in any public signature,
+# so it has no exported surface ID.
+ids = [
+    "type:AttachmentType",
+    "type:AttachmentType.namespace",
+    "type:AttachmentType.name",
+    "type:AttachmentType.default",
+    "type:AttachmentType.codec",
+    "type:AttachmentType.copy_on_death",
+    "type:AttachmentType.sync",
+    "handle:AttachmentType::get",
+    "handle:AttachmentType::has",
+    "handle:AttachmentType::get_existing",
+    "handle:AttachmentType::with_decoded",
+    "handle:AttachmentType::set",
+    "handle:AttachmentType::remove",
+    "handle:AttachmentType::sync_data",
+]
+why = "Retire AttachmentType and AttachmentEntry from the mod_api surface now that every mod-API attachment operation uses a typed AttachmentDescriptor registered once during Hooks::register and the issued AttachmentKey<T> it returns, matching NeoForge's single-registration AttachmentType model (net.neoforged.neoforge.attachment.AttachmentType / NeoForgeRegistries.Keys.ATTACHMENT_TYPES)."
+migrate = '''
+- Replace static `AttachmentType<T>` definitions with `let key: AttachmentKey<T> = r.register_attachment_type(AttachmentDescriptor::new("ns:name", default))?;` inside `Hooks::register`, chaining `.serialize(codec)`, `.sync(sync_codec)`, and `.copy_on_death()` as needed.
+- To access another package's attachment, declare a dependency on its owner and call `r.attachment_key::<T>("ns:name")?` during registration.
+- Store the issued `AttachmentKey<T>` on your mod, hook listener, or Part and call `key.{get,has,get_existing,set,remove,sync_data}(host, holder)` (or `*_in(level, holder)` on a `LevelRandomHost`).
+- `AttachmentEntry` is no longer re-exported from `mod_api`; inspect typed attachment values through `AttachmentKey<T>` or `AttachmentQueries` (`host.query(&key)` / `host.query_mut(&key)`).
+'''

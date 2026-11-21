@@ -2,7 +2,8 @@
 //! connection and LAN TCP: who is sent values, in which order, what a rollback and a stale
 //! epoch send, and what an oversized message does to the connection.
 use super::super::Game;
-use mod_api::{AttachmentCodec, AttachmentStore, AttachmentType, Host};
+use mod_api::{AttachmentCodec, AttachmentKey, Host};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use sunrise_core::nbt::Tag;
 use sunrise_mod_runtime::attachments::Holder;
@@ -25,14 +26,7 @@ pub(super) const VALUE_CODEC: AttachmentCodec<i32> = AttachmentCodec {
     },
 };
 
-pub(super) static VALUE: AttachmentType<i32> = AttachmentType {
-    namespace: "sync_route",
-    name: "value",
-    default: || 0,
-    codec: Some(VALUE_CODEC),
-    copy_on_death: false,
-    sync_codec: Some(VALUE_CODEC),
-};
+static VALUE_KEY: Mutex<Option<AttachmentKey<i32>>> = Mutex::new(None);
 const BLOB_CODEC: AttachmentCodec<Vec<u8>> = AttachmentCodec {
     encode: |bytes| Ok([("b".into(), Tag::ByteArray(bytes.clone()))].into()),
     decode: |c| match c.get(&"b".into()) {
@@ -41,19 +35,28 @@ const BLOB_CODEC: AttachmentCodec<Vec<u8>> = AttachmentCodec {
     },
 };
 /// A value past every network frame limit, and incompressible.
-static BLOB: AttachmentType<Vec<u8>> = AttachmentType {
-    namespace: "sync_route",
-    name: "blob",
-    default: Vec::new,
-    codec: Some(BLOB_CODEC),
-    copy_on_death: false,
-    sync_codec: Some(BLOB_CODEC),
-};
+static BLOB_KEY: Mutex<Option<AttachmentKey<Vec<u8>>>> = Mutex::new(None);
+
+pub(super) fn value_key() -> AttachmentKey<i32> {
+    VALUE_KEY
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("Route must be registered before reading value_key()")
+}
+
+fn blob_key() -> AttachmentKey<Vec<u8>> {
+    BLOB_KEY
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("Route must be registered before reading blob_key()")
+}
 
 /// A mod with no hooks: with a mod loaded, the server sends joining players snapshots.
 #[derive(Default)]
 pub(super) struct Route {
-    value: std::sync::Arc<std::sync::Mutex<Option<mod_api::AttachmentKey<i32>>>>,
+    value: std::sync::Arc<Mutex<Option<AttachmentKey<i32>>>>,
 }
 #[mod_api::__subscriptions]
 impl mod_api::Hooks for Route {
@@ -65,31 +68,28 @@ impl mod_api::Hooks for Route {
                     .sync(VALUE_CODEC),
             )
             .unwrap();
+        *VALUE_KEY.lock().unwrap() = Some(value.clone());
         *self.value.lock().unwrap() = Some(value);
-        registrar
+        let blob = registrar
             .register_attachment_type(
                 mod_api::AttachmentDescriptor::new("sync_route:blob", Vec::<u8>::new)
                     .serialize(BLOB_CODEC)
                     .sync(BLOB_CODEC),
             )
             .unwrap();
+        *BLOB_KEY.lock().unwrap() = Some(blob);
     }
-}
-
-/// The server's own attachment store.
-pub(super) fn store<'a>(server: &'a mut Game<'_>) -> &'a mut dyn AttachmentStore {
-    let host: &mut dyn Host = server;
-    host.attachments()
 }
 
 /// The server sets the level's value, committed or rolled back.
 pub(super) fn set_level(game: &Game<'_>, value: i32, commit: bool) {
+    let key = value_key();
     game.integrated
         .as_ref()
         .unwrap()
         .call(move |server| {
             let seal = server.transaction_open();
-            VALUE.set(store(server), Holder::Level, value).unwrap();
+            key.set(server, Holder::Level, value).unwrap();
             server.transaction_close(&seal, commit);
         })
         .unwrap();
@@ -393,23 +393,26 @@ fn attachment_sync_follows_the_negotiated_route() {
             set_level(game, 11, false);
             set_level(game, 12, true);
             assert_eq!(values_until(&mut sunrise, Holder::Level, 12), [12]);
-            let authority = game
-                .integrated
-                .as_ref()
-                .unwrap()
-                .call(|server| VALUE.get(store(server), Holder::Level))
-                .unwrap();
+            let authority = {
+                let key = value_key.clone();
+                game.integrated
+                    .as_ref()
+                    .unwrap()
+                    .call(move |server| key.get(server, Holder::Level))
+                    .unwrap()
+            };
             assert_eq!(authority, Ok(12));
             // A vanilla peer is sent nothing, before or after.
             assert_eq!(sync_packets_within(&mut vanilla, Duration::from_secs(2)), 0);
 
             // Past the network frame limits: refused by name, the peer stays joined and is
             // sent the next value. The memory connection has no frame limit.
+            let blob_key = blob_key();
             let refused = game
                 .integrated
                 .as_ref()
                 .unwrap()
-                .call(|server| {
+                .call(move |server| {
                     let blob: Vec<u8> = (0u32..9 << 20)
                         .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
                         .collect();
@@ -436,7 +439,7 @@ fn attachment_sync_follows_the_negotiated_route() {
                         .clone();
                     let refused = server.queue_attachment_sync(&peer, &body);
                     // The same value through the level's own pass, as a mod's edit sends it.
-                    BLOB.set(store(server), Holder::Level, blob).unwrap();
+                    blob_key.set(server, Holder::Level, blob).unwrap();
                     refused
                 })
                 .unwrap();
