@@ -23,8 +23,8 @@ layers remain in place for the next callback. Only a panic disables the register
 The client keeps the callback for the session and calls it as the mod that installed it. Capture
 any state the layer needs in the closure, and use the current `ClientHost` and `DrawContext`
 passed on each draw. All slots, including ones inserted with `register`, dispatch in order during
-the in-world HUD pass, even under F1. A `Flow::Cancel` from `render_gui_pre` skips every slot;
-`gui_layer_pre` can cancel just one.
+the in-world HUD pass, even under F1 and during replay. A `Flow::Cancel` from `render_gui_pre`
+skips every slot, including the sleep and subtitle overlays; `gui_layer_pre` can cancel just one.
 
 ### Replacing or wrapping a layer
 
@@ -36,8 +36,13 @@ and order. A replacement does not inherit the original body's eligibility checks
 a crosshair replacement runs in third person, where the vanilla crosshair does not paint.
 Those checks apply only to the original body, including when a wrapper calls `draw_previous()`
 and reaches it. To hide your own paint under F1, check
-`host.hud_mode() == mod_api::HudMode::AllVisible`. The `minecraft:chat` slot is for background
-chat; focused chat draws separately as part of the chat screen.
+`host.hud_mode() == mod_api::HudMode::AllVisible`.
+
+The `minecraft:chat` slot is only for background chat. `customize_chat_overlay` fires when the
+original body draws unfocused messages. Change `event.x` and `event.y` to move that paint. It
+does not move the focused message list, which the chat screen draws separately. For custom
+paint on that screen, use `screen_render_pre` or `screen_render_post`, check
+`event.screen.id == "chat"`, and draw with `event.draw`.
 
 A wrapper gets a `GuiLayerWrapContext`: read the client with `host()`, paint with the scoped
 `DrawContext` from `with_draw`, and call `draw_previous()` where the previous body should paint.

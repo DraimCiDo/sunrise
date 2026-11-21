@@ -1637,9 +1637,18 @@ impl Game<'_> {
             screen.suggest_command(&m, &c, &next);
         }
     }
-    /// Chat lines over the HUD (focused while the chat screen is open).
-    pub(super) fn draw_chat(&mut self, batch: &mut HudBatch) {
-        let focused = self.screen == Screen::Chat;
+    /// Original background chat body: `Hud.extractChat` lets mods move its paint.
+    pub(super) fn draw_background_chat(&mut self, batch: &mut HudBatch) {
+        let (width, height) = (batch.width as i32, batch.height as i32);
+        let home_y = height - 40;
+        let (mut x, mut y) = (0, home_y);
+        self.native_customize_chat_overlay(width, height, &mut x, &mut y);
+        let offset = [x as f32, (i64::from(y) - i64::from(home_y)) as f32];
+        self.draw_chat(batch, false, offset);
+    }
+
+    /// Shared message paint for the HUD and the chat screen.
+    fn draw_chat(&mut self, batch: &mut HudBatch, focused: bool, offset: [f32; 2]) {
         let options = self.pvp_chat();
         self.ui.chat.set_qol(&self.gui.atlas, options.qol());
         // A search ends with its option; a chat closed some other way ends it in keep_chat_draft.
@@ -1660,9 +1669,6 @@ impl Game<'_> {
         self.ui.chat.search_prompt = focused && self.pvp.chat_search;
         // `ChatComponent`'s queue row: the messages Chat Delay holds back.
         self.ui.chat.queue = self.chat_queue_len();
-        if self.ui.hide_gui && !focused {
-            return;
-        }
         let revision = self.inline_images_revision();
         if self.ui.chat.inline_images_stale(revision) {
             // Layout borrows a read-only Host while asking listeners.
@@ -1677,13 +1683,6 @@ impl Game<'_> {
         // The fractional tick makes the smooth chat extra's slide move every
         // frame; vanilla's fade reads it too.
         let now = self.visual_ticks() as f32 + self.clock.fraction() as f32;
-        // NeoForge's `CustomizeGuiOverlayEvent.Chat`: a mod may move the chat's bottom-left
-        // corner, and the chat is drawn shifted by as much (`Gui.renderChat`'s translate).
-        let (width, height) = (batch.width as i32, batch.height as i32);
-        let (home_x, home_y) = (0, height - 40);
-        let (mut x, mut y) = (home_x, home_y);
-        self.native_customize_chat_overlay(width, height, focused, &mut x, &mut y);
-        let offset = [(x - home_x) as f32, (y - home_y) as f32];
         self.ui
             .chat
             .draw_at(batch, &self.gui.atlas, now, focused, offset);
@@ -1725,8 +1724,8 @@ impl Game<'_> {
     }
     pub(super) fn draw_chat_screen(&mut self, batch: &mut HudBatch) {
         self.draw_screen_phase(batch, sunrise_client::screen_draw::RenderPhase::Background);
-        // ChatScreen extracts the focused chat separately from Hud's background chat layer.
-        self.draw_chat(batch);
+        // ChatScreen paints focused chat in vanilla's position, independently of the HUD slot.
+        self.draw_chat(batch, true, [0.0; 2]);
         let Some(mut screen) = self.ui.chat_screen.take() else {
             self.draw_screen_phase(batch, sunrise_client::screen_draw::RenderPhase::Foreground);
             return;

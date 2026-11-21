@@ -7233,33 +7233,19 @@ impl Game<'_> {
         let spectator = self.spectator();
         let (wi, hi) = (w as i32, h as i32);
         let mut gui_canceled = false;
-        let replaying = self.replay.playing();
-        // GuiLayerManager posts RenderGuiEvent.Pre even when F1 hides vanilla paint.
-        if !replaying || !self.ui.hide_gui {
-            self.native_render_gui_pre(&mut gui_canceled);
-        }
-        // The veto covers the HUD pass, not mandatory diagnostics.
-        let dispatch_hud = !gui_canceled && !replaying;
-        let presentation_hidden = self.ui.hide_gui || replaying;
-        let show_hud = dispatch_hud && !self.ui.hide_gui;
-        // Hud.extractRenderState asks `Screen.isInGameUi` twice: such a screen
-        // defers the subtitles over itself, and keeps them while F1 hides the
-        // rest of the HUD.
-        let subtitles = subtitles(
-            show_hud,
-            in_game_ui(self.screen, self.book.is_some() || self.sign_edit.is_some()),
-        );
-        let draw_sleep = &mut |g: &mut Self, batch: &mut HudBatch| {
-            let draws = hud_overlays::sleep_overlay(wi, hi, g.sleep_timer as i32);
-            hud_layout::paint(batch, &g.gui.atlas, &draws);
-        };
+        // GuiLayerManager posts RenderGuiEvent.Pre even when the vanilla HUD is hidden.
+        self.native_render_gui_pre(&mut gui_canceled);
+        // Replay hides vanilla paint like F1, not the slots. The veto covers the HUD
+        // pass in both cases, but not mandatory diagnostics.
+        let presentation_hidden = self.ui.hide_gui || self.replay.playing();
+        let show_hud = !gui_canceled && !presentation_hidden;
         self.ui.room = self.hud_room(w, h, show_hud);
         let mut guide_from = 0;
         if show_hud {
             self.draw_spyglass(&mut batch);
             guide_from = batch.vertices.len();
         }
-        if dispatch_hud {
+        if !gui_canceled {
             self.hud_layer_next = Some(0);
             // Combat feel Legacy hides the attack indicator unless the player keeps it.
             let indicator = if show_hud && !self.pvp_hides_attack_indicator() {
@@ -7539,8 +7525,15 @@ impl Game<'_> {
                     }
                 },
             );
-            // Hud.extractSleepOverlay paints even when F1 hides the other vanilla bodies.
-            self.gui_layer(VanillaGuiLayer::SleepOverlay, &mut batch, draw_sleep);
+            // Hud.extractSleepOverlay paints even when the other vanilla bodies are hidden.
+            self.gui_layer(
+                VanillaGuiLayer::SleepOverlay,
+                &mut batch,
+                &mut |g, batch| {
+                    let draws = hud_overlays::sleep_overlay(wi, hi, g.sleep_timer as i32);
+                    hud_layout::paint(batch, &g.gui.atlas, &draws);
+                },
+            );
             self.gui_layer(
                 VanillaGuiLayer::OverlayMessage,
                 &mut batch,
@@ -7568,7 +7561,10 @@ impl Game<'_> {
                 VanillaGuiLayer::SubtitleOverlay,
                 &mut batch,
                 &mut |g, batch| {
-                    if subtitles != Subtitles::Hidden {
+                    // Hud.extractRenderState keeps deferred subtitles for an in-game
+                    // screen even when the rest of its vanilla paint is hidden.
+                    let in_game = in_game_ui(g.screen, g.book.is_some() || g.sign_edit.is_some());
+                    if subtitles(show_hud, in_game) != Subtitles::Hidden {
                         g.draw_subtitles(batch);
                     }
                 },
@@ -7583,8 +7579,12 @@ impl Game<'_> {
             }
             // The chat screen draws focused chat; the background slot still dispatches.
             self.gui_layer(VanillaGuiLayer::Chat, &mut batch, &mut |g, batch| {
-                if show_hud && g.screen != Screen::Chat && !g.overlay_holds_view() {
-                    g.draw_chat(batch);
+                if show_hud
+                    && g.player.is_some()
+                    && g.screen != Screen::Chat
+                    && !g.overlay_holds_view()
+                {
+                    g.draw_background_chat(batch);
                 }
             });
             self.gui_layer(VanillaGuiLayer::TabList, &mut batch, &mut |g, batch| {
@@ -7594,12 +7594,6 @@ impl Game<'_> {
             });
             self.draw_mod_gui_layers(None, &mut batch);
             self.hud_layer_next = None;
-        } else if replaying {
-            // Replay's HUD-free view still draws the sleep tint and deferred screen subtitles.
-            draw_sleep(self, &mut batch);
-            if subtitles == Subtitles::Deferred {
-                self.draw_subtitles(&mut batch);
-            }
         }
         // Screen.extractBlurredBackground blurs the world and HUD, while the
         // screen's background, widgets, toasts and debug overlay stay sharp.

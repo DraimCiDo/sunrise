@@ -6,7 +6,7 @@ pub trait Hooks {
     /// layer through `event.draw`, or return `Flow::Cancel` to skip its entire body
     /// (including its render bookkeeping) and `gui_layer_post`. Gameplay ticks are unaffected.
     /// Each slot fires this once with its original ID, even when the vanilla body would not
-    /// paint. This includes F1 and third-person view for the crosshair.
+    /// paint. This includes F1, replay and third-person view for the crosshair.
     /// To change a layer's body rather than veto the whole slot, wrap or replace it
     /// at startup in `register_gui_layers`.
     ///

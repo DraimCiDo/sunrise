@@ -43,8 +43,8 @@ pub trait GuiLayerRegistrar {
     /// Returns false and logs a warning if the ID is malformed, in the `minecraft` namespace,
     /// already registered, or relative to a layer that is not registered yet. A rejected
     /// registration does not reserve the ID; use `replace_layer` or `wrap_layer` to edit one.
-    /// The slot dispatches during the in-world HUD pass, even under F1. Check
-    /// [`ClientHost::hud_mode`] inside the draw callback if your paint should hide with F1.
+    /// The slot dispatches during the in-world HUD pass, even under F1 and during replay.
+    /// Check [`ClientHost::hud_mode`] inside the draw callback if your paint should hide with F1.
     fn register(
         &mut self,
         id: String,

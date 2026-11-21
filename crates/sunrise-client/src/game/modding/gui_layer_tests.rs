@@ -5,9 +5,10 @@ use super::{
     native_entity_refs::tests::{run_fresh_cases, with_client_game},
 };
 use mod_api::{
-    ClientHost, Flow, GuiLayerPlacement, GuiLayerPostEvent, GuiLayerPreEvent, Hooks, ModEntry,
-    PlayerHeartTypeEvent, RegisterGuiLayersEvent, RegistrationContext, RenderGuiPreEvent,
-    client::hud_layout::GuiDraw, content::crash::current_native_mod,
+    ClientHost, CustomizeChatOverlayEvent, Flow, GuiLayerPlacement, GuiLayerPostEvent,
+    GuiLayerPreEvent, Hooks, ModEntry, PlayerHeartTypeEvent, RegisterGuiLayersEvent,
+    RegistrationContext, RenderGuiPreEvent, client::hud_layout::GuiDraw,
+    content::crash::current_native_mod,
 };
 use std::sync::{
     Arc, Mutex,
@@ -571,6 +572,20 @@ fn skipped_vanilla_hud_bodies_still_dispatch_their_slots() {
                 GuiLayerPlacement::Above(CROSSHAIR.into()),
                 Box::new(|_, _| log("inserted layer")),
             ));
+            assert!(event.layers.replace_layer(
+                CHAT,
+                Box::new(|_, _| {
+                    log("replacement background chat");
+                })
+            ));
+        }
+
+        fn customize_chat_overlay(
+            &self,
+            _: &mut dyn ClientHost,
+            _: &mut CustomizeChatOverlayEvent,
+        ) {
+            log("customize background chat");
         }
 
         fn render_gui_pre(&self, _: &dyn ClientHost, _: &mut RenderGuiPreEvent) -> Flow {
@@ -606,15 +621,29 @@ fn skipped_vanilla_hud_bodies_still_dispatch_their_slots() {
                 game.player =
                     Some(PlayerMotion::new(game.motion, Vec3::new(2.0, 64.0, 2.0)).unwrap());
                 game.camera_type = CameraType::ThirdPersonBack;
-                for (hidden, screen) in [
-                    (false, super::Screen::Playing),
-                    (true, super::Screen::Playing),
-                    (false, super::Screen::Chat),
-                ] {
+                game.screen = super::Screen::Playing;
+                // A unique glyph color lets us distinguish the seeded message from the
+                // chat input box and all other screen paint, regardless of its opacity.
+                const MESSAGE_RGB: u32 = 0x27_CB_27;
+                assert!(game.add_chat_line(
+                    sunrise_client::text::Text::colored("focused chat fixture", MESSAGE_RGB),
+                    sunrise_client::chat::ChatSource::Player,
+                ));
+                for (hidden, focused) in [(false, false), (true, false), (false, true)] {
                     game.ui.hide_gui = hidden;
-                    game.screen = screen;
+                    if focused {
+                        game.open_chat_method("");
+                        assert!(game.ui.chat_screen.is_some());
+                    }
                     let batch = game.hud_layers([640, 480]);
                     assert!(batch.vertices.iter().any(|v| v.color == MARKER));
+                    let (hud, screen) = batch.vertices.split_at(batch.blur_at as usize);
+                    assert!(!hud.iter().any(|v| v.color & 0xFF_FFFF == MESSAGE_RGB));
+                    assert_eq!(
+                        screen.iter().any(|v| v.color & 0xFF_FFFF == MESSAGE_RGB),
+                        focused,
+                        "only the real chat screen paints the message after its HUD slot was replaced",
+                    );
                     assert_eq!(
                         take(),
                         [
@@ -627,6 +656,7 @@ fn skipped_vanilla_hud_bodies_still_dispatch_their_slots() {
                             "pre minecraft:sleep_overlay",
                             "post minecraft:sleep_overlay",
                             "pre minecraft:chat",
+                            "replacement background chat",
                             "post minecraft:chat",
                         ],
                     );
@@ -636,7 +666,195 @@ fn skipped_vanilla_hud_bodies_still_dispatch_their_slots() {
                 veto.store(true, Ordering::Relaxed);
                 let batch = game.hud_layers([640, 480]);
                 assert!(!batch.vertices.iter().any(|v| v.color == MARKER));
+                assert!(
+                    batch
+                        .vertices
+                        .iter()
+                        .any(|v| v.color & 0xFF_FFFF == MESSAGE_RGB)
+                );
                 assert!(take().is_empty());
+            })
+        },
+    );
+}
+
+#[test]
+#[ignore = "daily"]
+fn replay_sleep_and_subtitle_slots_share_the_hud_pass() {
+    use sunrise_client::{
+        hud::rgba,
+        studio::{McprWriter, ReplayDriver},
+    };
+    use sunrise_protocol::{buf::Reader, packets::play};
+
+    if run_fresh_cases(
+        "game::gui_layer_tests::replay_sleep_and_subtitle_slots_share_the_hud_pass",
+        "SUNRISE_REPLAY_HUD_FIXTURE",
+        &["run"],
+    ) {
+        return;
+    }
+
+    const SLEEP: &str = "minecraft:sleep_overlay";
+    const SUBTITLES: &str = "minecraft:subtitle_overlay";
+    const MARKER: u32 = 0xFF73_7373;
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Veto {
+        None,
+        Sleep,
+        Hud,
+    }
+
+    struct ReplaySlots(Arc<Mutex<Veto>>);
+
+    #[mod_api::__subscriptions]
+    impl Hooks for ReplaySlots {
+        fn register_gui_layers(
+            &self,
+            _: &RegistrationContext,
+            event: &mut RegisterGuiLayersEvent<'_>,
+        ) {
+            assert!(event.layers.replace_layer(
+                SLEEP,
+                Box::new(|_, draw| {
+                    log("replacement sleep");
+                    draw.fill([20.0, 20.0, 8.0, 4.0], MARKER);
+                })
+            ));
+            assert!(event.layers.wrap_layer(
+                SUBTITLES,
+                Box::new(|ctx| {
+                    log("wrapped subtitles");
+                    ctx.draw_previous();
+                })
+            ));
+        }
+
+        fn render_gui_pre(&self, _: &dyn ClientHost, _: &mut RenderGuiPreEvent) -> Flow {
+            log("pre HUD");
+            if *self.0.lock().unwrap() == Veto::Hud {
+                Flow::Cancel
+            } else {
+                Flow::Continue
+            }
+        }
+
+        fn gui_layer_pre(&self, _: &dyn ClientHost, event: &mut GuiLayerPreEvent<'_>) -> Flow {
+            if matches!(event.layer, SLEEP | SUBTITLES) {
+                log(format!("pre {}", event.layer));
+            }
+            if event.layer == SLEEP && *self.0.lock().unwrap() == Veto::Sleep {
+                Flow::Cancel
+            } else {
+                Flow::Continue
+            }
+        }
+
+        fn gui_layer_post(&self, _: &dyn ClientHost, event: &mut GuiLayerPostEvent<'_>) {
+            if matches!(event.layer, SLEEP | SUBTITLES) {
+                log(format!("post {}", event.layer));
+            }
+        }
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("hud.mcpr");
+    // A replay only needs its initial Play Login packet for this extraction fixture.
+    let login = play::Clientbound::Login(play::Login {
+        player_id: 1,
+        hardcore: false,
+        levels: vec!["minecraft:overworld".into()],
+        max_players: 1,
+        chunk_radius: 8,
+        simulation_distance: 8,
+        reduced_debug_info: false,
+        show_death_screen: true,
+        limited_crafting: false,
+        spawn: play::SpawnInfo {
+            dimension_type: 0,
+            dimension: "minecraft:overworld".into(),
+            seed: 0,
+            game_type: 0,
+            previous_game_type: None,
+            debug: false,
+            flat: false,
+            last_death: None,
+            portal_cooldown: 0,
+            sea_level: 63,
+        },
+        online_mode: false,
+        enforces_secure_chat: false,
+    })
+    .encode();
+    let mut packet = Reader::new(&login);
+    let id = packet.varint().unwrap();
+    let mut recording = McprWriter::new(path, Default::default()).unwrap();
+    recording.write_packet(0, id, packet.rest()).unwrap();
+    let path = recording.finish(1000).unwrap();
+
+    let veto = Arc::new(Mutex::new(Veto::None));
+    mod_platform::testing::with_mods(
+        vec![ModEntry::new(
+            "replay-slots",
+            Box::new(ReplaySlots(veto.clone())),
+        )]
+        .into(),
+        || {
+            with_client_game(|game| {
+                mods::register_gui_layers(ExecutionRole::Client);
+                game.title = None;
+                game.player =
+                    Some(PlayerMotion::new(game.motion, Vec3::new(2.0, 64.0, 2.0)).unwrap());
+                game.screen = super::Screen::Inventory; // a screen eligible for deferred subtitles
+                game.replay.driver = Some(Box::new(ReplayDriver::open(&path).unwrap()));
+                for hidden in [false, true] {
+                    game.ui.hide_gui = hidden;
+                    game.sleep_timer = 0;
+                    *veto.lock().unwrap() = Veto::None;
+                    let batch = game.hud_layers([640, 480]);
+                    assert!(batch.vertices.iter().any(|v| v.color == MARKER));
+                    assert_eq!(
+                        take(),
+                        [
+                            "pre HUD",
+                            "pre minecraft:sleep_overlay",
+                            "replacement sleep",
+                            "post minecraft:sleep_overlay",
+                            "pre minecraft:subtitle_overlay",
+                            "wrapped subtitles",
+                            "post minecraft:subtitle_overlay",
+                        ]
+                    );
+
+                    game.sleep_timer = 50;
+                    // Vanilla uses RGB 0x101020 and half of its maximum alpha (220).
+                    let vanilla_tint = rgba(16, 16, 32, 110);
+                    for (mode, calls) in [
+                        (
+                            Veto::Sleep,
+                            [
+                                "pre HUD",
+                                "pre minecraft:sleep_overlay",
+                                "pre minecraft:subtitle_overlay",
+                                "wrapped subtitles",
+                                "post minecraft:subtitle_overlay",
+                            ]
+                            .as_slice(),
+                        ),
+                        (Veto::Hud, ["pre HUD"].as_slice()),
+                    ] {
+                        *veto.lock().unwrap() = mode;
+                        let batch = game.hud_layers([640, 480]);
+                        assert!(
+                            !batch
+                                .vertices
+                                .iter()
+                                .any(|v| v.color == MARKER || v.color == vanilla_tint)
+                        );
+                        assert_eq!(take().as_slice(), calls);
+                    }
+                }
             })
         },
     );

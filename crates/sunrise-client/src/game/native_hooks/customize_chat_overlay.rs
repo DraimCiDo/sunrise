@@ -1,18 +1,16 @@
 use super::*;
 
-/// The hook points. Each does nothing in Sunrise.
 impl Game<'_> {
-    /// The in-game chat is about to be drawn (`CustomizeGuiOverlayEvent.Chat`): `x`, `y` are its
-    /// bottom-left corner in GUI pixels, which a mod may move.
+    /// The original background chat body is about to draw (`CustomizeGuiOverlayEvent.Chat`):
+    /// `x`, `y` are its bottom-left corner in GUI pixels, which a mod may move.
     pub(in crate::game) fn native_customize_chat_overlay(
         &mut self,
         gui_width: i32,
         gui_height: i32,
-        focused: bool,
         x: &mut i32,
         y: &mut i32,
     ) {
-        self.fire_customize_chat_overlay(gui_width, gui_height, focused, x, y);
+        self.fire_customize_chat_overlay(gui_width, gui_height, x, y);
     }
 }
 
@@ -24,7 +22,7 @@ mod customize_chat_overlay_tests {
     use sunrise_client::hud::HudBatch;
     use sunrise_client::text::Text;
 
-    type Seen = Arc<Mutex<Vec<(i32, i32, bool, i32, i32)>>>;
+    type Seen = Arc<Mutex<Vec<(i32, i32, i32, i32)>>>;
 
     /// Lifts the chat 100 GUI pixels, logging what it was told.
     struct Lift(Seen);
@@ -39,22 +37,25 @@ mod customize_chat_overlay_tests {
             self.0
                 .lock()
                 .unwrap()
-                .push((e.gui_width, e.gui_height, e.focused, e.x, e.y));
+                .push((e.gui_width, e.gui_height, e.x, e.y));
             event.y -= 100;
         }
     }
 
-    /// The top of what the chat draws, in GUI pixels, and the batch's GUI scale.
-    fn chat_top(game: &mut super::Game<'_>) -> (Option<f32>, f32) {
+    /// The top of the original HUD chat's paint, in GUI pixels.
+    fn chat_top(game: &mut super::Game<'_>) -> f32 {
         let mut batch = HudBatch::scratch([1280, 720]);
-        game.draw_chat(&mut batch);
-        let top = batch.vertices.iter().map(|v| v.pos[1]).reduce(f32::min);
-        (top, batch.scale)
+        game.draw_background_chat(&mut batch);
+        batch
+            .vertices
+            .iter()
+            .map(|v| v.pos[1])
+            .reduce(f32::min)
+            .unwrap()
     }
 
     /// `CustomizeGuiOverlayEvent.Chat`: the mod gets vanilla's place (0, GUI height - 40) and the
-    /// GUI size, focused or not, and the chat is drawn where it moved it. With the chat hidden
-    /// (F1, chat closed) nothing is asked.
+    /// GUI size, and the background chat is drawn where it moved it.
     #[test]
     #[ignore = "daily"]
     fn a_client_mod_moves_the_chat() {
@@ -63,7 +64,7 @@ mod customize_chat_overlay_tests {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.options.execution_role = super::ExecutionRole::Client;
             game.system_message(message.clone());
-            plain = chat_top(game).0;
+            plain = Some(chat_top(game));
         });
         let plain = plain.expect("the message is drawn");
         let seen = Seen::default();
@@ -73,27 +74,11 @@ mod customize_chat_overlay_tests {
             crate::game::native_entity_refs::tests::with_game(|game| {
                 game.options.execution_role = super::ExecutionRole::Client;
                 game.system_message(message.clone());
-                let (moved, scale) = chat_top(game);
-                let moved = moved.expect("the message is drawn");
-                assert!(
-                    (plain - moved - 100.0).abs() < 0.5,
-                    "lifted by 100 GUI pixels: {plain} -> {moved} at scale {scale}"
-                );
-                let (w, h) = {
-                    let b = HudBatch::scratch([1280, 720]);
-                    (b.width as i32, b.height as i32)
-                };
-                assert_eq!(*seen.lock().unwrap(), [(w, h, false, 0, h - 40)]);
-                // Hidden: F1 with the chat closed asks nothing.
-                game.ui.hide_gui = true;
-                chat_top(game);
-                assert_eq!(seen.lock().unwrap().len(), 1);
-                // Focused, the chat shows under F1 and is asked again.
-                game.screen = super::Screen::Chat;
-                chat_top(game);
-                let seen = seen.lock().unwrap();
-                assert_eq!(seen.len(), 2);
-                assert!(seen[1].2, "focused");
+                let moved = chat_top(game);
+                assert_eq!(plain - moved, 100.0);
+                let b = HudBatch::scratch([1280, 720]);
+                let (w, h) = (b.width as i32, b.height as i32);
+                assert_eq!(*seen.lock().unwrap(), [(w, h, 0, h - 40)]);
             });
         });
     }

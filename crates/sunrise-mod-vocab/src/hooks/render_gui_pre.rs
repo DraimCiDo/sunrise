@@ -5,9 +5,9 @@ pub trait Hooks {
     /// Return `Flow::Cancel` to veto every HUD slot and its layer events, `render_gui_post`,
     /// and ordinary toasts. The chat screen and mandatory mod-error toasts are outside the veto;
     /// the player's F1 still hides the toasts.
-    /// Fires before the in-world HUD pass, including under F1, but not while a server dialog,
-    /// the connection screen or a loading screen covers the window. F1 hides vanilla paint,
-    /// not slot dispatch.
+    /// Fires before the in-world HUD pass, including under F1 and during replay, but not while a
+    /// server dialog, the connection screen or a loading screen covers the window. F1 and replay
+    /// can hide vanilla paint without skipping slot dispatch.
     /// Client-side.
     #[hook(
         receiver = "read",

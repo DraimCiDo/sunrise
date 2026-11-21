@@ -8,7 +8,7 @@ pub trait Hooks {
     /// or `replace_layer` and `wrap_layer` to change an existing slot's body.
     /// `minecraft:player_health` is the heart slot only. Use `minecraft:air_level` as the
     /// `Above` anchor to place a layer above all status rows. Every slot dispatches during
-    /// the HUD pass, even when the original body would not draw or F1 hides vanilla paint.
+    /// the HUD pass, even when F1 or replay hides the original paint.
     /// A listener sees its pending edits; they are published only if the listener
     /// returns without a panic or phase refusal.
     #[notes = r#"## HUD layers
@@ -49,9 +49,9 @@ use `Above("minecraft:air_level".into())` to put it above all status rows. Use
 `Above("minecraft:vehicle_health".into())` to stay above mount hearts. No single anchor
 keeps a layer both above the mount hearts and below the player rows after the reorder.
 
-Every slot dispatches in order, including inserted slots under F1 and the crosshair in third
-person. F1 only changes the original vanilla paint. A canceled `Hooks::render_gui_pre` skips
-the whole layer pass. Focused chat belongs to the chat screen, not the `minecraft:chat` slot.
+Every slot dispatches in order, including inserted slots under F1 and during replay, and the
+crosshair in third person. A canceled `Hooks::render_gui_pre` skips the whole layer pass.
+Focused chat belongs to the chat screen, not the `minecraft:chat` slot.
 For a foreground pass independent of the HUD slots, use `Hooks::gui_render_post`."#]
     #[hook(
         receiver = "associated",
