@@ -319,7 +319,8 @@ impl WorldRequest {
             &pack.additional_data,
         );
         let integrated = options.execution_role == execution_role::ExecutionRole::IntegratedServer;
-        let working_dir = std::env::current_dir()?;
+        // Resolving the report path must not prevent the world from opening.
+        let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let server_root = chunk_report_root(
             options.execution_role,
             options.game_dir.as_deref(),

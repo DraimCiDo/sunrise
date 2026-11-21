@@ -78,7 +78,7 @@ const LATEST_ENTRY_COUNT: usize = 8;
 #[derive(Default)]
 pub struct SaveFailureReporter {
     integrated: bool,
-    suppressed: Mutex<SuppressedSaveFailures>,
+    suppressed: Arc<Mutex<SuppressedSaveFailures>>,
     target: Option<ReportTarget>,
 }
 
@@ -128,22 +128,22 @@ impl Drop for ReportTarget {
     }
 }
 
-/// The launch's current server report source. An integrated server shuts down
-/// independently of the launch; a dedicated one may return its error to main.
+/// The launch's current server report source. The dedicated summary survives
+/// server teardown for the fatal report, but the report worker does not.
 #[derive(Clone, Default)]
 pub struct SaveFailureDiagnostics(Arc<Mutex<Option<ReportSource>>>);
 
 enum ReportSource {
-    Integrated(Weak<SaveFailureReporter>),
-    Dedicated(Arc<SaveFailureReporter>),
+    Integrated(Weak<Mutex<SuppressedSaveFailures>>),
+    Dedicated(Arc<Mutex<SuppressedSaveFailures>>),
 }
 
 impl SaveFailureDiagnostics {
-    pub fn register(&self, reporter: &Arc<SaveFailureReporter>) {
+    pub fn register(&self, reporter: &SaveFailureReporter) {
         let source = if reporter.integrated {
-            ReportSource::Integrated(Arc::downgrade(reporter))
+            ReportSource::Integrated(Arc::downgrade(&reporter.suppressed))
         } else {
-            ReportSource::Dedicated(reporter.clone())
+            ReportSource::Dedicated(Arc::clone(&reporter.suppressed))
         };
         *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(source);
     }
@@ -151,10 +151,10 @@ impl SaveFailureDiagnostics {
     /// A fatal report must not wait for locks held by a crashing server.
     pub fn suppressed_summary(&self) -> Option<String> {
         let source = match self.0.try_lock().ok()?.as_ref()? {
-            ReportSource::Integrated(reporter) => reporter.upgrade()?,
-            ReportSource::Dedicated(reporter) => reporter.clone(),
+            ReportSource::Integrated(suppressed) => suppressed.upgrade()?,
+            ReportSource::Dedicated(suppressed) => Arc::clone(suppressed),
         };
-        Some(source.suppressed.try_lock().ok()?.summary())
+        Some(source.try_lock().ok()?.summary())
     }
 }
 
@@ -707,10 +707,33 @@ mod tests {
         );
         drop(integrated);
         assert_eq!(diagnostics.suppressed_summary(), None);
-        let dedicated = Arc::new(SaveFailureReporter::new(false, Path::new("."), "world"));
-        dedicated.record(0, "Error", "dedicated failure".into());
+        let tmp = tempfile::tempdir().unwrap();
+        let dedicated = Arc::new(SaveFailureReporter::new(false, tmp.path(), "world"));
+        let weak_reporter = Arc::downgrade(&dedicated);
         diagnostics.register(&dedicated);
+        dedicated.report(
+            SaveFailure {
+                world_root: &tmp.path().join("world"),
+                dimension: "minecraft:overworld",
+                storage: "chunk",
+                pos: (3, 4),
+                error: &io::Error::other("dedicated failure"),
+            },
+            &Mutex::new(Pending::default()),
+            |_| Ok(save::LOW_DISK_SPACE),
+        );
         drop(dedicated);
+        assert!(weak_reporter.upgrade().is_none());
+        let report = fs::read_dir(tmp.path().join("debug"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        assert!(
+            fs::read_to_string(report.path())
+                .unwrap()
+                .contains("dedicated failure")
+        );
         assert!(
             diagnostics
                 .suppressed_summary()
