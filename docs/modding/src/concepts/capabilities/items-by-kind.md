@@ -33,7 +33,7 @@ fn first_at_least(
     minimum: u64,
 ) -> Result<Option<(ItemResource, u64)>, StorageError> {
     let mut found = None;
-    let stopped = storage.visit_entries(host, &mut |kind, amount| {
+    let _ = storage.visit_entries(host, &mut |kind, amount| {
         if amount >= minimum {
             found = Some((kind.clone(), amount));
             ControlFlow::Break(())
@@ -41,7 +41,7 @@ fn first_at_least(
             ControlFlow::Continue(())
         }
     })?;
-    Ok(if stopped.is_break() { found } else { None })
+    Ok(found)
 }
 ```
 

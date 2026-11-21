@@ -56,9 +56,11 @@ receive no `Host` and read startup facts through `RegistrationContext`.
 `event.register("mymod:charge".into())` with each owned, namespaced ID. The game checks IDs and
 duplicates before freezing the component registry.
 
-Scoped registration events are borrowed only for the listener call. Their registration methods
-add entries in dispatch order without letting a listener read, edit or remove earlier registrations.
-If the phase gate refuses a listener, its additions are discarded and earlier registrations stand.
+Scoped registration events are borrowed only for the listener call. Call `event.register(entry)`
+once per entry. Events with specialized operations, such as adding blocks to a block entity type,
+expose methods for those operations. Registration adds entries in dispatch order without letting a
+listener read, edit or remove earlier registrations. If the phase gate refuses a listener, its
+additions are discarded and earlier registrations stand.
 
 A callback registered on the event cannot borrow the event or the context. Capture owned inputs
 for its `Send + Sync + 'static` closure. A model layer supplier runs once at the startup freeze;

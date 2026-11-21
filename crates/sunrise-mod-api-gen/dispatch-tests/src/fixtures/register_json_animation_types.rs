@@ -3,10 +3,10 @@ mod stubs {
     pub(super) struct JsonAnimationType(pub(super) &'static str);
 }
 
-/// The generated dispatch of `register_json_animation_types` hands each mod an empty batch and
-/// names that mod on every entry it pushed, in mod order.
+/// The generated dispatch of `register_json_animation_types` names the mod on each
+/// registered entry and preserves dispatch order.
 #[test]
-fn each_registered_animation_type_names_the_mod_that_pushed_it() {
+fn each_registered_animation_type_names_its_registering_mod() {
     struct Registers(&'static [&'static str]);
     #[mod_api::__subscriptions]
     impl Hooks for Registers {
@@ -15,7 +15,7 @@ fn each_registered_animation_type_names_the_mod_that_pushed_it() {
             _: &RegistrationContext,
             event: &mut RegisterJsonAnimationTypesEvent<'_>,
         ) {
-            for id in self.0 {
+            for &id in self.0 {
                 event.register(JsonAnimationType(id));
             }
         }

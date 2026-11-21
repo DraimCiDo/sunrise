@@ -2,7 +2,7 @@
 
 pub trait Hooks {
     /// The item tint sources a mod adds (NeoForge's `RegisterColorHandlersEvent.ItemTintSources`):
-    /// push each id, `<mod id>:<path>`. Asked once at start on the client, before resources load.
+    /// call `event.register(id)` with each `<mod id>:<path>` ID. Asked once at start on the client, before resources load.
     /// An entry in a `minecraft:model`'s `tints` whose `type` is a registered id colours its
     /// `tintindex` with what `item_tint_source` answers per stack, also after a resource reload. An id
     /// in vanilla's namespace, not of that form, or registered already is logged and left out; a
@@ -10,8 +10,8 @@ pub trait Hooks {
     #[notes = r#"## Item tint sources
 
 An item tint source (NeoForge's `RegisterColorHandlersEvent.ItemTintSources`) colours a greyscale item per
-stack, in two steps as well: `Hooks::register_item_tint_sources` pushes its id once at start, before resources
-load, and `Hooks::item_tint_source` answers the ARGB colour for each stack, in hand, in a screen or on the ground.
+stack, in two steps: call `event.register(id)` in `Hooks::register_item_tint_sources` once at start, before
+resources load, and `Hooks::item_tint_source` answers the ARGB colour for each stack, in hand, in a screen or on the ground.
 
 ```rust,ignore
 fn register_item_tint_sources(

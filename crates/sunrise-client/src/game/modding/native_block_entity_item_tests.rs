@@ -834,13 +834,19 @@ fn storage_asks_a_game_container_by_kind_and_rolls_back_with_its_transaction() {
             });
             assert_eq!(top.amount(game, &stone), Ok(64), "input is still occupied");
             let mut bottom_entries = Vec::new();
-            let _ = bottom
-                .visit_entries(game, &mut |kind, amount| {
-                    bottom_entries.push((kind.clone(), amount));
-                    ControlFlow::Continue(())
-                })
-                .unwrap();
+            let flow = bottom.visit_entries(game, &mut |kind, amount| {
+                bottom_entries.push((kind.clone(), amount));
+                ControlFlow::Continue(())
+            });
+            assert_eq!(flow, Ok(ControlFlow::Continue(())));
             assert_eq!(bottom_entries, [(of(output), 11), (of(fuel), 7)]);
+            bottom_entries.clear();
+            let flow = bottom.visit_entries(game, &mut |kind, amount| {
+                bottom_entries.push((kind.clone(), amount));
+                ControlFlow::Break(())
+            });
+            assert_eq!(flow, Ok(ControlFlow::Break(())));
+            assert_eq!(bottom_entries, [(of(output), 11)]);
             assert!(game.transactions.is_empty());
         });
     });

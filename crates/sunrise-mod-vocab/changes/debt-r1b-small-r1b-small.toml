@@ -1,0 +1,71 @@
+ids = [
+    "method:ItemStorage::visit_entries",
+    "hook:register_block_state_models",
+    "hook:register_block_state_models.definitions",
+    "type:RegisterBlockStateModelsEvent.definitions",
+    "handle:RegisterBlockStateModelsEvent::register",
+    "hook:register_debug_entries",
+    "hook:register_debug_entries.entries",
+    "type:RegisterDebugEntriesEvent.entries",
+    "handle:RegisterDebugEntriesEvent::register",
+    "hook:register_debug_renderers",
+    "hook:register_debug_renderers.renderers",
+    "type:RegisterDebugRenderersEvent.renderers",
+    "handle:RegisterDebugRenderersEvent::register",
+    "hook:register_dimension_transition_screen",
+    "hook:register_dimension_transition_screen.screens",
+    "type:RegisterDimensionTransitionScreenEvent.screens",
+    "handle:RegisterDimensionTransitionScreenEvent::register",
+    "hook:register_item_models",
+    "hook:register_item_models.models",
+    "type:RegisterItemModelsEvent.models",
+    "handle:RegisterItemModelsEvent::register",
+    "hook:register_item_tint_sources",
+    "hook:register_item_tint_sources.sources",
+    "type:RegisterItemTintSourcesEvent.sources",
+    "handle:RegisterItemTintSourcesEvent::register",
+    "hook:register_json_animation_types",
+    "hook:register_json_animation_types.types",
+    "type:RegisterJsonAnimationTypesEvent.types",
+    "handle:RegisterJsonAnimationTypesEvent::register",
+    "hook:register_model_loaders",
+    "hook:register_model_loaders.loaders",
+    "type:RegisterModelLoadersEvent.loaders",
+    "handle:RegisterModelLoadersEvent::register",
+    "hook:register_preset_editors",
+    "hook:register_preset_editors.editors",
+    "type:RegisterPresetEditorsEvent.editors",
+    "handle:RegisterPresetEditorsEvent::register",
+    "hook:register_range_select_item_model_property",
+    "hook:register_range_select_item_model_property.properties",
+    "type:RegisterRangeSelectItemModelPropertyEvent.properties",
+    "handle:RegisterRangeSelectItemModelPropertyEvent::register",
+    "hook:register_select_item_model_property",
+    "hook:register_select_item_model_property.properties",
+    "type:RegisterSelectItemModelPropertyEvent.properties",
+    "handle:RegisterSelectItemModelPropertyEvent::register",
+    "hook:register_sprite_sources",
+    "hook:register_sprite_sources.sources",
+    "type:RegisterSpriteSourcesEvent.sources",
+    "handle:RegisterSpriteSourcesEvent::register",
+]
+why = "ItemStorage now distinguishes a caller-requested stop from exhaustion without reading any more entries, preserving the short-circuit sided traversal of vanilla 26.3 HopperBlockEntity.suckInItems and NeoForge ResourceHandlerUtil.extractFirst. Registration now uses methods on the event rather than editable answer lists, following NeoForge RegisterEvent.register, RegisterBlockStateModels.registerDefinition and RegisterDebugRenderersEvent.register. Vanilla 26.3 BuiltInRegistries.bootStrap populates before freezing and DebugRenderer.refreshRendererList rebuilds the renderer list; Sunrise keeps the same registration moments, dispatch order and entry validation."
+migrate = """
+ItemStorage::visit_entries(host, visitor) returns Result<std::ops::ControlFlow<()>, StorageError> instead of Result<(), StorageError>. Match Ok(ControlFlow::Break(())) for a visitor-requested stop, Ok(ControlFlow::Continue(())) for exhaustion, and Err(error) for a failed read. To handle only read errors, use `let _ = storage.visit_entries(host, visitor)?;`. In a provider, return Ok(flow) immediately when visitor(kind, amount) returns Break, and Ok(ControlFlow::Continue(())) on exhaustion. The visitor's signature is unchanged.
+
+In each listed registration hook replace `event.<field>.push(value)` with `event.register(value)`, passing the same value. If you used `extend`, iterate over your values and call `event.register` in that order. The private staging list is no longer readable, removable or replaceable. The callback's parameters are unchanged.
+
+- `register_block_state_models`: `definitions`, a type ID as `String` (version 2).
+- `register_debug_entries`: `entries`, a `DebugEntry` (version 3).
+- `register_debug_renderers`: `renderers`, a `DebugRenderer` (version 3).
+- `register_dimension_transition_screen`: `screens`, a `DimensionTransitionScreen` (version 3).
+- `register_item_models`: `models`, a node type ID as `String` (version 2).
+- `register_item_tint_sources`: `sources`, a tint source ID as `String` (version 2).
+- `register_json_animation_types`: `types`, a `JsonAnimationType::Target(id)` or `JsonAnimationType::Interpolation(id)` (version 2).
+- `register_model_loaders`: `loaders`, a loader ID as `String` (version 2).
+- `register_preset_editors`: `editors`, a `PresetEditor` (version 2).
+- `register_range_select_item_model_property` and `register_select_item_model_property`: `properties`, a property ID as `String` (both version 2).
+- `register_sprite_sources`: `sources`, a sprite source ID as `String` (version 3).
+
+Keep specialized scoped helpers as they are: `extend_poi_types` lends resolved block metadata to build predicates, `register_cauldron_fluid_content` registers typed block and fluid keys and level information, and `register_enchantment_damage_effects`, `register_load_conditions` and `register_villager_professions` retain their typed registrars and admission rules. These already offer scoped operations rather than reply lists. `block_entity_type_add_blocks` keeps `modify` and `modify_matching` for additions to existing types. `bake_model_loader`, `instantiate_block_state_definition` and `sprite_source` keep their per-resource output contracts: they answer a particular bake, definition or atlas source, not a registration. `register_commands` and `register_client_commands` build live command trees behind a Host rather than declaring entries in the registration phase; changing their command dispatch contract is separate work.
+"""

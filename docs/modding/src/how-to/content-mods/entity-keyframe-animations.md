@@ -119,8 +119,9 @@ renderer, alongside the [resolved-model drawing](../client/model-drawing.md) fac
 ## Registered targets and interpolations
 
 A mod adds its own targets and interpolations with `register_json_animation_types` (NeoForge's
-`RegisterJsonAnimationTypesEvent`), once at start; files may then name them. What they do is an
-`AnimationTypes` the playing mod implements: `convert_target` turns a registered target's file
+`RegisterJsonAnimationTypesEvent`), once at start. Pass a `JsonAnimationType::Target` or
+`JsonAnimationType::Interpolation` to `event.register(kind)`; files may then name the type.
+What it does is an `AnimationTypes` the playing mod implements: `convert_target` turns a registered target's file
 values into its values once at bake (unchanged by default, where the built-in targets convert
 with `posVec`, `degreeVec` and `scaleVec`), `apply_target` puts a sampled value on the part, and
 `interpolate` answers a segment into a keyframe with a registered interpolation. They run in the

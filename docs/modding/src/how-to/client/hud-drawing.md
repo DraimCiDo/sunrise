@@ -64,8 +64,8 @@ pixels from the bottom. A mod that needs to move either can cancel and redraw it
 
 ## Registering F3 text
 
-Push a `DebugEntry::text(id, group, lines)` in `Hooks::register_debug_entries` at client
-startup. Use a non-vanilla namespaced ID, which also identifies the entry in the debug options
+Pass a `DebugEntry::text(id, group, lines)` to `event.register` in `Hooks::register_debug_entries`
+at client startup. Use a non-vanilla namespaced ID, which also identifies the entry in the debug options
 and saved profile. The group says which vanilla lines yours join; the closure receives the
 current client host and appends to the entry's lines.
 
@@ -81,14 +81,13 @@ fn register_debug_entries(&self, _: &RegistrationContext, event: &mut RegisterDe
 }
 ```
 
-Each mod starts with an empty batch. The client keeps the closure and calls it as your mod only
-while the entry is visible. Reduced debug info hides it, even if it is set to always on.
+The client keeps the closure and calls it as your mod only while the entry is visible. Reduced debug info hides it, even if it is set to always on.
 
 ## Registering world-space debug renderers
 
-Push `DebugEntry::renderer(id)` in `Hooks::register_debug_entries` at client startup to
-create the toggle. In `Hooks::register_debug_renderers`, push `DebugRenderer::new(id, draw)`
-with the same ID. Use the callback's `ClientHost`, `WorldRenderView` and `WorldDrawContext` to
+Register `DebugEntry::renderer(id)` in `Hooks::register_debug_entries` at client startup to
+create the toggle. In `Hooks::register_debug_renderers`, pass `DebugRenderer::new(id, draw)`
+with the same ID to `event.register`. Use the callback's `ClientHost`, `WorldRenderView` and `WorldDrawContext` to
 draw, and capture any state specific to this renderer instead of handling an ID in a draw hook.
 
 ```rust,ignore
@@ -112,7 +111,7 @@ fn register_debug_renderers(&self, _: &RegistrationContext, event: &mut Register
 ```
 
 The client collects a fresh list at startup, login, the first world view and the next world view
-after a selection rebuild or respawn. Keep per-refresh state in the new callbacks. Push all
+after a selection rebuild or respawn. Keep per-refresh state in the new callbacks. Register all
 renderers every time, even if their toggles are off; the first active registration for a switch
 wins. Only installed callbacks run in a world view, as their registering mods, after
 `submit_custom_geometry` and within its shared draw limits. Off or hidden toggles do not draw.
