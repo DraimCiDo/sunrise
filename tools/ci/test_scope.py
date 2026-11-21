@@ -75,8 +75,12 @@ READERS = {
         "tools/release_train.py",
     ],
     "sunrise-mod-api-gen-tests": MOD_API_GEN,
+    # content_keys' source guard reads the files other crates' declaration types are defined in.
     "sunrise-mod-package": [
-        "Cargo.lock", "docs/developer-install.md", "tools/mixins/narrow-reference-rule.patch",
+        "Cargo.lock", "crates/sunrise-core/src/arm_pose.rs", "crates/sunrise-mod-vocab/src/client/types.rs",
+        "crates/sunrise-mod-vocab/src/content/package_side.rs",
+        "crates/sunrise-mod-vocab/src/world/package_details.rs", "docs/developer-install.md",
+        "tools/mixins/narrow-reference-rule.patch",
     ],
     "sunrise-mod-render": MOD_API_GEN,
     "sunrise-official": ["packaging/windows/exe.rs"],
