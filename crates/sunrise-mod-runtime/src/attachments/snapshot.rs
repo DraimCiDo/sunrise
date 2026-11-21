@@ -1,7 +1,7 @@
 //! Read-only generations of a holder's synced bindings, detached from the holder itself.
 use super::{
     AttachmentEntry, AttachmentError, AttachmentKeyView, AttachmentType, Attachments, Compound,
-    Entry, Tag, index::AttachmentKey,
+    Entry, RawKind, Tag, index::AttachmentKey,
 };
 use std::{fmt, sync::Arc};
 
@@ -37,19 +37,30 @@ impl SyncedAttachmentSnapshot {
             let key_bytes = (namespace.0.len() + name.0.len()) * size_of::<u16>();
             left = left.checked_sub(size_of::<Binding>() + entry_overhead + key_bytes)?;
             let frozen = match &binding.state {
-                Entry::Raw { saved, .. } => {
+                Entry::Raw {
+                    saved,
+                    kind: RawKind::Synced,
+                    ..
+                } => {
                     left = left.checked_sub(compound_heap_bytes(saved))?;
                     Arc::clone(binding)
                 }
-                Entry::Decoded(_) => {
-                    // A live read can promote the replica to a typed binding. Freeze its codec
-                    // input, not that live Rust value: render reads must still use the key's codec.
-                    let mut saved =
-                        Compound::from([("value".into(), Tag::Compound(Compound::new()))]);
+                Entry::Raw {
+                    kind: RawKind::Saved,
+                    ..
+                }
+                | Entry::Decoded(_) => {
+                    // A live read can promote the replica to a typed binding, and a disk-loaded
+                    // entry carries a saved envelope. Freeze the sync codec input so render reads
+                    // always decode via the key's sync_codec.
+                    let mut saved = Compound::from([
+                        ("value".into(), Tag::Compound(Compound::new())),
+                        ("sync".into(), Tag::Byte(1)),
+                    ]);
                     left = left.checked_sub(compound_heap_bytes(&saved))?;
                     left = left.checked_sub(compound_heap_bytes(value))?;
                     saved.insert("value".into(), Tag::Compound(value.clone()));
-                    Arc::new(AttachmentEntry::raw(saved))
+                    Arc::new(AttachmentEntry::raw_synced_envelope(saved))
                 }
             };
             entries.push((key.clone(), frozen));
@@ -104,15 +115,15 @@ mod tests {
         namespace: "test",
         name: "fuel",
         default: || 99,
-        codec: Some(AttachmentCodec {
+        codec: None,
+        copy_on_death: false,
+        sync_codec: Some(AttachmentCodec {
             encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
             decode: |tag| match tag.get(&"n".into()) {
                 Some(Tag::Int(n)) => Ok(*n),
                 _ => Err(AttachmentError::Decode),
             },
         }),
-        sync: true,
-        copy_on_death: false,
     };
 
     fn sync(holder: &mut Attachments, key: &str, value: Option<Compound>) {
@@ -210,20 +221,23 @@ mod tests {
     }
 
     #[test]
-    fn snapshots_of_live_decoded_bindings_still_read_through_the_codec() {
+    fn snapshots_of_live_decoded_bindings_still_read_through_the_sync_codec() {
         static CODEC: AttachmentType<i32> = AttachmentType {
             namespace: "test",
             name: "fuel",
             default: || 0,
             codec: Some(AttachmentCodec {
+                encode: |n| Ok([("disk".into(), Tag::Int(*n))].into()),
+                decode: |_| panic!("render snapshot must use sync_codec, not persistence codec"),
+            }),
+            copy_on_death: false,
+            sync_codec: Some(AttachmentCodec {
                 encode: |n| Ok([("n".into(), Tag::Int(n / 10))].into()),
                 decode: |c| match c.get(&"n".into()) {
                     Some(Tag::Int(n)) => Ok(*n * 10),
                     _ => Err(AttachmentError::Decode),
                 },
             }),
-            sync: true,
-            copy_on_death: false,
         };
         let mut holder = Attachments::default();
         CODEC.set(&mut holder, Holder::Level, 27).unwrap();

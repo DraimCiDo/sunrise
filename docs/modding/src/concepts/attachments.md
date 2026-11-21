@@ -59,7 +59,7 @@ an error. On a server, a missing holder is an error, not a new phantom holder; a
 keeps a copy for any holder it is asked about (see the sync paragraph below).
 `AttachmentError` distinguishes `MissingHolder`, `TypeMismatch`, `Decode`, `Encode`,
 `InvalidNamespace` (a malformed saved compound), `InvalidCopyPolicy` (death-copy
-without a codec) and `InvalidSyncPolicy` (sync without a codec), `HolderBusy` (storage temporarily
+without a persistence codec) and `InvalidSyncPolicy` (sync policy does not match the load-time declaration), `HolderBusy` (storage temporarily
 unavailable; retry after the pass) and `UnsupportedHolder` (the holder family has
 no attachment storage; retrying does not help).
 `host.attachments()` exposes
@@ -120,18 +120,19 @@ file, not `level.dat`.
 
 You cannot supply a holder-aware default, custom copy handler, conditional serialization,
 recipient predicate or partial synchronization updates. The default is `fn() -> T`;
-copying uses the declared policy, and synchronization uses the disk codec rather
-than a separate wire codec.
+copying uses the declared policy. Synchronization uses its own `sync_codec`, independent
+of the persistence `codec`: an attachment may sync without persisting to disk, persist
+without syncing, or use distinct codecs for disk and network.
 
-A type with `sync: true` sends its value to Sunrise clients when `get` creates the
+A type with `sync_codec: Some(...)` sends its value to Sunrise clients when `get` creates the
 default, on `set` and `remove`, and on demand with `AttachmentType::sync_data(host,
 holder)`; changes made in one tick are sent once, at its end. The recipients are the
 players who track the holder: guests who were sent a chunk for a chunk or block entity,
 who track an entity for an entity, the player and those tracking them for a player, and
 everyone in the level for the level. A client also gets all of a holder's synced values
 when it starts seeing it: a chunk sent (with its block entities), a level joined or
-re-entered, an entity tracked, and its own player. The wire form is the codec's compound, so `sync` requires
-a codec.
+re-entered, an entity tracked, and its own player. The wire form is encoded and decoded
+with `sync_codec`, without requiring a persistence `codec`.
 
 Values travel on `sunrise:attachment_sync`, an engine declaration in the negotiated
 payload table (play, to the client, version 1, optional): only a client whose connection

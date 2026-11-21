@@ -22,7 +22,7 @@ impl AttachmentBatch {
         self,
         key: &AttachmentType<T>,
     ) -> Result<AttachmentQuery<'_, T>, AttachmentError> {
-        crate::parts::validate_attachment_use(key.namespace, key.name, key.sync)?;
+        crate::parts::validate_attachment_use(key.namespace, key.name, key.sync_codec.is_some())?;
         self.0.query(key)
     }
 }

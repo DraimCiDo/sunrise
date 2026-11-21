@@ -17,12 +17,12 @@ pub struct EntityRenderAttachments {
 impl EntityRenderAttachments {
     /// Borrows the synced value of `key`, or returns `Ok(None)` if the key is absent from this
     /// generation. Never inserts a default or reads the live world. The first typed read may
-    /// allocate when it decodes the value using the key's codec.
+    /// allocate when it decodes the value using the key's sync codec.
     pub fn get<T: Send + Sync + 'static>(
         &self,
         key: &AttachmentType<T>,
     ) -> Result<Option<&T>, AttachmentError> {
-        crate::parts::validate_attachment_use(key.namespace, key.name, key.sync)?;
+        crate::parts::validate_attachment_use(key.namespace, key.name, key.sync_codec.is_some())?;
         self.data.get(key)
     }
 }

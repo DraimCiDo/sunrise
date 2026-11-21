@@ -347,6 +347,7 @@ fn snapshot_records_have_declared_field_bytes() {
     fields(
         AttachmentForm {
             encoded: Some(Compound::new()),
+            synced: Some(Compound::new()),
             policy: AttachmentPolicy {
                 copy_on_death: false,
                 sync: true,
@@ -354,6 +355,7 @@ fn snapshot_records_have_declared_field_bytes() {
             write: AttachmentWrite::Set,
         },
         (
+            Some(Compound::new()),
             Some(Compound::new()),
             AttachmentPolicy {
                 copy_on_death: false,

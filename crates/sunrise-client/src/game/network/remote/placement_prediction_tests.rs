@@ -358,19 +358,20 @@ fn a_denied_break_restores_wall_sign_text_and_synced_attachments() {
     use sunrise_mod_runtime::attachments::AttachmentSync;
     use sunrise_protocol::attachment_sync::{Message, encode};
 
+    const VALUE_CODEC: AttachmentCodec<i32> = AttachmentCodec {
+        encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
+        decode: |c| match c.get(&"n".into()) {
+            Some(Tag::Int(n)) => Ok(*n),
+            _ => Err(mod_api::AttachmentError::Decode),
+        },
+    };
     static VALUE: AttachmentType<i32> = AttachmentType {
         namespace: "break_test",
         name: "wall_sign",
         default: || 0,
-        codec: Some(AttachmentCodec {
-            encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
-            decode: |c| match c.get(&"n".into()) {
-                Some(Tag::Int(n)) => Ok(*n),
-                _ => Err(mod_api::AttachmentError::Decode),
-            },
-        }),
+        codec: Some(VALUE_CODEC),
         copy_on_death: false,
-        sync: true,
+        sync_codec: Some(VALUE_CODEC),
     };
     on_a_client(mod_api::Mods::default(), |game| {
         let spawn = play::SpawnInfo {

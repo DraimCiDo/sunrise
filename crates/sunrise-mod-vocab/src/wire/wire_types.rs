@@ -1225,13 +1225,15 @@ impl crate::wire::Wire for crate::Holder {
 }
 #[allow(unreachable_patterns, unused_variables)]
 impl crate::wire::Wire for crate::AttachmentForm {
-    layout_fields!("encoded" => Option<sunrise_core::nbt::Compound>, "policy" => crate::AttachmentPolicy, "write" => crate::AttachmentWrite);
+    layout_fields!("encoded" => Option<sunrise_core::nbt::Compound>, "synced" => Option<sunrise_core::nbt::Compound>, "policy" => crate::AttachmentPolicy, "write" => crate::AttachmentWrite);
     const MIN: usize =
         <::std::option::Option<sunrise_core::nbt::Compound> as crate::wire::Wire>::MIN
+            + <::std::option::Option<sunrise_core::nbt::Compound> as crate::wire::Wire>::MIN
             + <crate::AttachmentPolicy as crate::wire::Wire>::MIN
             + <crate::AttachmentWrite as crate::wire::Wire>::MIN;
     fn put(&self, out: &mut crate::wire::Writer) {
         out.put(&self.encoded);
+        out.put(&self.synced);
         out.put(&self.policy);
         out.put(&self.write);
     }
@@ -1241,6 +1243,7 @@ impl crate::wire::Wire for crate::AttachmentForm {
         input.record(|input| {
             Ok(Self {
                 encoded: input.take()?,
+                synced: input.take()?,
                 policy: input.take()?,
                 write: input.take()?,
             })

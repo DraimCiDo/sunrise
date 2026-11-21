@@ -236,6 +236,7 @@ mod tests {
             state: super::super::Entry::Decoded(Decoded {
                 value: Arc::new(value),
                 encoded: None,
+                synced: None,
                 policy: AttachmentPolicy {
                     copy_on_death: false,
                     sync: false,

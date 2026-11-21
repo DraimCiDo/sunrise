@@ -294,21 +294,22 @@ mod tests {
                         hook: "test",
                         part: None,
                     });
+                let codec: crate::AttachmentCodec<u32> = crate::AttachmentCodec {
+                    encode: |n| Ok([("n".into(), crate::Tag::Long(i64::from(*n)))].into()),
+                    decode: |saved| match saved.get(&"n".into()) {
+                        Some(crate::Tag::Long(n)) => {
+                            u32::try_from(*n).map_err(|_| crate::AttachmentError::Decode)
+                        }
+                        _ => Err(crate::AttachmentError::Decode),
+                    },
+                };
                 let key = crate::AttachmentType {
                     namespace: "a",
                     name: "mana",
                     default: || 37u32,
-                    codec: Some(crate::AttachmentCodec {
-                        encode: |n| Ok([("n".into(), crate::Tag::Long(i64::from(*n)))].into()),
-                        decode: |saved| match saved.get(&"n".into()) {
-                            Some(crate::Tag::Long(n)) => {
-                                u32::try_from(*n).map_err(|_| crate::AttachmentError::Decode)
-                            }
-                            _ => Err(crate::AttachmentError::Decode),
-                        },
-                    }),
+                    codec: Some(codec),
                     copy_on_death: false,
-                    sync: true,
+                    sync_codec: Some(codec),
                 };
                 assert_eq!(
                     key.get(

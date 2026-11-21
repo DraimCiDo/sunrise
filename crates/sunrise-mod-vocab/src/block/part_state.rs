@@ -155,7 +155,7 @@ impl std::error::Error for PartStateError {}
 #[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PartStateRefusal {
-    /// `DATA.sync` is set: Part state is not sent to clients yet.
+    /// `DATA.sync_codec` is set: Part state is not sent to clients yet.
     Sync,
     /// `DATA.copy_on_death` is set: a block entity has no death to copy across.
     CopyOnDeath,
@@ -262,7 +262,7 @@ impl PartStateDeclaration {
             namespace: key.namespace,
             name: key.name,
             data_name: std::any::type_name::<T>(),
-            sync: key.sync,
+            sync: key.sync_codec.is_some(),
             copy_on_death: key.copy_on_death,
         }
     }
@@ -459,19 +459,23 @@ mod tests {
     use super::*;
 
     const fn key(sync: bool, copy_on_death: bool, codec: bool) -> AttachmentType<i32> {
+        const CODEC: AttachmentCodec<i32> = AttachmentCodec {
+            encode: |_| Ok(Compound::new()),
+            decode: |_| Ok(0),
+        };
         AttachmentType {
             namespace: "test",
             name: "state",
             default: || 0,
             codec: match codec {
-                true => Some(AttachmentCodec {
-                    encode: |_| Ok(Compound::new()),
-                    decode: |_| Ok(0),
-                }),
+                true => Some(CODEC),
                 false => None,
             },
             copy_on_death,
-            sync,
+            sync_codec: match sync {
+                true => Some(CODEC),
+                false => None,
+            },
         }
     }
 

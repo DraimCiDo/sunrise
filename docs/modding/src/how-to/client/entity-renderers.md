@@ -62,7 +62,7 @@ row's identity, age, pose and a frozen snapshot of its synced attachments
 ([attachments](../../concepts/attachments.md)).
 
 ```rust,ignore
-static FUEL: AttachmentType<i32> = /* declared with sync: true */;
+static FUEL: AttachmentType<i32> = /* declared with sync_codec: Some(...) */;
 
 struct Missile;
 impl EntityRenderer for Missile {

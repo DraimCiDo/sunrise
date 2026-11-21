@@ -72,20 +72,22 @@ fn a_general_types_renderer_resolves_to_its_slot_and_a_type_without_one_is_named
     assert_eq!(table.unrendered_general(&catalog), ["test:plain"]);
 }
 
+const FUEL_CODEC: AttachmentCodec<i32> = AttachmentCodec {
+    encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
+    decode: |c| match c.get(&"n".into()) {
+        Some(Tag::Int(n)) => Ok(*n),
+        _ => Err(AttachmentError::Decode),
+    },
+};
+
 /// The type's synced field the renderer reads while drawing.
 static FUEL: AttachmentType<i32> = AttachmentType {
     namespace: "test",
     name: "fuel",
     default: || 0,
-    codec: Some(AttachmentCodec {
-        encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
-        decode: |c| match c.get(&"n".into()) {
-            Some(Tag::Int(n)) => Ok(*n),
-            _ => Err(AttachmentError::Decode),
-        },
-    }),
+    codec: Some(FUEL_CODEC),
     copy_on_death: false,
-    sync: true,
+    sync_codec: Some(FUEL_CODEC),
 };
 
 /// `test:missile`'s renderer: draws one stone quad from its pose's origin, and keeps the last
