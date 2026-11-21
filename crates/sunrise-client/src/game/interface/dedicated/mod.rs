@@ -57,6 +57,7 @@ mod language_tests;
 struct Watchdog {
     /// The thread running the ticks, whose stack the report carries.
     server: sunrise_threads::stack_dump::Watched,
+    save_failure_diagnostics: sunrise_client::chunk_io::SaveFailureDiagnostics,
     base: Instant,
     next_nanos: AtomicU64,
     tick_nanos: AtomicU64,
@@ -78,10 +79,14 @@ impl Watchdog {
     /// `DedicatedServer.initServer`: a thread that stops a server whose tick
     /// runs `max_tick_time` ms past its due time; none when that is 0 or less.
     /// Started from the thread that runs the ticks.
-    fn start(max_tick_time: i64) -> Option<Arc<Self>> {
+    fn start(
+        max_tick_time: i64,
+        save_failure_diagnostics: sunrise_client::chunk_io::SaveFailureDiagnostics,
+    ) -> Option<Arc<Self>> {
         let max = Duration::from_millis(u64::try_from(max_tick_time).ok().filter(|m| *m > 0)?);
         let watchdog = Arc::new(Self {
             server: sunrise_threads::stack_dump::Watched::current(),
+            save_failure_diagnostics,
             base: Instant::now(),
             next_nanos: AtomicU64::new(0),
             tick_nanos: AtomicU64::new(50_000_000),
@@ -135,6 +140,7 @@ impl Watchdog {
                     "server",
                     message,
                     stack,
+                    || self.save_failure_diagnostics.suppressed_summary(),
                 ) {
                     Some(path) => log_from(
                         "Server Watchdog",
@@ -1273,7 +1279,10 @@ impl Game<'_> {
         // The panic that ended the tick loop, when one did.
         let mut crashed: Option<String> = None;
         self.fns.permission = Some(props.function_permission_level.clamp(0, 4) as u8);
-        let watchdog = Watchdog::start(props.max_tick_time);
+        let watchdog = Watchdog::start(
+            props.max_tick_time,
+            self.options.save_failure_diagnostics.clone(),
+        );
         let _stop_watchdog = StopWatchdog(watchdog.clone());
         let mut overload_warned: Option<Instant> = None;
         // `/stop`, or a stop signal (the shutdown hook's `halt`): either way the players and levels are

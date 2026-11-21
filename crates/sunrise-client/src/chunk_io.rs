@@ -14,7 +14,7 @@ use std::{
     fmt::Write as _,
     fs, io,
     path::Path,
-    sync::{Mutex, PoisonError},
+    sync::{Arc, Mutex, PoisonError, Weak},
 };
 
 /// What the window has still to toast.
@@ -80,6 +80,36 @@ pub struct SaveFailureReporter {
     suppressed: Mutex<SuppressedSaveFailures>,
 }
 
+/// The launch's current server report source. An integrated server shuts down
+/// independently of the launch; a dedicated one may return its error to main.
+#[derive(Clone, Default)]
+pub struct SaveFailureDiagnostics(Arc<Mutex<Option<ReportSource>>>);
+
+enum ReportSource {
+    Integrated(Weak<SaveFailureReporter>),
+    Dedicated(Arc<SaveFailureReporter>),
+}
+
+impl SaveFailureDiagnostics {
+    pub fn register(&self, reporter: &Arc<SaveFailureReporter>) {
+        let source = if reporter.integrated {
+            ReportSource::Integrated(Arc::downgrade(reporter))
+        } else {
+            ReportSource::Dedicated(reporter.clone())
+        };
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(source);
+    }
+
+    /// A fatal report must not wait for locks held by a crashing server.
+    pub fn suppressed_summary(&self) -> Option<String> {
+        let source = match self.0.try_lock().ok()?.as_ref()? {
+            ReportSource::Integrated(reporter) => reporter.upgrade()?,
+            ReportSource::Dedicated(reporter) => reporter.clone(),
+        };
+        Some(source.suppressed.try_lock().ok()?.summary())
+    }
+}
+
 #[derive(Default)]
 struct SuppressedSaveFailures {
     latest: VecDeque<(i64, &'static str, String)>,
@@ -135,27 +165,10 @@ impl SaveFailureReporter {
 
     /// `SuppressedExceptionCollector.dump`: the server crash report's `Suppressed Exceptions` detail.
     pub fn suppressed_summary(&self) -> String {
-        let suppressed = self
-            .suppressed
+        self.suppressed
             .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        if suppressed.latest.is_empty() {
-            return "~~NONE~~".to_owned();
-        }
-        let now = Local::now().timestamp_millis();
-        let mut out = String::from("\n\t\tLatest entries:\n");
-        for (timestamp, class, message) in &suppressed.latest {
-            let _ = writeln!(
-                out,
-                "\t\t\t{SAVE_LOCATION}:{class}: {message} ({}ms ago)",
-                now - timestamp
-            );
-        }
-        out.push_str("\t\tEntry counts:\n");
-        for (class, count) in &suppressed.counts {
-            let _ = writeln!(out, "\t\t\t{SAVE_LOCATION}:{class} x {count}");
-        }
-        out
+            .unwrap_or_else(PoisonError::into_inner)
+            .summary()
     }
 
     fn report(
@@ -166,6 +179,10 @@ impl SaveFailureReporter {
     ) {
         let (x, z) = failure.pos;
         let message = failure.error.to_string();
+        if failure.storage == "entities" {
+            // `EntityStorage.reportSaveFailureIfPresent` logs before notifying the server.
+            log::error!("Failed to store entity chunk [{x}, {z}]: {message}");
+        }
         log::error!("Failed to save chunk {x},{z}: {message}");
         let time = Local::now();
         // The write path returns io::Error for record and filesystem failures;
@@ -181,14 +198,37 @@ impl SaveFailureReporter {
         }
         let estimate = |path: &Path| space(path).unwrap_or(u64::MAX);
         let low = warn_on_low_disk_space(failure.world_root, estimate);
+        // IntegratedServer.reportChunkSaveFailure checks again before showing the toast.
+        let low_again = self.integrated && warn_on_low_disk_space(failure.world_root, estimate);
+        let mut queued = pending.lock().unwrap_or_else(PoisonError::into_inner);
         if self.integrated {
-            // IntegratedServer.reportChunkSaveFailure checks again before showing the toast.
-            let low_again = warn_on_low_disk_space(failure.world_root, estimate);
-            pending
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .save_failed(x, z, low || low_again);
+            queued.save_failed(x, z, low || low_again);
+        } else {
+            // The dedicated server drains this flag to warn its operators.
+            queued.low_disk_space |= low;
         }
+    }
+}
+
+impl SuppressedSaveFailures {
+    fn summary(&self) -> String {
+        if self.latest.is_empty() {
+            return "~~NONE~~".to_owned();
+        }
+        let now = Local::now().timestamp_millis();
+        let mut out = String::from("\n\t\tLatest entries:\n");
+        for (timestamp, class, message) in &self.latest {
+            let _ = writeln!(
+                out,
+                "\t\t\t{SAVE_LOCATION}:{class}: {message} ({}ms ago)",
+                now - timestamp
+            );
+        }
+        out.push_str("\t\tEntry counts:\n");
+        for (class, count) in &self.counts {
+            let _ = writeln!(out, "\t\t\t{SAVE_LOCATION}:{class} x {count}");
+        }
+        out
     }
 }
 
@@ -437,7 +477,13 @@ mod tests {
                 .is_none()
         );
         assert_eq!(reporter.reported_failures(), 1);
-        assert_eq!(pending.into_inner().unwrap(), Pending::default());
+        assert_eq!(
+            pending.into_inner().unwrap(),
+            Pending {
+                low_disk_space: true,
+                ..Pending::default()
+            }
+        );
         let records = crate::test_log::records();
         assert!(
             records
@@ -482,11 +528,53 @@ mod tests {
                 load_failure: None
             }
         );
+        let records = crate::test_log::records();
         assert!(
-            crate::test_log::records()
+            records
                 .iter()
                 .any(|(level, text)| *level == log::Level::Warn
                     && text.starts_with("Failed to store chunk IO exception:"))
+        );
+        assert_eq!(
+            records[0],
+            (
+                log::Level::Error,
+                "Failed to store entity chunk [3, 4]: entities refused".into()
+            )
+        );
+        assert_eq!(
+            records[1],
+            (
+                log::Level::Error,
+                "Failed to save chunk 3,4: entities refused".into()
+            )
+        );
+    }
+
+    #[test]
+    fn crash_diagnostics_follow_the_launch_servers_lifetime() {
+        let diagnostics = SaveFailureDiagnostics::default();
+        assert_eq!(diagnostics.suppressed_summary(), None);
+        let integrated = Arc::new(SaveFailureReporter::new(true));
+        integrated.record(0, "Error", "integrated failure".into());
+        diagnostics.register(&integrated);
+        assert!(
+            diagnostics
+                .suppressed_summary()
+                .unwrap()
+                .contains("integrated failure")
+        );
+        drop(integrated);
+        assert_eq!(diagnostics.suppressed_summary(), None);
+        let dedicated = Arc::new(SaveFailureReporter::new(false));
+        dedicated.record(0, "Error", "dedicated failure".into());
+        diagnostics.register(&dedicated);
+        drop(dedicated);
+        assert!(
+            diagnostics
+                .suppressed_summary()
+                .unwrap()
+                .contains("dedicated failure")
         );
     }
 

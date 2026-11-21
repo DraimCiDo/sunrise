@@ -1506,7 +1506,7 @@ pub(super) mod tests {
         let scratch = tempfile::tempdir().unwrap();
         let home = scratch.path().to_path_buf();
         let previous = std::panic::take_hook();
-        sunrise_client::crash::install(home.clone(), "client");
+        sunrise_client::crash::install(home.clone(), "client", || None);
         let (tasks, receiver) = channel::<OwnerRequest>();
         let mut server = Integrated {
             emergency_save: None,
