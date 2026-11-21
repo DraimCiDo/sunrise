@@ -4,7 +4,8 @@
 Run with no arguments to apply the write-type rename, or with --engine-callers
 for the straightforward concrete Game calls; --fixture-scopes applies the
 reviewed raw open/close fixture pairs, including their explicitly listed
-outputs. --audit prints a tracked Rust inventory. To also
+outputs. --transaction-results migrates the reviewed outer Result annotations
+and straightforward test assertions. --audit prints a tracked Rust inventory. To also
 check cumulative working-tree changes against wave 3, pass --audit
 --wave3-hunks PATH [--base REV]. The hunk manifest uses wave-3 coordinates,
 not the debt checkout's coordinates.
@@ -173,6 +174,64 @@ LET_RESULT = re.compile(
     rf"(?:[\w:.]+|\([\w:.\s&]+?\))\s*{CALL}"
 )
 CLOSURE_RESULT = re.compile(rf"{CALL}\(\s*(?:move\s+)?\|[^|]*\|\s*->\s*{RESULT}")
+
+# Reviewed outer assertions at the step-4 head. Engine-only scope assertions,
+# application errors inside closures, and early-phase panic tests stay put.
+VOCAB = "crates/sunrise-mod-vocab/src"
+API = "crates/sunrise-mod-api/src"
+GAME_PATH = str(GAME.relative_to(ROOT))
+RESULT_ASSERTIONS = {
+    VOCAB: {
+        "content/attached_storage_tests.rs": (208,),
+        "content/resource_util_tests.rs": (423,),
+        "item/storage.rs": (583,),
+    },
+    API: {
+        "parts/capabilities.rs": (328,),
+        "parts/items.rs": (474, 613, 920, 1001, 1018, 1046, 1289, 1529, 1594),
+        "parts/registration_fake_host_tests.rs": (55, 82),
+        "parts/registration_fluid_util_world_tests.rs": (149,),
+    },
+    GAME_PATH: {
+        "blocks/machines/contents_changed_tests.rs": (747,),
+        "blocks/machines/native_energy.rs": (235, 259, 373),
+        "modding/attachment_index/attached_storage_tests.rs": (48,),
+        "modding/block_entity_part_state_tests.rs": (211,),
+        "modding/block_entity_part_state_tests/fixture.rs": (65,),
+        "modding/block_entity_tick_items_tests.rs": (71,),
+        "modding/block_entity_tick_reply_tests/fixture.rs": (63,),
+        "modding/entity_part_state_tests.rs": (232,),
+        "modding/native_block_entity_item_tests.rs": (107, 322, 511, 538, 611, 623, 783, 925, 993),
+        "modding/native_block_entity_refs.rs": (1634, 1654, 1727),
+        "modding/native_capability_cache_tests.rs": (460,),
+        "modding/native_entity_refs.rs": (3248, 3271, 4391),
+        "modding/native_item_places.rs": (2022, 2426, 2558, 2712, 2756, 2955, 3666),
+        "modding/native_level_notify_tests.rs": (37, 99, 190, 214),
+        "modding/native_level_placement_tests.rs": (195, 462, 479),
+        "modding/native_live_holder_tests.rs": (199,),
+        "modding/native_menu_inventory_tests.rs": (146, 319, 365),
+        "modding/native_menus.rs": (587, 592, 600, 615),
+        "runtime/transactions.rs": (2425, 2663, 2975, 3170),
+    },
+}
+# These nested actions must commit before the parent assertions are meaningful.
+COMMITTED_CHILDREN = {
+    f"{VOCAB}/content/resource_util_tests.rs": (748,),
+    f"{GAME_PATH}/blocks/machines/contents_changed_tests.rs": (743,),
+    f"{GAME_PATH}/modding/native_block_entity_item_tests.rs": (103, 312),
+    f"{GAME_PATH}/modding/native_level_notify_tests.rs": (33, 55, 183, 220),
+    f"{GAME_PATH}/modding/native_live_holder_tests.rs": (196,),
+    f"{GAME_PATH}/runtime/transactions.rs": (2421, 2970, 2972, 3267),
+}
+# The boundary, non-returning examples, and production helpers are edited by hand.
+RESULT_HAND_EDITS = {
+    f"{VOCAB}/item/transaction.rs",
+    f"{VOCAB}/content/resource_util.rs",
+    f"{VOCAB}/world/phase.rs",
+}
+RESULT_ERROR = re.compile(r"Result\s*<\s*(?:\(\)|[\w]+)\s*,\s*(?P<error>\(\)|[\w]+)\s*>")
+UNIT_ABORT_ASSERT = re.compile(r"(?P<indent> *)assert!\((?P<binding>\w+)\.is_err\(\)\);\n")
+ABORT_ASSERT = re.compile(r"(?P<prefix> *assert_eq!\(.*?, )Err\((?P<value>.+)\)\);\n")
 
 # Preimage commits whose coordinates match the manifest for this item's files.
 # In particular, game.rs:96 is the module include, not line 96 at DEBT_BASE.
@@ -385,6 +444,58 @@ def apply_fixture_scopes():
         print(path.relative_to(ROOT))
 
 
+def apply_transaction_results():
+    assertions = {
+        f"{root}/{path}": lines
+        for root, files in RESULT_ASSERTIONS.items()
+        for path, lines in files.items()
+    }
+    paths = set(assertions) | set(COMMITTED_CHILDREN)
+    paths.update(
+        name for name in source_files("transaction")
+        if name.startswith((f"{VOCAB}/", f"{API}/", f"{GAME_PATH}/"))
+        and not name.startswith(f"{VOCAB}/chunk_disk/")
+    )
+    updates = {}
+    for name in sorted(paths - RESULT_HAND_EDITS):
+        path = ROOT / name
+        source = path.read_text()
+        before = git("show", f"499ad2ec2b01b2ce3e642853d6db86329b20a80c:{name}")
+        ns = "mod_api" if name.startswith(f"{GAME_PATH}/") else "crate"
+        error_type = f"{ns}::TransactionError"
+        aborted = f"{error_type}::Aborted"
+        lines = source.splitlines(keepends=True)
+        for loc in assertions.get(name, ()):
+            line = lines[loc - 1]
+            if match := UNIT_ABORT_ASSERT.fullmatch(line):
+                replacement = f"{match['indent']}assert_eq!({match['binding']}, Err({aborted}(())));\n"
+            elif match := ABORT_ASSERT.fullmatch(line):
+                replacement = f"{match['prefix']}Err({aborted}({match['value']})));\n"
+            else:
+                raise SystemExit(f"{name}:{loc}: unrecognized assertion; no files written")
+            lines[loc - 1] = replacement
+        for loc in COMMITTED_CHILDREN.get(name, ()):
+            line = lines[loc - 1]
+            if not line.endswith(")?;\n"):
+                raise SystemExit(f"{name}:{loc}: expected nested transaction ?; no files written")
+            lines[loc - 1] = f"{line[:-3]}.unwrap();\n"
+        revised = "".join(lines)
+        code = rust_code(revised)
+        for match in reversed(list(LET_RESULT.finditer(code))):
+            shape = RESULT_ERROR.match(code, match.start("result"))
+            if not shape:
+                raise SystemExit(f"{name}: unreviewed outer result type; no files written")
+            left, right = shape.span("error")
+            revised = f"{revised[:left]}{error_type}<{revised[left:right]}>{revised[right:]}"
+        if revised != source:
+            if source != before:
+                raise SystemExit(f"{name}: source differs from the audited head; no files written")
+            updates[path] = revised
+    for path, source in updates.items():
+        path.write_text(source)
+        print(path.relative_to(ROOT))
+
+
 def audit():
     for name in source_files("Transaction", "transaction", *RAW_NAMES):
         source = (ROOT / name).read_bytes().decode()
@@ -477,6 +588,7 @@ def main():
     mode.add_argument("--audit", action="store_true", help="report Rust sites without editing")
     mode.add_argument("--engine-callers", action="store_true", help="migrate the step-3 engine callers")
     mode.add_argument("--fixture-scopes", action="store_true", help="migrate simple step-4 fixture pairs")
+    mode.add_argument("--transaction-results", action="store_true", help="migrate step-5 outer results")
     parser.add_argument("--wave3-hunks", type=Path, help="also check changed lines against this manifest")
     parser.add_argument("--base", default=DEBT_BASE, help="debt diff base (default: item start)")
     parser.add_argument("--wave3-base", help="preimage revision for any additional changed wave-3 file")
@@ -488,6 +600,8 @@ def main():
             apply_engine_calls()
         elif args.fixture_scopes:
             apply_fixture_scopes()
+        elif args.transaction_results:
+            apply_transaction_results()
         else:
             apply_rename()
         return
