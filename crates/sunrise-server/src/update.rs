@@ -41,14 +41,13 @@ fn assets_for(os: &str, arch: &str, musl: bool) -> &'static [&'static str] {
     }
 }
 
-pub(crate) static ASSETS: std::sync::LazyLock<&'static [&'static str]> =
-    std::sync::LazyLock::new(|| {
-        assets_for(
-            std::env::consts::OS,
-            std::env::consts::ARCH,
-            cfg!(target_env = "musl"),
-        )
-    });
+static ASSETS: std::sync::LazyLock<&'static [&'static str]> = std::sync::LazyLock::new(|| {
+    assets_for(
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        cfg!(target_env = "musl"),
+    )
+});
 
 pub(crate) fn exe(name: &str) -> String {
     format!("{name}{}", std::env::consts::EXE_SUFFIX)
@@ -1274,9 +1273,18 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_separate_manager_can_switch_to_a_game_only_release() {
-        let install = installed("separate-manager", &["v1", "v2"]);
-        std::fs::remove_file(install.release("v2").join("sunrise-server")).unwrap();
+    fn a_separate_manager_can_install_and_switch_to_a_game_only_release() {
+        let install = installed("separate-manager", &["v1"]);
+        let archive = install.root.join("game-only.zip");
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&archive).unwrap());
+        zip.start_file("sunrise-engine", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(b"new game").unwrap();
+        zip.finish().unwrap();
+        let game = unpack(&install, &archive, "v2")
+            .unwrap()
+            .join("sunrise-engine");
+        assert_eq!(std::fs::read(&game).unwrap(), b"new game");
         assert!(install.switch("v2").is_err());
         assert_eq!(install.current().as_deref(), Some("v1"));
 

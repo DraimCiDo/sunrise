@@ -42,8 +42,18 @@ impl Build {
         })
     }
 
-    fn newer_than(&self, running: &Self) -> bool {
-        self.commit != running.commit && self.date > running.date
+    fn newer_than(&self, running: &Self) -> Result<bool, String> {
+        if self.commit == running.commit {
+            return Ok(false);
+        }
+        // The rolling tag can be replayed with an old but still validly signed release set.
+        if self.date <= running.date {
+            return Err(format!(
+                "manager {} ({}) is not newer than the running manager {} ({}): not installed. Use `sunrise-server self-update --rollback` to go back.",
+                self.commit, self.date, running.commit, running.date
+            ));
+        }
+        Ok(true)
     }
 
     fn check_game(&self, game: &str, contract: u32) -> Result<(), String> {
@@ -65,7 +75,7 @@ struct GithubRelease {
     assets: Vec<Asset>,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Deserialize)]
 struct Asset {
     name: String,
     browser_download_url: String,
@@ -81,7 +91,7 @@ struct ToolRelease {
 /// bypass the version or compatibility check even if the executable itself has a signed checksum.
 fn signed_release(
     release: GithubRelease,
-    candidates: &[String],
+    archive_name: &str,
     fetch: impl Fn(&str) -> Result<Vec<u8>, String>,
     keys: &[PublicKey],
 ) -> Result<ToolRelease, String> {
@@ -127,17 +137,12 @@ fn signed_release(
             "{MANIFEST} has an invalid commit or contract range"
         ));
     }
-    let archive = candidates
-        .iter()
-        .find_map(|name| release.assets.iter().find(|a| a.name == *name))
-        .ok_or_else(|| {
-            format!(
-                "{TAG} has no manager archive for this computer ({})",
-                candidates.join(", ")
-            )
-        })?
-        .clone();
-    let sha256 = digest(&archive.name)?.to_owned();
+    let sha256 = digest(archive_name)?.to_owned();
+    let archive = release
+        .assets
+        .into_iter()
+        .find(|a| a.name == archive_name)
+        .ok_or_else(|| format!("{TAG} has no {archive_name}"))?;
     Ok(ToolRelease {
         build,
         archive,
@@ -145,25 +150,27 @@ fn signed_release(
     })
 }
 
-pub(crate) fn update(dir: &Path, check: bool) -> Result<(), String> {
-    let running = Build::running()?;
-    // Use the game updater's platform names and fallback order; manager archives are tarballs
-    // except on Windows, regardless of how the corresponding game is packed.
-    let mut candidates: Vec<_> = update::ASSETS
-        .iter()
-        .filter_map(|asset| {
-            let name = asset
-                .strip_prefix("sunrise-server-")
-                .or_else(|| asset.strip_prefix("sunrise-"))?;
-            let platform = name.split_once('.')?.0;
-            let suffix = if cfg!(windows) { "zip" } else { "tar.gz" };
-            Some(format!("{TAG}-{platform}.{suffix}"))
+fn platform_archive(os: &str, arch: &str) -> Result<&'static str, String> {
+    include_str!("../server-tool-platforms.txt")
+        .lines()
+        .find_map(|line| {
+            let mut fields = line.split_ascii_whitespace();
+            if fields.next()? == os && fields.next()? == arch {
+                fields.next()
+            } else {
+                None
+            }
         })
-        .collect();
-    candidates.dedup();
-    if candidates.is_empty() {
-        return Err(format!("{TAG} is not published for this build's platform"));
+        .ok_or_else(|| format!("{TAG} is not published for {os} {arch}"))
+}
+
+pub(crate) fn update(dir: &Path, check: bool) -> Result<(), String> {
+    // The Linux archive targets glibc. A manually installed musl build must not switch to it.
+    if cfg!(target_env = "musl") {
+        return Err(format!("{TAG} is not published for musl builds"));
     }
+    let archive_name = platform_archive(std::env::consts::OS, std::env::consts::ARCH)?;
+    let running = Build::running()?;
     let response = update::fetch_tag(TAG).map_err(|e| {
         if e == "404" {
             format!("no {TAG} release on GitHub")
@@ -173,13 +180,13 @@ pub(crate) fn update(dir: &Path, check: bool) -> Result<(), String> {
     })?;
     let release = signed_release(
         serde_json::from_slice(&response).map_err(|e| format!("GitHub's answer: {e}"))?,
-        &candidates,
+        archive_name,
         update::fetch,
         &sign::trusted_keys_for(sign::REPOSITORY),
     )?;
-    if !release.build.newer_than(&running) {
+    if !release.build.newer_than(&running)? {
         println!(
-            "No newer server manager is available (running {}).",
+            "The server manager is already current ({}).",
             running.commit
         );
         return Ok(());
