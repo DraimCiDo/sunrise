@@ -1493,7 +1493,7 @@ impl Goal for SearchForItems {
     }
 }
 /// `addAdditionalSaveData`: the cube's size, the timers and the fuse.
-pub fn to_nbt(m: &Mob, map: &mut sunrise_core::nbt::Compound) {
+pub fn to_nbt(m: &Mob, map: &mut crate::entity_nbt::EntityTagWriter) {
     use sunrise_core::nbt::Tag;
     map.insert("Size".into(), Tag::Int(m.extra.size.max(1) - 1));
     map.insert("wasOnGround".into(), Tag::Byte(i8::from(m.extra.flag2)));

@@ -838,6 +838,10 @@ impl Game<'_> {
     }
 
     pub(super) fn mob_object_nbt(&mut self, object: MobObject) -> Tag {
+        self.mob_object_tag(object, true)
+    }
+
+    pub(super) fn mob_object_tag(&mut self, object: MobObject, include_id: bool) -> Tag {
         let id = self.mob_at(object).id;
         let uuid = self.uuid_for(id);
         // A warden's anger names each suspect by UUID. A mob that has never been
@@ -906,25 +910,38 @@ impl Game<'_> {
         {
             self.uuid_for(attacker);
         }
-        let mut tag = entity_nbt::mob_to_nbt(
+        use sunrise_client::mobs::leash::Holder;
+        let mut retained = self
+            .persist
+            .raw
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| Tag::Compound(Default::default()));
+        self.put_last_hurt_by_mob(self.mob_at(object), &mut retained);
+        // `write_leash` may assign the holder a UUID. Other references retain
+        // the lookup they had before that assignment.
+        let holder = match self.mob_at(object).extra.leash {
+            Some(Holder::Mob(id) | Holder::Boat(id)) => Some((id, self.persist.uuid_of(id))),
+            _ => None,
+        };
+        self.write_leash(&mut retained, id);
+        let mut out = entity_nbt::EntityTagWriter::from_saved(retained);
+        entity_nbt::write_mob(
             self.mob_at(object),
             uuid,
-            self.persist.raw.get(&id),
+            &mut out,
             Some(self.pack.assets.registry),
-            |other| self.persist.uuid_of(other),
+            |other| match holder {
+                Some((id, uuid)) if other == id => uuid,
+                _ => self.persist.uuid_of(other),
+            },
             self.res.items(),
+            entity_nbt::MobSave {
+                include_id,
+                game_time: self.world.game_time,
+            },
         );
-        self.put_last_hurt_by_mob(self.mob_at(object), &mut tag);
-        if sunrise_client::mobs::camel::is_camel(self.mob_at(object).species())
-            && let Tag::Compound(c) = &mut tag
-        {
-            let tick = sunrise_client::mobs::camel::synced_pose_tick(
-                self.mob_at(object),
-                self.world.game_time,
-            );
-            c.insert("LastPoseTick".into(), Tag::Long(tick));
-        }
-        self.write_leash(&mut tag, id);
+        let mut tag = out.finish();
         write_attachments(&mut tag, id, &self.entity_attachments);
         // A mod's AI pause beside the mods' attachments, whose map would drop it.
         entity_nbt::write_ai_paused(self.mob_at(object).ai.ai_paused, &mut tag);

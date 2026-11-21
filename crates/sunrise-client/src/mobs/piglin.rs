@@ -2347,7 +2347,7 @@ pub fn hoglin_anim(m: &Mob, s: &State, p: &mut Poses) {
 
 /// `Brain.Packed`: the guarded-block live ANGRY_AT entry. The existing
 /// anger counter supplies its remaining long TTL, not an absolute timestamp.
-pub fn write_guarded_anger(m: &Mob, map: &mut sunrise_core::nbt::Compound) {
+pub fn write_guarded_anger(m: &Mob, map: &mut crate::entity_nbt::EntityTagWriter) {
     use sunrise_core::nbt::{Compound, Tag};
     let Some(actor) = m.extra.piglin.guarded_angry_at else {
         return;

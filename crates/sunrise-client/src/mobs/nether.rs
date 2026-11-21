@@ -213,7 +213,7 @@ pub fn register_ghast(m: &mut Mob) {
 }
 /// `Ghast.addAdditionalSaveData`: `putByte("ExplosionPower", (byte)explosionPower)`,
 /// the power the blast of the fireball it shoots uses (`LargeFireball.onHit`).
-pub fn to_nbt(m: &Mob, map: &mut sunrise_core::nbt::Compound) {
+pub fn to_nbt(m: &Mob, map: &mut crate::entity_nbt::EntityTagWriter) {
     map.insert(
         "ExplosionPower".into(),
         sunrise_core::nbt::Tag::Byte(m.extra.ints[EXPLOSION_POWER] as i8),

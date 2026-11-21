@@ -993,14 +993,12 @@ pub fn eat_and_digest_in(m: &mut Mob, w: &MobWorld) {
 
 /// The saved fields (`FoodLevel`, `Gossips`, `LastGossipDecay`, `Inventory`,
 /// `LivingEntity`'s `sleeping_pos` and the sleep and golem memories).
-pub fn write_nbt(m: &Mob, map: &mut sunrise_core::nbt::Compound, items: &crate::items::Items) {
+pub fn write_nbt(
+    m: &Mob,
+    map: &mut crate::entity_nbt::EntityTagWriter,
+    items: &crate::items::Items,
+) {
     use sunrise_core::nbt::Tag;
-    if let Some(p) = sleeping_pos(m) {
-        map.insert("sleeping_pos".into(), Tag::IntArray(p.to_vec()));
-    } else {
-        // LivingEntity.addAdditionalSaveData omits an absent modeled position.
-        map.remove(&"sleeping_pos".into());
-    }
     let Some(e) = ext(m) else { return };
     map.insert(
         "FoodLevel".into(),
@@ -1516,17 +1514,17 @@ mod tests {
         let mut m = villager();
         m.extra.ints[1] = bed_facing_code(Some("north"));
         ext_mut(&mut m).sleeping_pos = Some([3, 64, -7]);
-        let mut map = sunrise_core::nbt::Compound::new();
-        write_nbt(&m, &mut map, &Default::default());
+        let save = |m: &Mob| {
+            crate::entity_nbt::mob_to_nbt(m, [0; 4], None, None, |_| None, &Default::default())
+        };
         let mut loaded = villager();
-        read_nbt(&mut loaded, &sunrise_core::nbt::Tag::Compound(map));
+        read_nbt(&mut loaded, &save(&m));
         assert!(sleeping(&loaded));
         assert_eq!(sleeping_pos(&loaded), Some([3, 64, -7]));
         let mut awake = villager();
-        let mut map = sunrise_core::nbt::Compound::new();
-        write_nbt(&awake, &mut map, &Default::default());
-        assert!(!map.contains_key(&"sleeping_pos".into()));
-        read_nbt(&mut awake, &sunrise_core::nbt::Tag::Compound(map));
+        let saved = save(&awake);
+        assert!(saved.get("sleeping_pos").is_none());
+        read_nbt(&mut awake, &saved);
         assert!(!sleeping(&awake));
     }
     #[test]
@@ -1545,19 +1543,17 @@ mod tests {
                 if stale {
                     map.insert("sleeping_pos".into(), Tag::IntArray(vec![9, 90, 9]));
                 }
-                write_nbt(&m, &mut map, &Default::default());
-                assert_eq!(map.get(&"sleeping_pos".into()), expected.as_ref());
-                assert_eq!(map.get(&"h232_control".into()), Some(&Tag::Int(42)));
+                let saved = crate::entity_nbt::mob_to_nbt(
+                    &m,
+                    [0; 4],
+                    Some(&Tag::Compound(map)),
+                    None,
+                    |_| None,
+                    &Default::default(),
+                );
+                assert_eq!(saved.get("sleeping_pos"), expected.as_ref());
+                assert_eq!(saved.get("h232_control"), Some(&Tag::Int(42)));
             }
-            let saved = crate::entity_nbt::mob_to_nbt(
-                &m,
-                [0; 4],
-                None,
-                None,
-                |_| None,
-                &Default::default(),
-            );
-            assert_eq!(saved.get("sleeping_pos"), expected.as_ref());
         }
     }
     /// `Villager.setUnhappy` -> `Mob.makeSound(VILLAGER_NO)` plays with

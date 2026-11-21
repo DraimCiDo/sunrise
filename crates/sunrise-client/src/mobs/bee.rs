@@ -1262,7 +1262,7 @@ pub fn stable_destination(w: &MobWorld, p: [i32; 3]) -> bool {
 /// `Bee.addAdditionalSaveData` (and NeutralMob's `anger_end_time`).
 pub fn to_nbt(
     m: &Mob,
-    map: &mut sunrise_core::nbt::Compound,
+    map: &mut crate::entity_nbt::EntityTagWriter,
     uuid_of: &mut impl FnMut(u32) -> Option<[i32; 4]>,
 ) {
     use sunrise_core::nbt::Tag;
