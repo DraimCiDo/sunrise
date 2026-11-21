@@ -221,9 +221,8 @@ impl<'g> Game<'g> {
         );
     }
 
-    /// Draws inserted layers not drawn yet this frame, below `until` or to the end with `None`.
-    /// A skipped vanilla layer keeps its place; its neighbours draw at the next paint site.
-    /// Inserted layers don't draw while the HUD is hidden.
+    /// Draws inserted layers below the next vanilla slot, or through the end with `None`.
+    /// The HUD pass visits each vanilla anchor in order, whether or not its body paints.
     pub(in crate::game) fn draw_mod_gui_layers(
         &mut self,
         until: Option<VanillaGuiLayer>,
@@ -237,13 +236,12 @@ impl<'g> Game<'g> {
         };
         let slots = order.slots();
         let end = until.map_or(slots.len(), |layer| order.position(layer));
-        // An earlier anchor can still paint later (e.g. deferred subtitles). Don't redraw slots.
         for slot in &slots[next.min(end)..end] {
             if slot.vanilla_anchor().is_none() {
                 self.run_gui_layer(slot.id(), batch, &slot.body, None, false);
             }
         }
-        // Past `until` itself: its paint site draws it, not the cursor.
+        // Past `until` itself: its caller dispatches it with the original body.
         self.hud_layer_next = Some(next.max(end + usize::from(until.is_some())));
     }
 

@@ -22,19 +22,22 @@ layers remain in place for the next callback. Only a panic disables the register
 
 The client keeps the callback for the session and calls it as the mod that installed it. Capture
 any state the layer needs in the closure, and use the current `ClientHost` and `DrawContext`
-passed on each draw. A layer inserted with `register` does not dispatch under F1. A replaced or
-wrapped status slot still dispatches there. `gui_layer_pre` can cancel any slot that dispatches.
-A vanilla anchor still determines the layer's position if its body doesn't draw that frame.
+passed on each draw. All slots, including ones inserted with `register`, dispatch in order during
+the in-world HUD pass, even under F1. A `Flow::Cancel` from `render_gui_pre` skips every slot;
+`gui_layer_pre` can cancel just one.
 
 ### Replacing or wrapping a layer
 
 In the same registration hook, call `event.layers.replace_layer(id, Box::new(draw))` to discard
 an existing layer's body, including any wrappers. Use `event.layers.wrap_layer(id, Box::new(wrap))`
 to keep the previous body and draw around it. Both methods accept a vanilla ID or an already
-registered mod ID and return `false` if the ID isn't registered. They keep the layer's ID,
-order and dispatch. A replacement does not inherit the original body's eligibility checks.
+registered mod ID and return `false` if the ID isn't registered. They keep the layer's ID
+and order. A replacement does not inherit the original body's eligibility checks: for example,
+a crosshair replacement runs in third person, where the vanilla crosshair does not paint.
 Those checks apply only to the original body, including when a wrapper calls `draw_previous()`
-and reaches it.
+and reaches it. To hide your own paint under F1, check
+`host.hud_mode() == mod_api::HudMode::AllVisible`. The `minecraft:chat` slot is for background
+chat; focused chat draws separately as part of the chat screen.
 
 A wrapper gets a `GuiLayerWrapContext`: read the client with `host()`, paint with the scoped
 `DrawContext` from `with_draw`, and call `draw_previous()` where the previous body should paint.
@@ -54,15 +57,15 @@ event.layers.wrap_layer("minecraft:hotbar", Box::new(|ctx| {
 }));
 ```
 
-`gui_layer_pre` and `gui_layer_post` fire once per slot, not per wrapper. Post still fires if the
-wrapper omitted the previous body. If a retained painter or wrapper panics or is refused, its
-paint is discarded. A wrapper's completed `draw_previous()` calls keep their paint in order,
+`gui_layer_pre` and `gui_layer_post` fire once per slot, not per wrapper. Post still fires if
+the original body painted nothing or the wrapper omitted the previous body. If a retained
+painter or wrapper panics or is refused, its paint is discarded. A wrapper's completed
+`draw_previous()` calls keep their paint in order,
 without being called again. A panic disables just the offending callback for this session and
 reports the mod in the error log and the shared error toast. F1 hides the toast's paint, not the
 report. A refusal is reported without disabling the callback. A disabled wrapper leaves the
-previous body to draw directly. If Pre cancels the slot, neither the
-installed body nor Post runs. For work that must happen even when the HUD is hidden, use the independent foreground
-`gui_render_post` hook.
+previous body to draw directly. If Pre cancels the slot, neither the installed body nor Post
+runs. For a foreground pass independent of the HUD slots, use `gui_render_post`.
 
 ## Status rows and fixed text positions
 
@@ -86,11 +89,8 @@ event.layers.replace_layer("minecraft:player_health", Box::new(|host, draw| {
 Use `wrap_layer` and call `ctx.draw_previous()` if the vanilla row should still draw. Heart
 flashing and `player_heart_type` run only in the vanilla heart body, after the layer's Pre hook.
 Bubble bookkeeping and pop audio run only in the vanilla air body, even if the heart layer was
-cancelled or replaced. The status slots still run their layer hooks and installed bodies under F1,
-in creative or spectator mode, and off a mount. The original bodies check HUD visibility and the
-conditions for the row: survival or adventure for the player's rows, a mount with hearts for vehicle
-health. To hide your own paint under F1, check `host.hud_mode() == mod_api::HudMode::AllVisible`.
-A `Flow::Cancel` from `render_gui_pre` still skips those slots, even under F1. To replace all
+cancelled or replaced. The original bodies check HUD visibility and the conditions for the row:
+survival or adventure for the player's rows, a mount with hearts for vehicle health. To replace all
 rows formerly drawn by `health_hud`, replace or wrap `player_health`, `armor_level`, `food_level`
 and `air_level`; `vehicle_health` is separate.
 You can keep a `GuiDraw` list: pass it to `draw.gui_paint(&draws)` and handle its returned error.

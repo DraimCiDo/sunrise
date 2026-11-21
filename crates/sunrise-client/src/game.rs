@@ -3455,7 +3455,7 @@ struct Game<'a> {
     debug_renderers: Vec<sunrise_client::debug_entries::ActiveDebugRenderer>,
     /// `DebugRenderer.lastDebugEntriesVersion`: none before the first view of a world.
     debug_renderers_version: Option<u64>,
-    /// Next undrawn mod layer in HUD `gui_layers::order`; `None` while hidden or outside its pass.
+    /// Next undrawn mod layer in HUD `gui_layers::order`; `None` outside the HUD layer pass.
     hud_layer_next: Option<usize>,
     /// The mod block entities' view distances, asked of the parts once (`native_block_entity_draw`).
     mod_view_distances: std::cell::OnceCell<native_block_entity_draw::ViewDistances>,
@@ -7261,18 +7261,14 @@ impl Game<'_> {
         }
         if dispatch_hud {
             self.hud_layer_next = Some(0);
-            // Hud.extractCrosshair / extractItemHotbar / extractPlayerHealth /
-            // extractVehicleHealth and the experience bar, laid out by hud_layout.
             // Combat feel Legacy hides the attack indicator unless the player keeps it.
-            let indicator = if self.pvp_hides_attack_indicator() {
-                0
-            } else {
+            let indicator = if show_hud && !self.pvp_hides_attack_indicator() {
                 self.settings.attack_indicator
+            } else {
+                0
             };
-            let delay = sunrise_client::attack_strength::delay(self.main_hand_attack_speed());
-            let strength = self.hand_strength.scale(0.0, self.main_hand_attack_speed());
-            // The 3D crosshair (F3) takes the 2D one's place.
-            // Hud.extractCrosshair: a spectator only sees it over something to open.
+            // Hud.extractCrosshair: the 3D crosshair takes the 2D one's place, and a
+            // spectator only sees the latter over something to open.
             self.gui_layer(VanillaGuiLayer::Crosshair, &mut batch, &mut |g, batch| {
                 if !show_hud
                     || !g.camera_type.is_first_person()
@@ -7282,10 +7278,17 @@ impl Game<'_> {
                 {
                     return;
                 }
-                let attack = (indicator == 1).then_some(strength);
-                let full = attack.is_some_and(|a| {
-                    hud_layout::full_attack_indicator(a, delay, g.crosshair_living())
-                });
+                let (attack, full) = if indicator == 1 {
+                    let speed = g.main_hand_attack_speed();
+                    let strength = g.hand_strength.scale(0.0, speed);
+                    let delay = sunrise_client::attack_strength::delay(speed);
+                    (
+                        Some(strength),
+                        hud_layout::full_attack_indicator(strength, delay, g.crosshair_living()),
+                    )
+                } else {
+                    (None, false)
+                };
                 let draws = hud_layout::crosshair(wi, hi, attack, full);
                 // The custom crosshair takes the sprite's place (the first draw); the
                 // attack indicator stays.
@@ -7314,7 +7317,8 @@ impl Game<'_> {
                                 .map(|_| (f32::from(g.hotbar_pop[i]) - partial).max(0.0))
                         }),
                         offhand_pop: (f32::from(g.hotbar_pop[9]) - partial).max(0.0),
-                        attack: (indicator == 2).then_some(strength),
+                        attack: (indicator == 2)
+                            .then(|| g.hand_strength.scale(0.0, g.main_hand_attack_speed())),
                     };
                     let draws = hud_layout::hotbar(wi, hi, &inputs);
                     // `extractSlot` for each item, in order, on the path `gui_paint` takes.
@@ -7472,18 +7476,7 @@ impl Game<'_> {
                 }
             });
 
-            // Hud.nextContextualInfoState: the jump bar, the experience bar or
-            // the locator bar above the hotbar.
-            let has_experience = !self.creative && !spectator;
-            let contextual = sunrise_client::locator_bar::ContextualBar::next(
-                self.waypoints.has_waypoints(),
-                !spectator && self.jumpable_mount(),
-                self.mount_jumping(),
-                has_experience,
-                self.experience_recent(),
-            );
-            use sunrise_client::locator_bar::ContextualBar;
-            // After the health rows (Hud.extractHotbarAndDecorations): jump, locator or XP bar.
+            // Hud.nextContextualInfoState: jump, locator or XP bar after the health rows.
             self.gui_layer(
                 VanillaGuiLayer::ContextualInfoBar,
                 &mut batch,
@@ -7491,6 +7484,15 @@ impl Game<'_> {
                     if !show_hud {
                         return;
                     }
+                    use sunrise_client::locator_bar::ContextualBar;
+                    let has_experience = !g.creative && !spectator;
+                    let contextual = ContextualBar::next(
+                        g.waypoints.has_waypoints(),
+                        !spectator && g.jumpable_mount(),
+                        g.mount_jumping(),
+                        has_experience,
+                        g.experience_recent(),
+                    );
                     if contextual == ContextualBar::JumpableVehicle {
                         g.draw_jump_bar(batch, wi, hi);
                     }

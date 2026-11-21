@@ -7,8 +7,8 @@ pub trait Hooks {
     /// `event.layers.register(id, placement, Box::new(draw))` to insert a new slot,
     /// or `replace_layer` and `wrap_layer` to change an existing slot's body.
     /// `minecraft:player_health` is the heart slot only. Use `minecraft:air_level` as the
-    /// `Above` anchor to place a layer above all status rows. A status replacement or wrapper
-    /// runs even when the original body would not draw, including under F1.
+    /// `Above` anchor to place a layer above all status rows. Every slot dispatches during
+    /// the HUD pass, even when the original body would not draw or F1 hides vanilla paint.
     /// A listener sees its pending edits; they are published only if the listener
     /// returns without a panic or phase refusal.
     #[notes = r#"## HUD layers
@@ -33,8 +33,8 @@ A wrapper uses `ctx.with_draw` to paint with the current scoped drawing context 
 It can omit that call to skip the previous body. Both methods refuse an unknown ID.
 
 A layer fires `Hooks::gui_layer_pre` with its ID, runs its installed body, and fires
-`Hooks::gui_layer_post` once. No body or Post runs if Pre cancels. Drawing a previous
-body does not fire layer hooks again. A callback panic disables only that callback for the
+`Hooks::gui_layer_post` once, even if that body paints nothing. No body or Post runs if Pre
+cancels. Drawing a previous body does not fire layer hooks again. A callback panic disables only that callback for the
 session and reports its mod through the shared error log and toast. A non-panic refusal is
 reported without disabling the callback.
 
@@ -49,14 +49,15 @@ use `Above("minecraft:air_level".into())` to put it above all status rows. Use
 `Above("minecraft:vehicle_health".into())` to stay above mount hearts. No single anchor
 keeps a layer both above the mount hearts and below the player rows after the reorder.
 
-A skipped vanilla slot, such as the crosshair in third person, still keeps its place: inserted
-layers around it draw in order at the next slot. F1 and a canceled `Hooks::render_gui_pre` hide
-all inserted layers. For a foreground pass regardless of F1, use `Hooks::gui_render_post`."#]
+Every slot dispatches in order, including inserted slots under F1 and the crosshair in third
+person. F1 only changes the original vanilla paint. A canceled `Hooks::render_gui_pre` skips
+the whole layer pass. Focused chat belongs to the chat screen, not the `minecraft:chat` slot.
+For a foreground pass independent of the HUD slots, use `Hooks::gui_render_post`."#]
     #[hook(
         receiver = "associated",
         dispatch = "flat",
         side = "client",
-        version = 4,
+        version = 5,
         contract = "listen",
         staged_surface = "layers",
         context = "registration",

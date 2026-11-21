@@ -9,8 +9,12 @@ use mod_api::{
     PlayerHeartTypeEvent, RegisterGuiLayersEvent, RegistrationContext, RenderGuiPreEvent,
     client::hud_layout::GuiDraw, content::crash::current_native_mod,
 };
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use sunrise_client::{
+    camera::CameraType,
     chunk::Chunk,
     gui_layers::VanillaGuiLayer,
     hud::HudBatch,
@@ -436,10 +440,10 @@ fn health_extraction_runs_only_in_the_vanilla_layer_body() {
 
 #[test]
 #[ignore = "daily"]
-fn mod_layers_draw_in_their_place_and_hide_like_vanilla_layers() {
+fn mod_layers_draw_in_their_place() {
     // The layer order is kept once per process.
     if run_fresh_cases(
-        "game::gui_layer_tests::mod_layers_draw_in_their_place_and_hide_like_vanilla_layers",
+        "game::gui_layer_tests::mod_layers_draw_in_their_place",
         "SUNRISE_GUI_LAYER_FIXTURE",
         &["run"],
     ) {
@@ -457,9 +461,9 @@ fn mod_layers_draw_in_their_place_and_hide_like_vanilla_layers() {
         mods::register_gui_layers(ExecutionRole::Client);
         let mut batch = HudBatch::new([320, 240], game.settings.gui_scale_inputs());
 
-        // Simulate the HUD paint sites with the crosshair skipped (third person).
-        // Its wrapper doesn't draw, but both neighboring layers still do.
+        // A wrapper around a no-op vanilla body still draws between its neighbors.
         game.hud_layer_next = Some(0);
+        game.gui_layer(VanillaGuiLayer::Crosshair, &mut batch, &mut |_, _| {});
         for (layer, paint) in [
             (VanillaGuiLayer::Hotbar, "hotbar paint"),
             (VanillaGuiLayer::Effects, "effects paint"),
@@ -482,6 +486,9 @@ fn mod_layers_draw_in_their_place_and_hide_like_vanilla_layers() {
                 "inner after",
                 "outer after",
                 "post hud_test:under_crosshair",
+                "pre minecraft:crosshair",
+                "crosshair wrapper",
+                "post minecraft:crosshair",
                 "pre hud_test:over_crosshair",
                 "draw hud_test:over_crosshair",
                 "post hud_test:over_crosshair",
@@ -523,21 +530,116 @@ fn mod_layers_draw_in_their_place_and_hide_like_vanilla_layers() {
             colors,
             [[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255]]
         );
-
-        // With the HUD hidden (F1), vanilla's sleep overlay still draws, and no mod layer.
-        game.gui_layer(VanillaGuiLayer::SleepOverlay, &mut batch, &mut |_, _| {
-            log("sleep paint")
-        });
-        game.draw_mod_gui_layers(None, &mut batch);
-        assert_eq!(
-            take(),
-            [
-                "pre minecraft:sleep_overlay",
-                "sleep paint",
-                "post minecraft:sleep_overlay"
-            ]
-        );
     });
+}
+
+#[test]
+#[ignore = "daily"]
+fn skipped_vanilla_hud_bodies_still_dispatch_their_slots() {
+    if run_fresh_cases(
+        "game::gui_layer_tests::skipped_vanilla_hud_bodies_still_dispatch_their_slots",
+        "SUNRISE_HUD_ELIGIBILITY_FIXTURE",
+        &["run"],
+    ) {
+        return;
+    }
+
+    const CROSSHAIR: &str = "minecraft:crosshair";
+    const CHAT: &str = "minecraft:chat";
+    const AFTER_CROSSHAIR: &str = "hud_test:after_crosshair";
+    const SLEEP: &str = "minecraft:sleep_overlay";
+    const MARKER: u32 = 0xFF37_3737;
+
+    struct Slots(Arc<AtomicBool>);
+
+    #[mod_api::__subscriptions]
+    impl Hooks for Slots {
+        fn register_gui_layers(
+            &self,
+            _: &RegistrationContext,
+            event: &mut RegisterGuiLayersEvent<'_>,
+        ) {
+            assert!(event.layers.replace_layer(
+                CROSSHAIR,
+                Box::new(|_, draw| {
+                    log("replacement crosshair");
+                    draw.fill([20.0, 20.0, 8.0, 4.0], MARKER);
+                }),
+            ));
+            assert!(event.layers.register(
+                AFTER_CROSSHAIR.into(),
+                GuiLayerPlacement::Above(CROSSHAIR.into()),
+                Box::new(|_, _| log("inserted layer")),
+            ));
+        }
+
+        fn render_gui_pre(&self, _: &dyn ClientHost, _: &mut RenderGuiPreEvent) -> Flow {
+            if self.0.load(Ordering::Relaxed) {
+                Flow::Cancel
+            } else {
+                Flow::Continue
+            }
+        }
+
+        fn gui_layer_pre(&self, _: &dyn ClientHost, event: &mut GuiLayerPreEvent<'_>) -> Flow {
+            if matches!(event.layer, CROSSHAIR | AFTER_CROSSHAIR | SLEEP | CHAT) {
+                log(format!("pre {}", event.layer));
+            }
+            Flow::Continue
+        }
+
+        fn gui_layer_post(&self, _: &dyn ClientHost, event: &mut GuiLayerPostEvent<'_>) {
+            if matches!(event.layer, CROSSHAIR | AFTER_CROSSHAIR | SLEEP | CHAT) {
+                log(format!("post {}", event.layer));
+            }
+        }
+    }
+
+    let veto = Arc::new(AtomicBool::new(false));
+    mod_platform::testing::with_mods(
+        vec![ModEntry::new("test-slots", Box::new(Slots(veto.clone())))].into(),
+        || {
+            with_client_game(|game| {
+                mods::register_gui_layers(ExecutionRole::Client);
+                game.title = None;
+                game.set_mode_id(0);
+                game.player =
+                    Some(PlayerMotion::new(game.motion, Vec3::new(2.0, 64.0, 2.0)).unwrap());
+                game.camera_type = CameraType::ThirdPersonBack;
+                for (hidden, screen) in [
+                    (false, super::Screen::Playing),
+                    (true, super::Screen::Playing),
+                    (false, super::Screen::Chat),
+                ] {
+                    game.ui.hide_gui = hidden;
+                    game.screen = screen;
+                    let batch = game.hud_layers([640, 480]);
+                    assert!(batch.vertices.iter().any(|v| v.color == MARKER));
+                    assert_eq!(
+                        take(),
+                        [
+                            "pre minecraft:crosshair",
+                            "replacement crosshair",
+                            "post minecraft:crosshair",
+                            "pre hud_test:after_crosshair",
+                            "inserted layer",
+                            "post hud_test:after_crosshair",
+                            "pre minecraft:sleep_overlay",
+                            "post minecraft:sleep_overlay",
+                            "pre minecraft:chat",
+                            "post minecraft:chat",
+                        ],
+                    );
+                }
+                // A whole-HUD veto differs from F1: even the sleep and background chat slots stop.
+                game.ui.hide_gui = true;
+                veto.store(true, Ordering::Relaxed);
+                let batch = game.hud_layers([640, 480]);
+                assert!(!batch.vertices.iter().any(|v| v.color == MARKER));
+                assert!(take().is_empty());
+            })
+        },
+    );
 }
 
 #[test]
