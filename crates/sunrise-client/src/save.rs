@@ -2109,7 +2109,7 @@ fn write_prepared_region_records(
         let path = region_path(root, folder, rx, rz);
         // Clearing chunks of a region that doesn't exist changes nothing.
         let create = list.iter().any(|(_, _, r)| r.is_some());
-        let result = (|| {
+        let result: std::io::Result<()> = (|| {
             let Some(region) = cached_region(cache, (rx, rz), &path, create)? else {
                 return Ok(());
             };
