@@ -378,27 +378,42 @@ class StableModApiTests(unittest.TestCase):
     def test_only_a_new_major_can_change_content_declaration_files(self):
         repo = self.notes.with_name("repo")
         repo.mkdir()
+        reader, helper = nightly.CONTENT_READER + "\n", nightly.CONTENT_HELPER + "\n"
         manifest = "crates/sunrise-mod-package/src/manifest.rs"
-        # A reader file the guard has never heard of is covered by its folder or prefix.
-        declarations = ("crates/sunrise-mod-package/src/content/new_reader.rs",
-                        "crates/sunrise-client/src/mod_content_structures.rs")
-        unrelated = "crates/sunrise-mod-package/src/content/entity_sounds_tests.rs"
-        native_only = "crates/sunrise-mod-package/src/manifest/mixin.rs"
+        # A reader outside the folders is held by its line alone.
+        elsewhere = "crates/sunrise-client-render/src/particles/declarations.rs"
+        dropped = "crates/sunrise-client/src/mod_content_structures.rs"
+        tests = "crates/sunrise-mod-package/src/content/entity_sounds_tests.rs"
+        runtime = "crates/sunrise-client/src/mod_content/root_lifetime.rs"
+        unmarked = "crates/sunrise-client-render/src/particles.rs"
+        unclassified = "crates/sunrise-mod-package/src/content/new_reader.rs"
+
+        def commit(name, text):
+            Path(name).parent.mkdir(parents=True, exist_ok=True)
+            Path(name).write_text(text)
+            git("add", name)
+            git("commit", "-m", name)
+            return git("rev-parse", "HEAD")
+
         with chdir(repo):
             git("init", "--initial-branch=main")
             git("config", "user.name", "Release Test")
             git("config", "user.email", "release-test@example.invalid")
-            git("commit", "--allow-empty", "-m", "previous stable")
-            previous = git("rev-parse", "HEAD")
-            for name in (unrelated, native_only, manifest, *declarations):
-                Path(name).parent.mkdir(parents=True, exist_ok=True)
-                Path(name).touch()
-                git("add", name)
-                git("commit", "-m", name)
-            schema_edit = git("rev-parse", "HEAD")
-            # Keep the checkout at the unrelated edit to prove the diff uses the passed commits.
-            git("switch", "--detach", "HEAD~3")
-            unrelated_edit = git("rev-parse", "HEAD")
+            for name in (manifest, elsewhere, dropped):
+                commit(name, reader)
+            commit(runtime, helper)
+            commit(unmarked, "")
+            previous = commit(tests, "")
+            for name in (tests, runtime, unmarked):
+                unrelated_edit = commit(name, Path(name).read_text() + "// fixed\n")
+            # One reader changes, one is turned into a helper, one appears.
+            commit(manifest, reader + "// changed\n")
+            commit(dropped, helper)
+            schema_edit = commit("crates/sunrise-world/src/loot/new_reader.rs", reader)
+            unjudged = commit(unclassified, "")
+            # Keep the checkout elsewhere to prove the guard reads the passed commits.
+            git("switch", "--detach", previous)
+        declarations = (dropped, "crates/sunrise-world/src/loot/new_reader.rs")
 
         parent = nightly.train.Release(PREVIOUS, previous, "")
         run = subprocess.run
@@ -422,8 +437,12 @@ class StableModApiTests(unittest.TestCase):
                     self.assertIn(manifest, str(refused.exception))
                     for declaration in declarations:
                         self.assertIn(declaration, str(refused.exception))
-                    for allowed in (unrelated, native_only):
+                    for allowed in (tests, runtime, unmarked, elsewhere):
                         self.assertNotIn(allowed, str(refused.exception))
+                    with self.assertRaisesRegex(SystemExit, "do not say whether") as refused:
+                        nightly.stable_mod_api(unjudged, tag, self.notes)
+                    self.assertIn(unclassified, str(refused.exception))
+                    self.assertNotIn(tests, str(refused.exception))
             nightly.stable_mod_api(schema_edit, "26.3-1.0.0", self.notes)
 
     def test_stable_mod_api_command_requires_a_full_commit_sha(self):

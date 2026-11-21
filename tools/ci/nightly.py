@@ -160,7 +160,7 @@ def notes(today: str, chosen: Ref, main: Ref, picked: list[dict], left_out: list
 
 def merged_since(previous: str | None, main: str) -> list[dict]:
     """The pull requests merged into main since the previous nightly (its commit holds the main it was built on)."""
-    if not previous or subprocess.run(["git", "cat-file", "-e", f"{previous}^{{commit}}"]).returncode != 0:
+    if not previous or subprocess.run(["git", "cat-file", "-e", f"{previous}^{{commit}}"], cwd=REPOSITORY).returncode != 0:
         return []
     return train.merged_between("game", previous, main)
 
@@ -836,25 +836,41 @@ def require_stable_lineage(sha: str, tag: str, old_sha: str, old_tag: str) -> No
                          "cherry-pick fixes on this line or use a new major")
 
 
-# Until #3817 exports the content declarations, guard every file that reads a manifest or a mod-content
-# declaration, by folder and prefix so a new or moved reader is covered without an edit here. Left out: tests, the
-# native-only tables (which already pin an exact build) and the vanilla pack codecs.
-CONTENT_SCHEMA_PATHS = (
-    "crates/sunrise-mod-package/src/manifest.rs",
-    "crates/sunrise-mod-package/src/manifest/",
-    "crates/sunrise-mod-package/src/content.rs",
-    "crates/sunrise-mod-package/src/content/",
-    "crates/sunrise-client/src/mod_content*",
-    "crates/sunrise-client-render/src/connected/files.rs",
+# Until #3817 exports the content declarations, a file that reads a manifest or a mod-content declaration says so
+# with CONTENT_READER as a line of its module docs, and a patch or minor cannot change it. Tests live in their own
+# `*_tests.rs` files and runtime helpers are not marked, so neither is held. A file in the folders that hold the
+# readers (CONTENT_FOLDERS, by path prefix) must be classified, with either line, so a new one cannot go unjudged; a
+# reader elsewhere is marked too.
+CONTENT_READER = "//! stable-line: content-declarations"
+CONTENT_HELPER = "//! stable-line: no-content-declarations"
+CONTENT_FOLDERS = (
+    "crates/sunrise-mod-package/src/manifest",
+    "crates/sunrise-mod-package/src/content",
+    "crates/sunrise-client/src/mod_content",
     "crates/sunrise-world/src/conditions.rs",
-    ":(exclude)*_tests.rs",
-    ":(exclude)crates/sunrise-mod-package/src/manifest/loops.rs",
-    ":(exclude)crates/sunrise-mod-package/src/manifest/mixin.rs",
 )
 
 
+def files_marked(sha: str, marker: str) -> set[str]:
+    """The Rust files of `sha` that carry `marker`, which has no pattern characters, as a whole line."""
+    found = subprocess.run(["git", "grep", "-l", "-z", "-e", f"^{marker}$", sha, "--",
+                            "*.rs"], cwd=REPOSITORY, capture_output=True, text=True)
+    if found.returncode > 1:
+        raise SystemExit(f"::error::git grep in {sha} failed: {found.stderr.strip()}")
+    return {name.split(":", 1)[1] for name in found.stdout.split("\0") if name}
+
+
 def require_unchanged_content_schema(sha: str, tag: str, old_sha: str, old_tag: str) -> None:
-    changed = git("diff", "--name-only", "--no-renames", old_sha, sha, "--", *CONTENT_SCHEMA_PATHS)
+    readers = files_marked(sha, CONTENT_READER)
+    listed = {name for name in git("ls-tree", "-r", "--name-only", sha, "crates/").splitlines()
+              if name.startswith(CONTENT_FOLDERS) and name.endswith(".rs") and not name.endswith("_tests.rs")}
+    if unclassified := sorted(listed - readers - files_marked(sha, CONTENT_HELPER)):
+        raise SystemExit(f"::error::refused: {tag} has files that do not say whether they read content declarations: "
+                         f"{', '.join(unclassified)}. Each needs `{CONTENT_READER}` or `{CONTENT_HELPER}`.")
+    # A file that was a reader in the previous release is still judged if the candidate drops its line.
+    guarded = sorted(readers | files_marked(old_sha, CONTENT_READER))
+    changed = guarded and git("diff", "--name-only", "--no-renames", old_sha, sha, "--",
+                              *(f":(literal){name}" for name in guarded))
     if changed:
         raise SystemExit(f"::error::refused: {tag} changes content declaration files since {old_tag}: "
                          f"{', '.join(changed.splitlines())}. Patches and minors cannot change these files until #3817.")

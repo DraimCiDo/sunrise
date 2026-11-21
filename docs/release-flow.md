@@ -477,8 +477,12 @@ must equal the parent's signed `surface.json`, and it diffs the two exports. A t
 minor allows only changes the SDK classifies as additive. Conditional changes can break some existing mods, so a
 minor refuses them too. For content mods, the SDK's `content_api` version string must stay the same within a line.
 Until [#3817](https://github.com/sunrise-org/sunrise/issues/3817) exports the declarations for comparison, the check
-also refuses any patch or minor whose tree changes a manifest or mod-content reader: the files, folders and
-prefixes listed in `tools/ci/nightly.py` (`CONTENT_SCHEMA_PATHS`), so a new reader file there is covered too. The
+also refuses any patch or minor whose tree changes a manifest or mod-content reader: a Rust file whose module
+docs carry the line `//! stable-line: content-declarations`, in the candidate or in the release before it. Tests
+live in their own `*_tests.rs` files and runtime helpers carry no such line, so fixing either is not held. Every
+file in the folders that hold the readers (`CONTENT_FOLDERS` in `tools/ci/nightly.py`) must carry that line or
+`//! stable-line: no-content-declarations`, so a new file there is classified before a release; a reader anywhere
+else carries the first line too. The
 refusal names every changed file. Even a legitimate fix in one
 of those files cannot ship in a patch or minor until #3817. The first release of a line has no API restriction.
 No label, change note or dispatch option overrides the check. The mod API surface comparison judges declarations,
