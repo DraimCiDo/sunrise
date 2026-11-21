@@ -1,7 +1,7 @@
 //! `LevelChunk.markUnsaved` and `ChunkMap`'s insertion-ordered eager queue.
 use crate::fast_hash::{FxHashMap, FxHashSet};
 use std::{
-    collections::{BTreeMap, hash_map::Entry},
+    collections::BTreeMap,
     ops::Deref,
     time::{Duration, Instant},
 };
@@ -43,33 +43,12 @@ impl IntoIterator for ModifiedChunks {
 impl ModifiedChunks {
     pub fn insert(&mut self, key: Key) -> bool {
         let changed = self.dirty.insert(key);
-        match self.queued.entry(key) {
-            Entry::Vacant(slot) => {
-                self.sequence += 1;
-                self.order.insert(self.sequence, key);
-                slot.insert(self.sequence);
-            }
-            Entry::Occupied(_) if changed => self.sequence += 1,
-            _ => {}
+        if changed && !self.queued.contains_key(&key) {
+            self.sequence += 1;
+            self.order.insert(self.sequence, key);
+            self.queued.insert(key, self.sequence);
         }
         changed
-    }
-    /// Retain a failed snapshot for explicit and unload saves without scheduling an eager retry.
-    /// If another edit already dirtied this chunk, leave that newer edit in the queue.
-    pub fn retain_refused_save(&mut self, key: Key) {
-        if self.dirty.insert(key)
-            && let Some(sequence) = self.queued.remove(&key)
-        {
-            self.order.remove(&sequence);
-        }
-    }
-    /// Whether a dirty chunk has an edit that a periodic save may pick up.
-    pub fn queued_for_save(&self, key: &Key) -> bool {
-        self.queued.contains_key(key)
-    }
-    /// The last edit generation the save queue saw, for idle-close retries.
-    pub fn edit_sequence(&self) -> u64 {
-        self.sequence
     }
     pub fn extend(&mut self, keys: impl IntoIterator<Item = Key>) {
         for key in keys {
@@ -119,8 +98,7 @@ impl ModifiedChunks {
     }
     /// `ChunkMap.saveChunksEagerly` / `saveChunkIfNeeded`. `available` checks
     /// both haveTime and activeChunkWrites before EACH candidate; `save` takes
-    /// an immutable snapshot and returns true once a save was attempted, even if refused.
-    /// An attempted save consumes the eager mark and starts a cooldown.
+    /// an immutable snapshot and queues it. Failed submissions stay dirty.
     pub fn save_eagerly(
         &mut self,
         now: Instant,
@@ -134,10 +112,7 @@ impl ModifiedChunks {
             if saved == 20 || !available() {
                 break;
             }
-            if !loaded(key) {
-                self.dirty.remove(&key);
-                remove.push((sequence, key));
-            } else if !self.dirty.contains(&key) {
+            if !loaded(key) || !self.dirty.contains(&key) {
                 remove.push((sequence, key));
             } else if self.next_save.get(&key).is_none_or(|&at| now >= at) && save(key) {
                 self.dirty.remove(&key);

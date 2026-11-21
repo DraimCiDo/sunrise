@@ -105,7 +105,7 @@ impl DiskRecord {
     pub(super) fn read(&self) -> Option<Arc<NamedTag>> {
         match self.encoded.wait() {
             Ok(tag) => tag.clone(),
-            // Keep the unsaved snapshot readable so a later load can retry it.
+            // A reader that borrowed this snapshot before completion still owns that read.
             Err(_) => self.original.tag(),
         }
     }
@@ -271,31 +271,41 @@ impl SaveDir {
                         .flatten()
                 })
                 .collect();
-            let work = || -> std::io::Result<Vec<_>> {
+            let work = || {
                 chunks
                     .iter()
                     .zip(&jobs)
-                    .map(|(chunk, job)| {
-                        let entries = job.as_ref().map(|job| runtime.run(job)).transpose()?;
-                        let blending = self.calculated_blending(chunk.x, chunk.z);
-                        let mut tag = encode_saved(
-                            chunk,
-                            registry,
-                            biomes,
-                            self.tables.get().map(|t| &**t),
-                            self.shape,
-                            blending.as_deref(),
-                            items,
-                        );
-                        if let Some(entries) = entries {
-                            replace_entries(&mut tag, entries)?;
+                    .filter_map(|(chunk, job)| {
+                        let key = (chunk.x, chunk.z);
+                        let tag = compression_pool::catch_encoding_panic(|| {
+                            let entries = job.as_ref().map(|job| runtime.run(job)).transpose()?;
+                            let blending = self.calculated_blending(chunk.x, chunk.z);
+                            let mut tag = encode_saved(
+                                chunk,
+                                registry,
+                                biomes,
+                                self.tables.get().map(|t| &**t),
+                                self.shape,
+                                blending.as_deref(),
+                                items,
+                            );
+                            if let Some(entries) = entries {
+                                replace_entries(&mut tag, entries)?;
+                            }
+                            Ok(tag)
+                        });
+                        match tag {
+                            Ok(tag) => Some((key, Some(tag))),
+                            Err(error) => {
+                                self.report_record_failure(Folder::Region, key, &error);
+                                None
+                            }
                         }
-                        Ok(((chunk.x, chunk.z), Some(tag)))
                     })
                     .collect()
             };
             let records = std::thread::scope(|scope| scope.spawn(work).join())
-                .map_err(|_| "chunk disk worker unwound")??;
+                .map_err(|_| "chunk disk worker unwound")?;
             self.write_records("region", records, true)?;
             self.save_poi(chunks, true)?;
             Ok(chunks.len())

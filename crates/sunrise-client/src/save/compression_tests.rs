@@ -127,7 +127,7 @@ fn full_record_overflow_discards_edits_without_losing_current_chunk_data() {
 
 #[test]
 fn an_encoder_panic_does_not_strand_serial_or_parallel_writes() {
-    use super::{Folder, RecordSaveFailures, SaveDir};
+    use super::{Folder, SaveDir};
     use std::{sync::mpsc, time::Duration};
 
     for count in [3, 4] {
@@ -149,18 +149,15 @@ fn an_encoder_panic_does_not_strand_serial_or_parallel_writes() {
         let (send, receive) = mpsc::channel();
         let worker = std::thread::spawn(move || {
             save.queue(Folder::Region, records, false).unwrap();
-            let error = save
-                .flush()
-                .unwrap_err()
-                .downcast::<RecordSaveFailures>()
+            save.flush().unwrap();
+            send.send((save.record_save_failures(), save.active_chunk_writes()))
                 .unwrap();
-            send.send((error, save.active_chunk_writes())).unwrap();
         });
-        let (error, active) = receive
+        let (failures, active) = receive
             .recv_timeout(Duration::from_secs(1))
             .expect("flush waited indefinitely for the panicking batch");
         worker.join().unwrap();
-        assert!(error.to_string().contains("region 1,0:"), "{error}");
+        assert_eq!(failures, 1);
         assert_eq!(active, 0);
         let disk = open();
         for x in 0..count {
@@ -235,8 +232,7 @@ fn a_compressed_size_rejection_does_not_skip_healthy_records_in_either_region() 
             0,
             &records,
             prepared,
-        )
-        .unwrap();
+        );
         let disk = open();
         assert_eq!(
             disk.raw_chunk(0, 0).unwrap().tag.get("xPos"),

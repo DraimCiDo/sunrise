@@ -21,21 +21,18 @@ Registry and settings reads use the captured resource generation.
 A captured record caches its callback result. Disk encoding and pending reads
 reuse it; they cannot invoke the callback twice. If the writer stops before
 running a job, pending readers can still read the captured snapshot. The writer
-handles records independently: a refusal leaves the previous region slot intact
-and keeps the captured snapshot readable, while unrelated records are still
-written. A chunk whose `chunk_data_load` listener failed is saved without any
-save listener.
+handles records independently: an encoding refusal leaves the previous region slot
+intact, while unrelated records are still written. A pending reader that already
+borrowed the snapshot can finish reading it; a fresh load after the failed attempt
+reads the previous disk record. A chunk whose `chunk_data_load` listener failed
+is saved without any save listener.
 Attachment values over 65536 encoded bytes, nesting over 64 or total data over
 1048576 bytes refuse the job, including opaque unknown entries.
 
 Every record the writer processes runs the callback exactly once, for full saves (explicit,
 forced, late, unload and closing) and proto saves alike. Saves are refused, with
 no callback, while an action savepoint is open, and chunk unloading waits for
-it to close. An explicit flush reports any unresolved refusals. If shutdown
-finishes with a partial save because a record was refused, it logs the refusal
-and continues rather than treating it as fatal. Storage I/O errors still
-propagate. A failed full chunk is kept for an explicit, unload or shutdown save
-while it is resident, including after the server reloads the pending snapshot.
-Until the chunk is edited again, eager and periodic saves do not retry the
-same refused snapshot. A snapshot that stays unloaded and a proto chunk do not
-have an automatic retry path.
+it to close. A record that cannot be encoded or written is reported with its
+coordinates and storage type. A flush waits for all attempts to finish;
+a failed record does not fail the command, timer save or shutdown. The server
+does not retry the failed snapshot. A later edit can be saved in a new snapshot.

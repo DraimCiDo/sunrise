@@ -316,6 +316,9 @@ impl WorldRequest {
             &level,
             biomes.clone(),
             None,
+            Arc::new(sunrise_client::chunk_io::SaveFailureReporter::new(
+                options.execution_role == execution_role::ExecutionRole::IntegratedServer,
+            )),
         )?;
         drop(streaming_step);
         streaming.radius = settings.render_distance;
@@ -963,6 +966,7 @@ pub(super) fn make_streaming(
     level: &Level,
     biomes: Arc<Biomes>,
     runtime: Option<&super::runtime_levels::Generate>,
+    save_reporter: Arc<sunrise_client::chunk_io::SaveFailureReporter>,
 ) -> Result<(Streaming, Arc<SaveDir>, Option<Arc<VanillaTerrain>>)> {
     use sunrise_client::save::WorldGen;
     let enabled_features = &level.enabled_features;
@@ -974,6 +978,7 @@ pub(super) fn make_streaming(
         Some(res.shared_items()),
     );
     save.enable_trusted_fluid_load();
+    save.set_save_reporting(world_root.to_path_buf(), dim.id(), save_reporter);
     let save = Arc::new(save);
     if dim == Dim::End {
         // Migrate before any chunk reader can cache the old block entities. A side file it

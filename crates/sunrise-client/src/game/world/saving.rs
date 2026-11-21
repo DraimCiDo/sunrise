@@ -5,7 +5,7 @@ use std::{
     collections::{HashSet, VecDeque},
     time::{Duration, Instant},
 };
-use sunrise_client::{Result, hud::HudBatch, save::RecordSaveFailures};
+use sunrise_client::{Result, hud::HudBatch};
 
 pub(super) struct ClosingSave {
     pub quit: bool,
@@ -207,6 +207,8 @@ impl Game<'_> {
                     let started = Instant::now();
                     for _ in 0..per_frame {
                         let Some(&key) = keys.front() else { break };
+                        // ChunkMap.save consumes the dirty mark before capturing the snapshot.
+                        self.world.modified.remove(&key);
                         let chunks = self.with_entities(self.world.chunks.get(&key));
                         self.native_full_chunk_snapshots(&chunks);
                         self.save.save_later(
@@ -214,7 +216,6 @@ impl Game<'_> {
                             self.pack.assets.registry,
                             world_biomes!(self),
                         )?;
-                        self.world.modified.remove(&key);
                         keys.pop_front();
                         if started.elapsed() >= budget {
                             break;
@@ -249,32 +250,14 @@ impl Game<'_> {
                 }
                 Stage::Writes => {
                     let players = self.finish_player_autosaves(false)?;
-                    match self.save.writes_finished() {
-                        Err(error) if error.is::<RecordSaveFailures>() => {
-                            if players {
-                                if let Some(reply) = save.reply.take() {
-                                    let _ = reply.send(
-                                        serde_json::json!({ "error": error.to_string() })
-                                            .to_string(),
-                                    );
-                                }
-                                if save.close || save.quit {
-                                    log::warn!("Closing the world after a partial save: {error}");
-                                }
-                            }
-                            Ok(players)
-                        }
-                        chunks => {
-                            let finished = chunks? && players;
-                            if finished {
-                                self.message = Some((
-                                    sunrise_client::lang::get("commands.save.success"),
-                                    Instant::now(),
-                                ));
-                            }
-                            Ok(finished)
-                        }
+                    let finished = self.save.writes_finished()? && players;
+                    if finished && !save.close {
+                        self.message = Some((
+                            sunrise_client::lang::get("commands.save.success"),
+                            Instant::now(),
+                        ));
                     }
+                    Ok(finished)
                 }
             }
         })();
@@ -435,7 +418,6 @@ impl Game<'_> {
     /// Save the level in place: its changed chunks, its entities and its raids.
     pub(super) fn save_level(&mut self, wait: bool) -> Result<()> {
         self.admit_level_save()?;
-        self.requeue_failed_chunk_saves();
         // No save holds a player vehicle: a mob a mod seated on a player gets off first.
         self.eject_player_riders(None);
         self.save_border();
@@ -455,21 +437,17 @@ impl Game<'_> {
                 sunrise_client::streaming::SaveStep::Pending => unreachable!(),
             }
         }
-        let keys: Vec<_> = self
-            .world
-            .modified
-            .iter()
-            .filter(|key| wait || self.world.modified.queued_for_save(key))
-            .copied()
-            .collect();
+        let keys: Vec<_> = self.world.modified.iter().copied().collect();
         self.save.save_attachments(&self.world.attachments)?;
+        // ChunkMap.save calls tryMarkSaved before creating the snapshot. A record failure
+        // finishes this attempt and does not put the mark back.
+        for key in &keys {
+            self.world.modified.remove(key);
+        }
         let chunks = self.with_entities(keys.iter().filter_map(|k| self.world.chunks.get(k)));
         self.native_full_chunk_snapshots(&chunks);
         self.save
             .save_later(&chunks, self.pack.assets.registry, world_biomes!(self))?;
-        for chunk in &chunks {
-            self.world.modified.remove(&(chunk.x, chunk.z));
-        }
         // Prepare entities while the chunk writer runs, then use one barrier.
         if !wait {
             self.world.modified.autosaved(&keys, Instant::now());
@@ -537,28 +515,22 @@ mod tests {
 
     #[test]
     #[ignore = "daily"]
-    fn closing_and_control_saves_distinguish_refusals_from_storage_errors() {
+    fn closing_and_control_saves_complete_after_reporting_a_record_failure() {
         mod_platform::testing::with_mods(Vec::new().into(), || {
             with_game(|game| {
-                for (quit, hard) in [(false, false), (true, false), (false, true), (true, true)] {
+                for quit in [false, true] {
                     let dir = tempfile::tempdir().unwrap();
                     game.save = Arc::new(SaveDir::new(
                         dir.path().to_path_buf(),
                         LevelShape::OVERWORLD,
                         None,
                     ));
-                    let tag = if hard {
-                        std::fs::write(dir.path().join("entities"), b"not a directory").unwrap();
-                        Tag::compound([("marker", Tag::Int(7))])
-                    } else {
-                        (0..=DISK_WRITE_NESTING_GUARD)
-                            .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]))
-                    };
+                    let invalid = (0..=DISK_WRITE_NESTING_GUARD)
+                        .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
                     game.save
-                        .save_entities_later(vec![((2, 0), vec![tag])])
+                        .save_entities(vec![((2, 0), vec![invalid])])
                         .unwrap();
-                    let error = game.save.flush().unwrap_err();
-                    assert_eq!(error.is::<RecordSaveFailures>(), !hard);
+                    assert_eq!(game.save.record_save_failures(), 1);
                     let (send, receive) = mpsc::channel();
                     game.pending_save = Some(ClosingSave {
                         quit,
@@ -569,21 +541,15 @@ mod tests {
                     });
                     game.saved_for_exit = false;
                     game.message = None;
-                    let result = game.poll_closing_save();
-                    if hard {
-                        assert_eq!(result.unwrap_err().to_string(), error.to_string());
-                        assert!(game.pending_save.is_some());
-                    } else {
-                        assert_eq!(result.unwrap(), quit);
-                        assert!(game.pending_save.is_none());
-                    }
+                    assert_eq!(game.poll_closing_save().unwrap(), quit);
+                    assert!(game.pending_save.is_none());
                     if !quit {
                         let reply: serde_json::Value =
                             serde_json::from_str(&receive.try_recv().unwrap()).unwrap();
-                        assert_eq!(reply, serde_json::json!({"error": error.to_string()}));
+                        assert_eq!(reply, serde_json::json!({"ok": true}));
                     }
-                    assert_eq!(game.saved_for_exit, quit && !hard);
-                    assert!(game.message.is_none());
+                    assert_eq!(game.saved_for_exit, quit);
+                    assert_eq!(game.message.is_some(), !quit);
                 }
             });
         });

@@ -75,27 +75,17 @@ impl Game<'_> {
 }
 
 impl Game<'_> {
-    /// Keep failed snapshots eligible for explicit/unload saves, not another eager attempt
-    /// of the same data. As in `ChunkMap.save`, an eager attempt consumes the edit mark.
-    pub(in crate::game) fn requeue_failed_chunk_saves(&mut self) {
-        for key in self.save.take_failed_chunk_saves() {
-            if self.world.chunks.contains_key(&key) {
-                self.world.modified.retain_refused_save(key);
-            }
-        }
-    }
-
     /// With a `chunk_data_save` listener, saves wait while an action savepoint
     /// is open, so tentative state is never captured: unloads, and the plan
     /// that causes them, are deferred until it closes (the design's "defer
     /// unload when the gate refuses"). Never defers without a listener.
     pub(super) fn defer_chunk_disk_save(&mut self) -> bool {
-        if self.options.execution_role.is_client() {
+        if self.options.execution_role.is_client()
+            || !mod_api::__private::listened(mod_api::HookId::ChunkDataSave)
+        {
             return false;
         }
-        self.requeue_failed_chunk_saves();
-        mod_api::__private::listened(mod_api::HookId::ChunkDataSave)
-            && Self::admit_entity_save().is_err()
+        Self::admit_entity_save().is_err()
     }
 
     /// `ChunkMap.saveChunksEagerly`: snapshot only while the tick and writer
@@ -126,7 +116,6 @@ impl Game<'_> {
             .server_tick_deadline
             .unwrap_or_else(|| Instant::now() + self.clock.tick_duration());
         let mut modified = std::mem::take(&mut self.world.modified);
-        let mut refused = Vec::new();
         modified.save_eagerly(
             now,
             || Instant::now() < deadline && self.save.active_chunk_writes() < 128,
@@ -138,19 +127,18 @@ impl Game<'_> {
                     return false;
                 };
                 let chunks = self.with_entities([chunk]);
-                if let Err(e) =
-                    self.save
-                        .save_later(&chunks, self.pack.assets.registry, world_biomes!(self))
+                match self
+                    .save
+                    .save_later(&chunks, self.pack.assets.registry, world_biomes!(self))
                 {
-                    log::warn!("Sunrise: failed to save changed chunks: {e}");
-                    refused.push(key);
+                    Ok(_) => true,
+                    Err(e) => {
+                        log::warn!("Sunrise: failed to save changed chunks: {e}");
+                        false
+                    }
                 }
-                true
             },
         );
-        for key in refused {
-            modified.retain_refused_save(key);
-        }
         self.world.modified = modified;
     }
 }
@@ -160,7 +148,7 @@ mod tests {
     use super::*;
     use crate::game::native_entity_refs::tests::with_game;
     use std::time::Duration;
-    use sunrise_client::save::{LevelShape, RecordSaveFailures, SaveDir};
+    use sunrise_client::save::{LevelShape, SaveDir};
     use sunrise_core::nbt::{DISK_WRITE_NESTING_GUARD, Tag};
 
     #[test]
@@ -178,216 +166,54 @@ mod tests {
                 let key = (2, 0);
                 let mut chunk = Chunk::with_layout(key.0, key.1, game.world.layout());
                 chunk.lit = true;
+                let registry = game.pack.assets.registry;
+                let stone = registry.default_state("minecraft:stone").unwrap();
+                let gold = registry.default_state("minecraft:gold_block").unwrap();
+                chunk.set(1, 64, 1, stone.0);
+                game.save
+                    .save(&[Arc::new(chunk.clone())], registry, world_biomes!(game))
+                    .unwrap();
+                chunk.set(1, 64, 1, gold.0);
                 let invalid = (0..=DISK_WRITE_NESTING_GUARD)
                     .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
-                let extra = Arc::make_mut(chunk.saved.get_or_insert_with(Default::default));
-                extra.root.insert("test:invalid".into(), invalid);
-                extra.root.insert("test:attempt".into(), Tag::Int(1));
+                Arc::make_mut(chunk.saved.get_or_insert_with(Default::default))
+                    .root
+                    .insert("test:invalid".into(), invalid);
                 game.world.chunks.insert(key, Arc::new(chunk));
                 game.world.modified.insert(key);
 
                 let now = Instant::now();
                 game.save_chunks_eagerly_at(now);
-                let refused = |game: &Game<'_>, attempted| {
-                    assert!(game.save.flush().unwrap_err().is::<RecordSaveFailures>());
-                    let saved = game.save.raw_chunk(key.0, key.1).unwrap();
-                    assert_eq!(saved.tag.get("test:attempt"), Some(&Tag::Int(attempted)));
-                };
-                refused(game, 1);
-
-                // Advance past the cooldown without sleeping. An out-of-band marker
-                // tells us if the unencodable chunk was captured a second time.
-                let chunk = Arc::make_mut(game.world.chunks.get_mut(&key).unwrap());
-                Arc::make_mut(chunk.saved.as_mut().unwrap())
-                    .root
-                    .insert("test:attempt".into(), Tag::Int(2));
-                for elapsed in [11, 22, 33] {
-                    game.save_chunks_eagerly_at(now + Duration::from_secs(elapsed));
-                    refused(game, 1);
-                }
-                game.save_level(false).unwrap();
-                refused(game, 1);
-
-                game.world.modified.insert(key);
-                game.save_chunks_eagerly_at(now + Duration::from_secs(44));
-                refused(game, 2);
-
-                let chunk = Arc::make_mut(game.world.chunks.get_mut(&key).unwrap());
-                Arc::make_mut(chunk.saved.as_mut().unwrap())
-                    .root
-                    .insert("test:attempt".into(), Tag::Int(3));
-                assert!(game.save_game().unwrap_err().is::<RecordSaveFailures>());
-                refused(game, 3);
-            });
-        });
-    }
-
-    #[test]
-    #[ignore = "daily"]
-    fn shutdown_saves_a_refused_edit_after_the_chunk_reloads() {
-        use mod_api::{
-            AttachmentCodec, AttachmentError, AttachmentType, ChunkDataSaveEvent, ChunkDiskHost,
-            Hooks, ModEntry,
-        };
-        use std::sync::{Mutex, mpsc};
-        use sunrise_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
-
-        const KEY: (i32, i32) = (2, 0);
-        struct RefuseOnce(Arc<Mutex<Option<mpsc::Receiver<()>>>>);
-        #[mod_api::__subscriptions]
-        impl Hooks for RefuseOnce {
-            fn chunk_data_save(
-                &self,
-                host: &dyn ChunkDiskHost,
-                event: &mut ChunkDataSaveEvent<'_>,
-            ) {
-                if host.job().pos != [KEY.0, KEY.1] {
-                    return;
-                }
-                let gate = self.0.lock().unwrap().take();
-                if let Some(gate) = gate {
-                    gate.recv_timeout(Duration::from_secs(5)).unwrap();
-                    let invalid = AttachmentType {
-                        namespace: "reload_refusal",
-                        name: "bad",
-                        default: || 0,
-                        codec: Some(AttachmentCodec {
-                            encode: |_| Err(AttachmentError::Encode),
-                            decode: |_| Ok(0),
-                        }),
-                        copy_on_death: false,
-                        sync: false,
-                    };
-                    let _ = event.data.set(&invalid, 1);
-                }
-            }
-        }
-
-        let gate = Arc::new(Mutex::new(None));
-        let mods = vec![ModEntry::new(
-            "reload_refusal",
-            Box::new(RefuseOnce(gate.clone())),
-        )]
-        .into();
-        mod_platform::testing::with_mods(mods, || {
-            with_game(|game| {
-                let dir = tempfile::tempdir().unwrap();
-                game.world_root = dir.path().to_path_buf();
-                game.session_lock =
-                    Some(sunrise_client::save::SessionLock::acquire(dir.path()).unwrap());
-                game.world_adopted = true;
-                let open = || {
-                    SaveDir::new(
-                        dir.path().to_path_buf(),
-                        LevelShape::OVERWORLD,
-                        Some(Default::default()),
-                    )
-                };
-                game.save = Arc::new(open());
-                let load = LoadContext::new(
-                    DataLoadOrigin::ServerDataLoad,
-                    Arc::new(LoadInputs::new(
-                        Default::default(),
-                        game.world_root.join("settings"),
-                    )),
-                    [],
-                );
-                game.save.set_chunk_disk_context(
-                    mod_api::WorldEpoch::new(17),
-                    mod_api::Identifier::parse("minecraft:overworld").unwrap(),
-                    Arc::new(load.worldgen_context([])),
-                );
-                let registry = game.pack.assets.registry;
-                let stone = registry.default_state("minecraft:stone").unwrap();
-                let gold = registry.default_state("minecraft:gold_block").unwrap();
-                let mut chunk = Chunk::with_layout(KEY.0, KEY.1, game.world.layout());
-                chunk.lit = true;
-                chunk.set(1, 64, 1, stone.0);
-                game.save
-                    .save(&[Arc::new(chunk.clone())], registry, world_biomes!(game))
-                    .unwrap();
-
-                let (allow_refusal, wait_for_unload) = mpsc::channel();
-                *gate.lock().unwrap() = Some(wait_for_unload);
-                chunk.set(1, 64, 1, gold.0);
-                game.world.chunks.insert(KEY, Arc::new(chunk));
-                game.world.modified.insert(KEY);
-                game.save_chunks_eagerly_at(Instant::now());
-                assert!(!game.world.modified.contains(&KEY));
-                assert!(game.world.unload_chunk(KEY).is_some());
-                allow_refusal.send(()).unwrap();
-                assert!(game.save.flush().unwrap_err().is::<RecordSaveFailures>());
-                game.requeue_failed_chunk_saves();
-
-                let loaded = game
-                    .save
-                    .load(KEY.0, KEY.1, registry, world_biomes!(game))
-                    .unwrap();
-                assert_eq!(loaded.block(1, 64, 1), gold);
-                game.world.chunks.insert(KEY, Arc::new(loaded));
-                game.world.loaded_chunks.push((KEY.0, KEY.1, false));
-                game.native_chunks_loaded();
-                game.run_server_lifecycle(false, |_, began| {
-                    *began = true;
-                    Ok(())
-                })
-                .unwrap();
-
-                let disk = open()
-                    .load(KEY.0, KEY.1, registry, world_biomes!(game))
-                    .unwrap();
-                assert_eq!(disk.block(1, 64, 1), gold);
-            });
-        });
-    }
-
-    #[test]
-    #[ignore = "daily"]
-    fn an_unloaded_refusal_cannot_hide_a_later_edit_from_eager_saves() {
-        let dir = tempfile::tempdir().unwrap();
-        mod_platform::testing::with_mods(Vec::new().into(), || {
-            with_game(|game| {
-                game.world_root = dir.path().to_path_buf();
-                let open = || {
-                    SaveDir::new(
-                        dir.path().to_path_buf(),
-                        LevelShape::OVERWORLD,
-                        Some(Default::default()),
-                    )
-                };
-                game.save = Arc::new(open());
-                let key = (2, 0);
-                let registry = game.pack.assets.registry;
-                let mut unloaded = Chunk::with_layout(key.0, key.1, game.world.layout());
-                let invalid = (0..=DISK_WRITE_NESTING_GUARD)
-                    .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
-                Arc::make_mut(unloaded.saved.get_or_insert_with(Default::default))
-                    .root
-                    .insert("test:invalid".into(), invalid);
-                game.save
-                    .save_later(&[Arc::new(unloaded)], registry, world_biomes!(game))
-                    .unwrap();
-                assert!(game.save.flush().unwrap_err().is::<RecordSaveFailures>());
-                game.requeue_failed_chunk_saves();
-                assert!(!game.world.modified.contains(&key));
-
-                // Even a stale edit mark visited after unload must not poison the queue.
-                game.world.modified.insert(key);
-                game.save_chunks_eagerly();
-                assert!(!game.world.modified.contains(&key));
-
-                let mut loaded = Chunk::with_layout(key.0, key.1, game.world.layout());
-                loaded.lit = true;
-                let stone = registry.default_state("minecraft:stone").unwrap();
-                loaded.set(1, 64, 1, stone.0);
-                game.world.chunks.insert(key, Arc::new(loaded));
-                game.world.modified.insert(key);
-                game.save_chunks_eagerly();
                 game.save.flush().unwrap();
-                let disk = open()
-                    .load(key.0, key.1, registry, world_biomes!(game))
-                    .unwrap();
-                assert_eq!(disk.block(1, 64, 1), stone);
+                assert_eq!(game.save.record_save_failures(), 1);
+
+                // Advance beyond the ordinary cooldown and exercise all later save paths.
+                game.save_chunks_eagerly_at(now + Duration::from_secs(11));
+                game.save_game_with(false).unwrap();
+                game.save_game().unwrap();
+                assert_eq!(game.save.record_save_failures(), 1);
+                assert_eq!(
+                    game.save
+                        .load(key.0, key.1, registry, world_biomes!(game))
+                        .unwrap()
+                        .block(1, 64, 1),
+                    stone
+                );
+
+                let chunk = Arc::make_mut(game.world.chunks.get_mut(&key).unwrap());
+                Arc::make_mut(chunk.saved.as_mut().unwrap())
+                    .root
+                    .remove(&"test:invalid".into());
+                game.world.modified.insert(key);
+                game.save_chunks_eagerly_at(now + Duration::from_secs(22));
+                game.save.flush().unwrap();
+                assert_eq!(
+                    game.save
+                        .load(key.0, key.1, registry, world_biomes!(game))
+                        .unwrap()
+                        .block(1, 64, 1),
+                    gold
+                );
             });
         });
     }

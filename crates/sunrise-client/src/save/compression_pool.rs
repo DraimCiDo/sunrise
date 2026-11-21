@@ -177,8 +177,8 @@ pub(super) type Prepared = io::Result<Option<CompressedWrite>>;
 
 /// A single encoder cannot unwind the writer or strand the compression pool's other jobs.
 pub(super) fn catch_encoding_panic<T>(encode: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(encode))
-        .unwrap_or_else(|_| Err(io::Error::other("chunk record encoding panicked")))
+    // The installed panic hook must see this as contained before the unwind starts.
+    crate::crash::contain(encode).map_err(io::Error::other)?
 }
 
 pub(super) fn compress_record(

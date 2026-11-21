@@ -37,7 +37,7 @@ use sunrise_client::{
     Result,
     block_entity_anim::BlockEntityAnims,
     random_tick_sections::RandomTickSections,
-    save::{RecordSaveFailures, SaveDir},
+    save::SaveDir,
     streaming::Streaming,
     tick_chunk_membership::TickChunkMembership,
     ticket_levels::{ChunkTickets, PortalTicket},
@@ -199,8 +199,6 @@ pub(super) struct Parked {
     spawn_scratch: super::natural_spawning::SpawnScratch,
     /// Server ticks since a player was last in the level.
     idle: u32,
-    /// Do not repeat a refused idle close until the level is edited or entered again.
-    idle_close_refused_at: Option<u64>,
     /// The level's own world border (`ServerLevel.getWorldBorder`), and what its players were
     /// last told of it (`LanHost::border_sent`).
     border: sunrise_client::worldborder::WorldBorder,
@@ -751,6 +749,7 @@ impl Game<'_> {
                 .unwrap_or_else(|| self.res.biomes())
                 .clone(),
             generate.as_ref(),
+            self.save.save_failure_reporter().clone(),
         )?;
         self.bind_chunk_disk_worker(&save, dim);
         save.install_profession_snapshot(self.stations().professions.clone());
@@ -813,7 +812,6 @@ impl Game<'_> {
             creaking: Default::default(),
             spawn_scratch: Default::default(),
             idle: 0,
-            idle_close_refused_at: None,
             border: self.load_border(dim),
             border_sent: None,
         })
@@ -1052,7 +1050,6 @@ impl Game<'_> {
             std::mem::swap(&mut h.border_sent, &mut p.border_sent);
         }
         p.idle = 0;
-        p.idle_close_refused_at = None;
         std::mem::replace(&mut self.dim, target)
     }
 
@@ -1635,9 +1632,6 @@ impl Game<'_> {
                 p.idle = 0;
                 continue;
             }
-            if p.idle_close_refused_at == Some(p.world.modified.edit_sequence()) {
-                continue;
-            }
             p.idle += 1;
             if *dim != Dim::Overworld && p.idle >= IDLE_TICKS {
                 closing.push(*dim);
@@ -1647,16 +1641,7 @@ impl Game<'_> {
             return Ok(());
         }
         for dim in closing {
-            if let Err(error) = self.close_parked_level(dim) {
-                if !error.is::<RecordSaveFailures>() {
-                    return Err(error);
-                }
-                log::warn!("Leaving {} open after a partial save: {error}", dim.id());
-                if let Some(level) = self.levels.parked.get_mut(&dim) {
-                    level.idle = 0;
-                    level.idle_close_refused_at = Some(level.world.modified.edit_sequence());
-                }
-            }
+            self.close_parked_level(dim)?;
         }
         Ok(())
     }
@@ -1764,32 +1749,16 @@ impl Game<'_> {
             return Ok(());
         }
         let back = self.dim;
-        let parked: Vec<_> = self
-            .levels
-            .parked
-            .iter()
-            .map(|(&dim, level)| (dim, level.idle_close_refused_at))
-            .collect();
-        let mut refusals = RecordSaveFailures::default();
-        let saved = (|| -> Result<()> {
-            for &(dim, _) in &parked {
+        let parked = self.levels.parked_dims();
+        let saved = (|| {
+            for dim in parked {
                 self.enter_level(dim)?;
-                refusals.collect(self.save_level(wait))?;
+                self.save_level(wait)?;
             }
             Ok(())
         })();
         let restored = self.enter_level(back);
-        if !wait {
-            // The autosave's temporary swaps are not player re-entry. An unchanged
-            // refusal must keep idle close disarmed, even when the autosave fails.
-            for (dim, refused_at) in parked {
-                if let Some(level) = self.levels.parked.get_mut(&dim) {
-                    level.idle_close_refused_at = refused_at;
-                }
-            }
-        }
-        saved.and(restored)?;
-        refusals.finish()
+        saved.and(restored)
     }
 }
 
@@ -1848,7 +1817,7 @@ mod tests {
 
     #[test]
     #[ignore = "daily"]
-    fn save_all_reports_refusals_after_saving_each_level_and_metadata() {
+    fn save_all_succeeds_after_reported_failures_in_multiple_levels() {
         use crate::game::native_entity_refs::tests::with_game;
         use sunrise_client::save::{Level, LevelShape};
         mod_platform::testing::with_mods(Vec::new().into(), || {
@@ -1870,28 +1839,11 @@ mod tests {
                         queue_unencodable_entity_record(&game.save);
                     }
                 }
-                game.message = None;
-                let error = game
-                    .save_game()
-                    .unwrap_err()
-                    .downcast::<RecordSaveFailures>()
-                    .unwrap()
-                    .to_string();
-                assert!(
-                    game.message.is_none(),
-                    "a partial save must not show success"
-                );
-                for (_, folder, _) in folders.iter().filter(|(dim, _, _)| *dim != Dim::End) {
-                    assert!(
-                        error.contains(&format!("{} entities 2,0:", folder.display())),
-                        "missing failed record for {} in {error}",
-                        folder.display()
-                    );
-                }
                 assert_eq!(
                     game.save_all_reply().translation_key(),
-                    Some("commands.save.failed")
+                    Some("commands.save.success")
                 );
+                assert_eq!(game.save.record_save_failures(), 2);
                 assert_eq!(game.dim, Dim::Overworld);
                 assert_eq!(
                     Level::read(root.path()).unwrap().name,
@@ -1912,7 +1864,7 @@ mod tests {
 
     #[test]
     #[ignore = "daily"]
-    fn an_idle_level_with_a_refused_record_stays_open_without_failing_the_tick() {
+    fn an_idle_level_closes_after_reporting_a_record_failure() {
         use crate::game::native_entity_refs::tests::with_game;
         use sunrise_client::save::LevelShape;
         mod_platform::testing::with_mods(Vec::new().into(), || {
@@ -1932,37 +1884,9 @@ mod tests {
                 game.levels.parked.get_mut(&Dim::Nether).unwrap().idle = IDLE_TICKS - 1;
                 game.close_idle_levels().unwrap();
                 assert_eq!(game.dim, Dim::Overworld);
-                let nether = &game.levels.parked[&Dim::Nether];
-                assert_eq!(
-                    nether.idle, 0,
-                    "a refusal must not retry idle close on every tick"
-                );
-                assert!(nether.save.flush().unwrap_err().is::<RecordSaveFailures>());
-                assert!(
-                    disk.raw_chunk(0, 0).is_some(),
-                    "the healthy chunk was still saved"
-                );
-
-                // A newer durable entity record clears the old refusal, but the
-                // periodic save's administrative swaps must not re-arm idle close.
-                nether.save.save_entities(vec![((2, 0), vec![])]).unwrap();
-                game.save_game_with(false).unwrap();
-                assert_eq!(game.dim, Dim::Overworld);
-                for _ in 0..IDLE_TICKS {
-                    game.close_idle_levels().unwrap();
-                }
-                assert!(game.levels.parked.contains_key(&Dim::Nether));
-                game.levels
-                    .parked
-                    .get_mut(&Dim::Nether)
-                    .unwrap()
-                    .world
-                    .modified
-                    .insert((0, 0));
-                for _ in 0..IDLE_TICKS {
-                    game.close_idle_levels().unwrap();
-                }
                 assert!(!game.levels.parked.contains_key(&Dim::Nether));
+                assert_eq!(game.save.record_save_failures(), 1);
+                assert!(disk.raw_chunk(0, 0).is_some());
             });
         });
     }

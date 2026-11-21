@@ -24,7 +24,7 @@ struct StoppedProbe {
 #[test]
 #[ignore = "daily"]
 fn integrated_stop_finishes_after_an_unencodable_record() {
-    use sunrise_client::save::{LevelShape, RecordSaveFailures, SaveDir, SessionLock};
+    use sunrise_client::save::{LevelShape, SaveDir, SessionLock};
     use sunrise_core::nbt::{DISK_WRITE_NESTING_GUARD, Tag};
 
     struct SaveEvents(Arc<Mutex<Vec<&'static str>>>);
@@ -95,27 +95,17 @@ fn integrated_stop_finishes_after_an_unencodable_record() {
                 sunrise_client::save::Level::read(root.path()).unwrap().name,
                 "saved on exit after record failure"
             );
-            let error = game
-                .save
-                .flush()
-                .unwrap_err()
-                .downcast::<RecordSaveFailures>()
-                .unwrap()
-                .to_string();
-            assert!(error.contains("entities 2,-3:"), "{error}");
-            assert!(
-                events.lock().unwrap().is_empty(),
-                "a partial save must not fire success callbacks"
-            );
+            game.save.flush().unwrap();
+            assert_eq!(game.save.record_save_failures(), 1);
+            assert_eq!(*events.lock().unwrap(), ["level saved", "world saved"]);
         });
     });
 }
 
 #[test]
 #[ignore = "daily"]
-fn integrated_stop_propagates_storage_errors_even_after_a_record_refusal() {
-    use super::super::Dim;
-    use sunrise_client::save::{LevelShape, RecordSaveFailures, SaveDir, SessionLock};
+fn integrated_stop_propagates_metadata_errors_even_after_a_record_failure() {
+    use sunrise_client::save::{LevelShape, SaveDir, SessionLock};
     use sunrise_core::nbt::{DISK_WRITE_NESTING_GUARD, Tag};
 
     with_mods(Vec::new().into(), || {
@@ -131,38 +121,23 @@ fn integrated_stop_propagates_storage_errors_even_after_a_record_refusal() {
                 game.session_lock = Some(SessionLock::acquire(root.path()).unwrap());
                 game.world_adopted = true;
                 if mixed {
-                    // One refused record in the active dimension does not mask the parked
-                    // dimension's real storage error.
                     let invalid = (0..=DISK_WRITE_NESTING_GUARD)
                         .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
                     game.save
-                        .save_entities_later(vec![((2, 0), vec![invalid])])
+                        .save_entities(vec![((2, 0), vec![invalid])])
                         .unwrap();
-                    assert!(game.save.flush().unwrap_err().is::<RecordSaveFailures>());
-                    game.enter_level(Dim::Nether).unwrap();
+                    assert_eq!(game.save.record_save_failures(), 1);
                 }
-                let blocked = game.save.root.join("entities");
-                std::fs::create_dir_all(&game.save.root).unwrap();
-                std::fs::write(&blocked, b"not a directory").unwrap();
-                game.save
-                    .save_entities_later(vec![(
-                        (3, 0),
-                        vec![Tag::compound([("marker", Tag::Int(1))])],
-                    )])
-                    .unwrap();
-                if mixed {
-                    game.enter_level(Dim::Overworld).unwrap();
-                }
+                let blocked = root.path().join("level.dat_new");
+                std::fs::create_dir(&blocked).unwrap();
+                let expected = std::fs::write(&blocked, b"test").unwrap_err();
                 let error = game
                     .run_server_lifecycle(false, |_, began| {
                         *began = true;
                         Ok(())
                     })
                     .unwrap_err();
-                assert!(
-                    error.to_string().contains("failed to write entities files"),
-                    "{error}"
-                );
+                assert_eq!(error.to_string(), expected.to_string());
                 assert!(game.session_lock.is_none());
             }
         });

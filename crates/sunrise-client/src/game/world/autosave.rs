@@ -1,7 +1,6 @@
 //! The world's save on a timer (`MinecraftServer.computeNextAutosaveInterval`,
 //! `onTickRateChanged`), the players' autosaves, and the world's metadata (level.dat).
 use super::*;
-use sunrise_client::save::RecordSaveFailures;
 
 impl Game<'_> {
     pub(super) fn admit_entity_save() -> Result<()> {
@@ -136,16 +135,16 @@ impl Game<'_> {
         if dedicated {
             dedicated::events::record_server("saving", serde_json::json!({}));
         }
-        let mut refusals = RecordSaveFailures::default();
-        refusals.collect(self.save_level(wait))?;
-        refusals.collect(self.save_parked_levels(wait))?;
+        self.save_level(wait)?;
+        self.save_parked_levels(wait)?;
         self.save_game_metadata()?;
         let _ = self.finish_player_autosaves(wait);
-        refusals.finish()?;
-        self.message = Some((
-            sunrise_client::lang::get("commands.save.success"),
-            Instant::now(),
-        ));
+        if wait {
+            self.message = Some((
+                sunrise_client::lang::get("commands.save.success"),
+                Instant::now(),
+            ));
+        }
         self.native_world_saved(wait);
         if dedicated {
             dedicated::events::record_server("saved", serde_json::json!({}));

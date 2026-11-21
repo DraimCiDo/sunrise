@@ -24,7 +24,6 @@ use sunrise_client::{
     lan::{
         LoginGate, NetConfig, NetLog, OnlineMode, hub::HubConfig, viewed_levels::areas as viewed,
     },
-    save::RecordSaveFailures,
     server::{
         eula, profiles,
         properties::{GAME_MODES, ServerProperties, SystemEntropy},
@@ -2383,15 +2382,15 @@ fn console_level(active: super::Dim, spawn: super::Dim) -> Option<super::Dim> {
 impl Game<'_> {
     /// A partial checkpoint returns its diagnostic; only hard failures stop the lifecycle.
     fn save_dedicated_checkpoint(&mut self, phase: &str) -> Result<Option<String>> {
-        match self.save_game() {
-            Ok(()) => Ok(None),
-            Err(error) if error.is::<RecordSaveFailures>() => {
-                let diagnostic = error.to_string();
-                log::warn!("Partial save during {phase}: {diagnostic}");
-                Ok(Some(diagnostic))
-            }
-            Err(error) => Err(error),
+        let before = self.save.record_save_failures();
+        self.save_game()?;
+        let failed = self.save.record_save_failures() - before;
+        if failed == 0 {
+            return Ok(None);
         }
+        let diagnostic = format!("{failed} chunk records could not be saved");
+        log::warn!("Partial save during {phase}: {diagnostic}");
+        Ok(Some(diagnostic))
     }
 
     pub(super) fn stop_after_crash(&mut self, message: &str) -> Result<()> {
@@ -2481,41 +2480,51 @@ mod tests {
                         .unwrap()
                         .is_none()
                 );
-                let invalid = (0..=DISK_WRITE_NESTING_GUARD)
-                    .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
-                game.save
-                    .save_entities_later(vec![((2, 0), vec![invalid])])
-                    .unwrap();
+                let fail_next_save = |game: &mut crate::game::Game<'_>| {
+                    let key = (2, 0);
+                    let mut chunk = sunrise_client::chunk::Chunk::with_layout(
+                        key.0,
+                        key.1,
+                        game.world.layout(),
+                    );
+                    let invalid = (0..=DISK_WRITE_NESTING_GUARD)
+                        .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
+                    Arc::make_mut(chunk.saved.get_or_insert_with(Default::default))
+                        .root
+                        .insert("test:invalid".into(), invalid);
+                    game.world.chunks.insert(key, Arc::new(chunk));
+                    game.world.modified.insert(key);
+                };
+                for phase in ["startup fixture", "pause fixture"] {
+                    fail_next_save(game);
+                    assert!(game.save_dedicated_checkpoint(phase).unwrap().is_some());
+                }
+                assert_eq!(game.save.record_save_failures(), 2);
                 assert!(
-                    game.save_dedicated_checkpoint("startup fixture")
+                    game.save_dedicated_checkpoint("no new edits")
                         .unwrap()
-                        .is_some()
+                        .is_none()
                 );
-                let diagnostic = game
-                    .save_dedicated_checkpoint("pause fixture")
-                    .unwrap()
-                    .unwrap();
+
+                fail_next_save(game);
                 let error = game.stop_after_crash("fixture panic").unwrap_err();
                 assert_eq!(
                     error.to_string(),
                     "the server thread panicked: fixture panic"
                 );
-                assert_eq!(
-                    *events.lock().unwrap(),
-                    [(WorldPhase::WorldCloseFailed, diagnostic)]
-                );
+                let events = events.lock().unwrap();
+                assert_eq!(events.len(), 1);
+                assert_eq!(events[0].0, WorldPhase::WorldCloseFailed);
+                assert!(!events[0].1.is_empty());
+                assert_eq!(game.save.record_save_failures(), 3);
 
-                std::fs::write(dir.path().join("entities"), b"not a directory").unwrap();
-                game.save
-                    .save_entities_later(vec![(
-                        (3, 0),
-                        vec![Tag::compound([("marker", Tag::Int(7))])],
-                    )])
-                    .unwrap();
+                let blocked = dir.path().join("level.dat_new");
+                std::fs::create_dir(&blocked).unwrap();
+                let expected = std::fs::write(blocked, b"test").unwrap_err();
                 let error = game.save_dedicated_checkpoint("pause fixture").unwrap_err();
-                assert!(
-                    error.to_string().contains("failed to write entities files"),
-                    "{error}"
+                assert_eq!(
+                    error.downcast_ref::<std::io::Error>().unwrap().kind(),
+                    expected.kind()
                 );
             });
         });

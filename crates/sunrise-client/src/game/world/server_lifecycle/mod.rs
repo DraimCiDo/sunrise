@@ -2,7 +2,7 @@
 
 use super::Game;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use sunrise_client::{Result, save::RecordSaveFailures};
+use sunrise_client::Result;
 
 /// What a crash save decided about the players a panic interrupted.
 #[derive(Default)]
@@ -100,13 +100,9 @@ impl Game<'_> {
                 let _ = catch_unwind(AssertUnwindSafe(|| {
                     self.native_lifecycle_close_failed(&text);
                 }));
-                if error.is::<RecordSaveFailures>() {
-                    log::warn!("Server stopped after a partial save: {text}");
-                } else {
-                    log::error!("Exception stopping the server: {text}");
-                    if failure.is_none() {
-                        failure = Some(text);
-                    }
+                log::error!("Exception stopping the server: {text}");
+                if failure.is_none() {
+                    failure = Some(text);
                 }
             }
             Err(payload) => {
@@ -206,6 +202,7 @@ impl Game<'_> {
     /// The session lock is not that marker: it is installed before the prepared
     /// level, so tag reads work, and a save in that gap would write the placeholder.
     pub(super) fn finish_server_save(&mut self, crashed: bool) -> Result<()> {
+        let before = self.save.record_save_failures();
         // IntegratedServer.teardownPublishedState must happen even if an
         // earlier callback panicked; otherwise lan_close only unpublishes a
         // still-serving server instead of disconnecting and dropping its hub.
@@ -233,8 +230,7 @@ impl Game<'_> {
             Ok(result) => result,
             Err(payload) => Err(shutdown_panic(payload.as_ref()).into()),
         };
-        let mut refusals = RecordSaveFailures::default();
-        result = result.and(refusals.collect(saved));
+        result = result.and(saved);
         // The save can unwind inside a new player's turn, and `lan_close` writes every player the
         // exclusion does not name.
         self.exclude_interrupted_players(crashed, |m| log::warn!("{m}"));
@@ -252,7 +248,7 @@ impl Game<'_> {
             result = Err(shutdown_panic(payload.as_ref()).into());
         }
         match catch_unwind(AssertUnwindSafe(|| self.save.flush())) {
-            Ok(saved) => result = result.and(refusals.collect(saved)),
+            Ok(saved) => result = result.and(saved),
             Err(payload) => {
                 let message = shutdown_panic(payload.as_ref());
                 if result.is_ok() {
@@ -260,12 +256,19 @@ impl Game<'_> {
                 }
             }
         }
-        result = result.and(refusals.finish());
-        if result.is_ok()
-            && let Err(payload) =
-                catch_unwind(AssertUnwindSafe(|| self.native_lifecycle_world_closed()))
-        {
-            result = Err(shutdown_panic(payload.as_ref()).into());
+        if result.is_ok() {
+            let failed = self.save.record_save_failures() - before;
+            if let Err(payload) = catch_unwind(AssertUnwindSafe(|| {
+                if crashed && failed != 0 {
+                    let diagnostic = format!("{failed} chunk records could not be saved");
+                    log::warn!("Partial save during crash shutdown: {diagnostic}");
+                    self.native_lifecycle_close_failed(&diagnostic);
+                } else {
+                    self.native_lifecycle_world_closed();
+                }
+            })) {
+                result = Err(shutdown_panic(payload.as_ref()).into());
+            }
         }
         self.session_lock = None;
         self.interrupted_turns.clear();

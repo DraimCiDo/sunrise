@@ -110,6 +110,7 @@ fn a_disk_encoder_panic_leaves_the_original_readable_and_siblings_durable() {
             }
         }));
         let neighbor = Arc::new(marker(7));
+        let borrowed = wrapped.clone();
         save.queue(
             Folder::Region,
             vec![(key, wrapped), ((3, -3), Record::Tag(neighbor.clone()))],
@@ -118,14 +119,16 @@ fn a_disk_encoder_panic_leaves_the_original_readable_and_siblings_durable() {
         .unwrap();
         let (send, receive) = mpsc::channel();
         let reader = std::thread::spawn(move || {
-            assert!(save.flush().unwrap_err().is::<RecordSaveFailures>());
-            send.send(save.raw_chunk(key.0, key.1)).unwrap();
+            send.send(borrowed.tag()).unwrap();
         });
+        save.flush().unwrap();
+        assert_eq!(save.record_save_failures(), 1);
         let pending = receive
             .recv_timeout(Duration::from_secs(1))
             .expect("disk reader did not finish");
         reader.join().unwrap();
-        assert_eq!(pending.as_ref(), Some(original.as_ref()));
+        assert_eq!(pending.as_deref(), Some(original.as_ref()));
+        assert!(save.raw_chunk(key.0, key.1).is_none());
         let disk = open();
         assert_eq!(disk.raw_chunk(3, -3).as_ref(), Some(neighbor.as_ref()));
         assert!(disk.raw_chunk(key.0, key.1).is_none());
@@ -387,7 +390,7 @@ fn save_refused_during_open_action_savepoint_runs_no_callback_and_keeps_disk_7()
             save.save_later(&[Arc::new(chunk(9))], registry, &biomes)
                 .is_err()
         );
-        assert_eq!(save.take_failed_chunk_saves(), [(2, -3)]);
+        assert_eq!(save.record_save_failures(), 0);
         assert!(save.save(&[Arc::new(chunk(9))], registry, &biomes).is_err());
         drop(savepoint);
         assert!(seen.lock().unwrap().is_empty());
@@ -451,28 +454,29 @@ fn a_refused_save_keeps_its_disk_record_without_skipping_its_neighbour() {
     )]
     .into();
     mod_platform::testing::with_mods(mods, || {
-        let save = open();
-        context(&save);
-        let mut neighbour = chunk(11);
-        neighbour.x = 3;
-        save.save_later(
-            &[Arc::new(chunk(9)), Arc::new(neighbour)],
-            registry,
-            &biomes,
-        )
-        .unwrap();
-        let error = save.flush().unwrap_err();
-        let after = read_disk();
-        assert_eq!(after.compressed, before.compressed);
-        assert_eq!(after.timestamp, before.timestamp);
-        assert_eq!(
-            value(&mut open().load(3, -3, registry, &biomes).unwrap()),
-            11
-        );
-        assert_eq!(value(&mut save.load(2, -3, registry, &biomes).unwrap()), 9);
-        let error = error.downcast::<RecordSaveFailures>().unwrap().to_string();
-        assert!(error.contains("region 2,-3:"), "{error}");
-        assert!(!error.contains("region 3,-3:"), "{error}");
+        for synchronous in [false, true] {
+            let save = open();
+            context(&save);
+            let mut neighbour = chunk(if synchronous { 12 } else { 11 });
+            neighbour.x = 3;
+            let expected = value(&mut neighbour);
+            let chunks = [Arc::new(chunk(9)), Arc::new(neighbour)];
+            if synchronous {
+                save.save(&chunks, registry, &biomes).unwrap();
+            } else {
+                save.save_later(&chunks, registry, &biomes).unwrap();
+                save.flush().unwrap();
+            }
+            let after = read_disk();
+            assert_eq!(after.compressed, before.compressed);
+            assert_eq!(after.timestamp, before.timestamp);
+            assert_eq!(
+                value(&mut open().load(3, -3, registry, &biomes).unwrap()),
+                expected
+            );
+            assert_eq!(value(&mut save.load(2, -3, registry, &biomes).unwrap()), 7);
+            assert_eq!(save.record_save_failures(), 1);
+        }
     });
 }
 
@@ -548,7 +552,7 @@ fn a_coalesced_refusal_runs_its_callback_without_poisoning_the_newer_record() {
             .unwrap();
         release.send(()).unwrap();
         save.flush().unwrap();
-        assert!(save.take_failed_chunk_saves().is_empty());
+        assert_eq!(save.record_save_failures(), 1);
         assert_eq!(*seen.lock().unwrap(), [9, 11]);
         assert_eq!(disk_value(dir.path(), registry, &biomes), Some(11));
     });
@@ -589,21 +593,13 @@ fn a_biome_admission_refusal_keeps_the_rest_of_the_batch_writable() {
         let open = || SaveDir::new(dir.path().to_path_buf(), LevelShape::OVERWORLD, None);
         let save = open();
         context(&save);
-        let error = save
-            .queue(
-                Folder::Region,
-                vec![((2, -3), refused.clone()), ((3, -3), healthy.clone())],
-                true,
-            )
-            .unwrap_err();
-        assert!(
-            error
-                .downcast::<RecordSaveFailures>()
-                .unwrap()
-                .to_string()
-                .contains("region 2,-3:")
-        );
-        assert_eq!(save.take_failed_chunk_saves(), [(2, -3)]);
+        save.queue(
+            Folder::Region,
+            vec![((2, -3), refused.clone()), ((3, -3), healthy.clone())],
+            true,
+        )
+        .unwrap();
+        assert_eq!(save.record_save_failures(), 1);
         assert!(open().raw_chunk(2, -3).is_none());
         assert_eq!(
             value(&mut open().load(3, -3, registry, &biomes).unwrap()),
@@ -624,114 +620,87 @@ fn a_biome_admission_refusal_keeps_the_rest_of_the_batch_writable() {
 }
 
 #[test]
-fn an_unencodable_record_can_be_retried_without_a_disk_listener() {
+fn an_unencodable_record_without_a_listener_does_not_skip_other_regions() {
     mod_platform::testing::with_mods(Vec::new().into(), || {
-        for consume_failure_before_retry in [true, false] {
-            let path = tempfile::tempdir().unwrap();
-            let open = || SaveDir::new(path.path().to_path_buf(), LevelShape::OVERWORLD, None);
-            let save = open();
-            let key = (2, -3);
-            let neighbour = (3, -3);
-            let other_region = (32, -3);
-            let invalid = (0..=sunrise_core::nbt::DISK_WRITE_NESTING_GUARD)
-                .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
-            let record = |key, tag| {
-                (
-                    key,
-                    Some(NamedTag {
-                        name: "".into(),
-                        tag,
-                    }),
-                )
-            };
-            let valid = |marker| {
-                Tag::compound([
-                    ("DataVersion", Tag::Int(DATA_VERSION)),
-                    ("marker", Tag::Int(marker)),
-                ])
-            };
-            let read = |(x, z)| open().raw_chunk(x, z).unwrap().tag.get("marker").cloned();
-            save.write_records("region", vec![record(key, valid(1))], true)
-                .unwrap();
-            let error = save
-                .write_records(
-                    "region",
-                    vec![
-                        record(key, invalid),
-                        record(neighbour, valid(3)),
-                        record(other_region, valid(4)),
-                    ],
-                    true,
-                )
-                .unwrap_err();
-            assert_eq!(read(key), Some(Tag::Int(1)));
-            assert_eq!(read(neighbour), Some(Tag::Int(3)));
-            assert_eq!(read(other_region), Some(Tag::Int(4)));
-            let error = error.downcast::<RecordSaveFailures>().unwrap().to_string();
-            assert!(error.contains("region 2,-3:"), "{error}");
-            save.wait_for_chunk_writes_below(0).unwrap();
-            if consume_failure_before_retry {
-                assert_eq!(save.take_failed_chunk_saves(), [key]);
-            }
-            save.write_records("region", vec![record(key, valid(2))], true)
-                .unwrap();
-            assert!(
-                save.take_failed_chunk_saves().is_empty(),
-                "a newer durable record cancels the unread failure notice"
+        let path = tempfile::tempdir().unwrap();
+        let open = || SaveDir::new(path.path().to_path_buf(), LevelShape::OVERWORLD, None);
+        let save = open();
+        let key = (2, -3);
+        let neighbour = (3, -3);
+        let other_region = (32, -3);
+        let invalid = (0..=sunrise_core::nbt::DISK_WRITE_NESTING_GUARD)
+            .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
+        let record = |key, tag| {
+            (
+                key,
+                Some(NamedTag {
+                    name: "".into(),
+                    tag,
+                }),
+            )
+        };
+        let valid = |marker| {
+            Tag::compound([
+                ("DataVersion", Tag::Int(DATA_VERSION)),
+                ("marker", Tag::Int(marker)),
+            ])
+        };
+        save.write_records("region", vec![record(key, valid(1))], true)
+            .unwrap();
+        save.write_records(
+            "region",
+            vec![
+                record(key, invalid),
+                record(neighbour, valid(3)),
+                record(other_region, valid(4)),
+            ],
+            true,
+        )
+        .unwrap();
+        let disk = open();
+        for ((x, z), marker) in [(key, 1), (neighbour, 3), (other_region, 4)] {
+            assert_eq!(
+                disk.raw_chunk(x, z).unwrap().tag.get("marker"),
+                Some(&Tag::Int(marker))
             );
-            assert_eq!(read(key), Some(Tag::Int(2)));
         }
+        assert_eq!(save.record_save_failures(), 1);
+        save.wait_for_chunk_writes_below(0).unwrap();
     });
 }
 
-#[cfg(unix)]
 #[test]
-fn disk_write_failure_keeps_old_disk_7_and_snapshot_8_for_recovery() {
-    use std::os::unix::fs::PermissionsExt;
-    let (registry, biomes) = super::loot_tests::fixture();
-    let registry = Box::leak(Box::new(registry));
-    let biomes = Arc::new(biomes);
-    let path = root();
-    mod_platform::testing::with_mods(Vec::new().into(), || {
-        SaveDir::new(
-            path.clone(),
-            LevelShape::OVERWORLD,
-            Some(Default::default()),
+fn region_io_failure_is_reported_without_stopping_healthy_regions() {
+    let dir = tempfile::tempdir().unwrap();
+    let open = || SaveDir::new(dir.path().to_path_buf(), LevelShape::OVERWORLD, None);
+    let save = open();
+    for folder in ["region", "entities", "poi"] {
+        let blocked = dir.path().join(folder).join("r.0.0.mca");
+        // A directory in place of the file fails even for a privileged user.
+        fs::create_dir_all(blocked).unwrap();
+        let marker = || NamedTag {
+            name: "".into(),
+            tag: Tag::compound([("marker", Tag::Int(7))]),
+        };
+        let before = save.record_save_failures();
+        save.write_records(
+            folder,
+            vec![
+                ((0, 0), Some(marker())),
+                ((1, 0), None),
+                ((32, 0), Some(marker())),
+            ],
+            true,
         )
-        .save(&[Arc::new(chunk(7))], registry, &biomes)
         .unwrap();
-    });
-    let region = path.join("region/r.0.-1.mca");
-    let writable = fs::metadata(&region).unwrap().permissions();
-    fs::set_permissions(&region, fs::Permissions::from_mode(0o444)).unwrap();
-    with_listener(|saves, _| {
-        let save = SaveDir::new(
-            path.clone(),
-            LevelShape::OVERWORLD,
-            Some(Default::default()),
-        );
-        context(&save);
-        save.save_later(&[Arc::new(chunk(7))], registry, &biomes)
+        assert_eq!(save.record_save_failures() - before, 2);
+        assert_eq!(open().read_record_raw(folder, 32, 0), Some(marker()));
+        // The clear-only path must report a broken file, not mistake it for a missing file.
+        save.write_records(folder, vec![((0, 0), None), ((32, 0), None)], true)
             .unwrap();
-        // A failure to write the file itself also fails the backpressure wait.
-        assert!(!save.flush().unwrap_err().is::<RecordSaveFailures>());
-        assert!(save.wait_for_chunk_writes_below(0).is_err());
-        assert_eq!(saves.load(Ordering::Relaxed), 1);
-        // The chunk is marked for another attempt instead of silently clean.
-        assert_eq!(save.take_failed_chunk_saves(), [(2, -3)]);
-        // The unwritten snapshot (8) stays readable for recovery. Read it with no
-        // listener installed, so no load callback adds to it.
-        mod_platform::testing::with_mods(Vec::new().into(), || {
-            let mut recovered = save.load(2, -3, registry, &biomes).unwrap();
-            assert_eq!(value(&mut recovered), 8);
-        });
-    });
-    fs::set_permissions(&region, writable).unwrap();
-    // The old disk record is untouched.
-    mod_platform::testing::with_mods(Vec::new().into(), || {
-        assert_eq!(disk_value(&path, registry, &biomes), Some(7));
-    });
-    fs::remove_dir_all(path).unwrap();
+        assert_eq!(save.record_save_failures() - before, 3);
+        assert!(open().read_record_raw(folder, 32, 0).is_none());
+    }
 }
 
 /// A chunk whose load listener failed loads with its stored attachments and is saved by every
@@ -782,7 +751,7 @@ fn failed_load_keeps_stored_8_and_runs_no_save_listener_for_every_save_path() {
                 save.save_later(&chunks, registry, &biomes).unwrap();
                 save.flush().unwrap();
             }
-            assert!(save.take_failed_chunk_saves().is_empty());
+            assert_eq!(save.record_save_failures(), 0);
         });
         assert_eq!(saves.load(Ordering::Relaxed), 0);
         mod_platform::testing::with_mods(Vec::new().into(), || {

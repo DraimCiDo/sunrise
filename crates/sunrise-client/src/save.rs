@@ -27,7 +27,6 @@ mod horizon_names_tests;
 pub mod level_mods;
 mod respawn;
 mod writes;
-pub use writes::RecordSaveFailures;
 use writes::{Outstanding, Writer};
 
 use crate::{
@@ -2022,8 +2021,10 @@ fn cached_region(
     key: (i32, i32),
     path: &Path,
     create: bool,
-) -> Result<Option<Arc<Mutex<RegionFile>>>> {
-    let mut cache = cache.lock().map_err(|_| "region cache poisoned")?;
+) -> std::io::Result<Option<Arc<Mutex<RegionFile>>>> {
+    let mut cache = cache
+        .lock()
+        .map_err(|_| std::io::Error::other("region cache poisoned"))?;
     cache.clock += 1;
     let now = cache.clock;
     if let Some((cached, used)) = cache.regions.get_mut(&key)
@@ -2045,8 +2046,8 @@ fn cached_region(
     };
     let region = match region {
         Ok(r) => Some(Arc::new(Mutex::new(r))),
-        Err(_) if !create => None,
-        Err(e) => return Err(e.into()),
+        Err(e) if !create && e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e),
     };
     cache.regions.insert(key, (region.clone(), now));
     Ok(region)
@@ -2062,7 +2063,7 @@ fn write_region_records(
     cache: &RegionCache,
     folder: &str,
     records: &[((i32, i32), &Record)],
-) -> Result<BTreeMap<(i32, i32), std::io::Error>> {
+) -> BTreeMap<(i32, i32), std::io::Error> {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as u32);
@@ -2077,14 +2078,10 @@ fn write_prepared_region_records(
     timestamp: u32,
     records: &[((i32, i32), &Record)],
     compressed: Vec<compression_pool::Prepared>,
-) -> Result<BTreeMap<(i32, i32), std::io::Error>> {
+) -> BTreeMap<(i32, i32), std::io::Error> {
     type RegionWrite<'a> = (ChunkPos, &'a Record, Option<CompressedWrite>);
     let mut by_region: BTreeMap<(i32, i32), Vec<RegionWrite<'_>>> = BTreeMap::new();
     let mut failed = BTreeMap::new();
-    let mut refuse = |x, z, error| {
-        crate::chunk_io::report_save_failure(root, x, z, &error);
-        failed.insert((x, z), error);
-    };
     for (&((x, z), source), record) in records.iter().zip(compressed) {
         match record {
             Ok(record) => by_region.entry((x >> 5, z >> 5)).or_default().push((
@@ -2092,64 +2089,66 @@ fn write_prepared_region_records(
                 source,
                 record,
             )),
-            Err(error) => refuse(x, z, error),
+            Err(error) => {
+                failed.insert((x, z), error);
+            }
         }
     }
     for ((rx, rz), list) in by_region {
         let path = region_path(root, folder, rx, rz);
         // Clearing chunks of a region that doesn't exist changes nothing.
         let create = list.iter().any(|(_, _, r)| r.is_some());
-        let Some(region) = cached_region(cache, (rx, rz), &path, create)? else {
-            continue;
-        };
-        // Keep far readers on the exact locked read path while writes and their
-        // flush are in progress, so they cannot use a stale kept header.
-        let _writing = far_regions::writing(cache, (rx, rz));
-        let mut region = region.lock().map_err(|_| "region file poisoned")?;
-        let mut changed = false;
-        for (pos, source, record) in list {
-            match record {
-                Some(record) => match write_chunk_record(&mut region, pos, source, record) {
-                    Ok(()) => changed = true,
-                    Err(ChunkWriteError::Record(error)) => refuse(pos.x, pos.z, error),
-                    Err(ChunkWriteError::Storage(error)) => return Err(error.into()),
-                },
-                None => changed |= region.clear(pos, timestamp)?,
+        let mut to_sync: Vec<_> = list.iter().map(|(pos, _, _)| *pos).collect();
+        let result = (|| {
+            let Some(region) = cached_region(cache, (rx, rz), &path, create)? else {
+                return Ok(());
+            };
+            // Keep far readers on the exact locked read path until the flush completes.
+            let _writing = far_regions::writing(cache, (rx, rz));
+            let mut region = region
+                .lock()
+                .map_err(|_| std::io::Error::other("region file poisoned"))?;
+            to_sync.clear();
+            for (pos, source, record) in list {
+                let changed = match record {
+                    Some(record) => {
+                        write_chunk_record(&mut region, pos, source, record).map(|()| true)
+                    }
+                    None => region.clear(pos, timestamp),
+                };
+                match changed {
+                    Ok(true) => to_sync.push(pos),
+                    Ok(false) => (),
+                    Err(error) => {
+                        failed.insert((pos.x, pos.z), error);
+                    }
+                }
             }
-        }
-        if changed {
+            if to_sync.is_empty() {
+                return Ok(());
+            }
             match region.sync_handle() {
                 Ok(handle) => {
                     drop(region);
-                    handle.sync_data()?;
+                    handle.sync_data()
                 }
-                // Out of descriptors: flush under the lock as before rather than
-                // skip durability for this region and every region after it.
-                Err(_) => region.sync()?,
+                // Out of descriptors: flush under the lock rather than skip durability.
+                Err(_) => region.sync(),
+            }
+        })();
+        if let Err(error) = result {
+            // Open/lock failed before any record, or sync failed for the writes
+            // that reached the file. Preserve the same cause on each affected record.
+            let error = Arc::new(error);
+            for pos in to_sync {
+                failed.insert(
+                    (pos.x, pos.z),
+                    std::io::Error::new(error.kind(), error.clone()),
+                );
             }
         }
     }
-    Ok(failed)
-}
-
-#[derive(Debug)]
-enum ChunkWriteError {
-    Record(std::io::Error),
-    Storage(std::io::Error),
-}
-
-impl From<std::io::Error> for ChunkWriteError {
-    fn from(error: std::io::Error) -> Self {
-        if error
-            .get_ref()
-            .is_some_and(|cause| cause.is::<sunrise_world::region::CompressedChunkLimit>())
-        {
-            // RegionFile rejects an oversized payload before touching its slot.
-            Self::Record(error)
-        } else {
-            Self::Storage(error)
-        }
-    }
+    failed
 }
 
 fn write_chunk_record(
@@ -2157,7 +2156,7 @@ fn write_chunk_record(
     pos: ChunkPos,
     source: &Record,
     CompressedWrite { record, primary }: CompressedWrite,
-) -> std::result::Result<(), ChunkWriteError> {
+) -> std::io::Result<()> {
     region.write(pos, &record)?;
     if primary {
         source.accept_block_entity_edits();
@@ -2363,6 +2362,7 @@ impl Folder {
 /// read lazily by worker threads.
 pub struct SaveDir {
     pub root: PathBuf,
+    save_reporting: writes::SaveReporting,
     /// The loaded catalog for stack encoding; absent for metadata-only readers.
     items: Option<Arc<crate::items::Items>>,
     regions: Arc<RegionCache>,
@@ -2536,6 +2536,11 @@ impl SaveDir {
     /// The saves of a level of `shape` at `root` (its dimension folder).
     pub fn new(root: PathBuf, shape: LevelShape, items: Option<Arc<crate::items::Items>>) -> Self {
         Self {
+            save_reporting: writes::SaveReporting::new(
+                root.clone(),
+                "minecraft:overworld",
+                Arc::default(),
+            ),
             root,
             items,
             regions: Default::default(),
@@ -2556,6 +2561,20 @@ impl SaveDir {
             blending_lookup: OnceLock::new(),
         }
     }
+    /// Share the world's record diagnostic sink across its levels, before any writes.
+    pub fn set_save_reporting(
+        &mut self,
+        world_root: PathBuf,
+        dimension: &'static str,
+        reporter: Arc<crate::chunk_io::SaveFailureReporter>,
+    ) {
+        self.save_reporting = writes::SaveReporting::new(world_root, dimension, reporter);
+    }
+
+    pub fn save_failure_reporter(&self) -> &Arc<crate::chunk_io::SaveFailureReporter> {
+        &self.save_reporting.reporter
+    }
+
     fn items_for_save(&self) -> Result<&Arc<crate::items::Items>> {
         self.items
             .as_ref()
@@ -2818,8 +2837,10 @@ impl SaveDir {
             .map_err(|_| ())?
             .get(&(Folder::of(folder), x, z))
             .map(|(_, r)| r.clone());
-        if let Some(record) = pending {
-            return Ok(read_pending(&record).map(|t| (*t).clone()));
+        if let Some(record) = pending
+            && let Ok(tag) = compression_pool::catch_encoding_panic(|| Ok(read_pending(&record)))
+        {
+            return Ok(tag.map(|t| (*t).clone()));
         }
         let cache = match Folder::of(folder) {
             Folder::Region => &self.regions,
@@ -2964,11 +2985,11 @@ impl SaveDir {
         let tables = self.tables.get().map(|t| &**t);
         let records = chunks
             .iter()
-            .map(|c| {
-                let blending = self.calculated_blending(c.x, c.z);
-                (
-                    (c.x, c.z),
-                    Some(encode_saved(
+            .filter_map(|c| {
+                let key = (c.x, c.z);
+                match compression_pool::catch_encoding_panic(|| {
+                    let blending = self.calculated_blending(c.x, c.z);
+                    Ok(encode_saved(
                         c,
                         registry,
                         biomes,
@@ -2976,8 +2997,14 @@ impl SaveDir {
                         self.shape,
                         blending.as_deref(),
                         items,
-                    )),
-                )
+                    ))
+                }) {
+                    Ok(tag) => Some((key, Some(tag))),
+                    Err(error) => {
+                        self.report_record_failure(Folder::Region, key, &error);
+                        None
+                    }
+                }
             })
             .collect();
         self.write_records("region", records, true)?;
@@ -9969,9 +9996,7 @@ mod tests {
             Folder::Poi => &save.poi_regions,
         };
         assert!(
-            super::write_region_records(&save.root, cache, folder, &[((0, 0), &record)])
-                .unwrap()
-                .is_empty()
+            super::write_region_records(&save.root, cache, folder, &[((0, 0), &record)]).is_empty()
         );
     }
 
@@ -10123,7 +10148,6 @@ mod tests {
                 "region",
                 &[((1, 0), &current)],
             )
-            .unwrap()
             .is_empty()
         );
         assert!(nether.is_old_chunk(0, 0));

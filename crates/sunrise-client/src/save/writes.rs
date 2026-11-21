@@ -1,44 +1,6 @@
 //! The writer thread: what a folder queues to be written, and waiting for it to be on disk.
 use super::*;
-use std::{collections::BTreeSet, fmt};
-
 mod saved_portals;
-
-/// A completed save that could not publish some individual records. This is distinct from
-/// storage failures, for which the writer may not have finished the rest of its batch.
-#[derive(Debug, Default)]
-pub struct RecordSaveFailures(BTreeSet<String>);
-
-impl RecordSaveFailures {
-    /// Accumulate refusals without stopping the caller from saving unrelated data.
-    /// Other errors keep their original type and still stop the save.
-    pub fn collect(&mut self, result: Result<()>) -> Result<()> {
-        if let Err(error) = result {
-            self.0.extend(error.downcast::<Self>()?.0);
-        }
-        Ok(())
-    }
-
-    pub fn finish(self) -> Result<()> {
-        if self.0.is_empty() {
-            Ok(())
-        } else {
-            Err(self.into())
-        }
-    }
-}
-
-impl fmt::Display for RecordSaveFailures {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("chunk records not saved:")?;
-        for failure in &self.0 {
-            write!(f, " {failure};")?;
-        }
-        Ok(())
-    }
-}
-
-impl std::error::Error for RecordSaveFailures {}
 
 /// The background thread that encodes chunks and writes them into the region files, grouped
 /// by folder within each drained pass. Submission order is preserved within each folder.
@@ -131,16 +93,58 @@ pub(super) struct Outstanding {
     count: Mutex<usize>,
     chunks: AtomicUsize,
     pub(super) error: Mutex<Option<String>>,
-    /// Record encoding failures, kept until a newer record reaches disk at the same position.
-    record_errors: Mutex<BTreeMap<(&'static str, i32, i32), std::io::Error>>,
-    /// Terrain records the game needs to mark dirty again, with or without a disk callback.
-    failed_saves: Mutex<HashMap<(i32, i32), u64>>,
     done: Condvar,
     /// What the folder's writes make stale: the portal blocks a search read from saved chunks.
     portals: saved_portals::SavedPortals,
 }
 
+#[derive(Clone)]
+pub(super) struct SaveReporting {
+    world_root: PathBuf,
+    dimension: &'static str,
+    pub(super) reporter: Arc<crate::chunk_io::SaveFailureReporter>,
+}
+
+impl SaveReporting {
+    pub(super) fn new(
+        world_root: PathBuf,
+        dimension: &'static str,
+        reporter: Arc<crate::chunk_io::SaveFailureReporter>,
+    ) -> Self {
+        Self {
+            world_root,
+            dimension,
+            reporter,
+        }
+    }
+
+    fn report(&self, folder: Folder, key: (i32, i32), error: &std::io::Error) {
+        let label = match folder {
+            Folder::Region => "chunk",
+            Folder::Entities => "entities",
+            Folder::Poi => "poi",
+        };
+        crate::chunk_io::report_save_failure(
+            &self.reporter,
+            &self.world_root,
+            self.dimension,
+            label,
+            key,
+            error,
+        );
+    }
+}
+
 impl SaveDir {
+    pub(super) fn report_record_failure(
+        &self,
+        folder: Folder,
+        key: (i32, i32),
+        error: &std::io::Error,
+    ) {
+        self.save_reporting.report(folder, key, error);
+    }
+
     /// Queue `records` for the writer thread; with `wait`, return once
     /// they and every earlier write are on disk.
     pub(super) fn write_records(
@@ -166,26 +170,12 @@ impl SaveDir {
             let records = if self.disk.get().is_some()
                 || mod_api::__private::listened(mod_api::HookId::ChunkDataSave)
             {
-                let keys: Vec<_> = records.iter().map(|(key, _)| *key).collect();
-                match records
+                records
                     .into_iter()
                     .map(|(key, record)| {
                         self.capture_disk_record(record).map(|record| (key, record))
                     })
-                    .collect::<Result<Vec<_>>>()
-                {
-                    Ok(records) => records,
-                    Err(error) => {
-                        // A refused capture must leave its chunks dirty.
-                        if folder == Folder::Region
-                            && let Ok(mut failed) = self.outstanding.failed_saves.lock()
-                        {
-                            let seq = self.sequence.fetch_add(1, Ordering::Relaxed);
-                            failed.extend(keys.into_iter().map(|key| (key, seq)));
-                        }
-                        return Err(error);
-                    }
-                }
+                    .collect::<Result<Vec<_>>>()?
             } else {
                 records
             };
@@ -244,13 +234,13 @@ impl SaveDir {
     fn start_writer(&self) -> Writer {
         let (send, receive) = mpsc::channel::<WriteBatch>();
         let root = self.root.clone();
+        let reporting = self.save_reporting.clone();
         let (regions, entity_regions, poi_regions) = (
             self.regions.clone(),
             self.entity_regions.clone(),
             self.poi_regions.clone(),
         );
         let pending = self.pending.clone();
-        let outstanding = self.outstanding.clone();
         // The writer runs chunk_data_save callbacks before handing records to compression.
         let thread = sunrise_guest_stack::builder()
             .name("sunrise-region-writer".into())
@@ -302,7 +292,6 @@ impl SaveDir {
                                 p.get(&(kind, k.0, k.1)).is_none_or(|p| p.0 <= seq)
                             })
                         };
-                        let mut refused_poi = BTreeMap::new();
                         let resolved: Vec<_> = batch
                             .iter()
                             .filter_map(|job| {
@@ -313,8 +302,7 @@ impl SaveDir {
                                     && let Err(error) = chunk_disk::encode_record(&job.record)
                                     && !newest
                                 {
-                                    let (x, z) = job.key;
-                                    crate::chunk_io::report_save_failure(&root, x, z, &error);
+                                    reporting.report(kind, job.key, &error);
                                 }
                                 if !newest {
                                     return None;
@@ -324,76 +312,23 @@ impl SaveDir {
                                 }) {
                                     Ok(record) => record.map(|record| (job.key, record)),
                                     Err(error) => {
-                                        let (x, z) = job.key;
-                                        crate::chunk_io::report_save_failure(&root, x, z, &error);
-                                        refused_poi.insert(job.key, error);
+                                        reporting.report(kind, job.key, &error);
                                         None
                                     }
                                 }
                             })
                             .collect();
                         let records: Vec<_> = resolved.iter().map(|(k, r)| (*k, r)).collect();
-                        match write_region_records(&root, cache, folder, &records) {
-                            Ok(mut failed) => {
-                                failed.append(&mut refused_poi);
-                                let mut errors = outstanding.record_errors.lock().unwrap();
-                                if let Ok(mut pending) = pending.lock() {
-                                    let mut retry = (kind == Folder::Region)
-                                        .then(|| outstanding.failed_saves.lock().unwrap());
-                                    for job in batch {
-                                        let key = (kind, job.key.0, job.key.1);
-                                        if pending.get(&key).is_none_or(|p| p.0 != job.seq) {
-                                            continue;
-                                        }
-                                        if failed.contains_key(&job.key) {
-                                            if let Some(retry) = &mut retry {
-                                                let seq = retry.entry(job.key).or_insert(job.seq);
-                                                *seq = (*seq).max(job.seq);
-                                            }
-                                        } else {
-                                            pending.remove(&key);
-                                            // A POI job can resolve to no necessary write and still
-                                            // supersede a prior failure for this key.
-                                            errors.remove(&(folder, job.key.0, job.key.1));
-                                            if let Some(retry) = &mut retry
-                                                && retry
-                                                    .get(&job.key)
-                                                    .is_some_and(|&seq| seq <= job.seq)
-                                            {
-                                                retry.remove(&job.key);
-                                            }
-                                        }
-                                    }
-                                }
-                                errors.extend(
-                                    failed
-                                        .into_iter()
-                                        .map(|((x, z), error)| ((folder, x, z), error)),
-                                );
-                            }
-                            Err(e) => {
-                                if kind == Folder::Region
-                                    && let Ok(pending) = pending.lock()
-                                {
-                                    let mut retry = outstanding.failed_saves.lock().unwrap();
-                                    for job in batch {
-                                        let (x, z) = job.key;
-                                        if pending
-                                            .get(&(kind, x, z))
-                                            .is_some_and(|p| p.0 == job.seq)
-                                        {
-                                            let seq = retry.entry(job.key).or_insert(job.seq);
-                                            *seq = (*seq).max(job.seq);
-                                        }
-                                    }
-                                }
-                                let message = format!("failed to write {folder} files: {e}");
-                                log::warn!("Sunrise: {message}");
-                                *outstanding.error.lock().unwrap() = Some(message);
-                                for job in batch {
-                                    crate::chunk_io::report_save_failure(
-                                        &root, job.key.0, job.key.1, &e,
-                                    );
+                        for (key, error) in write_region_records(&root, cache, folder, &records) {
+                            reporting.report(kind, key, &error);
+                        }
+                        if let Ok(mut pending) = pending.lock() {
+                            for job in batch {
+                                let key = (kind, job.key.0, job.key.1);
+                                if pending.get(&key).is_some_and(|p| p.0 == job.seq) {
+                                    // Like IOWorker, retire both successful and failed stores. A
+                                    // reader that already borrowed the snapshot still owns it.
+                                    pending.remove(&key);
                                 }
                             }
                         }
@@ -403,52 +338,14 @@ impl SaveDir {
             .expect("spawn region writer");
         Writer { send, thread }
     }
-    /// Take the terrain positions to mark dirty again after unsuccessful writes.
-    pub fn take_failed_chunk_saves(&self) -> Vec<(i32, i32)> {
-        // This is polled every tick; don't take the pending read/write lock on an empty queue.
-        if self
-            .outstanding
-            .failed_saves
-            .lock()
-            .map_or(true, |failed| failed.is_empty())
-        {
-            return Vec::new();
-        }
-        let (Ok(pending), Ok(mut failed)) =
-            (self.pending.lock(), self.outstanding.failed_saves.lock())
-        else {
-            return Vec::new();
-        };
-        failed
-            .drain()
-            .filter(|&((x, z), seq)| {
-                pending
-                    .get(&(Folder::Region, x, z))
-                    .is_none_or(|p| p.0 <= seq)
-            })
-            .map(|(key, _)| key)
-            .collect()
+    /// Number of failed records reported for this world. Checkpoints use a before/after
+    /// difference for diagnostics; this count does not change their save result.
+    pub fn record_save_failures(&self) -> u64 {
+        self.save_failure_reporter().reported_failures()
     }
 
-    /// Visit loaded terrain that still has a refused record. The durable error outlives
-    /// the one-shot retry notice, since the chunk may not have been resident at that point.
-    pub fn for_each_refused_chunk_save(
-        &self,
-        loaded: impl Iterator<Item = (i32, i32)>,
-        mut mark: impl FnMut((i32, i32)),
-    ) {
-        if let Ok(errors) = self.outstanding.record_errors.lock()
-            && !errors.is_empty()
-        {
-            for (x, z) in loaded {
-                if errors.contains_key(&("region", x, z)) {
-                    mark((x, z));
-                }
-            }
-        }
-    }
-
-    /// Wait until every queued write is on disk, or report what could not be saved.
+    /// Wait until every queued write finishes. Individual failures are reported by the
+    /// writer; only a failure of the writer itself fails this barrier.
     pub fn flush(&self) -> Result<()> {
         let mut count = self
             .outstanding
@@ -462,7 +359,7 @@ impl SaveDir {
                 .wait(count)
                 .map_err(|_| "writer poisoned")?;
         }
-        self.write_result(true)
+        self.write_result()
     }
     /// Wait until at most `low` chunk records are still queued, without waiting
     /// for all of them; a save pass resuming at half the cap keeps the writer fed
@@ -486,8 +383,7 @@ impl SaveDir {
                 .wait(count)
                 .map_err(|_| "writer poisoned")?;
         }
-        // A bad record must not block submitting new records (including retries).
-        self.write_result(false)
+        self.write_result()
     }
     /// `ChunkMap.activeChunkWrites`: chunk records, excluding entity/POI IO.
     pub fn active_chunk_writes(&self) -> usize {
@@ -500,10 +396,10 @@ impl SaveDir {
             .count
             .lock()
             .map_err(|_| "writer poisoned")?;
-        self.write_result(*count == 0)?;
+        self.write_result()?;
         Ok(*count == 0)
     }
-    fn write_result(&self, report_record_errors: bool) -> Result<()> {
+    fn write_result(&self) -> Result<()> {
         if let Some(error) = &*self
             .outstanding
             .error
@@ -511,23 +407,6 @@ impl SaveDir {
             .map_err(|_| "writer poisoned")?
         {
             return Err(error.clone().into());
-        }
-        if report_record_errors {
-            let errors = self
-                .outstanding
-                .record_errors
-                .lock()
-                .map_err(|_| "writer poisoned")?;
-            if !errors.is_empty() {
-                let path = self.root.display();
-                return Err(RecordSaveFailures(
-                    errors
-                        .iter()
-                        .map(|((folder, x, z), error)| format!("{path} {folder} {x},{z}: {error}"))
-                        .collect(),
-                )
-                .into());
-            }
         }
         Ok(())
     }
@@ -546,47 +425,6 @@ impl Drop for SaveDir {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_noop_poi_job_clears_an_older_record_refusal() {
-        let dir = tempfile::tempdir().unwrap();
-        let save = SaveDir::new(dir.path().to_path_buf(), LevelShape::OVERWORLD, None);
-        let key = (2, 0);
-        let invalid = (0..=sunrise_core::nbt::DISK_WRITE_NESTING_GUARD)
-            .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
-        let refused = save
-            .write_records(
-                "poi",
-                vec![(
-                    key,
-                    Some(NamedTag {
-                        name: "".into(),
-                        tag: invalid,
-                    }),
-                )],
-                true,
-            )
-            .unwrap_err();
-        assert!(
-            refused
-                .downcast::<RecordSaveFailures>()
-                .unwrap()
-                .to_string()
-                .contains("poi 2,0:")
-        );
-        let tables = Arc::new(SaveTables {
-            block_names: Vec::new(),
-            block_ids: HashMap::new(),
-            default_state: Vec::new(),
-            block_entity: Vec::new(),
-            heightmaps: crate::assets::Properties::for_tests(&[]),
-            air: 0,
-            poi: Vec::new(),
-        });
-        let empty = Record::Poi(Arc::new(Chunk::empty(key.0, key.1)), tables, None);
-        save.queue(Folder::Poi, vec![(key, empty)], true).unwrap();
-        assert!(!dir.path().join("poi/r.0.0.mca").exists());
-    }
 
     #[test]
     #[cfg(debug_assertions)]
@@ -610,14 +448,13 @@ mod tests {
             tag: Tag::compound([("marker", Tag::Int(3))]),
         });
         let save = open();
-        let error = save
-            .queue(
-                Folder::Poi,
-                vec![(key, invalid), ((0, 0), Record::Tag(good.clone()))],
-                true,
-            )
-            .unwrap_err();
-        assert!(error.is::<RecordSaveFailures>());
+        save.queue(
+            Folder::Poi,
+            vec![(key, invalid), ((0, 0), Record::Tag(good.clone()))],
+            true,
+        )
+        .unwrap();
+        assert_eq!(save.record_save_failures(), 1);
         let disk = open();
         assert_eq!(
             disk.read_record_raw("poi", 0, 0).as_ref(),
@@ -680,24 +517,25 @@ mod tests {
     fn an_unexpected_writer_panic_releases_both_waits() {
         let dir = tempfile::tempdir().unwrap();
         let save = SaveDir::new(dir.path().to_path_buf(), LevelShape::OVERWORLD, None);
-        // Poison only the completion bookkeeping, so the writer unwinds after encoding.
-        assert!(
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _errors = save.outstanding.record_errors.lock().unwrap();
-                panic!("injected writer bookkeeping panic");
-            }))
-            .is_err()
-        );
+        let outstanding = save.outstanding.clone();
+        *outstanding.count.lock().unwrap() = 1;
+        outstanding.chunks.store(1, Ordering::Relaxed);
+        let writer = std::thread::spawn(move || {
+            let _completion = BatchCompletion {
+                outstanding,
+                chunks: 1,
+                batches: 1,
+            };
+            panic!("injected unexpected writer panic");
+        });
         let (send, receive) = mpsc::channel();
         let waiter = std::thread::spawn(move || {
-            save.write_records("region", vec![((0, 0), None)], false)
-                .unwrap();
-            let error = save.flush().unwrap_err();
-            assert!(!error.is::<RecordSaveFailures>());
+            assert!(save.flush().is_err());
             assert_eq!(save.active_chunk_writes(), 0);
             assert!(save.wait_for_chunk_writes_below(0).is_err());
             send.send(()).unwrap();
         });
+        assert!(writer.join().is_err());
         receive
             .recv_timeout(std::time::Duration::from_secs(1))
             .unwrap();
