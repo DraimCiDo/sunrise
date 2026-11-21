@@ -4,8 +4,8 @@ use super::Game;
 use mod_api::__private::game::*;
 use mod_api::{
     BlockEntityDataError, BlockEntityError, BlockEntityItemError, BlockEntityRef,
-    BlockEntityShapes, BlockEntityShapesError, BlockEntityTypeKey, LevelRef, PlayerRef,
-    Transaction,
+    BlockEntityShapes, BlockEntityShapesError, BlockEntityTypeKey, BlockEntityView, LevelRef,
+    PlayerRef, Transaction,
 };
 use sunrise_client::{
     block_entity_nbt,
@@ -16,7 +16,38 @@ use sunrise_client::{
 use sunrise_core::nbt::{Compound, Tag};
 use sunrise_core::position::BlockPos;
 use sunrise_items::items::ItemStack;
-use sunrise_world::registry::BlockStateId;
+use sunrise_world::registry::{BlockRegistry, BlockStateId};
+
+pub(super) struct NativeBlockEntityView<'a> {
+    world: &'a World,
+    block_entity: &'a BlockEntity,
+    registry: &'a BlockRegistry,
+    position: [i32; 3],
+    level: LevelRef,
+}
+
+impl BlockEntityView for NativeBlockEntityView<'_> {
+    fn kind(&self) -> Option<BlockEntityTypeKey> {
+        let [x, y, z] = self.position;
+        let block = &self.registry.state(self.world.block(x, y, z))?.name;
+        mod_api::__private::block_entity_type_key(save::block_entity_id(self.block_entity, block))
+    }
+
+    fn position(&self) -> [i32; 3] {
+        self.position
+    }
+
+    fn level(&self) -> LevelRef {
+        self.level
+    }
+
+    fn data_slots(&self) -> Option<&[i32]> {
+        match self.block_entity {
+            BlockEntity::Mod(entity) => Some(&entity.data),
+            _ => None,
+        }
+    }
+}
 
 impl Game<'_> {
     fn native_block_entity_target(&self, entity: BlockEntityRef) -> Option<(&World, &BlockEntity)> {
@@ -116,24 +147,31 @@ impl Game<'_> {
         }
     }
 
-    /// The block entity's type (`BlockEntity.getType`).
-    pub(super) fn block_entity_kind(&self, entity: BlockEntityRef) -> Option<BlockEntityTypeKey> {
+    pub(super) fn resolve_block_entity_view(
+        &self,
+        entity: BlockEntityRef,
+    ) -> Option<NativeBlockEntityView<'_>> {
         let (world, block_entity) = self.native_block_entity_target(entity)?;
-        let [x, y, z] = entity.fields().position;
-        let block = &self.pack.assets.registry.state(world.block(x, y, z))?.name;
-        mod_api::__private::block_entity_type_key(save::block_entity_id(block_entity, block))
+        let BlockEntityRefFields {
+            level, position, ..
+        } = entity.fields();
+        Some(NativeBlockEntityView {
+            world,
+            block_entity,
+            registry: self.pack.assets.registry,
+            position,
+            level,
+        })
     }
 
-    /// The block entity's position.
-    pub(super) fn block_entity_position(&self, entity: BlockEntityRef) -> Option<[i32; 3]> {
-        self.native_block_entity_target(entity)?;
-        Some(entity.fields().position)
-    }
-
-    /// The block entity's level.
-    pub(super) fn block_entity_level(&self, entity: BlockEntityRef) -> Option<LevelRef> {
-        self.native_block_entity_target(entity)?;
-        Some(entity.fields().level)
+    pub(super) fn with_block_entity_view(
+        &self,
+        entity: BlockEntityRef,
+        read: &mut dyn FnMut(&dyn BlockEntityView),
+    ) {
+        if let Some(view) = self.resolve_block_entity_view(entity) {
+            read(&view);
+        }
     }
 
     /// The data saved without identity or position metadata
@@ -211,15 +249,6 @@ impl Game<'_> {
             .name
             .clone();
         Some((key, block))
-    }
-
-    /// A snapshot of a mod block entity's menu data slots, on the server or in the
-    /// client's copy. None for a stale/missing/vanilla entity. Item storage is separate.
-    pub(super) fn block_entity_data_slots(&self, entity: BlockEntityRef) -> Option<Vec<i32>> {
-        let (_, BlockEntity::Mod(block_entity)) = self.native_block_entity_target(entity)? else {
-            return None;
-        };
-        Some(block_entity.data.clone())
     }
 
     /// Set a mod block entity's menu data slot silently in the current transaction.
@@ -1065,20 +1094,35 @@ mod tests {
                 game.world
                     .block_entities
                     .insert(pos, BlockEntity::Chest(vec![]));
-                assert_eq!(original.data_slots(game), None);
+                assert_eq!(original.with_view(game, |_| ()), None);
                 tentative = game.block_entity(level, [1, 64, 1]);
                 Err(())
             });
-            assert_eq!(original.data_slots(game), Some(vec![7]));
+            original
+                .with_view(game, |view| {
+                    assert_eq!(view.position(), [1, 64, 1]);
+                    assert_eq!(view.level(), level);
+                    assert_eq!(view.data_slots(), Some([7].as_slice()));
+                })
+                .unwrap();
             assert_eq!(tentative.unwrap().data(game), None);
             let (lease, taken) = game.world.block_entities.take(&pos).unwrap();
-            assert_eq!(original.data_slots(game), None);
+            assert_eq!(
+                game.block_entity_identity(level, [1, 64, 1]),
+                Some(original)
+            );
+            assert_eq!(original.with_view(game, |_| ()), None);
             assert!(game.world.block_entities.put(lease, taken));
-            assert_eq!(original.data_slots(game), Some(vec![7]));
+            original
+                .with_view(game, |view| {
+                    assert_eq!(view.data_slots(), Some([7].as_slice()))
+                })
+                .unwrap();
             game.world.block_entities.remove(&pos);
             game.world.block_entities.insert(pos, holder());
             let replacement = game.block_entity(level, [1, 64, 1]).unwrap();
             assert_ne!(original, replacement);
+            assert_eq!(original.with_view(game, |_| ()), None);
             let stale = Err(BlockEntityError::Stale);
             assert_eq!(original.set_lock(game, None), stale);
             assert_eq!(original.set_name(game, Some("stale")), stale);
@@ -1094,14 +1138,14 @@ mod tests {
                 original.item_slot(game, 0),
                 Err(BlockEntityItemError::Stale)
             );
-            assert_eq!(
-                replacement
-                    .with_view(game, |view| view.data_slots().map(|slots| slots.is_empty()))
-                    .flatten(),
-                Some(true)
-            );
+            replacement
+                .with_view(game, |view| {
+                    assert_eq!(view.data_slots(), Some([].as_slice()))
+                })
+                .unwrap();
             assert_eq!(replacement.set_data_slots(game, vec![8]), Ok(true));
             game.world.block_entities.load_chunk(vec![(pos, holder())]);
+            assert_eq!(replacement.with_view(game, |_| ()), None);
             assert_eq!(
                 replacement.set_data_slots(game, vec![99]),
                 Err(BlockEntityDataError::Stale)
@@ -1586,17 +1630,13 @@ mod tests {
                     .unwrap()
             );
             assert_eq!(slot3(game), Some(3));
-            assert_eq!(
-                chest
-                    .with_view(game, |view| view.kind())
-                    .flatten()
-                    .map(|kind| kind.id(game)),
-                Some("minecraft:chest".to_owned())
-            );
-            assert_eq!(
-                chest.with_view(game, |view| view.position()),
-                Some([0, 64, 0])
-            );
+            chest
+                .with_view(game, |view| {
+                    assert_eq!(view.kind().unwrap().id(game), "minecraft:chest");
+                    assert_eq!(view.position(), [0, 64, 0]);
+                    assert_eq!(view.data_slots(), None);
+                })
+                .unwrap();
             assert!(
                 !chest.merge_data(game, compound(stick)).unwrap(),
                 "no change"

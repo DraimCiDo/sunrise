@@ -281,6 +281,45 @@ pub struct BlockEntityRef {
     pub(crate) generation: u64,
 }
 
+impl BlockEntityRef {
+    /// Resolve this block entity once and lend its identity and menu data to `read`.
+    /// Works on either side. Returns `None` without calling `read` if the handle is stale,
+    /// the entity is out for its tick, or its level or block is unavailable.
+    /// Copy any data you need to keep before making a write through the host.
+    pub fn with_view<R>(
+        self,
+        host: &dyn Host,
+        read: impl FnOnce(&dyn BlockEntityView) -> R,
+    ) -> Option<R> {
+        let backend = backend_of(host)?;
+        let mut read = Some(read);
+        let mut result = None;
+        backend.with_block_entity_view(self, &mut |view| {
+            if let Some(read) = read.take() {
+                result = Some(read(view));
+            }
+        });
+        result
+    }
+}
+
+/// Read-only identity and menu data for a resident block entity, lent by [`BlockEntityRef::with_view`].
+// no wire: a scoped block entity read, not a transported value.
+pub trait BlockEntityView {
+    /// The block entity's type (`BlockEntity.getType`), if it has a registered key.
+    fn kind(&self) -> Option<BlockEntityTypeKey>;
+
+    /// The block entity's position, `[x, y, z]`.
+    fn position(&self) -> [i32; 3];
+
+    /// The level containing the block entity.
+    fn level(&self) -> LevelRef;
+
+    /// A mod block entity's transient menu data slots. An empty list is still present;
+    /// `None` means a vanilla block entity. The slice cannot escape the read scope.
+    fn data_slots(&self) -> Option<&[i32]>;
+}
+
 /// Why a block-entity operation could not resolve its target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]

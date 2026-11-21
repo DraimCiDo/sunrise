@@ -1,10 +1,11 @@
 # Declaring a machine's menu data
 
 A mod block entity has two different kinds of storage: external item access uses
-transactional Parts, while internal slots use the handle methods below; integer menu data is read with
-`BlockEntityRef::data_slots` and changed on a server Host. Menu data is transient:
-creation and loading both start with an empty data vector, even when the saved
-payload contains the machine's progress.
+transactional Parts, while internal slots use the handle methods below. Read integer menu data through
+`BlockEntityRef::with_view` and write it on a server Host. `view.data_slots()` borrows the mod holder's
+slice during the read, including an empty slice. Vanilla holders have no such slice. Menu data is
+transient: creation and loading start with an empty list, even when the saved payload contains the
+machine's progress.
 
 ## State-aware creation
 
@@ -111,8 +112,12 @@ until sent again: put a counter in them to tell one effect from the next.
 
 A `BlockEntityRef` names one live entity, not every entity later placed at its position. Removal,
 replacement and chunk reload invalidate it; reacquire with `host.block_entity(level, position)`.
-In-place data edits and temporary tick storage preserve identity. Option reads return `None` for
-stale handles; writes return their error's `Stale` variant, never writing to a replacement.
+In-place data edits and temporary tick storage preserve identity. Read the position, level, kind and
+menu data together in `entity.with_view(host, |view| { ... })`, calling `view.position()`,
+`view.level()`, `view.kind()` and `view.data_slots()` inside it. A stale handle or an entity taken out
+for its tick returns `None` without calling the closure. To keep a slot after the scope, copy just the
+value you need, for example `entity.with_view(host, |view| view.data_slots()?.first().copied()).flatten()`.
+Writes return their error's `Stale` variant, never writing to a replacement.
 `set_lock`, `set_name`, `merge_data`, `replace_data`, `set_changed` and `set_data_slot`
 return `Result<bool, BlockEntityError>`: handle `Err(BlockEntityError::Stale)` by dropping
 or reacquiring the handle. `Ok(false)` means unchanged data or an unsupported operation,

@@ -40,17 +40,14 @@ pub trait BlockEntitiesServerHost {
 #[sunrise_mod_api_macros::host_area]
 pub trait BlockEntitiesBackend {
     /// Side: both.
-    /// The block entity's type (`BlockEntity.getType`).
+    /// Lends a resident block entity's identity and menu data, or skips an unavailable entity.
     #[access(WorldOnly)]
-    fn block_entity_kind(&self, entity: BlockEntityRef) -> Option<BlockEntityTypeKey>;
-    /// Side: both.
-    /// The block entity's position.
-    #[access(WorldOnly)]
-    fn block_entity_position(&self, entity: BlockEntityRef) -> Option<[i32; 3]>;
-    /// Side: both.
-    /// The block entity's level.
-    #[access(WorldOnly)]
-    fn block_entity_level(&self, entity: BlockEntityRef) -> Option<LevelRef>;
+    #[decline_unavailable]
+    fn with_block_entity_view(
+        &self,
+        entity: BlockEntityRef,
+        read: &mut dyn FnMut(&dyn BlockEntityView),
+    );
     /// Side: both.
     /// An owned snapshot of the data saved without identity or position metadata
     /// (`BlockEntity.saveWithoutMetadata`). The save payload is assembled on request.
@@ -78,11 +75,6 @@ pub trait BlockEntitiesBackend {
     /// stale handle or a client.
     #[access(WorldOnly)]
     fn block_entity_viewers(&self, entity: BlockEntityRef) -> Option<Vec<PlayerRef>>;
-    /// Side: both.
-    /// A snapshot of a mod block entity's menu data slots, on the server or in the
-    /// client's copy. None for a stale/missing/vanilla entity. Item storage is separate.
-    #[access(WorldOnly)]
-    fn block_entity_data_slots(&self, entity: BlockEntityRef) -> Option<Vec<i32>>;
     /// Side: both.
     /// Read a configured mod holder's declared internal item slot, without automation policy.
     /// Removed, replaced or reloaded holders return BlockEntityItemError::Stale.

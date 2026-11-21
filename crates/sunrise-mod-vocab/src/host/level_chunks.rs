@@ -13,31 +13,10 @@ pub trait LevelChunksBackend {
     #[access(WorldOnly)]
     fn level_chunk_ref(&self, level: LevelRef, pos: [i32; 2]) -> Option<ChunkRef>;
     /// Side: server.
-    /// Whether this chunk is loaded; false on a client or for a stale handle.
+    /// Lends facts about a valid chunk of an open server level, even if it is unloaded.
     #[access(WorldOnly)]
-    fn chunk_loaded(&self, chunk: ChunkRef) -> bool;
-    /// Side: server.
-    /// The status of a loaded chunk. Proto chunks are not exposed here.
-    #[access(WorldOnly)]
-    fn chunk_status(&self, chunk: ChunkRef) -> Option<ChunkStatus>;
-    /// Side: server.
-    /// Whether the chunk passes vanilla's seeded slime-chunk test, independent of
-    /// dimension, height, biome and other spawn conditions. Works for unloaded chunks
-    /// in active or parked open levels. None for a stale level, a client or a chunk
-    /// outside world bounds. Does not load chunks or advance the world's random stream.
-    #[access(WorldOnly)]
-    fn chunk_is_slime_chunk(&self, chunk: ChunkRef) -> Option<bool>;
-    /// Side: server.
-    /// The sections of a loaded chunk whose block palette may hold any state of `block`
-    /// (`PalettedContainer.maybeHas`), as section Y coordinates (`SectionPos.y`, block Y `>> 4`)
-    /// from the bottom up, without reading the 4096 blocks of any section. "May": a palette
-    /// keeps a state no block of the section uses any more, so read the blocks of each section
-    /// named to find the ones that are there, and a section of more distinct states than a
-    /// palette holds is named whenever the block exists. The way to find blocks that stand in a
-    /// chunk, such as on `chunk_load`. None for a stale handle, on a client, and for a chunk
-    /// that isn't loaded; it loads nothing.
-    #[access(WorldOnly)]
-    fn chunk_sections_with_block(&self, chunk: ChunkRef, block: BlockKey) -> Option<Vec<i32>>;
+    #[decline_unavailable]
+    fn with_chunk_view(&self, chunk: ChunkRef, read: &mut dyn FnMut(&dyn ChunkView));
     /// Side: server.
     /// `ChunkMap.getPlayers(pos, false)`: the players watching this chunk, those
     /// it is inside the view of and was sent to, in the order the server keeps

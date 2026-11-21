@@ -52,9 +52,10 @@ use crate::item::transaction::{Transaction, TransactionSeal};
 use crate::runtime::Installed;
 use crate::world::ticket_controller::{ControllerInfo, TEST_CONTROLLERS};
 use crate::{
-    Backend, BackendMut, BackendMutRef, BackendRef, BlockEntityRef, BlockEntityTypeKey, BlockSide,
-    ClientHost, Commands, EntityRef, FluidStack, Host, ItemPlace, ItemStack, LevelRef, Messages,
-    Mods, PlayerRef, Players, ServerHost, TEST_MODS, Tag, Text, TicketController, WorldEpoch,
+    Backend, BackendMut, BackendMutRef, BackendRef, BlockEntityRef, BlockEntityTypeKey,
+    BlockEntityView, BlockSide, ClientHost, Commands, EntityRef, FluidStack, Host, ItemPlace,
+    ItemStack, LevelRef, Messages, Mods, PlayerRef, Players, ServerHost, TEST_MODS, Tag, Text,
+    TicketController, WorldEpoch,
 };
 
 /// The world epoch of every fake's handles.
@@ -491,9 +492,47 @@ impl crate::prelude::LevelTickingBackend for FakeHost {
     }
 }
 impl crate::prelude::BlockEntitiesBackend for FakeHost {
-    fn block_entity_kind(&self, entity: BlockEntityRef) -> Option<BlockEntityTypeKey> {
-        let standing = self.level.standing(entity.level, entity.position)?;
-        standing.kind().cloned()
+    fn with_block_entity_view(
+        &self,
+        entity: BlockEntityRef,
+        read: &mut dyn FnMut(&dyn BlockEntityView),
+    ) {
+        if let Some(standing) = self.level.standing(entity.level, entity.position) {
+            read(&fake_block_entity_view(entity, standing.kind().copied()));
+        }
+    }
+}
+
+/// Lend the identity of a block entity in a test backend. These fixtures keep no menu data.
+// hidden: test backend support shared by the vocabulary and the mod API's part tests.
+#[doc(hidden)]
+pub fn fake_block_entity_view(
+    entity: BlockEntityRef,
+    kind: Option<BlockEntityTypeKey>,
+) -> impl BlockEntityView {
+    FakeBlockEntityView { entity, kind }
+}
+
+struct FakeBlockEntityView {
+    entity: BlockEntityRef,
+    kind: Option<BlockEntityTypeKey>,
+}
+
+impl BlockEntityView for FakeBlockEntityView {
+    fn kind(&self) -> Option<BlockEntityTypeKey> {
+        self.kind
+    }
+
+    fn position(&self) -> [i32; 3] {
+        self.entity.position
+    }
+
+    fn level(&self) -> LevelRef {
+        self.entity.level
+    }
+
+    fn data_slots(&self) -> Option<&[i32]> {
+        self.kind.is_some().then_some(&[])
     }
 }
 impl crate::prelude::ItemsBackend for FakeHost {

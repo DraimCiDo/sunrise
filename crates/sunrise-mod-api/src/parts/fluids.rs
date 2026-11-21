@@ -286,10 +286,16 @@ pub mod tests {
     }
     #[cfg(test)]
     impl mod_api::prelude::BlockEntitiesBackend for TankWorld {
-        fn block_entity_kind(&self, entity: BlockEntityRef) -> Option<BlockEntityTypeKey> {
-            self.types
+        fn with_block_entity_view(
+            &self,
+            entity: BlockEntityRef,
+            read: &mut dyn FnMut(&dyn mod_api::BlockEntityView),
+        ) {
+            let kind = self
+                .types
                 .get(&mod_vocab::__private::game::Fields::fields(&entity).position)
-                .map(|id| type_key(id))
+                .map(|id| type_key(id));
+            read(&mod_vocab::testing::fake_block_entity_view(entity, kind));
         }
     }
     #[cfg(test)]

@@ -707,8 +707,13 @@ pub mod tests {
     }
     #[cfg(test)]
     impl mod_api::prelude::BlockEntitiesBackend for Shelf {
-        fn block_entity_kind(&self, _: BlockEntityRef) -> Option<BlockEntityTypeKey> {
-            self.overstates.then(|| type_key("test:item_overstates"))
+        fn with_block_entity_view(
+            &self,
+            entity: BlockEntityRef,
+            read: &mut dyn FnMut(&dyn mod_api::BlockEntityView),
+        ) {
+            let kind = self.overstates.then(|| type_key("test:item_overstates"));
+            read(&mod_vocab::testing::fake_block_entity_view(entity, kind));
         }
     }
     #[cfg(test)]

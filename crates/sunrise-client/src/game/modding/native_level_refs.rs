@@ -2,10 +2,10 @@
 //! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387). Server reads
 //! reach any loaded level; both-side reads also reach the client's current level.
 //! A handle of an earlier open or an unloaded block reads `None` (or `false`).
-use super::Game;
+use super::{Game, native_chunk_queries::NativeChunkView};
 use mod_api::world::mod_chunk_tickets::ModTicket;
 use mod_api::{
-    BlockHit, BlockTransformPreview, ChunkRef, ChunkStatus, ClipBlock, ClipFluid, GlobalPos, Hand,
+    BlockHit, BlockTransformPreview, ChunkRef, ChunkView, ClipBlock, ClipFluid, GlobalPos, Hand,
     Identifier, LevelRef, LightLayer, MapState, PlayerRef, RespawnData, TicketController, Vec3,
 };
 use sunrise_client::{streaming::Streaming, world::World};
@@ -354,14 +354,20 @@ impl Game<'_> {
                 .collect(),
         )
     }
-    /// Whether this chunk is loaded; false on a client or for a stale handle.
-    pub(super) fn chunk_loaded(&self, chunk: ChunkRef) -> bool {
-        self.chunk(chunk.level(), chunk.pos()).is_some()
-    }
-    /// The status of a loaded chunk. Proto chunks are not exposed here.
-    pub(super) fn chunk_status(&self, chunk: ChunkRef) -> Option<ChunkStatus> {
-        self.chunk(chunk.level(), chunk.pos())
-            .map(|_| ChunkStatus::Full)
+    pub(super) fn with_chunk_view(&self, chunk: ChunkRef, read: &mut dyn FnMut(&dyn ChunkView)) {
+        let pos = chunk.pos();
+        if !chunk_in_world(pos) {
+            return;
+        }
+        let Some(world) = self.native_level_world(chunk.level()) else {
+            return;
+        };
+        let [x, z] = pos;
+        read(&NativeChunkView {
+            column: world.chunks.get(&(x, z)).map(std::sync::Arc::as_ref),
+            pos,
+            seed: self.level.seed,
+        });
     }
     /// A handle for chunk `pos` of an open level, loaded or not, so a mod can
     /// force an unloaded chunk. None for a stale handle, on a client, and for

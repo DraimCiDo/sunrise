@@ -1,5 +1,17 @@
 impl BlockEntityRef {
-    fn kind(self, _: &dyn ClientHost) -> Option<BlockEntityTypeKey> {
+    fn with_view<R>(
+        self,
+        _: &dyn ClientHost,
+        read: impl FnOnce(&BlockEntityView) -> R,
+    ) -> Option<R> {
+        Some(read(&BlockEntityView))
+    }
+}
+
+struct BlockEntityView;
+
+impl BlockEntityView {
+    fn kind(&self) -> Option<BlockEntityTypeKey> {
         Some(BlockEntityTypeKey(0))
     }
 }

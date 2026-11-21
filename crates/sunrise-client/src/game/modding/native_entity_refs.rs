@@ -2522,10 +2522,11 @@ pub(super) mod tests {
     #[test]
     #[ignore = "daily"]
     fn chunk_handles_resolve_loaded_parked_and_stale_levels() {
-        use mod_api::{Authority, ChunkStatus};
+        use mod_api::{Authority, ChunkStatus, ChunkView};
         use std::sync::Arc;
         use sunrise_client::chunk::Chunk;
         with_game(|game| {
+            game.level.seed = 0;
             let level = game.level(game.dim.id()).unwrap();
             game.world
                 .chunks
@@ -2533,36 +2534,32 @@ pub(super) mod tests {
             let chunk = game.chunk(level, [-2, 3]).unwrap();
             assert_eq!(chunk.pos(), [-2, 3]);
             assert_eq!(chunk.level(), level);
-            assert!(chunk.with_view(game, |view| view.loaded()).unwrap_or(false));
-            assert_eq!(
-                chunk.with_view(game, |view| view.status()).flatten(),
-                Some(ChunkStatus::Full)
-            );
+            let facts =
+                |view: &dyn ChunkView| (view.loaded(), view.status(), view.is_slime_chunk());
+            // The seed-0 Java LCG's first nextInt(10) at (-2, 3) is 9.
+            let loaded = Some((true, Some(ChunkStatus::Full), false));
+            assert_eq!(chunk.with_view(game, facts), loaded);
             assert!(game.chunk(level, [99, 99]).is_none());
             assert!(
                 game.enter_command_level(super::super::Dim::Nether)
                     .is_some()
             );
-            assert_eq!(
-                chunk.with_view(game, |view| view.status()).flatten(),
-                Some(ChunkStatus::Full)
-            );
+            assert_eq!(chunk.with_view(game, facts), loaded);
             assert_eq!(game.chunk(level, [-2, 3]), Some(chunk));
             assert!(
                 game.enter_command_level(super::super::Dim::Overworld)
                     .is_some()
             );
             game.world.chunks.remove(&(-2, 3));
-            assert!(!chunk.with_view(game, |view| view.loaded()).unwrap_or(false));
-            assert_eq!(chunk.with_view(game, |view| view.status()).flatten(), None);
+            assert_eq!(chunk.with_view(game, facts), Some((false, None, false)));
+            assert!(!game.world.chunks.contains_key(&(-2, 3)));
             game.world
                 .chunks
                 .insert((-2, 3), Arc::new(Chunk::empty(-2, 3)));
             game.native_lifecycle
                 .begin_open(Authority::IntegratedServer);
             assert!(game.chunk(level, [-2, 3]).is_none());
-            assert!(!chunk.with_view(game, |view| view.loaded()).unwrap_or(false));
-            assert_eq!(chunk.with_view(game, |view| view.status()).flatten(), None);
+            assert_eq!(chunk.with_view(game, facts), None);
         });
     }
 

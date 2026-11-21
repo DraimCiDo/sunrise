@@ -28,7 +28,7 @@ block hooks) by block. The factory is a `BlockEntityPart` method, not a global `
 registration slot, not the type's blocks. Bare names use the `minecraft:` namespace. The final
 registry resolves requests after all declarations and refuses unknown IDs, naming the requesting mod
 and type. `key.id(host)` reads the canonical name for diagnostics; a key retains its identity until
-restart. Use a type ID, not a block ID (`minecraft:shulker_box`, not `minecraft:red_shulker_box`). `BlockEntityRef::kind(host)` returns `Option<BlockEntityTypeKey>`.
+restart. Use a type ID, not a block ID (`minecraft:shulker_box`, not `minecraft:red_shulker_box`). To read a live holder's type key, use `entity.with_view(host, |view| view.kind()).flatten()`.
 
 Lookup keys may answer capabilities for vanilla and native types. `block_entity_part` accepts only
 native types and returns `BlockEntityPartError::VanillaType { kind }` immediately for a vanilla key. Native
