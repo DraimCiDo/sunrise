@@ -95,7 +95,7 @@ chunk through the attachment codec and kept by transactions.
 ```rust,ignore
 static PROGRESS: AttachmentType<u32> = AttachmentType {
     namespace: "mymod", name: "press_progress", default: || 0,
-    codec: Some(PROGRESS_CODEC), copy_on_death: false, sync: false,
+    codec: Some(PROGRESS_CODEC), copy_on_death: false, sync_codec: None,
 };
 impl BlockEntityPartState for Press {
     type Data = u32;

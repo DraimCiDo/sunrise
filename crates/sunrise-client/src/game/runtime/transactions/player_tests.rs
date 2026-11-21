@@ -18,7 +18,7 @@ const VALUE: AttachmentType<i32> = AttachmentType {
         },
     }),
     copy_on_death: true,
-    sync: false,
+    sync_codec: None,
 };
 const OTHER: AttachmentType<i32> = AttachmentType {
     name: "other",

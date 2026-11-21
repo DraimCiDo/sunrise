@@ -13,7 +13,7 @@ pub static COUNT: AttachmentType<i32> = AttachmentType {
         },
     }),
     copy_on_death: false,
-    sync: false,
+    sync_codec: None,
 };
 
 /// Set to 1 after the undecodable-value check, so the game sees it ran to the end.
@@ -29,7 +29,7 @@ pub static MARK: AttachmentType<i32> = AttachmentType {
         },
     }),
     copy_on_death: false,
-    sync: false,
+    sync_codec: None,
 };
 
 /// Each tick does what its block entity's first data slot says:

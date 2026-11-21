@@ -3456,7 +3456,7 @@ pub(super) mod tests {
                 default: || 0i32,
                 codec: None,
                 copy_on_death: false,
-                sync: false,
+                sync_codec: None,
             };
             let holder = sunrise_mod_runtime::attachments::Holder::Player(2345);
             game.options.dedicated = Some(Vec::new());

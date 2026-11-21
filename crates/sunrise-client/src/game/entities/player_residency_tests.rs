@@ -19,7 +19,7 @@ fn actual_guest_membership_and_lifetime_survive_nested_body_loans_and_reset() {
             default: || 0,
             codec: None,
             copy_on_death: false,
-            sync: false,
+            sync_codec: None,
         };
         let index = Arc::new(Mutex::new(AttachmentIndex::default()));
         let dimension = game.dim.key();
@@ -361,7 +361,7 @@ fn actual_dragon_admits_exactly_eight_checked_parts_with_independent_uuids() {
         default: || 0,
         codec: None,
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
     crate::game::native_entity_refs::tests::with_game(|game| {
         game.options.dedicated = Some(Vec::new());
@@ -485,7 +485,7 @@ fn dragon_part_registrations_retire_on_replacement_command_and_chunk_unload() {
         default: || 0,
         codec: None,
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
     for operation in 0..3 {
         crate::game::native_entity_refs::tests::with_game(|game| {
@@ -553,7 +553,7 @@ fn parked_mob_attachment_values_survive_other_level_cleanup() {
         default: || 0,
         codec: None,
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
     crate::game::native_entity_refs::tests::with_game(|game| {
         game.options.dedicated = Some(Vec::new());

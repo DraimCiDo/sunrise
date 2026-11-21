@@ -226,7 +226,7 @@ mod tests {
             },
         }),
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
     pub(super) fn key() -> super::super::index::AttachmentKey {
         ("query".into(), "value".into())
@@ -440,7 +440,7 @@ mod tests {
             default: || unreachable!(),
             codec: None,
             copy_on_death: false,
-            sync: false,
+            sync_codec: None,
         };
         let batch = AttachmentBatch::new(index.lock().unwrap().snapshot(&key()))
             .query::<Probe>(&probe_key)

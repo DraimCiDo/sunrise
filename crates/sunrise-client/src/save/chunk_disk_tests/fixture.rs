@@ -15,7 +15,7 @@ pub const VALUE: AttachmentType<i32> = AttachmentType {
         },
     }),
     copy_on_death: false,
-    sync: false,
+    sync_codec: None,
 };
 
 /// Only the chunk that the test fills with a value needs editing.

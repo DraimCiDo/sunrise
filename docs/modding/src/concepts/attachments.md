@@ -36,7 +36,7 @@ static COUNTER: AttachmentType<i32> = AttachmentType {
         },
     }),
     copy_on_death: false,
-    sync: false,
+    sync_codec: None,
 };
 // Inside a server hook, or mixin code, with `host: &mut dyn ServerHost`:
 if !COUNTER.has(host, Holder::Chunk([0, 0]))? { /* no counter stored */ }

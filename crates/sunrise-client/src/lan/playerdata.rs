@@ -1082,7 +1082,7 @@ mod tests {
                 },
             }),
             copy_on_death: true,
-            sync: false,
+            sync_codec: None,
         };
         let dir = world("attachments");
         let mut original = guest();

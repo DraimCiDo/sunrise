@@ -242,7 +242,7 @@ pub mod tests {
         default: || 0,
         codec: None,
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
     /// A fluid attachment type for the tests.
     pub const ROBOT_FLUID: AttachmentType<u32> = AttachmentType {
@@ -251,7 +251,7 @@ pub mod tests {
         default: || 0,
         codec: None,
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
 
     /// A second test mod, sharing `CHEMICALS` and `Chemical` with the first, as a mod depending

@@ -13,7 +13,7 @@ const VALUE: AttachmentType<i32> = AttachmentType {
     default: || 0,
     codec: None,
     copy_on_death: false,
-    sync: false,
+    sync_codec: None,
 };
 type Calls = Arc<Mutex<Vec<(bool, Holder)>>>;
 
@@ -443,7 +443,7 @@ const SAVED: AttachmentType<i32> = AttachmentType {
     default: || 0,
     codec: Some(mod_api::AttachmentCodec { encode, decode }),
     copy_on_death: false,
-    sync: false,
+    sync_codec: None,
 };
 type Kinds = Arc<Mutex<Vec<(Holder, String)>>>;
 

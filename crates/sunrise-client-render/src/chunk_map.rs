@@ -364,7 +364,7 @@ mod tests {
             },
         }),
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
     fn observe(map: &mut ChunkMap, index: &Index, dimension: DimensionKey) -> Arc<AtomicUsize> {
         let calls = Arc::new(AtomicUsize::new(0));
@@ -546,7 +546,7 @@ mod tests {
             default: || unreachable!(),
             codec: None,
             copy_on_death: false,
-            sync: false,
+            sync_codec: None,
         };
         let index = Index::default();
         let drops = Arc::new(Mutex::new(Vec::new()));

@@ -27,7 +27,7 @@ static CHARGE: AttachmentType<i32> = AttachmentType {
         },
     }),
     copy_on_death: false,
-    sync: false,
+    sync_codec: None,
 };
 
 /// Kept for the session only: no codec.
@@ -37,7 +37,7 @@ static SCRATCH: AttachmentType<i32> = AttachmentType {
     default: || 0,
     codec: None,
     copy_on_death: false,
-    sync: false,
+    sync_codec: None,
 };
 
 /// Keeps a charge on each entity of its types.

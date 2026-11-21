@@ -103,7 +103,7 @@ mod tests {
             },
         }),
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
     fn key() -> super::super::index::AttachmentKey {
         ("observer".into(), "value".into())
@@ -233,7 +233,7 @@ mod tests {
             default: || unreachable!(),
             codec: None,
             copy_on_death: false,
-            sync: false,
+            sync_codec: None,
         };
         let index = Arc::new(Mutex::new(AttachmentIndex::default()));
         let events = Arc::new(Events::default());

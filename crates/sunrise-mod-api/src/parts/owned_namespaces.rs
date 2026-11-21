@@ -41,7 +41,7 @@ mod tests {
         default: || 0,
         codec: None,
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
     impl BlockEntityPartState for Session {
         type Data = u32;
@@ -79,7 +79,7 @@ mod tests {
                 default,
                 codec: None,
                 copy_on_death: false,
-                sync: false,
+                sync_codec: None,
             }
         }
         with_porter(|| {

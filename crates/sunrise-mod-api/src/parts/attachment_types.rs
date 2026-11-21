@@ -210,7 +210,7 @@ mod tests {
             default: || 37u32,
             codec: None,
             copy_on_death: false,
-            sync: false,
+            sync_codec: None,
         };
         let mut store = Store(crate::Attachments::default());
         assert_eq!(key.get(&mut store, crate::Holder::Level), Ok(37));
@@ -358,7 +358,7 @@ mod tests {
                     default: || 0u32,
                     codec: None,
                     copy_on_death: false,
-                    sync: false,
+                    sync_codec: None,
                 };
                 missing
                     .declare_block_entity_part_state(

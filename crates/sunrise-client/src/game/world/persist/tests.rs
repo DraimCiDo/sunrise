@@ -735,7 +735,7 @@ fn entity_attachment_boundary_does_not_alias_equal_uuid_passengers() {
             },
         }),
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
     let root_id = [1, 2, 3, 4];
     let child_id = root_id;
@@ -784,7 +784,7 @@ fn saved_attachments_read_over_a_constructed_map_but_not_a_live_one() {
                 },
             }),
             copy_on_death: false,
-            sync: false,
+            sync_codec: None,
         }
     }
     let (saved, unsaved) = (key("saved"), key("unsaved"));
@@ -869,7 +869,7 @@ fn an_older_save_loads_its_entities_attachments_back_onto_them() {
             },
         }),
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
     let mark = |n: i32| {
         Tag::compound([(

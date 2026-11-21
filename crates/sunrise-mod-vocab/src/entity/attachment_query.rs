@@ -130,7 +130,7 @@ mod tests {
         default: || 0,
         codec: None,
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
     #[test]
     fn wire_attachment_batch_refuses_duplicate_residencies() {
@@ -179,7 +179,7 @@ mod tests {
                 },
             }),
             copy_on_death: false,
-            sync: false,
+            sync_codec: None,
         };
         let holder = AttachmentHolder::Entity(EntityRef::new(WorldEpoch::new(1), 42));
         let index = Arc::new(std::sync::Mutex::new(index::AttachmentIndex::default()));

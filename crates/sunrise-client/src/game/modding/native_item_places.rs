@@ -2640,7 +2640,7 @@ pub(super) mod tests {
             default: Vec::new,
             codec: None,
             copy_on_death: false,
-            sync: false,
+            sync_codec: None,
         };
 
         struct MapStorage(bool);

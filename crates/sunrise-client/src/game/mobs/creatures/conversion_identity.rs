@@ -67,7 +67,7 @@ mod tests {
             },
         }),
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
     static LOOSE: AttachmentType<i32> = AttachmentType {
         namespace: "conversion_test",
@@ -75,7 +75,7 @@ mod tests {
         default: || 0,
         codec: None,
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
 
     /// A villager struck into a witch keeps the attachment that has a codec and leaves the

@@ -170,7 +170,7 @@ mod tests {
         default: || 0,
         codec: None,
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
     const RETAINED: AttachmentType<i32> = AttachmentType {
         namespace: "clone",
@@ -184,7 +184,7 @@ mod tests {
             },
         }),
         copy_on_death: true,
-        sync: false,
+        sync_codec: None,
     };
 
     const SAVED: AttachmentType<i32> = AttachmentType {

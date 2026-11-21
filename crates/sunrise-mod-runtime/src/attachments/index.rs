@@ -481,7 +481,7 @@ mod tests {
             },
         }),
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
 
     fn key(name: &str) -> AttachmentKey {
@@ -793,7 +793,7 @@ mod tests {
             default: || unreachable!(),
             codec: None,
             copy_on_death: false,
-            sync: false,
+            sync_codec: None,
         };
         fn apply<T>(
             index: &Mutex<AttachmentIndex<u32>>,

@@ -250,7 +250,7 @@ const VALUE: AttachmentType<i32> = AttachmentType {
     default: || 0,
     codec: None,
     copy_on_death: false,
-    sync: false,
+    sync_codec: None,
 };
 struct Scratch(std::path::PathBuf);
 impl Drop for Scratch {

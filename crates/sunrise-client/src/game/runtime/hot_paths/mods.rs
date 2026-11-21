@@ -10,7 +10,7 @@ static COUNTER: mod_api::AttachmentType<u32> = mod_api::AttachmentType {
     default: || 0,
     codec: None,
     copy_on_death: false,
-    sync: false,
+    sync_codec: None,
 };
 
 const CALLS: u64 = 100_000;

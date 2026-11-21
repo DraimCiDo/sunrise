@@ -15,7 +15,7 @@ static ITEMS: AttachmentType<StackList<ItemResource>> = AttachmentType {
     default: Vec::new,
     codec: Some(ITEM_STACKS),
     copy_on_death: false,
-    sync: false,
+    sync_codec: None,
 };
 static ENERGY: AttachmentType<u32> = AttachmentType {
     namespace: "storage_test",
@@ -23,7 +23,7 @@ static ENERGY: AttachmentType<u32> = AttachmentType {
     default: || 0,
     codec: None,
     copy_on_death: false,
-    sync: false,
+    sync_codec: None,
 };
 const CHUNK: Holder = Holder::Chunk([2, 3]);
 

@@ -270,7 +270,7 @@ pub mod tests {
         default: || 0,
         codec: None,
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
     /// How many times a `doubler:hoard` was asked about its removal.
     pub static HOARD_ASKED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
@@ -693,7 +693,7 @@ pub mod tests {
         default: || 0,
         codec: None,
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
     #[cfg(test)]
     static B_PROGRESS: AttachmentType<u32> = AttachmentType {
@@ -702,7 +702,7 @@ pub mod tests {
         default: || 0,
         codec: None,
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
     #[cfg(test)]
     struct Keeps<const OWNERS: bool>;

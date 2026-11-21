@@ -1176,7 +1176,7 @@ mod tests {
         default: || 0,
         codec: Some(AttachmentCodec { encode, decode }),
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
     static SYNCED: AttachmentType<i32> = AttachmentType {
         namespace: "test",
@@ -1199,7 +1199,7 @@ mod tests {
         default: || 3,
         codec: None,
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
     fn rows(
         index: &Arc<Mutex<index::AttachmentIndex<u32>>>,
@@ -1442,7 +1442,7 @@ mod tests {
             default: || panic!("no default"),
             codec: None,
             copy_on_death: false,
-            sync: false,
+            sync_codec: None,
         };
         let mut outcomes = Vec::new();
         for rebind in [false, true] {
@@ -1505,7 +1505,7 @@ mod tests {
                 },
             }),
             copy_on_death: false,
-            sync: false,
+            sync_codec: None,
         };
         let index = INDEX.get_or_init(Default::default);
         let mut map = Attachments::default();
@@ -1727,7 +1727,7 @@ mod tests {
             default: || 0,
             codec: Some(AttachmentCodec { encode, decode }),
             copy_on_death: true,
-            sync: false,
+            sync_codec: None,
         };
         let mut original = Attachments::default();
         keep.set(&mut original, Holder::Level, 42).unwrap();

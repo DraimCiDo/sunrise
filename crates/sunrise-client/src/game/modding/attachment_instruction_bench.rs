@@ -7,7 +7,7 @@ static VALUE: mod_api::AttachmentType<u32> = mod_api::AttachmentType {
     default: || 0,
     codec: None,
     copy_on_death: false,
-    sync: false,
+    sync_codec: None,
 };
 #[test]
 #[ignore = "callgrind fixture; needs SUNRISE_TEST_RESOURCES"]

@@ -1790,7 +1790,7 @@ mod tests {
             default: || 0,
             codec: None,
             copy_on_death: false,
-            sync: false,
+            sync_codec: None,
         };
         struct Constructed(Arc<Mutex<Vec<Holder>>>);
         #[mod_api::__subscriptions]
@@ -2089,7 +2089,7 @@ mod transfer_lifetime_tests {
         default: || 0,
         codec: None,
         copy_on_death: false,
-        sync: false,
+        sync_codec: None,
     };
 
     fn removal<T: Rideable + sunrise_client::join_seq::Joined + HasAttachmentLifetime>(

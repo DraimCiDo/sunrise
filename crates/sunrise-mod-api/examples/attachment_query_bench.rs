@@ -25,7 +25,7 @@ static VALUE: AttachmentType<u32> = AttachmentType {
         },
     }),
     copy_on_death: false,
-    sync: false,
+    sync_codec: None,
 };
 struct BenchHost {
     index: Arc<Mutex<AttachmentIndex<AttachmentHolder>>>,
@@ -295,7 +295,7 @@ static VECTOR: AttachmentType<Vec<i32>> = AttachmentType {
     default: || vec![0; 8],
     codec: None,
     copy_on_death: false,
-    sync: false,
+    sync_codec: None,
 };
 fn map_probes() {
     let mut host = BenchHost::new(false, false);

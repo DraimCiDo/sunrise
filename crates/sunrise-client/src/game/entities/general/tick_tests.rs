@@ -27,7 +27,7 @@ static COUNTER: AttachmentType<i32> = AttachmentType {
         },
     }),
     copy_on_death: false,
-    sync: false,
+    sync_codec: None,
 };
 
 /// What the part saw, in call order: each row's id.
