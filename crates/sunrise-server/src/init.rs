@@ -34,6 +34,7 @@ pub struct Answers {
     pub mods: Vec<sunrise_mod_install::input::ModRequest>,
     pub pack: Option<sunrise_mod_install::selection::PackSource>,
     pub json: bool,
+    pub trust_native: bool,
 }
 
 impl Answers {
@@ -248,6 +249,7 @@ pub fn run(dir: &Path, answers: Answers) -> Result<(), String> {
             answers.pack,
             answers.json,
             answers.yes,
+            answers.trust_native,
         )?;
     } else {
         std::fs::write(&toml_path, config::render(&cfg)).map_err(|e| e.to_string())?;

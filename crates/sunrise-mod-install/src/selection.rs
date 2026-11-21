@@ -3,7 +3,7 @@ use crate::{
     Side,
     index::{self, Index, Kind, Project, Version, resolve},
     input::{ModId, Mods, Pack},
-    lock::{self, BuildId, LockedMod, ModLock, PackagePath, Reason, ReleaseTag},
+    lock::{self, BuildId, LockedMod, ModLock, Native, PackagePath, Reason, ReleaseTag},
     modpack::{self, Modpack},
     registry::{self, Fetch},
     transaction::{self, PACK_FILE, Stage},
@@ -163,7 +163,7 @@ pub fn plan<'a>(
     pack: Option<&modpack::Manifest>,
     old: Option<&ModLock>,
     refresh: Refresh<'_>,
-    native_fits: impl Fn(&Project, &Version) -> bool,
+    native_refusal: impl Fn(&Project, &Version) -> Option<String>,
 ) -> Result<Plan<'a>, String> {
     fn fits_side(install: Side, declared: Option<Side>) -> bool {
         !matches!((install, declared), (Side::Server, Some(Side::Client)))
@@ -241,7 +241,7 @@ pub fn plan<'a>(
         &prefer,
         target.game,
         target.side,
-        native_fits,
+        |_, _| true,
         |p, v| {
             if !fits_side(target.side, v.side) {
                 return Some(format!(
@@ -269,7 +269,11 @@ pub fn plan<'a>(
                         .join(" and ")
                 ));
             }
-            None
+            if p.kind == Kind::NativeMod {
+                native_refusal(p, v)
+            } else {
+                None
+            }
         },
     );
     let errors: BTreeSet<_> = resolved
@@ -333,12 +337,18 @@ pub fn plan<'a>(
         } else {
             Reason::Required
         };
+        let native = project.kind == Kind::NativeMod;
+        let folder = if native {
+            "native/sources"
+        } else {
+            mod_list::DIR
+        };
         rows.push(LockedMod {
             id: ModId::try_from(id.to_owned())?,
             version: parse_version(&version.version)?,
             sha256: version.file.sha256.clone().try_into()?,
             url: version.file.url.clone().try_into()?,
-            file: PackagePath::try_from(format!("{}/{id}.smod", mod_list::DIR))?,
+            file: PackagePath::try_from(format!("{folder}/{id}.smod"))?,
             reason,
             required_by: if reason == Reason::Required {
                 parents
@@ -350,7 +360,7 @@ pub fn plan<'a>(
                 Vec::new()
             },
             on,
-            native: None,
+            native: native.then_some(Native::Inactive),
         });
         artifacts.push(Artifact { project, version });
     }
@@ -446,6 +456,7 @@ pub fn stage_content(
             .contains(path)
             .then(|| lock::local_file(root, path).ok())
             .flatten();
+        fs::create_dir_all(out.parent().expect("package folder")).map_err(|e| e.to_string())?;
         registry::checked_file(
             fetch,
             index,

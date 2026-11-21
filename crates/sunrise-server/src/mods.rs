@@ -15,28 +15,24 @@ use sunrise_server_launch::{
     },
 };
 
-const MAX_IDENTITY: u64 = 16 << 10;
+use sunrise_mod_install::{
+    lock::{BuildId, PackagePath, Sha256},
+    transaction::NATIVE_DIR,
+};
+use sunrise_native_build::{CLIENT, library_record::Library};
 
-#[derive(Deserialize)]
-struct Identity {
-    file: String,
-    sha256: String,
-    identity: String,
-}
-
-/// The provenance and the library rows the engine loader reads from the same record.
 #[derive(Deserialize)]
 struct NativeRuntime {
-    sunrise: String,
-    libraries: Vec<RuntimeLibrary>,
+    sunrise: BuildId,
+    rust: String,
+    libraries: Vec<Library>,
 }
 
 #[derive(Deserialize)]
-struct RuntimeLibrary {
-    #[serde(rename = "mod")]
-    id: String,
-    #[serde(flatten)]
-    stamp: Identity,
+struct SdkIdentity {
+    commit: BuildId,
+    rustc: String,
+    side: sunrise_mod_install::sdk::Side,
 }
 
 enum Repair<'a> {
@@ -82,83 +78,131 @@ fn check_files(lock: &Lock, root: &Path, input: &Mods) -> Result<(), Refusal> {
     Ok(())
 }
 
-fn check_native(lock: &Lock, root: &Path, program: &Path) -> Result<(), Refusal> {
+fn check_native(lock: &Lock, root: &Path) -> Result<Option<PathBuf>, Refusal> {
+    let active = lock
+        .mods
+        .iter()
+        .filter(|row| row.on && row.native.is_some());
+    let Some(first) = active.clone().next() else {
+        if !lock.runtime.is_empty() {
+            return Err(
+                "mods.lock lists a native runtime with no enabled native mods."
+                    .to_owned()
+                    .into(),
+            );
+        }
+        return Ok(None);
+    };
+    let mut expected: std::collections::BTreeMap<_, _> =
+        active.map(|row| (row.id.as_str(), row)).collect();
+    let error = |cause: String| refuse_mod(first, &cause);
     let build = lock.sunrise.as_str();
-    let runtime = if let Some(row) = lock.mods.iter().find(|row| row.on && row.native.is_some()) {
-        let error = |cause| refuse_mod(row, &format!("native-mods.json: {cause}"));
-        let exe = fs::canonicalize(program).map_err(|e| error(e.to_string()))?;
-        let record = exe.with_file_name("native-mods.json");
-        let relative = record
+    let runtime = Path::new(NATIVE_DIR);
+    let program = runtime.join(CLIENT);
+    let identity_path = runtime.join("identity.json");
+    let record = runtime.join("native-mods.json");
+    let source = runtime.join("sources");
+    let mut checked = std::collections::BTreeMap::new();
+    for file in native::walkdir(&root.join(runtime)).map_err(error)? {
+        let path = file
             .strip_prefix(root)
-            .map_err(|_| error("the native runtime is outside the server folder".into()))?;
-        let path = local_file(root, relative).map_err(error)?;
-        let text = read_text(&path, MAX_LOCK).map_err(error)?;
-        let runtime: NativeRuntime =
-            serde_json::from_str(&text).map_err(|e| error(e.to_string()))?;
-        if runtime.sunrise != build {
+            .expect("native runtime is inside server folder");
+        if path.starts_with(&source) {
+            continue;
+        }
+        let name = path
+            .iter()
+            .map(|s| s.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+        let name = PackagePath::try_from(name).map_err(error)?;
+        let hash = lock.runtime.get(&name).ok_or_else(|| {
+            error(format!(
+                "{} isn't listed in the native runtime",
+                path.display()
+            ))
+        })?;
+        let file = local_file(root, path).map_err(error)?;
+        if engine::sha256_file(&file).map_err(|e| error(e.to_string()))? != hash.as_str() {
             return Err(error(format!(
-                "the runtime was built for {}, not {build}.",
-                runtime.sunrise
+                "{} has a different checksum",
+                path.display()
             )));
         }
-        Some((exe, runtime))
-    } else {
-        None
-    };
-    for row in &lock.mods {
-        let Some(native) = &row.native else { continue };
-        let path = row.file.as_path();
-        let stamp = path.with_extension("identity.json");
-        let error = |cause| refuse_mod(row, &format!("{}: {cause}", stamp.display()));
-        let file = local_file(root, &stamp).map_err(error)?;
-        let text = read_text(&file, MAX_IDENTITY).map_err(error)?;
-        let identity: Identity = serde_json::from_str(&text).map_err(|e| error(e.to_string()))?;
-        let hash_matches = match native {
-            Native::Prebuilt(_) => identity.sha256 == row.sha256.as_str(),
-            Native::Built(sdk) => {
-                *sdk == lock.sunrise
-                    && (identity.sha256.is_empty() || identity.sha256 == row.sha256.as_str())
+        checked.insert(path.to_owned(), hash);
+    }
+    if checked.len() != lock.runtime.len()
+        || ![&program, &identity_path, &record]
+            .iter()
+            .all(|path| checked.contains_key(path.as_path()))
+    {
+        return Err(error("native runtime files are missing".into()));
+    }
+    let parse = |path: &Path| read_text(&root.join(path), MAX_LOCK).map_err(error);
+    let sdk: SdkIdentity =
+        serde_json::from_str(&parse(&identity_path)?).map_err(|e| error(e.to_string()))?;
+    let runtime: NativeRuntime =
+        serde_json::from_str(&parse(&record)?).map_err(|e| error(e.to_string()))?;
+    if sdk.commit != lock.sunrise
+        || runtime.sunrise != lock.sunrise
+        || sdk.side != sunrise_mod_install::sdk::Side::Server
+        || !sdk
+            .rustc
+            .lines()
+            .any(|line| line.strip_prefix("release: ") == Some(runtime.rust.as_str()))
+    {
+        return Err(error(format!(
+            "native runtime is not the server SDK for {build}"
+        )));
+    }
+    let mut patch = false;
+    for lib in &runtime.libraries {
+        let (id, version) = match lib.kind.as_str() {
+            "mod" if !patch => {
+                let row = expected.remove(lib.mod_id.as_str()).ok_or_else(|| {
+                    error(format!("native library for unexpected mod {}", lib.mod_id))
+                })?;
+                match &row.native {
+                    Some(Native::Built(id)) if id == &lock.sunrise => (),
+                    Some(Native::Prebuilt(_)) => (),
+                    _ => return Err(refuse_mod(row, "the runtime doesn't match the mod's build")),
+                }
+                (row.id.as_str(), row.version.to_string())
+            }
+            "patch" if !patch && lib.mod_id == "sunrise_patch" => {
+                patch = true;
+                ("sunrise_patch", "0".to_owned())
+            }
+            _ => {
+                return Err(error(format!(
+                    "unexpected native library {} ({})",
+                    lib.file, lib.kind
+                )));
             }
         };
-        let mut parts = identity.identity.split_ascii_whitespace();
-        let version = row.version.to_string();
-        let identity_matches = parts
-            .by_ref()
-            .take(3)
-            .eq([build, row.id.as_str(), &version])
-            && parts
-                .next()
-                .is_some_and(|v| semver::Version::parse(v).is_ok())
-            && parts.eq(["unwind"]);
-        if Some(identity.file.as_ref()) != path.file_name() || !hash_matches || !identity_matches {
-            return Err(error("does not match the library or engine build.".into()));
-        }
-        if let Some((exe, runtime)) = &runtime {
-            let mut entries = runtime
-                .libraries
-                .iter()
-                .filter(|lib| lib.id == row.id.as_str());
-            let recorded = entries.next();
-            let expected_place = exe.with_file_name(&identity.file);
-            // The runtime reads the library beside the selected executable, not elsewhere in
-            // the folder. Don't accept a lock that checks a different copy of the same file.
-            let matches = recorded.is_some_and(|lib| {
-                lib.stamp.file == identity.file
-                    && lib.stamp.sha256 == row.sha256.as_str()
-                    && lib.stamp.identity == identity.identity
-                    && fs::canonicalize(root.join(path))
-                        .is_ok_and(|actual| actual == expected_place)
-            });
-            if (row.on && (!matches || entries.next().is_some())) || (!row.on && recorded.is_some())
-            {
-                return Err(refuse_mod(
-                    row,
-                    "native-mods.json does not match the locked library or its on/off choice.",
-                ));
-            }
+        let name = PackagePath::try_from(lib.file.clone()).map_err(error)?;
+        let linked = name.as_path();
+        let hash: Sha256 = lib.sha256.clone().try_into().map_err(error)?;
+        if linked.components().count() != 1
+            || checked.get(&Path::new(NATIVE_DIR).join(linked)) != Some(&&hash)
+            || lib.identity
+                != sunrise_mod_install::index::registry::builds::library_identity(
+                    build,
+                    id,
+                    &version,
+                    &runtime.rust,
+                )
+        {
+            return Err(error(format!(
+                "native library {} doesn't match the locked runtime",
+                lib.file
+            )));
         }
     }
-    Ok(())
+    if let Some(row) = expected.values().next() {
+        return Err(refuse_mod(row, "its native library is missing."));
+    }
+    Ok(Some(root.join(program)))
 }
 
 fn write_list(lock: &Lock, mut out: impl Write, as_json: bool) -> std::io::Result<()> {
@@ -176,6 +220,7 @@ fn write_list(lock: &Lock, mut out: impl Write, as_json: bool) -> std::io::Resul
         let kind = match &row.native {
             Some(Native::Prebuilt(_)) => "native, prebuilt",
             Some(Native::Built(_)) => "native, built here",
+            Some(Native::Inactive) => "native",
             None => "content",
         };
         let why = match row.reason {
@@ -260,13 +305,23 @@ pub fn check_start(
             _ => {}
         }
     }
-    check_native(&lock, &root, &program)?;
+    let native = check_native(&lock, &root)?;
+    if native.is_some()
+        && (!config.engine.path.is_empty() || install.and_then(launch::Install::current).is_none())
+    {
+        return Err(Refusal::new(
+            "managed native mods need an installed Sunrise release, not a custom engine.".into(),
+            Repair::Engine,
+        ));
+    }
     warn_takedowns(&root, &lock);
-    Ok(Some(program))
+    Ok(Some(native.unwrap_or(program)))
 }
 
 mod manage;
-pub use manage::{command, init};
+mod native;
+mod toolchain;
+pub use manage::{ReleaseChange, carry_release, command, init};
 
 pub fn read_lease(dir: &Path) -> Result<Option<fs::File>, Refusal> {
     sunrise_mod_install::transaction::read_lease(dir).map_err(|error| {
@@ -277,17 +332,45 @@ pub fn read_lease(dir: &Path) -> Result<Option<fs::File>, Refusal> {
 }
 
 fn warn_takedowns(root: &Path, lock: &Lock) {
-    let Ok(Some(index)) = sunrise_mod_install::registry::cached(root) else {
-        return;
-    };
-    for row in &lock.mods {
-        if let Some(revoked) = index.revoked(row.id.as_str(), row.sha256.as_str()) {
-            eprintln!(
-                "{} {} was taken down ({}). Remove it: sunrise-server mods remove {}",
-                row.id, row.version, revoked.reason, row.id
-            );
+    if let Ok(Some(index)) = sunrise_mod_install::registry::cached(root) {
+        for warning in takedowns(&index, lock) {
+            eprintln!("{warning}");
         }
     }
+}
+
+fn takedowns(index: &sunrise_mod_install::index::Index, lock: &Lock) -> Vec<String> {
+    lock.mods
+        .iter()
+        .filter_map(|row| {
+            let entry = index
+                .revoked(row.id.as_str(), row.sha256.as_str())
+                .or_else(|| match &row.native {
+                    Some(Native::Prebuilt(hash)) => index.revoked(row.id.as_str(), hash.as_str()),
+                    _ => None,
+                })?;
+            Some(format!(
+                "{} {} was taken down ({}). Remove it: sunrise-server mods remove {}",
+                row.id, row.version, entry.reason, row.id
+            ))
+        })
+        .collect()
+}
+
+/// Report newly taken down packages without changing the running selection.
+pub fn refresh_takedowns(dir: &Path) -> Result<Vec<String>, String> {
+    if !dir.join(LOCK).is_file() {
+        return Ok(Vec::new());
+    }
+    let _lease = sunrise_mod_install::transaction::read_lease(dir)?;
+    let root = dir.canonicalize().map_err(|e| e.to_string())?;
+    let lock = Lock::read(&root)?;
+    let index = sunrise_mod_install::registry::refresh(
+        &root,
+        &manage::index_location(),
+        &sunrise_mod_install::registry::Https::default(),
+    )?;
+    Ok(takedowns(&index, &lock))
 }
 
 #[cfg(test)]

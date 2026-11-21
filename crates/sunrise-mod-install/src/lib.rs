@@ -1,5 +1,5 @@
 //! Registry reads, verified packages and transactions shared by mod installers.
-pub use sunrise_mod_package::{index, manifest::Side, modpack};
+pub use sunrise_mod_package::{Package, index, manifest::Side, mod_list, modpack, sdk};
 
 pub mod input;
 pub mod lock;

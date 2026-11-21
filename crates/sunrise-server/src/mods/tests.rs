@@ -78,60 +78,71 @@ fn bounds_the_lock_read_and_does_not_accept_a_valid_prefix() {
 }
 
 #[test]
-fn checks_native_identity_and_requires_consent_for_enabled_code() {
-    for (origin, sha) in [
-        (format!("built = '{BUILD}'"), ""),
-        (format!("prebuilt = '{HASH}'"), HASH),
-    ] {
-        let (_dir, root) = fixture(&format!(
-            "file = 'rails.so'\nreason = 'requested'\non = true\nnative = {{ {origin} }}"
-        ));
-        let mut lock = Lock::read(&root).unwrap();
-        fs::write(root.join("rails.so"), b"abc").unwrap();
-        assert!(check_files(&lock, &root, &lock.input).is_err());
-        lock.input.trust_native_code = true;
-        assert!(check_files(&lock, &root, &lock.input).is_ok());
-        let exe = root.join("sunrise-engine");
-        fs::write(&exe, b"not a running process").unwrap();
-        assert!(check_native(&lock, &root, &exe).is_err());
-        let record = root.join("native-mods.json");
-        let correct = format!("{BUILD} rails 1.2.3 1.95.0 unwind");
-        let library = serde_json::json!({"file": "rails.so", "sha256": HASH, "identity": correct, "mod": "rails"});
-        fs::write(
-            &record,
-            serde_json::json!({"sunrise": BUILD, "libraries": [library]}).to_string(),
-        )
-        .unwrap();
-        assert!(check_native(&lock, &root, &exe).is_err());
-        let stamp = root.join("rails.identity.json");
-        let body = serde_json::json!({"file": "rails.so", "sha256": sha, "identity": correct});
-        fs::write(&stamp, body.to_string()).unwrap();
-        assert!(check_native(&lock, &root, &exe).is_ok());
-        for (field, value) in [
-            ("file", "old.so"),
-            ("sha256", "bad"),
-            ("identity", "bad identity"),
-        ] {
-            let mut wrong = body.clone();
-            wrong[field] = value.into();
-            fs::write(&stamp, wrong.to_string()).unwrap();
-            assert!(check_native(&lock, &root, &exe).is_err());
-        }
-        fs::write(&stamp, body.to_string()).unwrap();
-        for (commit, identity) in [
-            ("wrong-commit", correct),
-            (BUILD, format!("{BUILD} rails 1.2.3 1.95.1 unwind")),
-        ] {
-            let mut library = library.clone();
-            library["identity"] = identity.into();
-            fs::write(
-                &record,
-                serde_json::json!({"sunrise": commit, "libraries": [library]}).to_string(),
-            )
-            .unwrap();
-            assert!(check_native(&lock, &root, &exe).is_err());
-        }
-    }
+fn checks_native_runtime_and_requires_consent() {
+    let (_dir, root) = fixture(&format!(
+        "file = 'native/sources/rails.smod'\nreason = 'requested'\non = true\nnative = {{ built = '{BUILD}' }}"
+    ));
+    let mut lock = Lock::read(&root).unwrap();
+    let native = root.join(NATIVE_DIR);
+    fs::create_dir_all(native.join("sources")).unwrap();
+    fs::write(native.join("sources/rails.smod"), b"abc").unwrap();
+    assert!(check_files(&lock, &root, &lock.input).is_err());
+    lock.input.trust_native_code = true;
+    assert!(check_files(&lock, &root, &lock.input).is_ok());
+    let identity =
+        serde_json::json!({ "commit": BUILD, "side": "server", "rustc": "release: 1.95.0" });
+    let library = serde_json::json!({ "file": "rails.so", "sha256": HASH, "identity": format!("{BUILD} rails 1.2.3 1.95.0 unwind"), "mod": "rails", "kind": "mod" });
+    let record = serde_json::json!({ "sunrise": BUILD, "rust": "1.95.0", "libraries": [library] });
+    let mut install = |name: &str, contents: &[u8]| {
+        fs::write(native.join(name), contents).unwrap();
+        let path = PackagePath::try_from(format!("{NATIVE_DIR}/{name}")).unwrap();
+        lock.runtime.insert(
+            path,
+            sunrise_mod_install::index::sha256(contents)
+                .try_into()
+                .unwrap(),
+        );
+    };
+    install(CLIENT, b"not a running process");
+    install("rails.so", b"abc");
+    install("native-mods.json", record.to_string().as_bytes());
+    install("identity.json", identity.to_string().as_bytes());
+    assert_eq!(
+        check_native(&lock, &root).unwrap(),
+        Some(native.join(CLIENT))
+    );
+    fs::write(native.join("rails.so"), b"drift").unwrap();
+    assert!(
+        check_native(&lock, &root)
+            .unwrap_err()
+            .to_string()
+            .contains("different checksum")
+    );
+    fs::write(native.join("rails.so"), b"abc").unwrap();
+    fs::write(native.join("unrecorded.so"), b"more code").unwrap();
+    assert!(
+        check_native(&lock, &root)
+            .unwrap_err()
+            .to_string()
+            .contains("isn't listed")
+    );
+    fs::remove_file(native.join("unrecorded.so")).unwrap();
+    let mut wrong = record;
+    wrong["libraries"][0]["identity"] = format!("{BUILD} rails 1.2.3 1.95.1 unwind").into();
+    let wrong = wrong.to_string();
+    fs::write(native.join("native-mods.json"), &wrong).unwrap();
+    lock.runtime.insert(
+        PackagePath::try_from("native/native-mods.json".to_owned()).unwrap(),
+        sunrise_mod_install::index::sha256(wrong.as_bytes())
+            .try_into()
+            .unwrap(),
+    );
+    assert!(
+        check_native(&lock, &root)
+            .unwrap_err()
+            .to_string()
+            .contains("doesn't match")
+    );
 }
 
 #[test]

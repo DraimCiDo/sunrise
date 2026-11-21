@@ -52,7 +52,7 @@ Usage: sunrise-server [--dir DIR] <command>
 
   init        Set up a server here: the EULA, the world, the port, who may join (asks, or takes flags:
               --eula --world NAME --seed SEED --port N --whitelist/--no-whitelist --player NAME... --op NAME
-              --offline --yes --mods ID[@RANGE],... --pack ID|FILE|URL --json)
+              --offline --yes --mods ID[@RANGE],... --pack ID|FILE|URL --trust-native-code --json)
   run         Run the server in the foreground; type console commands, Ctrl-C stops it cleanly. It
               restarts the game if it crashes.
   start       Run the server in the background, or resume a stopped supervisor (output goes to logs/supervisor.log)
@@ -180,7 +180,7 @@ pub fn main() -> ExitCode {
         }
         Some("init") if args[1..] == ["--help"] || args[1..] == ["-h"] => {
             println!(
-                "Usage: sunrise-server init [--eula] [--world NAME] [--seed SEED] [--port N]\n  [--whitelist|--no-whitelist] [--player NAME] [--op NAME] [--offline] [--yes]\n  [--mods ID[@RANGE],…] [--pack ID|FILE.spack|URL] [--json]"
+                "Usage: sunrise-server init [--eula] [--world NAME] [--seed SEED] [--port N]\n  [--whitelist|--no-whitelist] [--player NAME] [--op NAME] [--offline] [--yes]\n  [--mods ID[@RANGE],…] [--pack ID|FILE.spack|URL] [--trust-native-code] [--json]"
             );
             Ok(())
         }
@@ -268,6 +268,7 @@ fn init_answers(args: &[String]) -> Result<init::Answers, String> {
         };
         match arg.as_str() {
             "--eula" => answers.eula = true,
+            "--trust-native-code" => answers.trust_native = true,
             "--yes" | "-y" => answers.yes = true,
             "--world" => answers.world = Some(value(arg)?),
             "--seed" => answers.seed = Some(value(arg)?),

@@ -2,7 +2,7 @@
 use crate::input::{ModId, Mods};
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fmt, fs,
     io::Read,
     path::{Component, Path, PathBuf},
@@ -22,6 +22,8 @@ pub struct ModLock {
     pub input: Mods,
     #[serde(default, deserialize_with = "lock_rows")]
     pub mods: Vec<LockedMod>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub runtime: BTreeMap<PackagePath, Sha256>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -76,6 +78,7 @@ pub enum Reason {
 pub enum Native {
     Prebuilt(Sha256),
     Built(BuildId),
+    Inactive,
 }
 
 pub type BuildId = Hex<40>;
@@ -177,7 +180,7 @@ impl From<HttpsUrl> for String {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(try_from = "String", into = "String")]
 pub struct PackagePath(PathBuf);
 
@@ -205,6 +208,12 @@ impl TryFrom<String> for PackagePath {
 impl From<PackagePath> for String {
     fn from(path: PackagePath) -> Self {
         path.0.to_string_lossy().into_owned()
+    }
+}
+
+impl LockedMod {
+    pub fn source_url(&self) -> &str {
+        self.url.0.as_str()
     }
 }
 
@@ -251,6 +260,7 @@ impl ModLock {
             release,
             input,
             mods,
+            runtime: BTreeMap::new(),
         }
     }
 

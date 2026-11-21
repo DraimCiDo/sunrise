@@ -33,18 +33,27 @@ impl Default for Https {
 
 impl Fetch for Https {
     fn open(&self, url: &str) -> Result<Box<dyn Read>, String> {
+        self.open_optional(url)?
+            .map(|body| body as Box<dyn Read>)
+            .ok_or_else(|| format!("{url} returned HTTP 404"))
+    }
+}
+
+impl Https {
+    /// `None` is returned only for a missing resource, not for a transport failure.
+    pub fn open_optional(&self, url: &str) -> Result<Option<Box<dyn Read + Send>>, String> {
         let mut url = url::Url::parse(url).map_err(|e| e.to_string())?;
         for _ in 0..6 {
             if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() {
                 return Err("a mod download needs an HTTPS URL without credentials".into());
             }
-            let response = self
-                .0
-                .get(url.as_str())
-                .call()
-                .map_err(|e| format!("{}: {e}", url.origin().ascii_serialization()))?;
+            let response = match self.0.get(url.as_str()).call() {
+                Ok(response) => response,
+                Err(ureq::Error::Status(404, _)) => return Ok(None),
+                Err(e) => return Err(format!("{}: {e}", url.origin().ascii_serialization())),
+            };
             match response.status() {
-                200 => return Ok(response.into_reader()),
+                200 => return Ok(Some(response.into_reader())),
                 301 | 302 | 303 | 307 | 308 => {
                     let new = response
                         .header("Location")
@@ -61,16 +70,25 @@ impl Fetch for Https {
 /// Refresh the cache only after the complete index parses. A mutation never installs from a
 /// stale cache: it would miss a takedown published since the last read.
 pub fn refresh(home: &Path, at: &str, fetch: &dyn Fetch) -> Result<Index, String> {
+    let text = read_index(at, fetch)?;
+    let index = Index::parse(&text)?;
+    durable::write(&home.join(CACHE), text.as_bytes()).map_err(|e| format!("{CACHE}: {e}"))?;
+    Ok(index)
+}
+
+/// Inspect the latest registry without writing to the installation.
+pub fn load(at: &str, fetch: &dyn Fetch) -> Result<Index, String> {
+    Index::parse(&read_index(at, fetch)?)
+}
+
+fn read_index(at: &str, fetch: &dyn Fetch) -> Result<String, String> {
     let reader: Box<dyn Read> = if at.starts_with("https://") {
         fetch.open(at)?
     } else {
         // A developer can point at a local index, but it still describes HTTPS downloads.
         Box::new(File::open(at).map_err(|e| format!("{at}: {e}"))?)
     };
-    let text = bounded_index(reader)?;
-    let index = Index::parse(&text)?;
-    durable::write(&home.join(CACHE), text.as_bytes()).map_err(|e| format!("{CACHE}: {e}"))?;
-    Ok(index)
+    bounded_index(reader)
 }
 
 pub fn cached(home: &Path) -> Result<Option<Index>, String> {

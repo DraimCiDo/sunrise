@@ -15,13 +15,23 @@ use toml_edit::{DocumentMut, Item};
 
 /// The snapshot that rollback restores.
 pub const PREVIOUS_DIR: &str = ".mods-previous";
+/// The mod set saved when changing the installed Sunrise release.
+pub const RELEASE_PREVIOUS: &str = ".mods-release-previous";
+pub const RELEASE_PENDING: &str = ".mods-release-pending";
 const JOURNAL: &str = ".mods-transaction";
 const COMPLETE: &str = ".mods-transaction-complete";
 const GUARD: &str = ".mods-write.lock";
 const CONFIG: &str = "server.toml";
 pub const PACK_FILE: &str = ".mods-pack.spack";
 pub const NATIVE_DIR: &str = "native";
-const FILES: &[&str] = &[CONFIG, lock::LOCK, mod_list::FILE, mod_list::DIR, PACK_FILE];
+const FILES: &[&str] = &[
+    CONFIG,
+    lock::LOCK,
+    mod_list::FILE,
+    mod_list::DIR,
+    PACK_FILE,
+    NATIVE_DIR,
+];
 
 pub struct ServerFolder {
     root: PathBuf,
@@ -33,7 +43,16 @@ pub struct ServerFolder {
 struct Move {
     old: [bool; FILES.len()],
     new: [bool; FILES.len()],
-    keep_undo: bool,
+    undo: Undo,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum Undo {
+    KeepMods,
+    ConsumeMods,
+    KeepRelease,
+    ConsumeRelease,
 }
 
 pub struct Stage(tempfile::TempDir);
@@ -118,7 +137,41 @@ impl ServerFolder {
     /// preserve edits that occur while downloading by refusing a stale plan rather than overwriting.
     pub fn commit(&self, stage: Stage, config: &str) -> Result<(), String> {
         self.reread(config)?;
-        self.swap(stage, true)
+        self.swap(stage, Undo::KeepMods)
+    }
+
+    /// Replace the release's mod set but keep a separate snapshot until its engine starts.
+    pub fn commit_release(&self, stage: Stage, config: &str) -> Result<(), String> {
+        self.reread(config)?;
+        if self
+            .root
+            .join(RELEASE_PENDING)
+            .try_exists()
+            .map_err(|e| e.to_string())?
+        {
+            return Err(
+                "a release mod change is still pending; recover it before updating again".into(),
+            );
+        }
+        self.swap(stage, Undo::KeepRelease)
+    }
+
+    pub fn finish_release(&self, switched_tag: bool) -> Result<(), String> {
+        let pending = self.root.join(RELEASE_PENDING);
+        let result = if switched_tag {
+            let previous = self.root.join(RELEASE_PREVIOUS);
+            remove(&previous).and_then(|()| rename(&pending, &previous))
+        } else {
+            remove(&pending)
+        };
+        result.map_err(|e| format!("couldn't finish the mod release change: {e}"))
+    }
+
+    /// Restore the mods of a release that never booted; do not touch ordinary mods undo.
+    pub fn undo_release(&self, config: &str) -> Result<(), String> {
+        let stage = self.stage_previous(RELEASE_PENDING, config)?;
+        self.reread(config)?;
+        self.swap(stage, Undo::ConsumeRelease)
     }
 
     pub fn previous_lock(&self) -> Result<Option<ModLock>, String> {
@@ -151,7 +204,17 @@ impl ServerFolder {
     /// Restore the previous selection, but keep unrelated server.toml edits made since the swap.
     /// Consume the previous selection after success; this is undo, not a toggle.
     pub fn rollback(&self, config: &str) -> Result<(), String> {
-        let previous = self.root.join(PREVIOUS_DIR);
+        let stage = self.stage_previous(PREVIOUS_DIR, config)?;
+        self.reread(config)?;
+        self.swap(stage, Undo::ConsumeMods)
+    }
+
+    pub fn stage_release_previous(&self, config: &str) -> Result<Stage, String> {
+        self.stage_previous(RELEASE_PREVIOUS, config)
+    }
+
+    fn stage_previous(&self, snapshot: &str, config: &str) -> Result<Stage, String> {
+        let previous = self.root.join(snapshot);
         if !previous.is_dir() {
             return Err("there is no previous mod selection".into());
         }
@@ -160,10 +223,23 @@ impl ServerFolder {
             copy_tree(&previous.join(name), &stage.path().join(name))
                 .map_err(|e| format!("{name}: {e}"))?;
         }
+        // A package rollback must not roll back data written by the game after installation.
+        let storage = Path::new(mod_list::DIR).join(sunrise_mod_package::manifest::STORAGE_DIR);
+        remove(&stage.path().join(&storage)).map_err(|e| format!("mod storage: {e}"))?;
+        if self
+            .root
+            .join(&storage)
+            .try_exists()
+            .map_err(|e| e.to_string())?
+        {
+            fs::create_dir_all(stage.path().join(mod_list::DIR)).map_err(|e| e.to_string())?;
+            copy_tree(&self.root.join(&storage), &stage.path().join(&storage))
+                .map_err(|e| format!("mod storage: {e}"))?;
+        }
         let prior = match fs::read_to_string(previous.join(CONFIG)) {
             Ok(text) => text,
             Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
-            Err(e) => return Err(format!("{PREVIOUS_DIR}/{CONFIG}: {e}")),
+            Err(e) => return Err(format!("{snapshot}/{CONFIG}: {e}")),
         };
         let mut new = config.parse::<DocumentMut>().map_err(|e| e.to_string())?;
         let prior = prior.parse::<DocumentMut>().map_err(|e| e.to_string())?;
@@ -176,8 +252,7 @@ impl ServerFolder {
             }
         }
         write_record(&self.root, stage.path(), CONFIG, &new.to_string())?;
-        self.reread(config)?;
-        self.swap(stage, false)
+        Ok(stage)
     }
 
     fn reread(&self, expected: &str) -> Result<(), String> {
@@ -193,14 +268,14 @@ impl ServerFolder {
         Ok(())
     }
 
-    fn swap(&self, stage: Stage, keep_undo: bool) -> Result<(), String> {
+    fn swap(&self, stage: Stage, undo: Undo) -> Result<(), String> {
         let root = &self.root;
         let target = root.join(JOURNAL);
         let prepare = (|| -> io::Result<Move> {
             let mut record = Move {
                 old: [false; FILES.len()],
                 new: [false; FILES.len()],
-                keep_undo,
+                undo,
             };
             for (i, name) in FILES.iter().enumerate() {
                 record.old[i] = replaceable(&root.join(name))?;
@@ -273,14 +348,20 @@ fn finish(root: &Path, folder: &Path) -> io::Result<()> {
     let old = folder.join("old");
     if folder.join("committed").try_exists()? {
         let record = read_move(folder)?;
-        let previous = root.join(PREVIOUS_DIR);
+        let (snapshot, keep) = match record.undo {
+            Undo::KeepMods => (PREVIOUS_DIR, true),
+            Undo::ConsumeMods => (PREVIOUS_DIR, false),
+            Undo::KeepRelease => (RELEASE_PENDING, true),
+            Undo::ConsumeRelease => (RELEASE_PENDING, false),
+        };
+        let previous = root.join(snapshot);
         let discard = folder.join("discard");
-        if record.keep_undo && old.try_exists()? {
+        if keep && old.try_exists()? {
             if previous.try_exists()? {
                 rename(&previous, &discard)?;
             }
             rename(&old, &previous)?;
-        } else if !record.keep_undo && previous.try_exists()? {
+        } else if !keep && previous.try_exists()? {
             rename(&previous, &discard)?;
         }
     } else if folder.join("move.json").try_exists()? {

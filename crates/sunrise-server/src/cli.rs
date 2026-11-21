@@ -475,6 +475,12 @@ fn describe(status: &Value) -> String {
             update["installed"].as_str().unwrap_or("?")
         );
     }
+    if let Some(warnings) = update["mod_warnings"].as_array() {
+        for warning in warnings.iter().filter_map(Value::as_str) {
+            out.push_str(warning);
+            out.push('\n');
+        }
+    }
     out
 }
 

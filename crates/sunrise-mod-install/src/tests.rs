@@ -117,7 +117,7 @@ fn server_resolves_ranges_and_skips_client_pack_members() {
         Some(&pack),
         None,
         Refresh::None,
-        |_, _| false,
+        |_, _| None,
     )
     .unwrap();
     assert_eq!(plan.skipped_pack_members, ["overlay"]);
@@ -135,7 +135,7 @@ fn server_resolves_ranges_and_skips_client_pack_members() {
         Some(&pack),
         Some(&plan.lock),
         Refresh::None,
-        |_, _| false,
+        |_, _| None,
     )
     .err()
     .unwrap();
@@ -147,7 +147,7 @@ fn server_resolves_ranges_and_skips_client_pack_members() {
         None,
         None,
         Refresh::None,
-        |_, _| false,
+        |_, _| None,
     )
     .err()
     .unwrap();
@@ -172,7 +172,7 @@ fn failed_download_leaves_previous_selection_and_undo_keeps_unrelated_settings()
         None,
         None,
         Refresh::None,
-        |_, _| false,
+        |_, _| None,
     )
     .unwrap();
     let stage = folder.stage().unwrap();
@@ -197,7 +197,7 @@ fn failed_download_leaves_previous_selection_and_undo_keeps_unrelated_settings()
         None,
         Some(&old),
         Refresh::None,
-        |_, _| false,
+        |_, _| None,
     )
     .unwrap();
     let beams = &registry.project("beams").unwrap().versions[0];
