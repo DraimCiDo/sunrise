@@ -16,7 +16,6 @@ use sunrise_mod_package::{
 use sunrise_native_build::{Bundle, api, registry_generate};
 
 pub(super) const USAGE: &str = "release source --tag <vVERSION> --releases <file> [--index <file> [--files <dir>]] [--update-lock]";
-const REGISTRY_INDEX: &str = "https://sunrise-org.github.io/sunrise-mods/index.json";
 
 pub(super) fn run(entry: ChildEntry, project: &Path, args: &[String]) -> Result<(), String> {
     let mut flags = Options::new(
@@ -52,16 +51,19 @@ pub(super) fn run(entry: ChildEntry, project: &Path, args: &[String]) -> Result<
     let index = match published {
         Some(path) => bounded::read(Path::new(path), index::MAX_INDEX)?,
         None => {
+            let url = format!("{}index.json", crate::registry::SITE);
             let mut text = String::new();
-            ureq::get(REGISTRY_INDEX)
+            sunrise_proxy::agent("cargo-sunrise-mod", &url, std::convert::identity)
+                .map_err(|e| format!("{url}: {e}"))?
+                .get(&url)
                 .call()
-                .map_err(|e| format!("{REGISTRY_INDEX}: {e}"))?
+                .map_err(|e| format!("{url}: {e}"))?
                 .into_reader()
                 .take(index::MAX_INDEX + 1)
                 .read_to_string(&mut text)
-                .map_err(|e| format!("{REGISTRY_INDEX}: {e}"))?;
+                .map_err(|e| format!("{url}: {e}"))?;
             if text.len() as u64 > index::MAX_INDEX {
-                return Err(format!("{REGISTRY_INDEX}: index exceeds its size limit"));
+                return Err(format!("{url}: index exceeds its size limit"));
             }
             text
         }
@@ -92,10 +94,14 @@ pub(super) fn run(entry: ChildEntry, project: &Path, args: &[String]) -> Result<
             Some(files) => Box::new(
                 fs::File::open(files.join(&row.file.sha256)).map_err(|e| failed(e.to_string()))?,
             ),
-            None => ureq::get(&row.file.url)
-                .call()
-                .map_err(|e| failed(e.to_string()))?
-                .into_reader(),
+            None => {
+                sunrise_proxy::agent("cargo-sunrise-mod", &row.file.url, std::convert::identity)
+                    .map_err(|e| failed(e.to_string()))?
+                    .get(&row.file.url)
+                    .call()
+                    .map_err(|e| failed(e.to_string()))?
+                    .into_reader()
+            }
         };
         io::copy(&mut input.take(row.file.size + 1), &mut download.as_file())
             .map_err(|e| failed(e.to_string()))?;
