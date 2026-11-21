@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Content sources, file admission and native declarations.
 
 use super::{

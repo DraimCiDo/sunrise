@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! Typed block, item, fluid and creative tab entries.
 
 use super::{

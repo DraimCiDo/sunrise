@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A package's verified runtime files.
 
 use super::{MAX_RUNTIME_FILES, RuntimeTable};

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Look up original files in the launcher-prepared jar cache.
 
 use super::{JarRef, JarRequirement};

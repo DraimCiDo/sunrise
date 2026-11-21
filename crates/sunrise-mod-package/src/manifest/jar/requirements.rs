@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! The generated record of the original jars a prepared installation needs.
 
 use super::JarRef;

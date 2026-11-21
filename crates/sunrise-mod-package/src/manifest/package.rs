@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Read and write packages containing a mod manifest.
 
 use super::{MANIFEST, MAX_RUNTIME_FILE, Manifest, RUNTIME_DIR, RuntimeData, RuntimeTable, Side};

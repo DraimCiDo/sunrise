@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! Read references from a mod's assets and data for diagnostics.
 
 use super::{Asset, Model, References};
