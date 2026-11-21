@@ -93,6 +93,40 @@ class SaveRoundtripChunkTests(unittest.TestCase):
                 self.assertEqual([path for path, _, _ in report],
                                  [f'chunk.sections.{name}[-5] @{key}' for name in paths])
 
+    def test_only_warm_full_lower_sky_accepts_packed_zero_in_place_of_empty(self):
+        key = ('r.0.0.mca', 0, 0)
+        full = 'minecraft:full'
+        zero = ('B', [0] * 2048)
+        source = {'Y': ('b', -4), 'SkyLight': ('B', [0] * 128 + [1] * 1920)}
+        for y in range(-5, 21):
+            for layer in ('SkyLight', 'BlockLight'):
+                for warm in (False, True):
+                    with self.subTest(y=y, layer=layer, warm=warm):
+                        base = [] if y == -4 else [source]
+                        missing = {key: {'Status': full, 'sections': base}}
+                        packed = {key: {'Status': full, 'sections': base + [{'Y': ('b', y), layer: zero}]}}
+                        for a, b in ((missing, packed), (packed, missing)):
+                            report = []
+                            roundtrip.compare_chunks(a, b, report, warm_overworld=warm)
+                            expected = [] if warm and y == -5 and layer == 'SkyLight' else [
+                                f'chunk.sections.{layer}[{y}] @{key}']
+                            self.assertEqual([p for p, _, _ in report], expected)
+        lit_source = {**source, 'SkyLight': ('B', [0x10] + [0] * 2047)}
+        for status, sources, payload in (
+                (full, [source], ('B', [0] * 2047 + [0x10])),
+                (full, [source], ('B', [0] * 2047)),
+                (full, [source], ('I', [0] * 2048)),
+                ('minecraft:light', [source], zero),
+                (full, [], zero),
+                (full, [lit_source], zero),
+        ):
+            with self.subTest(status=status, sources=len(sources), payload=(payload[0], len(payload[1]), payload[1][-1])):
+                report = []
+                a = {key: {'Status': status, 'sections': sources}}
+                b = {key: {'Status': status, 'sections': sources + [{'Y': ('b', -5), 'SkyLight': payload}]}}
+                roundtrip.compare_chunks(a, b, report, warm_overworld=True)
+                self.assertEqual([p for p, _, _ in report], [f'chunk.sections.SkyLight[-5] @{key}'])
+
 
 class SaveRoundtripTimersTests(unittest.TestCase):
     def test_elapsed_despawn_timers_do_not_hide_other_saved_state_changes(self):

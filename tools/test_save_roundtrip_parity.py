@@ -8,15 +8,15 @@
    entity section (`save-all`) and quits; this is world H.
 3. The NBT of V0 and H is compared: chunks (block states and biomes decoded, so palette
    order does not matter), block entities, entities, heightmaps, light, ticks, structure
-   data, level.dat, data/*.dat, players/data/*.dat. Differences must be explained by
-   IGNORED below (vanilla-irrelevant: elapsed time, ordering, derived data) or the test
-   fails.
+   data, level.dat, data/*.dat, players/data/*.dat. The warm Overworld lower sky pad's
+   two encodings of zero compare equal; other differences must be explained by IGNORED.
+   A separate cold generation on both servers pins the spawn and compares both pads exactly.
 4. The vanilla server loads H: its log must show no errors, upgrades or DataFixer
    activity, and `data get` of every block entity and entity must print the same
    data as the server that loaded V0 (so vanilla reads Sunrise's files as it reads its own).
 
-  test_save_roundtrip_parity.py [--keep] [--skip-sunrise] [--bin-dir DIR] [--stage gen|resave|compare|all]
-                                [--world DIR] (compare an existing V0/H pair: --vanilla DIR --sunrise DIR)
+  test_save_roundtrip_parity.py [--keep] [--bin-dir DIR] [--gen-only] [--skip-vanilla-load]
+                                [--vanilla DIR] [--sunrise DIR] (reuse an existing V0/H pair)
 
 Run files stay under .local/save-roundtrip/run. On Linux the Sunrise client runs on the
 virtual screen (`vscreen`), never on a real monitor, with a null ALSA device; on macOS it
@@ -115,7 +115,7 @@ BENIGN = re.compile(r'(Unpacking |OFFLINE/INSECURE|online-mode|authenticate user
 # ---------------------------------------------------------------- vanilla server
 
 class Vanilla:
-    def __init__(self, directory, port=None, world='world', extra=None):
+    def __init__(self, directory, port=None, world='world', extra=None, *, sunrise_binary=None):
         port = port or lab.free_port()
         directory.mkdir(parents=True, exist_ok=True)
         (directory / 'eula.txt').write_text('eula=true\n')
@@ -130,9 +130,11 @@ class Vanilla:
         props.update(extra or {})
         (directory / 'server.properties').write_text(''.join(f'{k}={v}\n' for k, v in props.items()))
         self.port = port
-        self.process = subprocess.Popen(
-            ['java', '-Xmx2G', '-jar', str(SERVER), '--nogui'], cwd=directory, stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        command = ([str(sunrise_binary), '--resources', str(RESOURCES), '--dedicated', '--nogui']
+                   if sunrise_binary else ['java', '-Xmx2G', '-jar', str(SERVER), '--nogui'])
+        self.process = subprocess.Popen(command, cwd=directory, stdin=subprocess.PIPE,
+                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                        env=lab.game_env() if sunrise_binary else None)
         self.lines = []
         self.queue = queue.Queue()
         self.counter = 0
@@ -265,12 +267,18 @@ def normalize_scoreboard(data):
     return data
 
 
-def build_world(directory):
-    """Fill a fresh vanilla world; returns the failed scene commands."""
-    server = Vanilla(directory)
+def build_world(directory, *, fixed_spawn=False, sunrise_binary=None):
+    """Fill a fresh world; return failed scene commands and suspicious log lines."""
+    server = Vanilla(directory, sunrise_binary=sunrise_binary)
     failed = []
-    # A bot joins first so the player file exists and the chunks around spawn are loaded.
+    # A bot joins so the player file exists and the chunks around spawn are loaded.
     server.run('forceload add 0 0 63 63')
+    if fixed_spawn:
+        # Do not let each server's randomly scattered initial join select a different FULL ring.
+        for command in ('gamerule respawn_radius 0', 'setworldspawn 8 -60 8'):
+            out = server.run(command)
+            if command_failed(out):
+                failed.append((command, out))
     for rule in ('spawn_mobs', 'spawn_monsters', 'spawn_wandering_traders', 'spawn_patrols', 'spawn_phantoms',
                  'spawn_wardens', 'raids'):
         server.run(f'gamerule {rule} false')
@@ -491,9 +499,25 @@ BLANK_STATUSES = {'minecraft:empty', 'minecraft:structure_starts', 'minecraft:st
                   'minecraft:biomes'}
 # ChunkStatus LIGHT and later: the chunk's light is saved.
 LIT_STATUSES = {'minecraft:light', 'minecraft:spawn', 'minecraft:full'}
+# Overworld block sections -4 through 19, plus two light-only pads.
+LOWER_PAD, UPPER_PAD = -5, 20
+PACKED_ZERO = ('B', [0] * 2048)
 
 
-def compare_chunks(vanilla, sunrise, report):
+def lower_pad_inherits_zero(sections):
+    # A missing sky layer reads the first row of the next sky layer above it (or open sky).
+    for y in range(LOWER_PAD + 1, UPPER_PAD + 1):
+        match sections.get(y, {}).get('SkyLight'):
+            case None:
+                continue
+            case ('B', list(values)) if len(values) == 2048:
+                return not any(values[:128])
+            case _:
+                return False
+    return False
+
+
+def compare_chunks(vanilla, sunrise, report, *, warm_overworld=False):
     for key in sorted(set(vanilla) | set(sunrise)):
         if key not in sunrise:
             report.append((f'chunk {key}', 'present', 'missing from Sunrise'))
@@ -520,9 +544,19 @@ def compare_chunks(vanilla, sunrise, report):
             if a['biomes'] is not None and b['biomes'] is not None and a['biomes'] != b['biomes']:
                 out.append((f'chunk.sections.biomes[{y}]', 'differ', ''))
             for light in ('BlockLight', 'SkyLight'):
-                if a[light] != b[light]:
-                    out.append((f'chunk.sections.{light}[{y}]', None if a[light] is None else 'present',
-                                None if b[light] is None else 'present'))
+                p, q = a[light], b[light]
+                if p == q:
+                    continue
+                # Vanilla's warm light initialization can allocate this pad before or after
+                # the bottom section's packed array arrives. The former omits its empty
+                # layer on save; the latter repeats the bottom row into packed zeroes.
+                if (warm_overworld and y == LOWER_PAD and light == 'SkyLight'
+                        and va.get('Status') == ha.get('Status') == 'minecraft:full'
+                        and ((p is None and q == PACKED_ZERO and lower_pad_inherits_zero(vs))
+                             or (q is None and p == PACKED_ZERO and lower_pad_inherits_zero(hs)))):
+                    continue
+                out.append((f'chunk.sections.{light}[{y}]', None if p is None else 'present',
+                            None if q is None else 'present'))
         # Before its terrain a chunk has no blocks, light or heightmaps yet.
         if promoted and va.get('Status') in BLANK_STATUSES:
             blank = re.compile(r'^chunk\.(Heightmaps|sections)\.')
@@ -597,11 +631,38 @@ def dimension(world):
     return d if d.is_dir() else world
 
 
-def compare_worlds(vanilla, sunrise):
+def compare_cold_pads(vanilla, sunrise):
+    def full_pads(world):
+        pads = {}
+        for key, raw in load_regions(dimension(world) / 'region').items():
+            chunk = unwrap(raw)
+            if chunk.get('Status') == 'minecraft:full':
+                pads[key] = {section['Y'][1]: (section.get('SkyLight'), section.get('BlockLight'))
+                             for section in chunk.get('sections', [])
+                             if section['Y'][1] in (LOWER_PAD, UPPER_PAD)}
+        return pads
+
+    a, b = full_pads(vanilla), full_pads(sunrise)
+    if not a or a.keys() != b.keys():
+        print('cold generation: FULL columns differ or are missing', sorted(a.keys() - b.keys()),
+              sorted(b.keys() - a.keys()))
+        return 1
+    failures = 0
+    for key in sorted(a):
+        for y in (LOWER_PAD, UPPER_PAD):
+            if a[key].get(y, (None, None)) != b[key].get(y, (None, None)):
+                print(f'cold generation: pad light[{y}] differs @{key}')
+                failures += 1
+    print(f'cold sky pads: {len(a)} FULL columns, {failures} differences')
+    return failures
+
+
+def compare_worlds(vanilla, sunrise, *, warm_overworld=False):
     report = []
     va, ha = dimension(vanilla), dimension(sunrise)
-    compare_chunks(load_regions(va / 'region'), load_regions(ha / 'region'), report)
-    chunks = {(k[1], k[2]) for k in load_regions(va / 'region')}
+    vanilla_chunks = load_regions(va / 'region')
+    compare_chunks(vanilla_chunks, load_regions(ha / 'region'), report, warm_overworld=warm_overworld)
+    chunks = {(k[1], k[2]) for k in vanilla_chunks}
     compare_entities(load_regions(va / 'entities'), load_regions(ha / 'entities'), report, chunks)
     for rel in ['level.dat'] + sorted(
             p.relative_to(vanilla).as_posix() for pattern in ('data/**/*.dat', 'players/**/*.dat')
@@ -676,8 +737,19 @@ def main():
             subprocess.run(['cargo', 'build', '--locked', '--profile', 'fast', '-p', 'sunrise-game', '-p', 'sunrise-client-lib', '--bins'], cwd=ROOT, check=True)
             bin_dir = ROOT / os.environ.get('CARGO_TARGET_DIR', 'target') / 'fast'
         h = sunrise_resave(v0, RUN / 'h', bin_dir)
+        if not args.vanilla:
+            cold_vanilla, cold_sunrise = RUN / 'cold-vanilla', RUN / 'cold-sunrise'
+            for directory, binary in ((cold_vanilla, None), (cold_sunrise, bin_dir / 'sunrise-client')):
+                shutil.rmtree(directory, ignore_errors=True)
+                failed, problems = build_world(directory, fixed_spawn=True, sunrise_binary=binary)
+                failures += len(failed)
+                for command, out in failed:
+                    print('cold scene command failed:', command[:100], out[:2])
+                for line in problems:
+                    print('cold server log:', line)
+            failures += compare_cold_pads(cold_vanilla / 'world', cold_sunrise / 'world')
     print('comparing', v0, 'with', h)
-    report = compare_worlds(v0, h)
+    report = compare_worlds(v0, h, warm_overworld=True)
     failures += summarize(report)
     if not args.skip_vanilla_load:
         shutil.rmtree(RUN / 'v1', ignore_errors=True)
