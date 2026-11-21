@@ -1012,12 +1012,14 @@ impl Game<'_> {
 
     /// `MinecraftServer.stopServer`: the players are saved and sent away,
     /// then the world is saved.
-    pub(super) fn stop_integrated(&mut self, crashed: bool) -> Result<()> {
+    pub(super) fn stop_integrated(&mut self, crashed: bool, run_error: Option<&str>) -> Result<()> {
         // Abort background terrain generation/decoration on shutdown, matching vanilla behavior.
         self.streaming.abort_generation();
         self.levels.abort_parked_generation();
-        // The close request: lifecycle observation stops.
-        self.native_lifecycle.begin_close();
+        // A failed open keeps its opening phase until the final save attempts finish.
+        if run_error.is_none() || !self.native_lifecycle.is_opening() {
+            self.native_lifecycle.begin_close();
+        }
         self.native_configs_server_stop();
         self.native_players_leaving();
         // IntegratedServer.stopServer: teardownPublishedState.
@@ -1040,7 +1042,7 @@ impl Game<'_> {
                 std::thread::sleep(Duration::from_millis(50));
             }
         }
-        self.finish_server_save(crashed)
+        self.finish_server_save(crashed, run_error)
     }
 }
 

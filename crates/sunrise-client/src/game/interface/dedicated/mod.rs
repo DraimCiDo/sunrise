@@ -2318,11 +2318,13 @@ impl Game<'_> {
         }
     }
 
-    pub(super) fn stop_dedicated(&mut self, crashed: bool) -> Result<()> {
+    pub(super) fn stop_dedicated(&mut self, crashed: bool, run_error: Option<&str>) -> Result<()> {
         self.streaming.abort_generation();
         self.levels.abort_parked_generation();
-        // The close request starts before player and world saves.
-        self.native_lifecycle.begin_close();
+        // A failed open keeps its opening phase until the final save attempts finish.
+        if run_error.is_none() || !self.native_lifecycle.is_opening() {
+            self.native_lifecycle.begin_close();
+        }
         self.native_configs_server_stop();
         log("INFO", "Stopping server");
         self.native_players_leaving();
@@ -2343,7 +2345,7 @@ impl Game<'_> {
         }
         std::thread::sleep(Duration::from_millis(100));
         log("INFO", "Saving worlds");
-        let result = self.finish_server_save(crashed);
+        let result = self.finish_server_save(crashed, run_error);
         if result.is_ok() {
             self.log_saved_levels();
         }
@@ -2419,12 +2421,9 @@ impl Game<'_> {
             format!("the server thread panicked: {message}")
         };
         self.exclude_interrupted_players(true, warn);
-        // The crash, not any record failure during its checkpoint, fails this close.
-        self.native_lifecycle_close_failed(&cause);
-        self.exclude_interrupted_players(true, warn);
         if integrated {
             // `IntegratedServer.stopServer`'s steps; `save_guest` skips the guest unplaced above.
-            return self.stop_integrated(true);
+            return self.stop_integrated(true, Some(&cause));
         }
         log("INFO", "Saving worlds");
         match self.save_dedicated_checkpoint("crash shutdown") {
@@ -2433,6 +2432,8 @@ impl Game<'_> {
             Err(error) => log::error!("Exception saving during crash shutdown: {error}"),
         }
         self.lan_close(false);
+        // The crash, not any record failure during its checkpoint, fails this close.
+        self.native_lifecycle_close_failed(&cause);
         Err(cause.into())
     }
 }

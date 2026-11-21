@@ -1716,10 +1716,9 @@ impl Game<'_> {
         }
     }
 
-    /// Save the levels mods asked for since the last tick, each as an autosave does but with its
-    /// chunks on disk when it ends: `level_save` fires for each that was written, and one that
-    /// could not be is logged. A level not open any more is opened to be saved, like a parked one.
-    /// The level in place is put back.
+    /// Run the requested level save passes. `level_save` fires after a pass even if an
+    /// individual record failed and was reported. A failed awaited flush ends the pass with
+    /// an error and no hook. Reopen levels as needed, then restore the active one.
     pub(super) fn run_requested_saves(&mut self) {
         if Self::admit_entity_save().is_err() {
             return;
