@@ -10,18 +10,26 @@ use sunrise_core::nbt::Tag;
 static EDITORS: LazyLock<RwLock<BTreeMap<String, mod_api::PresetEditor>>> =
     LazyLock::new(Default::default);
 
-/// Install the client registration-phase table, first registration per preset wins.
-pub fn register(editors: Vec<mod_api::PresetEditor>) {
+/// Install the client registration-phase table. The last valid editor for a preset wins.
+pub fn register(editors: Vec<mod_api::Answered<mod_api::PresetEditor>>) {
     let mut table = BTreeMap::new();
-    for editor in editors {
+    for mod_api::Answered {
+        answer: editor,
+        mod_id,
+        ..
+    } in editors
+    {
         if !sunrise_core::level_id::valid_level_id(&editor.preset)
             || !sunrise_core::level_id::valid_level_id(&editor.screen)
             || editor.screen.starts_with("minecraft:")
         {
-            log::warn!("Invalid world preset editor: {editor:?}");
+            log::warn!("[{mod_id}] Invalid world preset editor: {editor:?}");
             continue;
         }
-        table.entry(editor.preset.clone()).or_insert(editor);
+        let preset = editor.preset.clone();
+        if table.insert(preset.clone(), editor).is_some() {
+            log::debug!("World preset editor {preset} overridden by mod {mod_id}");
+        }
     }
     *EDITORS.write().unwrap() = table;
 }

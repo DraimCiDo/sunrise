@@ -272,6 +272,7 @@ fn log_and_queue_panic(
     hook: &'static str,
     mod_id: &'static str,
     named_callback: Option<&Identifier>,
+    disabled: bool,
     payload: &(dyn std::any::Any + Send),
 ) {
     let reason = payload
@@ -283,10 +284,12 @@ fn log_and_queue_panic(
         log::error!(
             "mod {mod_id} panicked in {hook} ({id}) and has been disabled for this callback for the rest of the session: {reason}"
         );
-    } else {
+    } else if disabled {
         log::error!(
             "mod {mod_id} panicked in hook {hook} and has been disabled for this hook for the rest of the session: {reason}"
         );
+    } else {
+        log::error!("mod {mod_id} panicked while dropping a registration for {hook}: {reason}");
     }
     if let Some(installed) = installed() {
         let mut queue = installed
@@ -327,7 +330,7 @@ pub(crate) fn invoke<T>(
         mod_id,
         contained,
         None,
-        || poison(hook_id, mod_id),
+        Some(|| poison(hook_id, mod_id)),
         call,
     )
 }
@@ -338,7 +341,7 @@ fn invoke_with<T>(
     owner: &'static str,
     contained: bool,
     named_callback: Option<&Identifier>,
-    poison: impl FnOnce() -> bool,
+    poison: Option<impl FnOnce() -> bool>,
     call: impl FnOnce() -> T,
 ) -> DispatchOutcome<T> {
     let _scope = DispatchPanicScope::enter();
@@ -346,10 +349,13 @@ fn invoke_with<T>(
         Ok(Ok(value)) => DispatchOutcome::Ok(value),
         Ok(Err(refusal)) => DispatchOutcome::Refused(refusal),
         Err(payload) => {
-            let (entered, trapped) = LISTENER_SERIAL.get();
-            LISTENER_SERIAL.set((entered, trapped.wrapping_add(1)));
-            if poison() {
-                log_and_queue_panic(operation, owner, named_callback, &*payload);
+            if poison.is_some() {
+                let (entered, trapped) = LISTENER_SERIAL.get();
+                LISTENER_SERIAL.set((entered, trapped.wrapping_add(1)));
+            }
+            let disabled = poison.is_some();
+            if poison.is_none_or(|disable| disable()) {
+                log_and_queue_panic(operation, owner, named_callback, disabled, &*payload);
             }
             dispose_panic_payload(payload);
             DispatchOutcome::Panicked
@@ -393,7 +399,7 @@ pub fn call_session_callback<T>(
         owner,
         true,
         Some(id),
-        || {
+        Some(|| {
             installed().is_none_or(|installed| {
                 installed
                     .named_poison
@@ -403,7 +409,7 @@ pub fn call_session_callback<T>(
                     .or_default()
                     .insert(id.clone())
             })
-        },
+        }),
         call,
     ) {
         DispatchOutcome::Ok(value) => Ok(value),
@@ -427,9 +433,10 @@ fn dispose_panic_payload(payload: Box<dyn std::any::Any + Send>) {
 
 /// Drop one mod-owned registration value after deciding whether to publish its batch. Never
 /// let one destructor unwind across other entries or the next listener, and keep a replaced
-/// value attributed to its original mod rather than to the mod that replaced it.
+/// value attributed to its original mod rather than to the mod that replaced it. A destructor
+/// panic is not a listener panic: report it without disabling the registration listener.
 pub fn discard_registration<T>(
-    (hook_id, hook): (generated::HookId, &'static str),
+    (_, hook): (generated::HookId, &'static str),
     owner: Option<&'static str>,
     value: T,
 ) {
@@ -437,11 +444,12 @@ pub fn discard_registration<T>(
     let _owner = owner
         .filter(|&id| Some(id) != current)
         .map(|id| mark_mod(id, hook));
-    if let DispatchOutcome::Refused(refusal) = invoke(
-        hook_id,
+    if let DispatchOutcome::Refused(refusal) = invoke_with(
         hook,
         owner.unwrap_or("unknown"),
         outside_world(),
+        None,
+        None::<fn() -> bool>,
         || drop(value),
     ) {
         refusal.report();
@@ -530,7 +538,7 @@ pub(crate) fn invoke_registration(mod_id: &'static str, call: impl FnOnce()) -> 
         Err(payload) => {
             let (entered, trapped) = LISTENER_SERIAL.get();
             LISTENER_SERIAL.set((entered, trapped.wrapping_add(1)));
-            log_and_queue_panic("register", mod_id, None, &*payload);
+            log_and_queue_panic("register", mod_id, None, true, &*payload);
             dispose_panic_payload(payload);
             false
         }

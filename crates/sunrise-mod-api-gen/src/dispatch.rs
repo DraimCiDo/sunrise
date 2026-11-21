@@ -383,14 +383,15 @@ pub(super) fn emit<'a>(
                 _ => None,
             };
             let Some(entry) = entry.filter(|_| {
-                hook.context == Some(PhaseContext::Registration)
+                (hook.context == Some(PhaseContext::Registration)
+                    || (hook.context.is_none() && host.is_some()))
                     && contract == Contract::Collect
                     && !collect_cancel
                     && declaration.is_none()
                     && !is_render
             }) else {
                 return Err(format!(
-                    "{name}: registration_append requires a non-cancelling RegistrationContext collect with a mutable Vec output"
+                    "{name}: registration_append requires a non-cancelling collect with a Host or RegistrationContext and a mutable Vec output"
                 ));
             };
             Some((mode, entry))

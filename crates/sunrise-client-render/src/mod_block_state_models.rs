@@ -1,23 +1,28 @@
 //! The block-state definition types native mods register (NeoForge's `RegisterBlockStateModels`),
 //! kept once at start, and the hook point that asks a type's mod to pick each state's model when a
 //! resource load reads a blockstate file naming it (`neoforge:definition_type`).
-use mod_api::{BlockStateModelPick, HookId, Identifier, RegistrationContext};
+use mod_api::{Answered, BlockStateModelPick, HookId, Identifier, RegistrationContext};
 use serde_json::Value;
-use std::{collections::BTreeSet, sync::RwLock};
+use std::{collections::BTreeMap, sync::RwLock};
 use sunrise_assets::blockstate::{Variant, bind::Properties};
 use sunrise_core::nbt::Tag;
 
-static TYPES: RwLock<BTreeSet<String>> = RwLock::new(BTreeSet::new());
+static TYPES: RwLock<BTreeMap<String, &'static str>> = RwLock::new(BTreeMap::new());
 
-/// Keeps the block-state definition types native mods registered, before resources load. An id
-/// that is not `<namespace>:<path>` in a namespace other than vanilla's, or one registered
-/// already, is logged and left out. Returns the ids kept, in registration order.
-pub fn register(ids: Vec<String>) -> Vec<String> {
-    sunrise_assets::item_model::keep_mod_ids(&TYPES, "block state definition type", ids)
-}
-
-fn is_registered(id: &str) -> bool {
-    TYPES.read().unwrap_or_else(|e| e.into_inner()).contains(id)
+/// Keep the successful registrant for each definition type, in dispatch order. A later
+/// registration replaces that type's binding, as in `LateBoundIdMapper.put`.
+pub fn register(definitions: Vec<Answered<String>>) {
+    let mut types = TYPES.write().unwrap_or_else(|e| e.into_inner());
+    for Answered {
+        answer: id, mod_id, ..
+    } in definitions
+    {
+        if Identifier::parse_namespaced(&id).is_none() {
+            log::warn!("[{mod_id}] Invalid block state definition type: {id:?}");
+            continue;
+        }
+        types.insert(id, mod_id);
+    }
 }
 
 /// Hook point for native mods (docs/modding/src/how-to/native-mods.md, declared in `hooks/` with
@@ -27,6 +32,7 @@ fn is_registered(id: &str) -> bool {
 #[inline(never)]
 pub fn native_instantiate_block_state_definition(
     context: &RegistrationContext,
+    mod_id: &str,
     definition_type: &str,
     block: &Identifier,
     config: &Tag,
@@ -38,6 +44,7 @@ pub fn native_instantiate_block_state_definition(
     }
     mod_api::dispatch_instantiate_block_state_definition(
         context,
+        mod_id,
         definition_type,
         block,
         config,
@@ -56,9 +63,14 @@ pub fn instantiate(
     states: &[Properties],
 ) -> Result<Vec<Option<Variant>>, String> {
     use mod_api::__private::game::RegistrationContextNew;
-    if !is_registered(kind) {
+    let owner = TYPES
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(kind)
+        .copied();
+    let Some(owner) = owner else {
         return Err(format!("unknown block state definition type {kind}"));
-    }
+    };
     let block = Identifier::parse(block).map_err(|e| format!("block {block}: {e}"))?;
     let config = sunrise_core::json_nbt::json_to_tag(config)
         .map_err(|e| format!("definition type {kind}: its JSON doesn't convert to NBT: {e}"))?;
@@ -66,6 +78,7 @@ pub fn instantiate(
     let mut picks = Vec::new();
     native_instantiate_block_state_definition(
         &RegistrationContext::new(),
+        owner,
         kind,
         &block,
         &config,

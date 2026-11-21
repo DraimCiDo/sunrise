@@ -21,8 +21,8 @@ A native server tick hook can call `native_server_block` with its context, a dim
 For mods that run where the world is simulated: a dedicated server, a LAN host, single player's server thread
 (`crates/sunrise-client/src/game/modding/native_server.rs`).
 
-- **`register_commands(commands)`**: push a `Command` per usage, asked once when a world opens to
-  players. A usage is words, then arguments `<name:kind>`, optional ones last in brackets:
+- **`register_commands(host, event)`**: call `event.register(Command)` per usage, asked at
+  world open, on reload and after a requested refresh. A usage is words, then arguments `<name:kind>`, optional ones last in brackets:
   `Command::new("pay <player:player> <amount:integer>")`, `Command::op("eco set <player:player>
   <amount:integer>", 3)` for operators of level 3. Kinds: `word`, `text` (the rest of the line, last), `integer`,
   `number`, `boolean`, `player`, `item`, `block_pos`, `vec3`, `id`, and any command argument type a mod registered

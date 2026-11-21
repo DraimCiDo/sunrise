@@ -4,7 +4,7 @@ impl Game<'_> {
     /// Collect world-preset editor registrations once at client startup.
     pub(in crate::game) fn native_register_preset_editors(
         context: &mod_api::RegistrationContext,
-        editors: &mut Vec<mod_api::PresetEditor>,
+        editors: &mut Vec<mod_api::Answered<mod_api::PresetEditor>>,
     ) {
         Self::fire_register_preset_editors(context, editors);
     }
@@ -49,6 +49,25 @@ mod tests {
         ScreenRenderPostEvent,
     };
     use sunrise_client::title::{Mode, WorldOptions};
+
+    struct DiscardedEditor;
+    #[mod_api::__subscriptions]
+    impl Hooks for DiscardedEditor {
+        fn register_preset_editors(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut RegisterPresetEditorsEvent<'_>,
+        ) {
+            event.register(mod_api::PresetEditor {
+                preset: "example:islands".into(),
+                screen: "refused:editor".into(),
+            });
+            mod_api::__private::check_access(
+                "test_world_only",
+                mod_api::__private::LoadAccess::WorldOnly,
+            );
+        }
+    }
 
     struct EditorMod;
     #[mod_api::__subscriptions]
@@ -102,15 +121,24 @@ mod tests {
     #[ignore = "daily"]
     fn preset_editor_test_mod_draws_and_edits_through_real_client_hooks() {
         mod_platform::testing::with_mods(
-            vec![ModEntry::new("example", Box::new(EditorMod))].into(),
+            vec![
+                ModEntry::new("example", Box::new(EditorMod)),
+                ModEntry::new("refused", Box::new(DiscardedEditor)),
+            ]
+            .into(),
             || {
                 crate::game::native_entity_refs::tests::with_client_game(|game| {
                     use mod_api::__private::game::RegistrationContextNew;
                     let mut editors = Vec::new();
-                    Game::native_register_preset_editors(
-                        &mod_api::RegistrationContext::new(),
-                        &mut editors,
-                    );
+                    {
+                        let _phase = mod_api::__private::PhaseOwner::scope(
+                            mod_api::__private::ModPhase::Registration,
+                        );
+                        Game::native_register_preset_editors(
+                            &mod_api::RegistrationContext::new(),
+                            &mut editors,
+                        );
+                    }
                     assert_eq!(editors.len(), 1);
                     let mut title = game.new_title(game.save.root.join("editor-saves"));
                     title.set_preset_data_source(game.pack.data_changes.clone());

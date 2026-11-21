@@ -1,6 +1,7 @@
 # Typed server commands
 
-Register each server usage with `register_commands` and `Command`. The
+In `register_commands`, call `event.register(Command::new(usage))` or
+`event.register(Command::op(usage, level))` for each server usage. The
 `run_mod_command` event carries a `CommandInvocation`,
 not a raw line to split. Match its `literals` to your command path, then read named
 values through `command.argument(name)` and `CommandArgumentValue`. An integer is
@@ -12,7 +13,8 @@ functions compile, and again on every `/reload` and data pack change. No player 
 needs to exist yet. Register the complete current set on each call. Plain function lines and
 substituted macro lines are checked against this session tree; commands no longer registered
 are refused when functions next load. Starting the hub reuses the session registration rather
-than asking again.
+than asking again. Earlier registrations are not editable, and a listener that
+panics or is refused publishes none of its usages.
 
 Literal words use lowercase letters, digits, `_` and `-`. Only the first word may
 additionally begin with one `/`: register `/set <x:word>` and type `//set stone` in chat.
@@ -278,7 +280,8 @@ suggestions.
 The namespaced id is in the registering mod's namespace; an id registered twice, a
 name in another namespace or an empty name refuses the mods at startup, naming the
 mod. A client mod registers client command argument types the same way; they are
-available to `register_client_commands`.
+available to `register_client_commands`; declare each client usage with
+`event.register(Command::new(usage))` when the connection or server tree changes.
 
 ### Completing one token of a greedy text
 

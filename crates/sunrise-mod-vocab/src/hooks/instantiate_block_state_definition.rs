@@ -4,18 +4,22 @@ pub trait Hooks {
     /// A blockstate file whose `neoforge:definition_type` a mod registered
     /// (`register_block_state_models`) is read: push a `BlockStateModelPick` for each state of
     /// `states` that draws a model, or one `Refuse` if the file doesn't read, for a type your mod
-    /// owns. `config` is the file's JSON object converted to a `Tag`, `block` the block it
-    /// belongs to. It is asked once per file on each resource load, on the resource loader,
+    /// owns. Only the type's currently bound mod (`mod_id`) is called. `config` is the file's
+    /// JSON object converted to a `Tag`, `block` the block it belongs to. It is asked once per
+    /// file on each resource load, on the resource loader,
     /// never per frame.
     #[hook(
         side = "client",
         contract = "collect",
         out = "models",
+        owner = "mod_id",
         context = "registration",
+        version = 2,
         neoforge = "none (CustomBlockModelDefinition.instantiate of a type RegisterBlockStateModels registers; NeoForge adds no event for it)",
         target = "sunrise_client_render::mod_block_state_models::native_instantiate_block_state_definition"
     )]
     fn instantiate_block_state_definition(
+        mod_id: &str,
         definition_type: &str,
         block: &Identifier,
         config: &Tag,

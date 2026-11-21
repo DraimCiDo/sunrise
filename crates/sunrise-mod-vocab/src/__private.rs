@@ -36,6 +36,7 @@ pub mod native {
 }
 
 pub use crate::runtime::{call_session_callback, session_callback_enabled};
+pub use crate::world::dimension_transition::{RegisteredTransitionScreen, TransitionKey};
 
 /// Switch an installed mod's dispatches on or off, returning whether it was found.
 pub fn set_mod_enabled(id: &str, on: bool) -> bool {

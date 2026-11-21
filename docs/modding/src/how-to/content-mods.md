@@ -1402,7 +1402,8 @@ the entity and rotate with its yaw.
 
 Call `event.register(id)` in `Hooks::register_block_state_models` before client resources
 load. Set `neoforge:definition_type` to that id in the blockstate JSON, and answer
-`Hooks::instantiate_block_state_definition` on every load and reload. Read the whole
+`Hooks::instantiate_block_state_definition` on every load and reload. The latest successful
+registration binds the type to a mod; only that mod is asked to answer. Read the whole
 file from `event.config` and enumerate `event.states` in registry order. Append a
 `BlockStateModelPick::Model` for each state you choose, with its index, model id,
 quarter turns and UV-lock setting; append `Refuse` with a reason to reject a file.

@@ -45,9 +45,12 @@ impl Game<'_> {
     pub(in crate::game) fn refresh_debug_renderers(&mut self) {
         let renderers = mods::debug_renderers(self.options.execution_role);
         let reduced = self.reduced_debug_info();
-        self.debug_renderers = self
+        let active = self
             .debug_entries
             .active_renderers(renderers, self.debug, reduced);
+        for renderer in std::mem::replace(&mut self.debug_renderers, active) {
+            sunrise_client::debug_entries::discard_debug_renderer(renderer);
+        }
     }
     /// `DebugRenderer.emitGizmos`'s first half: a selection the list has not seen refreshes it.
     fn follow_debug_selection(&mut self) {

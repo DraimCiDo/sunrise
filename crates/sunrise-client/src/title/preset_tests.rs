@@ -171,20 +171,38 @@ fn registered_world_preset_editor_commits_only_on_done_and_saves_its_dimensions(
     f.title.enter_singleplayer();
     f.title
         .set_data_packs(vec!["vanilla".into(), "example".into()]);
-    preset_editors::register(vec![
-        PresetEditor {
-            preset: "example:islands".into(),
-            screen: "example:editor".into(),
-        },
-        PresetEditor {
-            preset: "example:islands".into(),
-            screen: "example:duplicate".into(),
-        },
-        PresetEditor {
-            preset: "example:islands".into(),
-            screen: "minecraft:invalid".into(),
-        },
-    ]);
+    struct Editor(&'static str);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Editor {
+        fn register_preset_editors(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterPresetEditorsEvent<'_>,
+        ) {
+            event.register(PresetEditor {
+                preset: "example:islands".into(),
+                screen: self.0.into(),
+            });
+        }
+    }
+    let mods = [
+        ("first", "example:editor"),
+        ("second", "example:replacement"),
+        ("invalid", "minecraft:invalid"),
+    ]
+    .into_iter()
+    .map(|(id, screen)| mod_api::ModEntry::new(id, Box::new(Editor(screen))))
+    .collect::<Vec<_>>()
+    .into();
+    mod_platform::testing::with_mods(mods, || {
+        use mod_api::__private::game::RegistrationContextNew;
+        let mut editors = Vec::new();
+        mod_api::dispatch_register_preset_editors(
+            &mod_api::RegistrationContext::new(),
+            &mut editors,
+        );
+        preset_editors::register(editors);
+    });
     let Mode::Create { options, .. } = &mut f.title.mode else {
         panic!("create")
     };
@@ -219,7 +237,10 @@ fn registered_world_preset_editor_commits_only_on_done_and_saves_its_dimensions(
     };
     click(&mut f.title, 26, (480.0, 262.0));
     assert_eq!(f.title.mode.id(), "world_preset_editor");
-    assert_eq!(f.title.preset_editor().unwrap().screen, "example:editor");
+    assert_eq!(
+        f.title.preset_editor().unwrap().screen,
+        "example:replacement"
+    );
     assert!(
         !f.title
             .set_preset_editor_dimensions(Tag::Compound(Default::default()))

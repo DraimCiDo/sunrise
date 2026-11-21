@@ -3,7 +3,8 @@
 //! only in the overlay or never, the two built-in profiles, and
 //! `debug-profile.json` beside `options.txt`, which keeps them.
 use mod_api::{
-    Answered, ClientHost, DebugEntry, DebugGroup, DebugRenderer, Identifier,
+    __private::game::discard_registration,
+    Answered, ClientHost, DebugEntry, DebugGroup, DebugRenderer, HookId, Identifier,
     content::crash::{ModCall, enter_native_mod},
 };
 use std::borrow::Cow;
@@ -194,6 +195,15 @@ pub struct RegisteredDebugEntry {
 
 /// The entries native mods registered (`register_debug_entries`), kept once at start.
 static REGISTERED: OnceLock<Vec<RegisteredDebugEntry>> = OnceLock::new();
+const DEBUG_ENTRIES: (HookId, &str) = (HookId::RegisterDebugEntries, "register_debug_entries");
+/// Retire a renderer under its registering mod's failure boundary.
+pub fn discard_debug_renderer(renderer: Answered<DebugRenderer>) {
+    discard_registration(
+        (HookId::RegisterDebugRenderers, "register_debug_renderers"),
+        Some(renderer.mod_id),
+        renderer.answer,
+    );
+}
 
 /// Keeps the entries native mods registered, once at start. One whose id is not
 /// `<namespace>:<path>` in a namespace other than vanilla's, or that another entry has
@@ -203,8 +213,11 @@ pub fn register(entries: Vec<Answered<DebugEntry>>) {
         owner: answer.mod_id,
         entry: answer.answer,
     });
-    if REGISTERED.set(checked(entries)).is_err() {
+    if let Err(entries) = REGISTERED.set(checked(entries)) {
         log::warn!("debug entries were registered already; these are left out");
+        for registered in entries {
+            discard_registration(DEBUG_ENTRIES, Some(registered.owner), registered.entry);
+        }
     }
 }
 
@@ -229,7 +242,9 @@ fn checked(entries: impl IntoIterator<Item = RegisteredDebugEntry>) -> Vec<Regis
             );
         } else {
             kept.push(registered);
+            continue;
         }
+        discard_registration(DEBUG_ENTRIES, Some(registered.owner), registered.entry);
     }
     kept
 }
@@ -496,21 +511,23 @@ impl DebugEntries {
         let mut active: Vec<Answered<DebugRenderer>> = Vec::new();
         for renderer in renderers {
             let id = renderer.answer.id();
-            let Some(declared) =
+            if let Some(declared) =
                 entry(id).filter(|e| id.contains(':') && e.category == Category::Renderer)
-            else {
+            {
+                if (declared.reduced || !reduced)
+                    && self.status(id).shown(overlay)
+                    && !active.iter().any(|kept| kept.answer.id() == id)
+                {
+                    active.push(renderer);
+                    continue;
+                }
+            } else {
                 log::warn!(
                     "{}: debug renderer {id} has no renderer entry; it is left out",
                     renderer.mod_id
                 );
-                continue;
-            };
-            if (declared.reduced || !reduced)
-                && self.status(id).shown(overlay)
-                && !active.iter().any(|kept| kept.answer.id() == id)
-            {
-                active.push(renderer);
             }
+            discard_debug_renderer(renderer);
         }
         active
     }
@@ -792,6 +809,106 @@ mod tests {
             )
             .next()
             .is_none()
+        );
+    }
+
+    #[test]
+    fn rejected_renderers_destructors_cannot_stop_dispatch_or_refresh_or_disable_registration() {
+        use mod_api::__private::game::RegistrationContextNew;
+        use mod_api::__private::{HookPanicReport, LoadAccess, ModPhase, PhaseOwner, check_access};
+        use mod_api::{Hooks, ModEntry, RegisterDebugRenderersEvent, RegistrationContext};
+
+        struct BrokenCapture(&'static str);
+        impl Drop for BrokenCapture {
+            fn drop(&mut self) {
+                assert_eq!(current_native_mod(), Some(self.0));
+                panic!("rejected renderer capture");
+            }
+        }
+        struct Renderers(&'static str, bool);
+        #[mod_api::__subscriptions]
+        impl Hooks for Renderers {
+            fn register_debug_renderers(
+                &self,
+                _: &RegistrationContext,
+                event: &mut RegisterDebugRenderersEvent<'_>,
+            ) {
+                let capture = BrokenCapture(self.0);
+                event.register(DebugRenderer::new(
+                    "debug_owner:missing".into(),
+                    move |_, _, _| {
+                        let _ = &capture;
+                    },
+                ));
+                if self.1 {
+                    check_access("renderer_world_only", LoadAccess::WorldOnly);
+                }
+                event.register(DebugRenderer::new(
+                    "minecraft:chunk_borders".into(),
+                    |_, _, _| {},
+                ));
+            }
+        }
+
+        crate::test_log::install();
+        crate::test_log::clear();
+        let mut selection = DebugEntries::default();
+        selection.set_status("chunk_borders", Status::AlwaysOn);
+        mod_platform::testing::with_mods(
+            vec![
+                ModEntry::new("refused_owner", Box::new(Renderers("refused_owner", true))),
+                ModEntry::new("debug_owner", Box::new(Renderers("debug_owner", false))),
+            ]
+            .into(),
+            || {
+                let _phase = PhaseOwner::scope(ModPhase::Registration);
+                for _ in 0..2 {
+                    let mut renderers = Vec::new();
+                    mod_api::dispatch_register_debug_renderers(
+                        &RegistrationContext::new(),
+                        &mut renderers,
+                    );
+                    assert_eq!(
+                        mod_api::__private::take_hook_panics(),
+                        [HookPanicReport {
+                            mod_id: "refused_owner",
+                            hook: "register_debug_renderers",
+                        }]
+                    );
+                    let active = selection.active_renderers(renderers, false, false);
+                    assert_eq!(active.len(), 1);
+                    assert_eq!(active[0].mod_id, "debug_owner");
+                    assert_eq!(active[0].answer.id(), "minecraft:chunk_borders");
+                    assert_eq!(
+                        mod_api::__private::take_hook_panics(),
+                        [HookPanicReport {
+                            mod_id: "debug_owner",
+                            hook: "register_debug_renderers",
+                        }]
+                    );
+                }
+            },
+        );
+        let records = crate::test_log::records();
+        for owner in ["refused_owner", "debug_owner"] {
+            assert_eq!(
+                records
+                    .iter()
+                    .filter(|(level, line)| *level == log::Level::Error
+                        && line.contains(owner)
+                        && line.contains("rejected renderer capture"))
+                    .count(),
+                2
+            );
+        }
+        assert_eq!(
+            records
+                .iter()
+                .filter(|(level, line)| *level == log::Level::Warn
+                    && line.contains("refused_owner hook register_debug_renderers")
+                    && line.contains("renderer_world_only"))
+                .count(),
+            2
         );
     }
 

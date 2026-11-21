@@ -3,7 +3,8 @@
 
 pub trait Hooks {
     /// The client's own commands (NeoForge's `RegisterClientCommandsEvent`), which
-    /// `command` runs: push a `Command` per usage (`x <mode:word>`).
+    /// `command` runs: call `event.register(Command)` per usage (`x <mode:word>`).
+    /// Earlier registrations are not editable; a failing listener publishes none of its usages.
     /// Asked when a connection starts and again when the server sends its
     /// own tree, so the chat box colours, completes and lists them as the
     /// game's own; a name the game already has keeps that command's
@@ -15,7 +16,9 @@ pub trait Hooks {
         side = "client",
         contract = "collect",
         out = "commands",
-        neoforge = "RegisterClientCommandsEvent"
+        registration_append = "register",
+        neoforge = "RegisterClientCommandsEvent",
+        version = 2
     )]
     fn register_client_commands(commands: &mut Vec<mod_api::Command>);
 }

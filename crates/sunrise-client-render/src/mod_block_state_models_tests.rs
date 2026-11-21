@@ -103,12 +103,17 @@ fn scoped_model_registration_rolls_back_and_reports_each_refusal() {
         mod_platform::testing::with_mods(mods, || {
             let _phase = PhaseOwner::scope(ModPhase::Registration);
             for _ in 0..2 {
-                let mut ids = vec![String::from("before:one")];
+                let mut ids = Vec::new();
                 mod_api::dispatch_register_block_state_models(
                     &RegistrationContext::new(),
                     &mut ids,
                 );
-                assert_eq!(ids, ["before:one", "first:one", "last:one"]);
+                assert_eq!(
+                    ids.iter()
+                        .map(|id| (id.mod_id, id.answer.as_str()))
+                        .collect::<Vec<_>>(),
+                    [("first", "first:one"), ("last", "last:one")]
+                );
             }
             assert!(mod_api::__private::take_hook_panics().is_empty());
         });
@@ -259,14 +264,47 @@ fn names(models: &[&str]) -> Vec<String> {
 #[test]
 fn a_registered_type_picks_each_states_model_and_again_on_reload() {
     use mod_api::__private::game::RegistrationContextNew;
+    use mod_api::__private::{LoadAccess, ModPhase, PhaseOwner, check_access};
+
+    struct Other(bool);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Other {
+        fn register_block_state_models(
+            &self,
+            _: &RegistrationContext,
+            event: &mut mod_api::RegisterBlockStateModelsEvent<'_>,
+        ) {
+            event.register("rendtest:by_power".into());
+            if self.0 {
+                check_access("block_state", LoadAccess::WorldOnly);
+            }
+        }
+        fn instantiate_block_state_definition(
+            &self,
+            _: &RegistrationContext,
+            event: &mut mod_api::InstantiateBlockStateDefinitionEvent<'_>,
+        ) {
+            event.models.push(pick(0, "rendtest:block/post"));
+            event.models.push(BlockStateModelPick::Refuse {
+                reason: "not the bound definition".into(),
+            });
+        }
+    }
+
     let fixture = Fixture::new("reload");
     let post = names(&["rendtest:block/post", "rendtest:block/dim"]);
     let none = Vec::new();
-    let mods: mod_api::Mods = vec![mod_api::ModEntry::new("lamps", Box::new(Lamps))].into();
+    let mods = vec![
+        mod_api::ModEntry::new("old_codec", Box::new(Other(false))),
+        mod_api::ModEntry::new("lamps", Box::new(Lamps)),
+        mod_api::ModEntry::new("rejected_codec", Box::new(Other(true))),
+    ]
+    .into();
     mod_platform::testing::with_mods(mods, || {
+        let _phase = PhaseOwner::scope(ModPhase::Registration);
         let mut ids = Vec::new();
         mod_api::dispatch_register_block_state_models(&RegistrationContext::new(), &mut ids);
-        assert_eq!(register(ids), ["rendtest:by_power"]);
+        register(ids);
         fixture.lamp(
             r#"{"neoforge:definition_type":"rendtest:by_power","on":"rendtest:block/on","off":"rendtest:block/off"}"#,
         );
@@ -316,6 +354,13 @@ fn a_typed_layer_over_vanilla_replaces_only_the_states_it_picks() {
     struct PoweredOnly;
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for PoweredOnly {
+        fn register_block_state_models(
+            &self,
+            _: &RegistrationContext,
+            event: &mut mod_api::RegisterBlockStateModelsEvent<'_>,
+        ) {
+            event.register("rendtest:powered_only".into());
+        }
         fn instantiate_block_state_definition(
             &self,
             _: &RegistrationContext,
@@ -332,9 +377,12 @@ fn a_typed_layer_over_vanilla_replaces_only_the_states_it_picks() {
         {"neoforge:definition_type":"rendtest:powered_only"}
     ]});
     fixture.lamp(&stacked.to_string());
-    register(vec!["rendtest:powered_only".into()]);
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new("on", Box::new(PoweredOnly))].into();
     mod_platform::testing::with_mods(mods, || {
+        use mod_api::__private::game::RegistrationContextNew;
+        let mut ids = Vec::new();
+        mod_api::dispatch_register_block_state_models(&RegistrationContext::new(), &mut ids);
+        register(ids);
         let picked = load(&fixture);
         assert_eq!(picked[0], ["rendtest:block/off"]);
         assert_eq!(picked[1], ["rendtest:block/on"]);

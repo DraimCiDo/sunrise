@@ -335,9 +335,60 @@ fn panicking_registration_discards_owned_renderers_even_if_cleanup_panics() {
             [HookPanicReport {
                 mod_id: "broken",
                 hook: "register_debug_renderers",
-            }]
+            }; 2]
         );
     });
     assert_eq!(calls.load(Ordering::Relaxed), 1);
     assert_eq!(*drops.lock().unwrap(), ["broken:one", "broken:two"]);
+}
+
+#[test]
+fn command_registrars_keep_earlier_usages_and_discard_a_refused_batch() {
+    struct Commands(&'static str, bool);
+    #[crate::__subscriptions]
+    impl Hooks for Commands {
+        fn register_commands(&self, _: &mut dyn ServerHost, event: &mut RegisterCommandsEvent<'_>) {
+            event.register(Command::new(self.0));
+            if self.1 {
+                check_access("server_world_only", LoadAccess::WorldOnly);
+            }
+        }
+        fn register_client_commands(
+            &self,
+            _: &mut dyn ClientHost,
+            event: &mut RegisterClientCommandsEvent<'_>,
+        ) {
+            event.register(Command::new(self.0));
+            if self.1 {
+                check_access("client_world_only", LoadAccess::WorldOnly);
+            }
+        }
+    }
+
+    crate::__private::initialize().unwrap();
+    let _phase = PhaseOwner::scope(ModPhase::Setup);
+    testing::with_dispatch(
+        vec![
+            ModEntry::new("first", Box::new(Commands("first <argument:word>", false))),
+            ModEntry::new("refused", Box::new(Commands("refused", true))),
+            ModEntry::new("last", Box::new(Commands("last", false))),
+        ]
+        .into(),
+        || {
+            let mut host = testing::FakeHost::new();
+            let mut server = Vec::new();
+            let mut client = Vec::new();
+            dispatch_register_commands(&mut host, &mut server);
+            dispatch_register_client_commands(&mut host, &mut client);
+            for commands in [server, client] {
+                assert_eq!(
+                    commands
+                        .into_iter()
+                        .map(|command| command.usage)
+                        .collect::<Vec<_>>(),
+                    ["first <argument:word>", "last"]
+                );
+            }
+        },
+    );
 }

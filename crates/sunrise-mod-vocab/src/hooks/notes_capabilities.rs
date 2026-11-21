@@ -266,7 +266,7 @@ pub trait Notes {
   uses `flags::UPDATE_CLIENTS`) and set `handled` to skip the block's own tick. Without `handled`, the block then takes
   its own tick as it is now, if it is still the tick's block.
 
-- The commands a mod owns on the client, as NeoForge's `RegisterClientCommandsEvent`: `register_client_commands` is asked for a `Command` per usage (`x <mode:word>`, the same usage form as `register_commands`), so the chat box colours, completes and lists them, arguments included, like the game's own, and `command` runs them. A name the game already has keeps that command; a nonzero `level` has no meaning on the client and the command is left out with a log line. It replaces `commands`, which gave bare names: a mod that implemented it pushes `Command::new("name <args:text>")` instead. Asked at connect, never per frame.
+- The commands a mod owns on the client, as NeoForge's `RegisterClientCommandsEvent`: `register_client_commands` takes `event.register(Command)` per usage (`x <mode:word>`, the same usage form as `register_commands`), so the chat box colours, completes and lists them, arguments included, like the game's own, and `command` runs them. A name the game already has keeps that command; a nonzero `level` has no meaning on the client and the command is left out with a log line. Asked on connect and when the server sends a new tree, never per frame.
 - The keys a mod registers on Options > Controls, as NeoForge's `RegisterKeyMappingsEvent`: call
   `Registrar::register_key_mapping(KeyRegistration::new("zoom", "key.keyboard.z").label("key.mymod.zoom"))`
   from `Hooks::register`. Ownership comes from the registrar; invalid or duplicate local ids refuse startup.

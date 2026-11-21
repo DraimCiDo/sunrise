@@ -49,12 +49,21 @@ the sign's block position and whether its front side is being edited. It returns
 editor open, or outside a world. A close of the sign editor always sends the sign update, however it
 closes; there is no close that skips it, because the vanilla client never omits that packet.
 
+## Replacing a world preset editor
+
+At client startup, call `event.register(PresetEditor { preset, screen })` in
+`Hooks::register_preset_editors`. When two successful listeners register a valid editor for
+the same preset, Customize opens the last one and logs the overriding mod. A failed listener
+cannot replace the earlier editor. Registering an editor does not create the world preset.
+
 ## Drawing a dimension transition
 
 At client startup, `Hooks::register_dimension_transition_screen` gives you `event.register(screen)`.
 Pass a `DimensionTransitionScreen` for each trip you want to cover.
 `Conditional { to, from }` wins over `Incoming(to)`, then `Outgoing(from)`. The first valid
-registration for each key wins. Use a namespaced, non-`minecraft` screen ID for diagnostics;
+registration for each key wins. `register` returns `false` for invalid IDs or an occupied key,
+including one already staged by your listener. If the listener panics or is refused, none of
+its staged factories reserve a key. Use a namespaced, non-`minecraft` screen ID for diagnostics;
 nothing looks it up during drawing.
 
 ```rust,ignore

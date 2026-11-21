@@ -36,9 +36,12 @@ mod tests {
                 dispatch_register_preset_editors(&RegistrationContext::new(), &mut editors);
                 assert_eq!(
                     editors,
-                    [PresetEditor {
-                        preset: "example:islands".into(),
-                        screen: "example:editor".into()
+                    [Answered {
+                        mod_id: "example",
+                        answer: PresetEditor {
+                            preset: "example:islands".into(),
+                            screen: "example:editor".into()
+                        }
                     }]
                 );
             },

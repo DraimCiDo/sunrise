@@ -2,11 +2,12 @@
 // catalog-order: 0032
 
 pub trait Hooks {
-    /// The commands native mods add to the server's command tree: push
-    /// yours. Asked whenever the server builds its command tree, as the reference loader's
+    /// Add each usage to the server's command tree with `event.register(Command)`.
+    /// Earlier registrations are not editable; a failing listener publishes none of its usages.
+    /// Asked whenever the server builds its command tree, as the reference loader's
     /// `Commands` does: when a world opens (a dedicated server, a LAN host, single player's
     /// server thread), before its functions load, so a function line may name your command;
-    /// on each `/reload` and data pack change, so a command you stop pushing is refused by the
+    /// on each `/reload` and data pack change, so a command you stop registering is refused by the
     /// next functions loaded; and after a mod calls `host.commands().refresh_commands()`.
     /// Every player's chat box completes them as vanilla's, within their level. A
     /// name vanilla has is left out. Each executable usage keeps its own
@@ -24,8 +25,9 @@ pub trait Hooks {
         side = "server",
         contract = "collect",
         out = "commands",
+        registration_append = "register",
         neoforge = "RegisterCommandsEvent",
-        version = 2
+        version = 3
     )]
     fn register_commands(commands: &mut Vec<mod_api::Command>);
 }

@@ -1,11 +1,10 @@
 use super::*;
 
 impl Game<'_> {
-    /// The block-state definition types a mod adds (NeoForge's `RegisterBlockStateModels`): push
-    /// each id, `<mod id>:<path>`. Asked once at start on the client, before resources load.
+    /// Collect the block-state definition types each mod binds, before client resources load.
     pub(in crate::game) fn native_register_block_state_models(
         context: &mod_api::RegistrationContext,
-        definitions: &mut Vec<String>,
+        definitions: &mut Vec<mod_api::Answered<String>>,
     ) {
         Self::fire_register_block_state_models(context, definitions);
     }

@@ -4,7 +4,9 @@ pub trait Hooks {
     /// Register loading-screen factories once at client startup (NeoForge's
     /// `RegisterDimensionTransitionScreenEvent`). Call `event.register(screen)` for each trip.
     /// Conditional pairs take priority over incoming, then outgoing. The first valid
-    /// factory for a key wins. Unmatched travel, login and death use vanilla for a new screen.
+    /// factory for a key wins; `event.register` returns `false` for a duplicate or invalid key
+    /// and `true` to stage an accepted factory. Failed listeners publish no keys.
+    /// Unmatched travel, login and death use vanilla for a new screen.
     /// The client keeps whichever presentation is already open on an in-place load update.
     #[notes = r#"## Dimension transition screens
 
@@ -12,7 +14,9 @@ Pass `DimensionTransitionScreen::new(id, transition, factory)` to `event.registe
 Use `DimensionTransition::Incoming(to)`, `Outgoing(from)` or `Conditional { to, from }`
 with namespaced dimension IDs. The client resolves those IDs at registration and rejects
 invalid registrations and screen IDs in the `minecraft` namespace. A screen ID is for
-validation and diagnostics, not draw dispatch.
+validation and diagnostics, not draw dispatch. `register` reports `false` for invalid or
+occupied keys, including a key already staged by this listener. A failed listener releases
+all its staged keys.
 
 On a matching trip, the client calls the selected factory once as the registering mod and
 keeps its presentation until the loading screen closes. An existing loading screen (including
@@ -27,13 +31,12 @@ readiness, timeout and closing."#]
         side = "client",
         contract = "collect",
         out = "screens",
-        registration_append = "register",
+        registration_append = "custom",
         context = "registration",
-        answered_by = "mod",
         neoforge = "RegisterDimensionTransitionScreenEvent",
         version = 3
     )]
     fn register_dimension_transition_screen(
-        screens: &mut Vec<mod_api::Answered<mod_api::DimensionTransitionScreen>>,
+        screens: &mut Vec<mod_api::__private::RegisteredTransitionScreen>,
     );
 }

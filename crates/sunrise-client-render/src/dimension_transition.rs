@@ -1,13 +1,9 @@
 //! Load-time dimension-key resolution and selection of client loading presentations.
 use mod_api::{
-    Answered, DimensionKey, DimensionTransition, DimensionTransitionPresentation,
-    DimensionTransitionScreen, Identifier,
+    __private::{RegisteredTransitionScreen, TransitionKey, game::discard_registration},
+    DimensionKey, DimensionTransitionPresentation, DimensionTransitionScreen, HookId,
 };
-use std::{
-    collections::{HashMap, hash_map::Entry},
-    fmt,
-    sync::OnceLock,
-};
+use std::{collections::HashMap, fmt, sync::OnceLock};
 
 /// A mod's presentation instance for the lifetime of one loading screen.
 pub struct ActiveTransitionScreen {
@@ -23,16 +19,6 @@ impl fmt::Debug for ActiveTransitionScreen {
     }
 }
 
-#[derive(PartialEq, Eq, Hash)]
-enum TransitionKey {
-    Incoming(DimensionKey),
-    Outgoing(DimensionKey),
-    Conditional {
-        to: DimensionKey,
-        from: DimensionKey,
-    },
-}
-
 type Registration = (&'static str, DimensionTransitionScreen);
 
 /// Registrations resolved once at load; lookups never build dimension names.
@@ -42,29 +28,13 @@ struct TransitionScreens(HashMap<TransitionKey, Registration>);
 static SCREENS: OnceLock<TransitionScreens> = OnceLock::new();
 
 impl TransitionScreens {
-    fn new(registrations: impl IntoIterator<Item = Registration>) -> Self {
-        let mut screens = HashMap::new();
-        for (owner, registration) in registrations {
-            let id = registration.screen();
-            if !Identifier::parse_namespaced(id).is_some_and(|id| id.namespace() != "minecraft") {
-                log::warn!("[{owner}] Invalid dimension transition screen id: {id}");
-                continue;
-            }
-            let key = match registration.transition() {
-                DimensionTransition::Incoming(to) => resolve(to).map(TransitionKey::Incoming),
-                DimensionTransition::Outgoing(from) => resolve(from).map(TransitionKey::Outgoing),
-                DimensionTransition::Conditional { to, from } => resolve(to)
-                    .zip(resolve(from))
-                    .map(|(to, from)| TransitionKey::Conditional { to, from }),
-            };
-            match key.map(|key| screens.entry(key)) {
-                Some(Entry::Vacant(entry)) => {
-                    entry.insert((owner, registration));
-                }
-                _ => log::warn!("[{owner}] Invalid or duplicate dimension transition: {id}"),
-            }
-        }
-        Self(screens)
+    fn new(registrations: Vec<RegisteredTransitionScreen>) -> Self {
+        Self(
+            registrations
+                .into_iter()
+                .map(|r| (r.key, (r.owner, r.screen)))
+                .collect(),
+        )
     }
 
     /// Conditional, then incoming, then outgoing, as NeoForge's event javadoc specifies.
@@ -81,15 +51,20 @@ impl TransitionScreens {
     }
 }
 
-fn resolve(id: &str) -> Option<DimensionKey> {
-    Identifier::parse_namespaced(id).map(|_| mod_api::__private::dimension_key(id))
-}
-
 /// Publish the client registrations once at startup.
-pub fn register(registrations: Vec<Answered<DimensionTransitionScreen>>) {
-    let registrations = registrations.into_iter().map(|r| (r.mod_id, r.answer));
-    if SCREENS.set(TransitionScreens::new(registrations)).is_err() {
+pub fn register(registrations: Vec<RegisteredTransitionScreen>) {
+    if let Err(TransitionScreens(screens)) = SCREENS.set(TransitionScreens::new(registrations)) {
         log::warn!("Dimension transition screens already registered; keeping the first table");
+        for (owner, screen) in screens.into_values() {
+            discard_registration(
+                (
+                    HookId::RegisterDimensionTransitionScreen,
+                    "register_dimension_transition_screen",
+                ),
+                Some(owner),
+                screen,
+            );
+        }
     }
 }
 
@@ -106,7 +81,7 @@ pub fn select(
 mod tests {
     use super::*;
     use crate::level_loading::{LevelLoadTracker, PlayerCheck, Reason, ServerLoadView, Stage};
-    use mod_api::{ClientHost, DrawContext, Host};
+    use mod_api::{ClientHost, DimensionTransition, DrawContext, Host};
     use std::sync::Arc;
 
     struct Client;
@@ -138,6 +113,14 @@ mod tests {
             }),
         )
     }
+    fn screens_from(entries: impl IntoIterator<Item = Registration>) -> TransitionScreens {
+        let mut registrations = Vec::new();
+        for (owner, screen) in entries {
+            RegisteredTransitionScreen::register(&mut registrations, owner, screen);
+        }
+        TransitionScreens::new(registrations)
+    }
+
     fn chosen(screens: &TransitionScreens, to: &str, from: &str) -> Option<u32> {
         let (owner, factory) = screens.select(key(to), key(from))?;
         assert_eq!(owner, "registrant");
@@ -153,7 +136,7 @@ mod tests {
 
     #[test]
     fn conditional_wins_over_incoming_then_outgoing_and_first_registration_wins() {
-        let screens = TransitionScreens::new(vec![
+        let screens = screens_from([
             entry(
                 "test:leave",
                 DimensionTransition::Outgoing("test:a".into()),
@@ -199,7 +182,7 @@ mod tests {
 
     #[test]
     fn invalid_ids_do_not_reserve_a_transition_or_replace_vanilla() {
-        let screens = TransitionScreens::new(vec![
+        let screens = screens_from([
             entry(
                 "minecraft:reserved",
                 DimensionTransition::Incoming("test:b".into()),
@@ -242,7 +225,7 @@ mod tests {
 
     #[test]
     fn selected_screen_follows_existing_progress_readiness_and_cleanup_then_falls_back() {
-        let screens = TransitionScreens::new([entry(
+        let screens = screens_from([entry(
             "test:arrival",
             DimensionTransition::Conditional {
                 to: "test:b".into(),
