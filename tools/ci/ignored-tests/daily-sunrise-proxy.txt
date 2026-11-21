@@ -3,3 +3,4 @@
 sunrise-proxy tests::a_configured_agent_uses_the_env_proxy_but_goes_direct_for_localhost lib daily network
 sunrise-proxy tests::a_refused_connect_is_a_transport_error lib daily network
 sunrise-proxy tests::a_request_goes_through_a_socks_proxy lib daily network
+sunrise-proxy tests::a_stalled_socks_handshake_times_out_and_closes_the_connection lib daily network

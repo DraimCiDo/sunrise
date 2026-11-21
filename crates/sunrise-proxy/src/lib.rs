@@ -572,6 +572,37 @@ mod tests {
 
     #[test]
     #[ignore = "daily"]
+    fn a_stalled_socks_handshake_times_out_and_closes_the_connection() {
+        use std::io::Read;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let proxy = format!("socks5h://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(TIMEOUT)).unwrap();
+            let mut greeting = [0; 3];
+            stream.read_exact(&mut greeting).unwrap();
+            assert_eq!(greeting, [5, 1, 0]);
+            // Never answer the greeting. The client must cancel the handshake and close its socket.
+            assert_eq!(stream.read(&mut [0]).unwrap(), 0);
+        });
+        let client = Client::builder()
+            .no_proxy()
+            .proxy(parse_proxy(&proxy).unwrap())
+            .connect_timeout(Duration::from_millis(500))
+            .timeout(TIMEOUT)
+            .build()
+            .unwrap();
+        let error = client
+            .get("http://sunrise.invalid/a.jar")
+            .send()
+            .unwrap_err();
+        assert!(error.is_connect() && error.is_timeout(), "{error}");
+        // Keep the client alive while checking EOF, so dropping the whole runtime cannot pass it.
+        server.join().unwrap();
+    }
+
+    #[test]
+    #[ignore = "daily"]
     fn a_configured_agent_uses_the_env_proxy_but_goes_direct_for_localhost() {
         use std::io::{BufRead, BufReader, Write};
         use std::net::TcpListener;
