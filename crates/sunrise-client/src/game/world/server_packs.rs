@@ -554,19 +554,32 @@ impl Game<'_> {
 
     /// The download notifiers' toasts, each in a free 32-pixel slot of the
     /// `ToastManager` (`hidden`, F1, keeps them timing out undrawn).
-    pub(super) fn draw_pack_toasts(&mut self, batch: &mut HudBatch, hidden: bool) {
+    pub(super) fn draw_pack_toasts(
+        &mut self,
+        batch: &mut HudBatch,
+        hidden: bool,
+        presentation_hidden: bool,
+    ) {
         let multiplier = self.settings.notification_display_time;
         self.add_chunk_io_toasts();
         self.add_hook_panic_toasts();
         let mut used = self.toast_slots_used();
         let packs = &mut self.server_packs;
-        for slot_toast in packs
+        for (slot_toast, hidden) in packs
             .notifiers
             .iter_mut()
             .map(|n| &mut n.toast)
             .chain(std::iter::once(&mut packs.load_fail))
             .chain(packs.chunk_io.iter_mut())
-            .chain(packs.hook_panics.iter_mut())
+            .map(|toast| (toast, hidden))
+            // The player's presentation settings still apply, but a mod's HUD veto must
+            // never hide this diagnostic while its display timer runs.
+            .chain(
+                packs
+                    .hook_panics
+                    .iter_mut()
+                    .map(|toast| (toast, presentation_hidden)),
+            )
         {
             let Some(toast) = slot_toast else {
                 continue;
@@ -705,7 +718,10 @@ mod tests {
     #[test]
     #[ignore = "daily"]
     fn hook_panic_toast_cannot_be_vetoed_or_rewritten_by_toast_add() {
-        use mod_api::{ClientHost, ComponentTypesEvent, Flow, Hooks, ModEntry, ToastAddEvent};
+        use mod_api::{
+            ClientHost, ComponentTypesEvent, Flow, Hooks, ModEntry, RenderGuiPreEvent,
+            ToastAddEvent,
+        };
         struct VetoingPanicker;
         #[mod_api::__subscriptions]
         impl Hooks for VetoingPanicker {
@@ -715,6 +731,9 @@ mod tests {
             fn toast_add(&self, _: &dyn ClientHost, event: &mut ToastAddEvent<'_>) -> Flow {
                 *event.title = mod_api::Text::literal("rewritten");
                 *event.description = Some(mod_api::Text::literal("hidden"));
+                Flow::Cancel
+            }
+            fn render_gui_pre(&self, _: &dyn ClientHost, _: &mut RenderGuiPreEvent) -> Flow {
                 Flow::Cancel
             }
         }
@@ -757,6 +776,22 @@ mod tests {
                         "with": ["veto_mod", "component_types"],
                     })
                 );
+                let mut gui_canceled = false;
+                game.native_render_gui_pre(&mut gui_canceled);
+                assert!(gui_canceled);
+                // Advance the existing slide past its entrance without sleeping.
+                let mut first = HudBatch::scratch([640, 480]);
+                game.draw_every_toast(&mut first, false, gui_canceled);
+                let toast = game.server_packs.hook_panics[0].as_mut().unwrap();
+                assert!(toast.slot.is_some());
+                toast.slide.origin =
+                    Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+                let mut visible = HudBatch::scratch([640, 480]);
+                game.draw_every_toast(&mut visible, false, gui_canceled);
+                assert!(visible.vertices.iter().any(|v| v.pos[0] < visible.width));
+                let mut player_hidden = HudBatch::scratch([640, 480]);
+                game.draw_every_toast(&mut player_hidden, true, gui_canceled);
+                assert!(player_hidden.vertices.is_empty());
             });
         });
     }

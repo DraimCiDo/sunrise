@@ -1,0 +1,8 @@
+version = 1
+doc = "A panic in a generated hook disables only that mod's callback for that hook for the session. The first panic is logged and shown in a client error toast. Other listeners continue subject to the hook's cancellation, replacement and isolated-cancel contracts. Phase refusals are reported without disabling the callback."
+tests = [
+    "crates/sunrise-mod-vocab/src/hooks_tests.rs::panicking_listener_is_disabled_for_that_hook_and_reported_once",
+    "crates/sunrise-mod-vocab/src/hooks_tests.rs::callback_and_registration_contain_panicking_payload_destructors",
+    "crates/sunrise-mod-vocab/src/chunk_disk/tests.rs::codec_error_or_unwind_after_setting_8_refuses_partial_publication",
+    "crates/sunrise-mod-api-gen/dispatch-tests/src/fixtures/entity_move.rs::an_unwinding_listener_keeps_the_requested_delta_and_ends_the_walk",
+]

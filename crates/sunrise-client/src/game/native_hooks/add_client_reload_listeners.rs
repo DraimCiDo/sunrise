@@ -15,7 +15,7 @@ impl Game<'_> {
     /// Client-side.
     pub(in crate::game) fn native_add_client_reload_listeners(
         &self,
-        listeners: &mut dyn ClientReloadListeners,
+        listeners: &mut ClientListenerRegistry,
     ) {
         self.fire_add_client_reload_listeners(listeners);
     }

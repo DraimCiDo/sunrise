@@ -105,8 +105,7 @@ impl BlockPart for Observed {
                     .push(host.transaction_lifecycle());
                 return;
             }
-            NoticeAction::Panic => panic!("contents notice panic probe"),
-            NoticeAction::Write => {}
+            NoticeAction::Write | NoticeAction::Panic => {}
         }
         if event.pos != BlockPos::new(0, 64, 0) {
             return;
@@ -129,6 +128,9 @@ impl BlockPart for Observed {
             }),
             Ok(())
         );
+        if matches!(self.action, NoticeAction::Panic) {
+            panic!("contents notice panic probe after successful nested writes");
+        }
         assert!(
             host.block_entity(event.level, pos)
                 .unwrap()
@@ -384,19 +386,34 @@ fn a_panicking_part_does_not_leave_its_contents_notice_guarded() {
         NoticeAction::Panic,
         |game, level, changes| {
             let pos = [0, 64, 0];
+            let other = [2, 64, 0];
             place(game, level, pos, "minecraft:chest");
+            place(game, level, other, "minecraft:chest");
             changes.0.lock().unwrap().clear();
             let entity = game.block_entity(level, pos).unwrap();
-            for _ in 0..2 {
-                assert!(
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        entity.set_changed(game).unwrap()
-                    }))
-                    .is_err()
-                );
-            }
-            // Both calls reach the Part: the first unwind did not leave a stale active position.
-            assert_eq!(changes.0.lock().unwrap().len(), 2);
+            let items = level.capability(game, &ITEMS, pos, None).unwrap();
+            let other = level.capability(game, &ITEMS, other, None).unwrap();
+            let sticks = ItemResource::of(
+                &mod_api::ItemStack::new(
+                    mod_api::__private::item_key("minecraft:stick").unwrap(),
+                    1,
+                )
+                .unwrap(),
+            );
+            let host: &mut dyn ServerHost = game;
+            let committed = host.transaction(|host, tx| {
+                assert_eq!(items.insert_at(host, tx, 0, &sticks, 1), 1);
+                assert!(entity.set_changed(host).unwrap());
+                assert_eq!(items.amount(host, 0), 1);
+                assert_eq!(other.amount(host, 0), 0);
+                Ok::<_, ()>(())
+            });
+            assert_eq!(committed, Ok(()));
+            assert_eq!(items.amount(host, 0), 1);
+            assert_eq!(other.amount(host, 0), 0);
+            assert!(entity.set_changed(host).unwrap());
+            assert_eq!(changes.0.lock().unwrap().len(), 1, "Part is disabled");
+            assert!(game.contents_changing.is_empty());
         },
     );
 }
@@ -801,8 +818,8 @@ fn a_notice_that_opens_a_transaction_keeps_the_root_closing_phase() {
     );
 }
 
-/// A notice that panics while the root commits leaves no closing phase behind: after the caught
-/// panic nothing is open, and the next transaction reads Open.
+/// A panic while the root commits drops only the failed listener's writes and leaves no
+/// closing phase behind.
 #[test]
 #[ignore = "daily"]
 fn a_panicking_root_commit_notice_leaves_the_phase_none() {
@@ -813,6 +830,8 @@ fn a_panicking_root_commit_notice_leaves_the_phase_none() {
             let pos = [0, 64, 0];
             place(game, level, pos, "minecraft:chest");
             let items = level.capability(game, &ITEMS, pos, None).unwrap();
+            place(game, level, [2, 64, 0], "minecraft:chest");
+            let other = level.capability(game, &ITEMS, [2, 64, 0], None).unwrap();
             let stick = mod_api::ItemStack::new(
                 mod_api::__private::item_key("minecraft:stick").unwrap(),
                 1,
@@ -843,20 +862,17 @@ fn a_panicking_root_commit_notice_leaves_the_phase_none() {
             );
             game.world.modified.clear();
             let host: &mut dyn ServerHost = game;
-            let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                host.transaction(|host, tx| {
-                    assert_eq!(items.insert_at(host, tx, 0, &sticks, 1), 1);
-                    assert_eq!(
-                        depot.set_item_slot(host, tx, 0, Some(stick.clone())),
-                        Ok(true)
-                    );
-                    Ok::<_, ()>(())
-                })
-            }));
-            assert_eq!(
-                caught.unwrap_err().downcast_ref::<&str>(),
-                Some(&"contents notice panic probe")
-            );
+            let committed = host.transaction(|host, tx| {
+                assert_eq!(items.insert_at(host, tx, 0, &sticks, 1), 1);
+                assert_eq!(
+                    depot.set_item_slot(host, tx, 0, Some(stick.clone())),
+                    Ok(true)
+                );
+                Ok::<_, ()>(())
+            });
+            assert_eq!(committed, Ok(()));
+            assert_eq!(items.amount(host, 0), 1);
+            assert_eq!(other.amount(host, 0), 0);
             assert_eq!(host.transaction_lifecycle(), TransactionLifecycle::None);
             assert_eq!(depot.item_slot(host, 0), Ok(Some(stick)));
             let next = host.transaction(|host, _| {

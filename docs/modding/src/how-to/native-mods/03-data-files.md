@@ -31,7 +31,9 @@ Both prepare contexts lend converted IDs through `context.list()` and bytes thro
 an invalid file, return `Err(ReloadResourceError::new(id, cause))` with the original error, not
 its message. `error.resource()` borrows the failing resource ID, and
 `std::error::Error::source(&error)` exposes its original cause. Registration still returns typed
-`ReloadOrderError` values for dependency and listener failures. No listener applies until every
+`ReloadOrderError` values for dependency and listener failures. If a registration callback panics,
+its partial entries and ordering edges are discarded; unrelated registrations still run. This
+applies to client startup and later client and server reloads. No listener applies until every
 prepare succeeds.
 
 Outside a listener, `host.resource(pack_type, &identifier)` reads one file from the selected

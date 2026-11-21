@@ -41,6 +41,7 @@ pub trait Hooks {
         context = "loop",
         cancellable = true,
         isolate = true,
+        version = 2,
         output_validator = "crate::entity::types::refused_travel_output",
         neoforge = "none (fork addition; see travel-and-move.md, #2308)",
         target = "sunrise_client_lib::travel_gate::native_living_travel"

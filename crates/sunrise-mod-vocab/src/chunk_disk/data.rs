@@ -100,12 +100,6 @@ impl ChunkDiskData {
         self.failure.as_ref()
     }
 
-    pub(crate) fn refuse(&mut self, error: ChunkDiskFailure) {
-        if self.failure.is_none() {
-            self.failure = Some(error);
-        }
-    }
-
     pub(crate) fn attribute_failure(&mut self, error: ChunkDiskFailure) {
         self.failure = Some(error);
     }

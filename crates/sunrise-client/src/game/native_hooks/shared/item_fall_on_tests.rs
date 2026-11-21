@@ -66,8 +66,8 @@ impl Hooks for LoanMod {
     }
 }
 
-/// Only the inner production loan is exercised: the outer dropped-item pass
-/// is deliberately not claimed to survive this unwind.
+/// Exercise the actual dimension loan and the dispatcher in both dimensions. Each
+/// fixture installs a fresh session so the first panic does not skip the second case.
 #[test]
 #[ignore = "daily"]
 fn item_fall_on_returns_progressed_level_loan_after_part_panic() {
@@ -79,11 +79,11 @@ fn item_fall_on_returns_progressed_level_loan_after_part_panic() {
     .into();
     crate::game::api_values::install_parts(&mods).unwrap();
     let _ = sunrise_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
-    with_mods(mods, || {
-        let mut loaded = 0;
-        for dimension in [crate::game::Dim::Overworld, crate::game::Dim::Nether] {
-            let scratch = std::env::temp_dir()
-                .join(format!("item-loan-{}-{dimension:?}", std::process::id()));
+    let mut loaded = 0;
+    for dimension in [crate::game::Dim::Overworld, crate::game::Dim::Nether] {
+        let scratch =
+            std::env::temp_dir().join(format!("item-loan-{}-{dimension:?}", std::process::id()));
+        with_mods(mods.clone(), || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.world_root = scratch.clone();
                 game.enter_level(dimension).unwrap();
@@ -104,20 +104,18 @@ fn item_fall_on_returns_progressed_level_loan_after_part_panic() {
                     .set(&mut game.world.attachments, mod_api::Holder::Level, 11)
                     .unwrap();
                 game.world.attachment_syncs.insert(mod_api::Holder::Level);
-                let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    sunrise_client::block_contact::in_level(
-                        sunrise_client::parallel::TickThread::mint(),
-                        Some(game.dim.id()),
-                        || {
-                            game.item_fall_on(42, pos, 5.0);
-                        },
-                    );
-                }))
-                .expect_err("actual Part must panic");
-                assert!(std::sync::Arc::ptr_eq(
-                    &payload,
-                    caught.downcast_ref::<std::sync::Arc<()>>().unwrap()
-                ));
+                sunrise_client::block_contact::in_level(
+                    sunrise_client::parallel::TickThread::mint(),
+                    Some(game.dim.id()),
+                    || game.item_fall_on(42, pos, 5.0),
+                );
+                assert_eq!(
+                    mod_api::__private::take_hook_panics(),
+                    [mod_api::__private::HookPanicReport {
+                        mod_id: "loan_test",
+                        hook: "fall_on",
+                    }],
+                );
                 assert_eq!(
                     game.world.random.next_int(),
                     -2090749135,
@@ -141,10 +139,10 @@ fn item_fall_on_returns_progressed_level_loan_after_part_panic() {
                     "aborted landing writes were not queued"
                 );
             });
-            let _ = std::fs::remove_dir_all(scratch);
-        }
-        assert_eq!(loaded, 2, "both resource fixtures ran");
-    });
+        });
+        let _ = std::fs::remove_dir_all(scratch);
+    }
+    assert_eq!(loaded, 2, "both resource fixtures ran");
 }
 
 /// A dropped item that falls onto a block with a `fall_on` part is told to it once, as

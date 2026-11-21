@@ -101,19 +101,22 @@ fn visibility_unwind_save() {
             }),
         )]
         .into();
-        let panic = mod_platform::testing::with_mods(mods, || {
+        mod_platform::testing::with_mods(mods, || {
             mod_api::__private::mark_game_thread();
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| game.tick_items()))
-                .unwrap_err()
+            game.tick_items();
+            assert_eq!(
+                mod_api::__private::take_hook_panics(),
+                [mod_api::__private::HookPanicReport {
+                    mod_id: "visibility-unwind",
+                    hook: "item_picked_up",
+                }],
+            );
         });
-        assert_eq!(panic.downcast_ref::<u32>(), Some(&77));
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(
             visibility.settled(),
-            "unwind must release, not leave a stuck pass"
+            "the item pass must finish and release its lease after a listener panic"
         );
-        // The baseline item pass has no unwind restoration fence. This proves
-        // lease drop/cleanup, NOT retained-row recovery or persisted entities.
         assert!(
             !root.join("level.dat").exists(),
             "no stale metadata can satisfy this proof"

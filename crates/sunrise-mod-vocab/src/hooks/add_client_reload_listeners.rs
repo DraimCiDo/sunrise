@@ -14,13 +14,16 @@ pub trait Hooks {
     /// Client-side, in Reloading nested in Setup initially and World later.
     /// Later registration is on the render thread, prepare on the loader,
     /// and apply on the owning game thread; completion restores the entering
-    /// phase. Startup's empty Host grants no extra access.
+    /// phase. Startup's empty Host grants no extra access. A panicking registration
+    /// callback discards its own listeners and ordering edges, not other mods' entries.
     #[hook(
         receiver = "read",
         dispatch = "flat",
         side = "client",
         contract = "listen",
+        event_per_listener = true,
+        version = 2,
         neoforge = "AddClientReloadListenersEvent"
     )]
-    fn add_client_reload_listeners(listeners: &mut dyn ClientReloadListeners);
+    fn add_client_reload_listeners(listeners: &mut ClientListenerRegistry);
 }

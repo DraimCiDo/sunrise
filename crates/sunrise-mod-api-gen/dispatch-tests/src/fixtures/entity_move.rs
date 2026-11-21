@@ -34,10 +34,10 @@ impl Hooks for Mover {
     }
 }
 
-fn mover(answer: Answer) -> (Arc<Mutex<Heard>>, ModEntry) {
+fn mover(id: &'static str, answer: Answer) -> (Arc<Mutex<Heard>>, ModEntry) {
     let heard = Arc::new(Mutex::new(Vec::new()));
     let entry = ModEntry::new(
-        "mover",
+        id,
         Box::new(Mover {
             answer,
             heard: Arc::clone(&heard),
@@ -67,8 +67,8 @@ fn dispatch(requested: [f64; 3]) -> ([f64; 3], bool) {
 /// invocation.
 #[test]
 fn an_unwinding_listener_keeps_the_requested_delta_and_ends_the_walk() {
-    let (replacer_heard, replacer) = mover(Answer::UnwindAfterReplace);
-    let (later_heard, later) = mover(Answer::Continue);
+    let (replacer_heard, replacer) = mover("mover_a", Answer::UnwindAfterReplace);
+    let (later_heard, later) = mover("mover_b", Answer::Continue);
     install(vec![replacer, later].into());
     let (delta, canceled) = dispatch([1.0, 0.0, 0.0]);
     assert_eq!(
@@ -80,15 +80,18 @@ fn an_unwinding_listener_keeps_the_requested_delta_and_ends_the_walk() {
     assert_eq!(replacer_heard.lock().unwrap().len(), 1);
     assert!(
         later_heard.lock().unwrap().is_empty(),
-        "no listener after the unwind runs on that invocation"
+        "#2414 stops the failing invocation even for unrelated listeners"
     );
+    assert_eq!(dispatch([2.0, 0.0, 0.0]), ([2.0, 0.0, 0.0], false));
+    assert_eq!(*replacer_heard.lock().unwrap(), [[1.0, 0.0, 0.0]]);
+    assert_eq!(*later_heard.lock().unwrap(), [[2.0, 0.0, 0.0]]);
 }
 
 /// The poison skips **this hook** of the mod for the session: the next
 /// dispatch hears nobody, and neither dispatch panics out of the loop.
 #[test]
 fn a_poisoned_listener_is_skipped_by_the_hook_alone() {
-    let (heard, entry) = mover(Answer::UnwindAfterReplace);
+    let (heard, entry) = mover("mover", Answer::UnwindAfterReplace);
     install(vec![entry].into());
     dispatch([1.0, 0.0, 0.0]);
     let (delta, canceled) = dispatch([2.0, 0.0, 0.0]);
@@ -105,7 +108,7 @@ fn a_poisoned_listener_is_skipped_by_the_hook_alone() {
 /// replacement stands.
 #[test]
 fn an_ordinary_listener_still_replaces_the_delta() {
-    let (heard, entry) = mover(Answer::Continue);
+    let (heard, entry) = mover("mover", Answer::Continue);
     install(vec![entry].into());
     let (delta, canceled) = dispatch([1.0, 0.0, 0.0]);
     assert_eq!(delta, [1.0, 0.0, 0.0]);

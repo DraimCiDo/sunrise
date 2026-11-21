@@ -27,7 +27,7 @@ pub trait Hooks {
         neoforge = "BlockEvent.FarmlandTrampleEvent",
         cancellable = true,
         isolate = true,
-        version = 3
+        version = 4
     )]
     fn farmland_trample(
         entity: mod_api::LivingRef,

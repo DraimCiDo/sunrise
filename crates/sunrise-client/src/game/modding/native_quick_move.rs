@@ -269,6 +269,7 @@ impl Game<'_> {
         let revision = api.revision();
         let original = held.clone();
         let mut candidate_handled = *handled;
+        let failures = mod_api::runtime::isolated_failures();
         self.native_menu_quick_move(
             pos,
             &mut api,
@@ -277,6 +278,9 @@ impl Game<'_> {
             &mut held,
             &mut candidate_handled,
         );
+        if mod_api::runtime::isolated_failures() != failures {
+            return false;
+        }
         let held = if held == original {
             Ok(None)
         } else {

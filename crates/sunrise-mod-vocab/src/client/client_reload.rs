@@ -160,6 +160,14 @@ impl ClientReloadListeners for ClientListenerRegistry {
     }
 }
 impl ClientListenerRegistry {
+    pub(crate) fn checkpoint(&self) -> crate::world::reload::ReloadCheckpoint {
+        self.core.checkpoint()
+    }
+
+    pub(crate) fn rollback(&mut self, checkpoint: crate::world::reload::ReloadCheckpoint) {
+        self.core.rollback(checkpoint);
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             core: crate::world::reload::ReloadCore::new(

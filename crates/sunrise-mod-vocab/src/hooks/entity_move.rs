@@ -27,7 +27,7 @@ pub trait Hooks {
     /// listener written for version 1 hears moves it never heard. `MoveCause` is
     /// `#[non_exhaustive]`: match it with a wildcard arm.
     #[hook(
-        version = 2,
+        version = 3,
         side = "server",
         contract = "cancel",
         out = "canceled",

@@ -387,6 +387,17 @@ pub(super) fn emit<'a>(
         // The fields an isolated dispatch rolls back to the requested values on a listener's
         // unwind (#2414 ruling), each with whether the event holds it behind a `&mut`.
         let mut rollback: Vec<(String, bool)> = Vec::new();
+        // The reload owner carries the concrete append-only registry; only the mod sees a trait
+        // object. Keeping the owner outside the event also gives rollback the original sink.
+        let reload_registration: Option<Type> = match event_type.as_str() {
+            "AddClientReloadListenersEvent" => {
+                Some(syn::parse_quote!(&mut dyn ClientReloadListeners))
+            }
+            "AddServerReloadListenersEvent" => {
+                Some(syn::parse_quote!(&mut dyn ServerReloadListeners))
+            }
+            _ => None,
+        };
         // The rolled-back fields a snapshot copies by `Clone` rather than by `Copy`.
         let mut cloned: Vec<String> = Vec::new();
         // The `&mut dyn Trait` fields: registrars and draw surfaces, with no value to snapshot.
@@ -455,6 +466,10 @@ pub(super) fn emit<'a>(
                 syn::parse_quote!(ModBlockEntityView<'_>)
             } else if optional_mutable_entity {
                 syn::parse_quote!(Option<ModBlockEntityView<'_>>)
+            } else if let Some(registrar) =
+                reload_registration.as_ref().filter(|_| name == "listeners")
+            {
+                registrar.clone()
             } else if let Some(entry) = batch_entry {
                 syn::parse_quote!(&mut Vec<#entry>)
             } else {
@@ -970,6 +985,12 @@ pub(super) fn emit<'a>(
             snaps.push(format!("{event}.registration.checkpoint()"));
             restores.push(format!("{event}.registration.rollback({saved}.{index});"));
         }
+        if reload_registration.is_some() {
+            let index = snaps.len();
+            snaps.push("listeners.checkpoint()".into());
+            // Restore through the owning sink, not the mutable reference a listener can replace.
+            restores.push(format!("listeners.rollback({saved}.{index});"));
+        }
         if mod_cancel {
             restores.push(format!("{event}.cancelled = {saved}.{};", snaps.len()));
             snaps.push(format!("{event}.cancelled"));
@@ -1019,7 +1040,17 @@ pub(super) fn emit<'a>(
             } else {
                 run(mod_id_expr, on_abort, &format!("{callee}.{name}({invoke})"))
             };
-            let plain_call = run(mod_id_expr, on_abort, &format!("{callee}.{name}({invoke})"));
+            let plain_expression = if name == "contents_changed" {
+                // In World, let the existing transaction guard see the raw callback unwind
+                // before invoke contains it. Outside World, journaled writes aren't available.
+                let (host, _) = host.as_ref().unwrap();
+                format!(
+                    "if contained {{ {callee}.{name}({invoke}); }} else {{ let _: Result<(), core::convert::Infallible> = super::item::transaction::run_transaction(&mut *{host}, |{host}, _| {{ {callee}.{name}({invoke}); Ok(()) }}); }}"
+                )
+            } else {
+                format!("{callee}.{name}({invoke})")
+            };
+            let plain_call = run(mod_id_expr, on_abort, &plain_expression);
             let invocation = match contract {
                 Contract::Cancel => format!(
                     "if matches!({plain_call}, Flow::Cancel) {{ *{o} = true; {exit}; }}",
@@ -1052,9 +1083,12 @@ pub(super) fn emit<'a>(
                 }
                 _ => format!("{plain_call};"),
             };
-            format!(
-                "{local_event} {snapshot_statement}{invocation} {local_write_back} {stack_after}"
-            )
+            let (first, second) = if reload_registration.is_some() {
+                (&snapshot_statement, &local_event)
+            } else {
+                (&local_event, &snapshot_statement)
+            };
+            format!("{first} {second} {invocation} {local_write_back} {stack_after}")
         };
         // The #2414 ruling an isolated cancel hook carries: a listener that unwinds keeps the
         // **requested** outputs — not one an earlier listener had proposed — is skipped by this
@@ -1177,7 +1211,26 @@ pub(super) fn emit<'a>(
             None if hook.context == Some(PhaseContext::ChunkDisk) => (
                 String::new(),
                 format!(
-                    "for ({listener_id}, {mod_item}) in super::entered_with_id(HookId::{hook_id}, \"{name}\") {{ if {event}.data.failure().is_some() {{ break; }} {local_event} {snapshot_statement}match super::runtime::invoke(HookId::{hook_id}, \"{name}\", {listener_id}, contained, || {mod_item}.{name}({invoke})) {{ super::runtime::DispatchOutcome::Ok(()) => {{ {local_write_back} {stack_after} }} super::runtime::DispatchOutcome::Refused(refusal) => {{ {restore_statement}refusal.report(); }} super::runtime::DispatchOutcome::Panicked => {{ {restore_statement}{event}.data.refuse(super::chunk_disk::unwound_failure({listener_id})); }} }} if let Some(error) = {event}.data.failure().cloned() {{ let mut error = error; if error.mod_id.is_empty() {{ error.mod_id = {listener_id}.into(); }} {event}.data.attribute_failure(error); break; }} }}"
+                    "let mut first_panic = None;
+                     for ({listener_id}, {mod_item}) in super::entered_with_id(HookId::{hook_id}, \"{name}\") {{
+                         if {event}.data.failure().is_some() {{ break; }}
+                         {local_event} {snapshot_statement}
+                         match super::runtime::invoke(HookId::{hook_id}, \"{name}\", {listener_id}, contained, || {mod_item}.{name}({invoke})) {{
+                             super::runtime::DispatchOutcome::Ok(()) => {{ {local_write_back} {stack_after} }}
+                             super::runtime::DispatchOutcome::Refused(refusal) => {{ {restore_statement}refusal.report(); }}
+                             super::runtime::DispatchOutcome::Panicked => {{
+                                 {restore_statement}
+                                 first_panic.get_or_insert_with(|| super::chunk_disk::unwound_failure({listener_id}));
+                             }}
+                         }}
+                         if let Some(mut error) = {event}.data.failure().cloned() {{
+                             if error.mod_id.is_empty() {{ error.mod_id = {listener_id}.into(); }}
+                             if first_panic.is_some() {{ log::warn!(\"mod {{}} hook {name} refused: {{error:?}}\", {listener_id}); }}
+                             {event}.data.attribute_failure(error);
+                             break;
+                         }}
+                     }}
+                     if let Some(error) = first_panic {{ {event}.data.attribute_failure(error); }}"
                 ),
             ),
             None if name == "consume_effect" => (

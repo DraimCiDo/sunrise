@@ -1,5 +1,5 @@
 //! `chunk_data_load` and `chunk_data_save`: the disk hooks run each mod through the unified
-//! `runtime::invoke` dispatcher and stop at the first failed job. Stand-ins for the restricted
+//! `runtime::invoke` dispatcher. Stand-ins for the restricted
 //! host and the store.
 mod stubs {
     pub(super) trait ChunkDiskHost {}
@@ -14,9 +14,6 @@ mod stubs {
     impl ChunkDiskData {
         pub(super) fn failure(&self) -> Option<&ChunkDiskFailure> {
             self.failure.as_ref()
-        }
-        pub(super) fn refuse(&mut self, error: ChunkDiskFailure) {
-            self.failure.get_or_insert(error);
         }
         pub(super) fn attribute_failure(&mut self, error: ChunkDiskFailure) {
             self.failure = Some(error);

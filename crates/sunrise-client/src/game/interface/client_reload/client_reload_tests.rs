@@ -53,6 +53,98 @@ fn root_with_asset(name: &str, bytes: &[u8]) -> PathBuf {
 }
 
 #[test]
+#[ignore = "daily"]
+fn panicking_client_reload_registration_discards_its_listener_and_edges() {
+    use mod_api::{AddClientReloadListenersEvent, Hooks, ModEntry, VanillaClientListeners};
+    use sunrise_assets::resource_source::ResourceSource;
+
+    struct Register {
+        fails: bool,
+        applied: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+    #[mod_api::__subscriptions]
+    impl Hooks for Register {
+        fn add_client_reload_listeners(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut AddClientReloadListenersEvent<'_>,
+        ) {
+            let name = if self.fails { "failed" } else { "healthy" };
+            event
+                .listeners
+                .add_listener(
+                    id(&format!("test_mod:{name}")),
+                    hats(),
+                    Arc::new(HatListener {
+                        seen: Default::default(),
+                        applied: self.applied.clone(),
+                    }),
+                )
+                .unwrap();
+            if self.fails {
+                event
+                    .listeners
+                    .add_dependency(
+                        VanillaClientListeners::last(),
+                        VanillaClientListeners::first(),
+                    )
+                    .unwrap();
+                panic!("client reload registrar failed after adding a listener and an edge");
+            }
+        }
+    }
+    super::super::native_entity_refs::tests::with_game(|game| {
+        for startup in [true, false] {
+            let failed = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let healthy = Arc::new(std::sync::Mutex::new(Vec::new()));
+            mod_platform::testing::with_mods(
+                vec![
+                    ModEntry::new(
+                        "failed",
+                        Box::new(Register {
+                            fails: true,
+                            applied: failed.clone(),
+                        }),
+                    ),
+                    ModEntry::new(
+                        "healthy",
+                        Box::new(Register {
+                            fails: false,
+                            applied: healthy.clone(),
+                        }),
+                    ),
+                ]
+                .into(),
+                || {
+                    let (listeners, phase) = if startup {
+                        (
+                            register_startup_client_reload_listeners(),
+                            mod_api::__private::ModPhase::Setup,
+                        )
+                    } else {
+                        (
+                            game.register_client_reload_listeners(),
+                            mod_api::__private::ModPhase::World,
+                        )
+                    };
+                    assert!(!listeners.get_registry().contains(&id("test_mod:failed")));
+                    assert!(listeners.get_registry().contains(&id("test_mod:healthy")));
+                    assert!(!listeners.get_graph().contains(&(
+                        VanillaClientListeners::last(),
+                        VanillaClientListeners::first()
+                    )));
+                    let root = ResourceSource::indexed(Default::default());
+                    let prepared = stage_client_reload(&root, listeners, phase).unwrap();
+                    apply_client_reload(&mod_api::__private::PhaseOwner::new(phase), prepared);
+                    assert!(failed.lock().unwrap().is_empty());
+                    assert_eq!(healthy.lock().unwrap().as_slice(), ["hats"]);
+                },
+            );
+        }
+    });
+}
+
+#[test]
 fn stage_reads_resolved_asset_bytes_without_a_directory() {
     use sunrise_assets::resource_source::{Resource, ResourceSource};
     let source = ResourceSource::indexed(std::collections::BTreeMap::from([(

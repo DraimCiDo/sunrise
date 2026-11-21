@@ -105,7 +105,24 @@ pub(crate) struct ReloadCore<L: ?Sized> {
     last: Identifier,
 }
 
+pub(crate) struct ReloadCheckpoint {
+    order: (usize, usize),
+    failure: Option<ReloadOrderError>,
+}
+
 impl<L: ?Sized + 'static> ReloadCore<L> {
+    pub(crate) fn checkpoint(&self) -> ReloadCheckpoint {
+        ReloadCheckpoint {
+            order: self.order.checkpoint(),
+            failure: self.failure.clone(),
+        }
+    }
+
+    pub(crate) fn rollback(&mut self, checkpoint: ReloadCheckpoint) {
+        self.order.rollback(checkpoint.order);
+        self.failure = checkpoint.failure;
+    }
+
     /// The `first`, vanilla-anchor and `last` boundaries with their default
     /// edges; `boundary` builds each id's own stateless listener, as the
     /// vanilla anchors are distinct listener objects.

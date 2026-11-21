@@ -1,3 +1,20 @@
-ids = ["behaviour:hook_dispatch_panic_containment"]
-why = "Unify hook dispatch failure handling across every generated hook, chunk-disk callback, and startup Hooks::register instead of mixing isolate-only poisoning, ad-hoc per-feature catch_unwind wrappers, and latched refusal warnings. Follows NeoForge's NeoForge.EVENT_BUS and FML's FMLModContainer::onEventFailed (error logging naming the mod and event) together with vanilla 26.3's SystemToast error toast (a per-install failure queue drained directly into non-vetoable red-titled client system toasts; headless dedicated servers log without draining client toasts), plus per-(hook, mod) isolation, full rollback of mutable event fields and transactional host writes in every phase including World, and panic-hook deferral on client, integrated server, and worker threads so contained hook panics never write crash reports or abort the process. Non-panic refusals (phase refusals and output-validator refusals) are reported each time and never latched."
-migrate = "No hook or host signature changed. A mod callback that panics in any hook (including chunk-disk callbacks and startup Hooks::register) is now caught, rolled back, disabled for that hook for the rest of the session, and reported once via an error log line and (on clients) a non-vetoable error toast instead of unwinding out of dispatch or triggering a crash report/exit; its other hooks and other mods continue running. Repeated phase refusals and output-validator refusals are logged every time they occur rather than being suppressed after the first warning."
+ids = [
+    "behaviour:hook_dispatch_panic_containment",
+    "hook:add_client_reload_listeners",
+    "hook:add_server_reload_listeners",
+    "hook:chunk_data_load",
+    "hook:chunk_data_save",
+    "hook:contents_changed",
+    "hook:entity_move",
+    "hook:farmland_trample",
+    "hook:living_travel",
+    "hook:menu_button",
+]
+why = "Sunrise defines per-hook session disablement and continuation so a failed mod callback does not fail unrelated callbacks or publish unfinished edits. Vanilla 26.3 IntegratedServer.reportChunkLoadFailure and reportChunkSaveFailure route diagnostics to SystemToast, and ToastManager.extractRenderState respects the player's HUD setting. FMLModContainer.onEventFailed logs the mod's loading-bus failure; it does not define NeoForge.EVENT_BUS recovery or hook disablement. Reload registration follows AddClientReloadListenersEvent and SortedReloadListenerEvent; the contents notice uses the existing NeoForge-style Transaction.open nested journal at vanilla Container.setChanged. Detached menu outputs are checked at AbstractContainerMenu.clickMenuButton and quickMoveStack. ChunkDataEvent.Load and Save anchor the disk callback moments, not the panic policy."
+migrate = '''
+Keep existing mod hook signatures. Do not catch a hook panic at a caller or use a panic to cancel an event; return the hook's normal cancellation or error instead. A panic disables only your callback for that hook until restart. A phase refusal discards your current proposal, is logged on each occurrence, and does not disable you. In entity_move (v3), farmland_trample (v4) and living_travel (v2), a phase refusal keeps the last accepted proposal and continues; a panic still restores the game's requested outputs and stops just that invocation (#2414).
+
+In chunk_data_load and chunk_data_save (both v3), later listeners can run on the last accepted store even after a panic. None of that failed job's edits can publish. Do not rely on an unrelated listener being skipped when a disk callback panics.
+
+In add_client_reload_listeners and add_server_reload_listeners (both v2), keep calling event.listeners.add_listener and add_dependency as before. A failing registration callback's tentative entries and edges are discarded, including on first load; do not assume half a registration can survive a panic. Native replacements of the engine entry points native_add_client_reload_listeners and native_add_server_reload_listeners must take &mut ClientListenerRegistry and &mut ServerListenerRegistry respectively instead of the mutable trait objects; the public hook event fields still lend the traits. For contents_changed (v4), keep doing writes with the existing transaction API; the listener's tentative writes are discarded on panic without undoing the change that raised the notice. For menu_button (v3), keep editing entity and carried through the event; a panicking invocation publishes neither detached output. menu_quick_move still refuses the move if a listener panics, as before. If a manifest pins any of these hooks, update its hook_version to the version above.
+'''

@@ -1965,7 +1965,11 @@ impl super::Game<'_> {
         };
         let revision = api_entity.as_ref().map(|entity| entity.revision());
         let original = cursor.clone();
+        let failures = mod_api::runtime::isolated_failures();
         self.native_menu_button(menu, block, context, api_entity.as_mut(), &mut cursor);
+        if mod_api::runtime::isolated_failures() != failures {
+            return;
+        }
         // The outer Option means whether the callback changed the cursor; the inner one is its
         // new value. `Some(None)` is an explicit consume, while `None` leaves it untouched.
         let cursor: Result<Option<Option<EngineStack>>, BlockEntitySnapshotError> =

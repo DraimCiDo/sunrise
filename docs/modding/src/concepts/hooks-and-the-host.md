@@ -26,17 +26,20 @@ A hook with no receiver gets no `Host`.
 ## Failures and panics
 
 Every hook's dispatcher — including chunk-disk callbacks and startup `Hooks::register` — catches
-panics in mod callbacks. A panicking callback is disabled for that hook for the rest of the session
-— the mod's other hooks and every other mod's listeners keep running — its mutable event fields and
-transactional host writes are rolled back, and the panic is reported once loudly with an `error!`
-log line and, on a client, a non-vetoable error toast naming the mod and the hook (headless
-dedicated servers log the error and do not drain the client toast queue).
+panics in mod callbacks. A panicking callback is disabled for that hook for the rest of the session;
+other hooks and other mods stay enabled. Dispatch drops its tentative outputs, and owning actions
+such as menu quick moves can refuse the whole operation. The panic is reported once in the error
+log and, on a client, in an error toast naming the mod and hook. Neither `toast_add` nor a mod's HUD
+veto hides that diagnostic. The player's presentation settings still apply.
 
-Isolated hooks additionally roll the panicking listener's outputs back to the game's requested
-values and stop the current invocation so no later listener runs on that call.
+Isolated cancel hooks (`entity_move`, `farmland_trample` and `living_travel`) keep the game's
+requested outputs on a panic and stop only the current invocation (#2414). A phase refusal instead
+discards just that proposal, keeps the preceding accepted values and continues. Chunk disk callbacks
+also continue past a panic on the last accepted store, but the failed job publishes none of its edits.
 
-Any other failure or refusal — such as a load-phase refusal, an invalid output writeback, or an
-output-validator refusal — is reported each time it happens and is never latched.
+Other failures or refusals, such as an invalid output or a phase refusal, are reported each time
+and do not disable the callback. A failing client or server reload registration leaves none of that
+callback's pending listener entries or dependencies in the reload.
 
 ## Player tick hooks
 

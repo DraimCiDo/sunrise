@@ -117,15 +117,44 @@ fn load_disk_8_callback_increment_publishes_9_once() {
 
 #[test]
 fn codec_error_or_unwind_after_setting_8_refuses_partial_publication() {
-    with_listener(1, |calls| {
-        let job = ChunkDiskJob::capture(&context(ChunkDiskPhase::Save), &store(7)).unwrap();
-        let refusal = run(&job).unwrap_err();
-        assert_eq!(refusal.mod_id, "disk_fixture");
-        assert_eq!(refusal.reason, "native listener unwound");
-        assert_eq!(read(job.captured()), 7);
-        assert_eq!(run(&job).unwrap_err(), refusal);
-        assert_eq!(calls.load(Ordering::Relaxed), 1);
-    });
+    let a = Arc::new(AtomicUsize::new(0));
+    let b = Arc::new(AtomicUsize::new(0));
+    testing::with_dispatch(
+        vec![
+            ModEntry::new(
+                "disk_a",
+                Box::new(Listener {
+                    calls: a.clone(),
+                    mode: 1,
+                }),
+            ),
+            ModEntry::new(
+                "disk_b",
+                Box::new(Listener {
+                    calls: b.clone(),
+                    mode: 0,
+                }),
+            ),
+        ]
+        .into(),
+        || {
+            let failed = ChunkDiskJob::capture(&context(ChunkDiskPhase::Save), &store(7)).unwrap();
+            let refusal = run(&failed).unwrap_err();
+            assert_eq!(refusal.mod_id, "disk_a");
+            assert_eq!(refusal.reason, "native listener unwound");
+            assert_eq!(read(failed.captured()), 7);
+            assert_eq!(
+                b.load(Ordering::Relaxed),
+                1,
+                "B runs even on the failed job"
+            );
+            assert_eq!(run(&failed).unwrap_err(), refusal);
+            let next = ChunkDiskJob::capture(&context(ChunkDiskPhase::Save), &store(7)).unwrap();
+            assert_eq!(read(&run(&next).unwrap()), 8, "only B runs and publishes");
+            assert_eq!(a.load(Ordering::Relaxed), 1);
+            assert_eq!(b.load(Ordering::Relaxed), 2);
+        },
+    );
     let broken = AttachmentType {
         codec: Some(sunrise_mod_runtime::attachments::AttachmentCodec {
             encode: |_| Err(AttachmentError::Encode),

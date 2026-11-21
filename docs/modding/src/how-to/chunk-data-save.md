@@ -24,7 +24,8 @@ the callback, or copy it if it must outlive the callback. Neither metadata gette
 
 A captured record caches its callback result. Disk encoding and pending reads
 reuse it; they cannot invoke the callback twice. A refusal keeps the original
-capture and prevents the writer from replacing the prior region record. A chunk
+capture and prevents the writer from replacing the prior region record. After a listener
+panics, later listeners still run without its edits, but the failed job cannot publish. A chunk
 whose `chunk_data_load` listener failed is saved without any save listener.
 
 Every captured record runs the callback exactly once, for full saves (explicit,

@@ -36,13 +36,13 @@ pub use mod_api::game::{PhantomSpawnResult, Shake, SleepProblem};
 use mod_api::{
     self, Answered, BlockPlacement, BlockTintSources, CauldronFluidContents, CauldronInteractions,
     ClientAudioOptions, ClientChatOptions, ClientGraphicsOptions, ClientGuiOptions,
-    ClientInputOptions, ClientMiningPrediction, ClientModifiers, ClientReloadListeners,
+    ClientInputOptions, ClientListenerRegistry, ClientMiningPrediction, ClientModifiers,
     ColorResolvers, CommandInvocation, EnchantmentDamageEffects, EnchantmentInfo, EntityLayers,
     EntityRef, EntityRenderers, GameRuleActor, HandRender, InsideEffects, InteractionAttempt,
     InteractionKey, ItemEntityRef, JsonAnimationType, LifecycleContext, LivingRef, LoadConditions,
     NoteBlockChange, ParticleProviders, PathComputationType, Placement, PlayerRef,
     PoiTypeExtensions, RecipeBookCategory, ScreenId, ScreenOpening, ScreenTarget, ScreenshotImage,
-    ServerReloadListeners, ServerTickPhase, SpecialModelRenderers, TicketController, ToolUse,
+    ServerListenerRegistry, ServerTickPhase, SpecialModelRenderers, TicketController, ToolUse,
     VillagerProfessions, WorldPhase,
 };
 use mod_api::{

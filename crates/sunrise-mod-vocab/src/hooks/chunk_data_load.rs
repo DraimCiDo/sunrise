@@ -7,13 +7,15 @@ pub trait Hooks {
     /// succeeds. Missing records and proto-to-full promotion do not fire this hook.
     /// Borrow the captured metadata from `host.job()`. A codec error, unwind,
     /// or invalid or over-budget disk NBT refuses publication of the whole store.
+    /// After a panic, later listeners can still run on the last accepted store;
+    /// none of this job's changes are published.
     #[hook(
         side = "server",
         contract = "listen",
         context = "chunk_disk",
         target = "mod_api::chunk_disk::native_chunk_data_load",
         neoforge = "ChunkDataEvent.Load",
-        version = 2
+        version = 3
     )]
     fn chunk_data_load(data: &mut ChunkDiskData);
 }

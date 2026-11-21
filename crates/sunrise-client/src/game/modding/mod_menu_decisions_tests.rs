@@ -40,6 +40,8 @@ struct Script {
     change_cursor: bool,
     /// `menu_button`: consume the player's carried stack.
     clear_cursor: bool,
+    /// `menu_button`: propose a valid backing slot and one-shot update, then panic.
+    fail_button: bool,
 }
 
 thread_local! {
@@ -102,6 +104,14 @@ impl BlockEntityPart for Part {
             event.entity.items.resize(9, None);
             event.entity.items[1] = Some(stone(if s.invalid { 65 } else { 4 }));
             event.entity.items[2] = Some(stone(if s.all { 6 } else { 5 }));
+            if s.panic {
+                event
+                    .entity
+                    .set_client_update_fields(mod_api::Compound::from([(
+                        "panic_fixture".into(),
+                        mod_api::Tag::Int(1),
+                    )]));
+            }
             if s.all {
                 *event.stack = None;
             } else {
@@ -175,6 +185,16 @@ impl mod_api::MenuPart for Part {
                 )
                 .unwrap(),
             );
+        }
+        if script.fail_button {
+            let entity = event.entity.as_mut().unwrap();
+            let stone = mod_api::__private::item_key("minecraft:stone").unwrap();
+            entity.items[1] = Some(mod_api::ItemStack::new(stone, 4).unwrap());
+            entity.set_client_update_fields(mod_api::Compound::from([(
+                "panic_fixture".into(),
+                mod_api::Tag::Int(2),
+            )]));
+            panic!("menu button failed after editing the entity");
         }
         if script.replace_menu {
             host.open_menu(
@@ -257,11 +277,21 @@ fn a_click_on_a_mod_menu_tells_the_mods_inside_an_action_and_a_failure_undoes_it
             assert_eq!(IN_ACTION.with(|a| a.borrow().clone()), [true]);
             assert_eq!(inventory(game, 20), 2);
             assert!(game.transactions.is_empty());
-            // Rows 79 and 84: a write and then a panic: the write is undone, the click is not
-            // heard again, and the next click works.
             game.lan.as_mut().unwrap().hub.guests.update(0, |g| {
                 g.inventory[20] = None;
             });
+            // Row 90: heard inside a transaction that then aborts: the write is undone.
+            script(Script {
+                write_dirt: true,
+                ..Script::default()
+            });
+            let seal = game.transaction_open();
+            click(game);
+            assert_eq!(inventory(game, 20), 2);
+            game.transaction_close(&seal, false);
+            assert_eq!(inventory(game, 20), 0);
+            // Rows 79 and 84: a write and then a panic: the write is undone and the callback
+            // is not heard on a subsequent click.
             script(Script {
                 write_dirt: true,
                 panic: true,
@@ -273,17 +303,7 @@ fn a_click_on_a_mod_menu_tells_the_mods_inside_an_action_and_a_failure_undoes_it
             assert!(game.transactions.is_empty());
             script(Script::default());
             click(game);
-            assert_eq!(DISPATCHES.get(), 1);
-            // Row 90: heard inside a transaction that then aborts: the write is undone.
-            script(Script {
-                write_dirt: true,
-                ..Script::default()
-            });
-            let seal = game.transaction_open();
-            click(game);
-            assert_eq!(inventory(game, 20), 2);
-            game.transaction_close(&seal, false);
-            assert_eq!(inventory(game, 20), 0);
+            assert_eq!(DISPATCHES.get(), 0);
         });
     });
 }
@@ -505,45 +525,86 @@ fn a_mod_quick_move_is_one_action_and_a_refusal_leaves_no_prefix() {
             });
             click(game);
             assert_eq!(depot(game), (10, 0, 0, 0));
-            // Rows 79 and 84: a panic after writing: the block entity is put back as it was
-            // (it is out of the world while the mods are asked), the write is undone, and the next
-            // click works.
-            open_depot(game);
-            script(Script {
-                take: true,
-                write_dirt: true,
-                panic: true,
-                ..Script::default()
-            });
-            click(game);
-            assert_eq!(depot(game), (10, 0, 0, 0));
-            assert!(game.transactions.is_empty());
-            // The panic alone, with no `Host` write (which would make the move stale by itself):
-            // the move the listener answered is still refused and the block entity is put back.
-            open_depot(game);
-            script(Script {
-                take: true,
-                panic: true,
-                ..Script::default()
-            });
-            click(game);
-            assert_eq!(DISPATCHES.get(), 1);
-            assert_eq!(depot(game), (10, 0, 0, 0));
-            assert!(game.transactions.is_empty());
-            open_depot(game);
-            script(Script {
-                take: true,
-                ..Script::default()
-            });
-            click(game);
-            assert_eq!(depot(game), (1, 4, 5, 0));
             // Row 90: applied inside a transaction that then aborts: the move is undone.
             open_depot(game);
+            script(Script {
+                take: true,
+                ..Script::default()
+            });
             let seal = game.transaction_open();
             click(game);
             assert_eq!(depot(game), (1, 4, 5, 0));
             game.transaction_close(&seal, false);
             assert_eq!(depot(game), (10, 0, 0, 0));
+        });
+    });
+    // Run each panic in a fresh dispatch session. A Host write by itself also makes the move
+    // stale, so exercise valid detached edits without that write as well.
+    for write_dirt in [false, true] {
+        with_mod(|| {
+            with_guests(|game| {
+                let window = open_depot(game);
+                script(Script {
+                    take: true,
+                    write_dirt,
+                    panic: true,
+                    ..Script::default()
+                });
+                game.lan_guest_packet(12, container_click(window, 0, 1));
+                assert_eq!(DISPATCHES.get(), 1);
+                assert_eq!(depot(game), (10, 0, 0, 0));
+                assert!(game.transactions.is_empty());
+                assert_eq!(
+                    mod_api::__private::take_hook_panics(),
+                    [mod_api::__private::HookPanicReport {
+                        mod_id: "movemod",
+                        hook: "menu_quick_move",
+                    }]
+                );
+            });
+        });
+    }
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_panicking_menu_button_cannot_publish_edits_to_the_detached_block_entity() {
+    with_mod(|| {
+        with_guests(|game| {
+            let mut entity = ModBlockEntity::new(
+                "movemod:depot".into(),
+                ModBlockEntityFields {
+                    items: vec![None; 9],
+                    ..Default::default()
+                },
+            );
+            let before = entity.revision();
+            script(Script {
+                fail_button: true,
+                ..Script::default()
+            });
+            game.api_menu_button(
+                DEPOT_MENU,
+                None,
+                &mod_api::item::menu::MenuButtonContext {
+                    player: 12,
+                    player_entity_id: 1,
+                    pos: Some([POS.0, POS.1, POS.2]),
+                    id: 3,
+                },
+                Some(&mut entity),
+                &mut None,
+            );
+            assert!(entity.items[1].is_none());
+            assert!(entity.take_client_update_fields().is_none());
+            assert_eq!(entity.revision(), before);
+            assert_eq!(
+                mod_api::__private::take_hook_panics(),
+                [mod_api::__private::HookPanicReport {
+                    mod_id: "movemod",
+                    hook: "menu_button",
+                }]
+            );
         });
     });
 }
@@ -627,7 +688,7 @@ fn a_handled_cross_block_move_commits_only_if_its_take_returns() {
                 crafting: None,
                 links: None,
             }));
-            for fail_take in [true, false] {
+            for fail_take in [false, true] {
                 let window = open_depot(game);
                 second_block(game);
                 game.lan

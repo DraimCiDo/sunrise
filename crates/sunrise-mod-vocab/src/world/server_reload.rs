@@ -227,6 +227,15 @@ impl ServerReloadListeners for ServerListenerRegistry {
     }
 }
 impl ServerListenerRegistry {
+    pub(crate) fn checkpoint(&self) -> (super::reload::ReloadCheckpoint, usize) {
+        (self.core.checkpoint(), self.retained.len())
+    }
+
+    pub(crate) fn rollback(&mut self, (core, retained): (super::reload::ReloadCheckpoint, usize)) {
+        self.core.rollback(core);
+        self.retained.truncate(retained);
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             core: ReloadCore::new(

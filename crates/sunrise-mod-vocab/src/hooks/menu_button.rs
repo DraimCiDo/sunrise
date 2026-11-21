@@ -5,7 +5,8 @@ pub trait Hooks {
     /// A player pressed a mod menu's button (`clickMenuButton`), on the
     /// server. `entity` is the block entity backing the menu when there is
     /// one, out of the world during the call; it is None for a blockless
-    /// menu. Mods may change it and the clicking player's carried stack.
+    /// menu. Mods may change it and the clicking player's carried stack. If a
+    /// listener panics, the button invocation publishes neither detached output.
     #[notes = r#"### Menu buttons
 
 `menu_button` handles a mod menu's button (`AbstractContainerMenu.clickMenuButton(Player, int)`) on the server, for
@@ -15,7 +16,7 @@ take or give what the player carries. A blockless menu supplies None for the pos
     #[hook(
         target = "sunrise_client::game::native_hooks::base::Game<'_>::native_menu_button",
         dispatch = "flat",
-        version = 2,
+        version = 3,
         side = "server",
         contract = "listen",
         scope = "menu",

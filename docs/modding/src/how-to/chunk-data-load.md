@@ -17,7 +17,9 @@ The host has no live backend and is not a `ServerHost`. Typed values need a
 persistence codec, not `Wire`. Unknown bounded attachment entries are preserved opaquely.
 
 Codec errors, invalid or over-budget disk NBT, and unwinding panics refuse the entire
-store: none of its edits are kept. The chunk still loads, with the attachments
+store: none of its edits are kept. After a listener panics, later listeners still run on the
+last accepted store without the panicking listener's edits, but nothing that job does can
+publish. The chunk still loads, with the attachments
 exactly as they were stored, so a mod bug leaves no gap in the world. No
 `chunk_data_save` listener runs for that chunk for the rest of the session, so
 half-initialised state never replaces the stored record, and the chunk's later
