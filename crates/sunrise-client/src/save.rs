@@ -7182,22 +7182,22 @@ mod tests {
 
     #[test]
     fn failed_async_entity_write_is_reported_by_only_one_barrier() {
-        let dir = std::env::temp_dir().join(format!("sunrise-save-failure-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = tempfile::tempdir().unwrap();
         // A file where a directory is needed causes a real writer I/O error.
-        std::fs::write(dir.join("entities"), b"blocked").unwrap();
-        let save =
-            super::SaveDir::new(dir.clone(), LevelShape::OVERWORLD, Some(Default::default()));
+        std::fs::write(dir.path().join("entities"), b"blocked").unwrap();
+        let mut save = super::SaveDir::new(
+            dir.path().to_owned(),
+            LevelShape::OVERWORLD,
+            Some(Default::default()),
+        );
+        save.chunk_reports = Arc::default();
         let entity = Tag::compound([("version", Tag::Int(3))]);
         save.save_entities_later(vec![((0, 0), vec![entity])])
             .unwrap();
         assert!(save.flush().is_err());
         assert!(save.writes_finished().unwrap());
-        std::fs::remove_file(dir.join("entities")).unwrap();
+        std::fs::remove_file(dir.path().join("entities")).unwrap();
         assert!(save.load_entities(0, 0).unwrap().is_empty());
-        drop(save);
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

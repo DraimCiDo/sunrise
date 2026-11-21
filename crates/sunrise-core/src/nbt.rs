@@ -1840,7 +1840,29 @@ mod tests {
     /// modified UTF-8 empty and goes on (#5064); the network writer refuses
     /// it. Vanilla 26.3's bytes for `{s: 32768 x U+0000}` (65536 encoded).
     #[test]
+    #[ignore = "daily"]
     fn the_disk_writer_reports_and_empties_overlong_modified_utf8() {
+        // The logger is process-wide; install the fixture only in a fresh harness process.
+        const CHILD: &str = "SUNRISE_NBT_FALLBACK_LOG_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--include-ignored",
+                    "--exact",
+                    "nbt::tests::the_disk_writer_reports_and_empties_overlong_modified_utf8",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success() && stdout.contains("test result: ok. 1 passed;"),
+                "the isolated NBT log fixture failed:\n{stdout}{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+
         thread_local! {
             static REPORTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
         }
