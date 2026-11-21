@@ -2,7 +2,7 @@
 use std::{fmt, hash::Hash, slice, sync::Arc};
 
 use super::{
-    AttachmentError, AttachmentType,
+    AttachmentError, AttachmentType, CheckedAttachmentType,
     index::{AttachmentIndex, AttachmentOwner, AttachmentRow, AttachmentSnapshot},
 };
 
@@ -68,6 +68,18 @@ impl<H> AttachmentBatch<H> {
     ) -> Result<AttachmentQuery<'_, H, T>, AttachmentError> {
         key.validate_policy()?;
         Ok(AttachmentQuery { batch: self, key })
+    }
+
+    /// Bind a pre-validated key without re-running policy checks.
+    /// The query borrows only the key, never the index or host.
+    pub fn query_checked<'key, T: Send + Sync + 'static>(
+        self,
+        key: &'key CheckedAttachmentType<T>,
+    ) -> AttachmentQuery<'key, H, T> {
+        AttachmentQuery {
+            batch: self,
+            key: key.as_type(),
+        }
     }
 }
 

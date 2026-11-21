@@ -312,11 +312,8 @@ mod tests {
         );
         assert_eq!(
             missing.sync_data(&mut store, crate::Holder::Level),
-            Err(error.clone())
+            Err(error)
         );
-        let batch: crate::AttachmentBatch =
-            sunrise_mod_runtime::attachments::AttachmentBatch::empty().into();
-        assert_eq!(batch.query(&missing).err(), Some(error));
     }
 
     #[test]
@@ -376,6 +373,9 @@ mod tests {
 
         let mut host = crate::testing::FakeHost::default();
         assert_eq!(consumer_key.get(&mut host, crate::Holder::Level), Ok(37));
+        let batch: crate::AttachmentBatch =
+            sunrise_mod_runtime::attachments::AttachmentBatch::empty().into();
+        assert_eq!(batch.query(&consumer_key).unwrap().iter().len(), 0);
 
         // Reinstall: previously issued keys become stale even with the same ID and Rust type.
         let owner_key_next = Arc::new(Mutex::new(None));
@@ -395,6 +395,15 @@ mod tests {
             consumer_key.get(&mut host, crate::Holder::Level),
             Err(crate::AttachmentError::StaleKey)
         );
+        let stale_batch: crate::AttachmentBatch =
+            sunrise_mod_runtime::attachments::AttachmentBatch::empty().into();
+        assert_eq!(
+            stale_batch.query(&consumer_key).err(),
+            Some(crate::AttachmentError::StaleKey)
+        );
+        let live_batch: crate::AttachmentBatch =
+            sunrise_mod_runtime::attachments::AttachmentBatch::empty().into();
+        assert_eq!(live_batch.query(&owner_key_next).unwrap().iter().len(), 0);
         assert_eq!(owner_key_next.get(&mut host, crate::Holder::Level), Ok(37));
     }
 

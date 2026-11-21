@@ -1,0 +1,14 @@
+ids = [
+    "trait:AttachmentQueries",
+    "method:AttachmentQueries::query",
+    "trait:AttachmentQueriesMut",
+    "method:AttachmentQueriesMut::query_mut",
+    "type:AttachmentQueryMut",
+    "type:AttachmentRowMut",
+    "handle:AttachmentBatch::query",
+]
+why = "Migrate AttachmentQueries, AttachmentQueriesMut, AttachmentQueryMut, AttachmentRowMut, and AttachmentBatch::query to issued AttachmentKey<T> handles, following NeoForge's single-registration AttachmentType model (net.neoforged.neoforge.attachment.AttachmentType registered once via NeoForgeRegistries.Keys.ATTACHMENT_TYPES / RegisterEvent.register). Keys are validated for installation liveness on query acquisition (returning AttachmentError::StaleKey) and on retained row writes (after residency validation, returning AttachmentRowError::Value(AttachmentError::StaleKey)), while keeping warm read snapshots allocation-free."
+migrate = '''
+- Pass `&AttachmentKey<T>` (returned by `Registrar::register_attachment_type` or `Registrar::attachment_key`) instead of `&AttachmentType<T>` to `host.query(&key)`, `host.query_mut(&key)`, and `AttachmentBatch::query(&key)`.
+- Handle `AttachmentError::StaleKey` if a query or retained `AttachmentRowMut::{set, remove}` can outlive a mod registration reinstall.
+'''

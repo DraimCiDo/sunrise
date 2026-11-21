@@ -51,17 +51,21 @@ static BLOB: AttachmentType<Vec<u8>> = AttachmentType {
 };
 
 /// A mod with no hooks: with a mod loaded, the server sends joining players snapshots.
-pub(super) struct Route;
+#[derive(Default)]
+pub(super) struct Route {
+    value: std::sync::Arc<std::sync::Mutex<Option<mod_api::AttachmentKey<i32>>>>,
+}
 #[mod_api::__subscriptions]
 impl mod_api::Hooks for Route {
     fn register(&self, registrar: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        registrar
+        let value = registrar
             .register_attachment_type(
                 mod_api::AttachmentDescriptor::new("sync_route:value", || 0i32)
                     .serialize(VALUE_CODEC)
                     .sync(VALUE_CODEC),
             )
             .unwrap();
+        *self.value.lock().unwrap() = Some(value);
         registrar
             .register_attachment_type(
                 mod_api::AttachmentDescriptor::new("sync_route:blob", Vec::<u8>::new)
@@ -92,12 +96,12 @@ pub(super) fn set_level(game: &Game<'_>, value: i32, commit: bool) {
 }
 
 /// The window's synced copy of the level's value.
-fn window_value(game: &mut Game<'_>) -> Option<i32> {
+fn window_value(game: &mut Game<'_>, key: &mod_api::AttachmentKey<i32>) -> Option<i32> {
     let host: &dyn Host = game;
     let rows = host
         .attachment_query("sync_route", "value")
         .unwrap()
-        .query(&VALUE)
+        .query(key)
         .ok()?;
     rows.iter().next().map(|row| *row.unwrap().value)
 }
@@ -119,9 +123,9 @@ pub(super) fn wait_server_ticks(game: &Game<'_>, n: u64) {
     }
 }
 
-fn wait_window(game: &mut Game<'_>, value: i32) {
+fn wait_window(game: &mut Game<'_>, key: &mod_api::AttachmentKey<i32>, value: i32) {
     let deadline = Instant::now() + Duration::from_secs(30);
-    while window_value(game) != Some(value) {
+    while window_value(game, key) != Some(value) {
         game.poll_remote().unwrap();
         assert!(Instant::now() < deadline, "window never saw {value}");
         std::thread::yield_now();
@@ -322,9 +326,21 @@ fn attachment_sync_follows_the_negotiated_route() {
     ) {
         return;
     }
-    let mods = vec![mod_api::ModEntry::new("sync_route", Box::new(Route))].into();
+    let value_slot = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let mods = vec![mod_api::ModEntry::new(
+        "sync_route",
+        Box::new(Route {
+            value: value_slot.clone(),
+        }),
+    )]
+    .into();
     mod_platform::testing::with_mods(mods, || {
         super::super::native_entity_refs::tests::with_client_game(|game| {
+            let value_key = value_slot
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("Route registered");
             game.settings.render_distance = 2;
             game.settings.simulation_distance = 2;
             let options = sunrise_client::title::WorldOptions {
@@ -351,10 +367,10 @@ fn attachment_sync_follows_the_negotiated_route() {
             }
             // Integrated memory connection: a commit reaches the window, a rollback does not.
             set_level(game, 7, true);
-            wait_window(game, 7);
+            wait_window(game, &value_key, 7);
             set_level(game, 9, false);
             set_level(game, 10, true);
-            wait_window(game, 10);
+            wait_window(game, &value_key, 10);
 
             let port = game
                 .integrated

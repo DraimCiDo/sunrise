@@ -6,14 +6,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-static VALUE: AttachmentType<u32> = AttachmentType {
-    namespace: "mapping",
-    name: "value",
-    default: || 0,
-    codec: None,
-    copy_on_death: false,
-    sync_codec: None,
-};
 #[derive(Default)]
 struct Store {
     index: Arc<Mutex<AttachmentIndex<AttachmentHolder>>>,
@@ -97,14 +89,14 @@ fn all_scoped_variants_write_and_remove_the_exact_storage_target() {
         ),
         (AttachmentHolder::Level(level), Holder::Level),
     ];
-    let _key = crate::parts::install_attachment_fixture(
+    let key = crate::parts::install_attachment_fixture(
         "mapping",
         crate::AttachmentDescriptor::new("mapping:value", || 0u32),
     );
     let mut host = Store::default();
     for (scoped, target) in cases {
         let mut map = Attachments::default();
-        VALUE.set(&mut map, target, 10).unwrap();
+        key.descriptor().set(&mut map, target, 10).unwrap();
         map.bind_index(&host.index, scoped);
         host.maps.insert(target, map);
     }
@@ -118,10 +110,10 @@ fn all_scoped_variants_write_and_remove_the_exact_storage_target() {
     ];
     for target in decoys {
         let mut map = Attachments::default();
-        VALUE.set(&mut map, target, 99).unwrap();
+        key.descriptor().set(&mut map, target, 99).unwrap();
         host.maps.insert(target, map);
     }
-    let batch = host.query_mut(&VALUE).unwrap();
+    let batch = host.query_mut(&key).unwrap();
     assert_eq!(batch.iter().len(), 5);
     let captured = || {
         batch
@@ -145,7 +137,7 @@ fn all_scoped_variants_write_and_remove_the_exact_storage_target() {
                 .entry("mapping", "value")
                 .unwrap()
                 .unwrap()
-                .read(&VALUE),
+                .read_checked(key.descriptor()),
             Ok(&23)
         );
         assert_eq!(
@@ -173,9 +165,57 @@ fn all_scoped_variants_write_and_remove_the_exact_storage_target() {
                 .entry("mapping", "value")
                 .unwrap()
                 .unwrap()
-                .read(&VALUE),
+                .read_checked(key.descriptor()),
             Ok(&99)
         );
     }
-    assert_eq!(host.query(&VALUE).unwrap().iter().len(), 0);
+    assert_eq!(host.query(&key).unwrap().iter().len(), 0);
+}
+
+#[test]
+fn stale_key_is_refused_by_query_query_mut_and_retained_row_writes() {
+    let epoch = WorldEpoch::new(19);
+    let level = LevelRef::new(epoch, DimensionKey::OVERWORLD);
+    let scoped = AttachmentHolder::Level(level);
+    let first = crate::parts::install_attachment_fixture(
+        "mapping",
+        crate::AttachmentDescriptor::new("mapping:stale", || 0u32),
+    );
+    let mut host = Store::default();
+    let mut map = Attachments::default();
+    first.descriptor().set(&mut map, Holder::Level, 17).unwrap();
+    map.bind_index(&host.index, scoped);
+    host.maps.insert(Holder::Level, map);
+
+    let retained = host.query_mut(&first).unwrap();
+    let row = retained.iter().next().unwrap().unwrap();
+    assert_eq!(*row.value(), 17);
+
+    // Reinstall the same ID and Rust type: the prior key becomes stale for fresh queries
+    // and retained row writes, while the freshly issued key keeps working.
+    let second = crate::parts::install_attachment_fixture(
+        "mapping",
+        crate::AttachmentDescriptor::new("mapping:stale", || 0u32),
+    );
+    assert_eq!(host.query(&first).err(), Some(AttachmentError::StaleKey));
+    assert_eq!(
+        host.query_mut(&first).err(),
+        Some(AttachmentError::StaleKey)
+    );
+    assert_eq!(
+        host.attachment_query("mapping", "stale")
+            .unwrap()
+            .query(&first)
+            .err(),
+        Some(AttachmentError::StaleKey)
+    );
+    assert_eq!(
+        row.set(&mut host, 99),
+        Err(AttachmentRowError::Value(AttachmentError::StaleKey))
+    );
+    assert_eq!(
+        row.remove(&mut host),
+        Err(AttachmentRowError::Value(AttachmentError::StaleKey))
+    );
+    assert_eq!(host.query(&second).unwrap().get(scoped), Ok(Some(17)));
 }

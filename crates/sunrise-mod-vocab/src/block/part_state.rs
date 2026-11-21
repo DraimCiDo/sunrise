@@ -94,8 +94,7 @@ pub trait BlockEntityPartState: BlockEntityPart + Sized {
         let checked = key.live().map_err(|error| attachment(key, error))?;
         level
             .block_entity_part_snapshot(entity, checked.namespace(), checked.name())?
-            .query(checked.as_type())
-            .map_err(|error| attachment(key, error))?
+            .query_checked(checked)
             .get(AttachmentHolder::BlockEntity(entity))
             .map_err(|error| match error {
                 AttachmentRowError::Value(error) => attachment(key, error),
@@ -392,8 +391,9 @@ pub fn read_state<H: PartStateHolder, T: Clone + Send + Sync + 'static>(
 ) -> Result<Option<T>, PartStateError> {
     let checked = key.live().map_err(|error| attachment(key, error))?;
     entity.part_state_holder(host)?;
-    host.query(checked.as_type())
+    host.attachment_query(checked.namespace(), checked.name())
         .map_err(|error| attachment(key, error))?
+        .query_checked(checked)
         .get(entity.attachment_holder())
         .map_err(|error| match error {
             AttachmentRowError::Value(error) => attachment(key, error),

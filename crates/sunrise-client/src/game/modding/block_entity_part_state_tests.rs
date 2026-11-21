@@ -546,11 +546,11 @@ fn a_nested_item_write_marks_the_level_written_not_the_level_committing() {
     });
 }
 
-/// What the attachment index answers for `entity`'s `PROGRESS`, without the handle check.
-fn indexed(game: &Game<'_>, entity: BlockEntityRef) -> Option<i32> {
+/// What the attachment index answers for `entity`'s `progress`, without the handle check.
+fn indexed(game: &Game<'_>, entity: BlockEntityRef, progress: &AttachmentKey<i32>) -> Option<i32> {
     use mod_api::AttachmentQueries;
     let host: &dyn mod_api::Host = game;
-    host.query(&PROGRESS)
+    host.query(progress)
         .unwrap()
         .get(mod_api::AttachmentHolder::BlockEntity(entity))
         .ok()
@@ -564,6 +564,7 @@ fn a_removal_retires_its_state_only_at_the_root_commit() {
         "game::block_entity_part_state_tests::a_removal_retires_its_state_only_at_the_root_commit";
     with_state_mod(NAME, |game, keys| {
         let press_part = &keys.press;
+        let progress = press_part.state_key();
         let pos = (1, 64, 1);
         let a = press(game, pos);
         assert_eq!(press_part.edit_state(game, a, |_, n| *n = 7), Ok(()));
@@ -575,7 +576,7 @@ fn a_removal_retires_its_state_only_at_the_root_commit() {
         game.journal_remove_block_entity(pos);
         assert_eq!(press_part.state(game, a), Err(PartStateError::Stale));
         assert_eq!(
-            indexed(game, a),
+            indexed(game, a, progress),
             Some(7),
             "still bound until the root commits"
         );
@@ -586,23 +587,23 @@ fn a_removal_retires_its_state_only_at_the_root_commit() {
         );
         game.transaction_close(&seal, false);
         assert_eq!(press_part.state(game, a), Ok(7));
-        assert_eq!(indexed(game, a), Some(7));
+        assert_eq!(indexed(game, a, progress), Some(7));
         assert_eq!(
             press_part.state(game, tentative),
             Err(PartStateError::Stale)
         );
-        assert_eq!(indexed(game, tentative), None);
+        assert_eq!(indexed(game, tentative, progress), None);
 
         // A nested removal committed into its parent is still not published.
         let outer = game.transaction_open();
         let inner = game.transaction_open();
         game.journal_remove_block_entity(pos);
         game.transaction_close(&inner, true);
-        assert_eq!(indexed(game, a), Some(7));
+        assert_eq!(indexed(game, a, progress), Some(7));
         // The root commit retires it.
         game.transaction_close(&outer, true);
         assert_eq!(press_part.state(game, a), Err(PartStateError::Stale));
-        assert_eq!(indexed(game, a), None);
+        assert_eq!(indexed(game, a, progress), None);
         assert!(game.world.block_entities.attachments(pos).is_none());
     });
 }
@@ -669,6 +670,7 @@ fn one_position_replaced_twice_in_an_aborted_transaction_gets_its_original_back(
     const NAME: &str = "game::block_entity_part_state_tests::one_position_replaced_twice_in_an_aborted_transaction_gets_its_original_back";
     with_state_mod(NAME, |game, keys| {
         let press_part = &keys.press;
+        let progress = press_part.state_key();
         let pos = (1, 64, 1);
         let original = press(game, pos);
         assert_eq!(press_part.edit_state(game, original, |_, n| *n = 7), Ok(()));
@@ -684,16 +686,16 @@ fn one_position_replaced_twice_in_an_aborted_transaction_gets_its_original_back(
             tentative.push(replacement);
         }
         assert_eq!(
-            indexed(game, original),
+            indexed(game, original, progress),
             Some(7),
             "bound until the root commits"
         );
         game.transaction_close(&seal, false);
         assert_eq!(press_part.state(game, original), Ok(7));
-        assert_eq!(indexed(game, original), Some(7));
+        assert_eq!(indexed(game, original, progress), Some(7));
         for handle in tentative {
             assert_eq!(press_part.state(game, handle), Err(PartStateError::Stale));
-            assert_eq!(indexed(game, handle), None);
+            assert_eq!(indexed(game, handle, progress), None);
         }
     });
 }
