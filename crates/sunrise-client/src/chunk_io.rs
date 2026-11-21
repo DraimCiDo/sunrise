@@ -13,8 +13,9 @@ use std::{
     error::Error,
     fmt::Write as _,
     fs, io,
-    path::Path,
-    sync::{Arc, Mutex, PoisonError, Weak},
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock, PoisonError, Weak, mpsc},
+    thread::{self, JoinHandle},
 };
 
 /// What the window has still to toast.
@@ -78,6 +79,53 @@ const LATEST_ENTRY_COUNT: usize = 8;
 pub struct SaveFailureReporter {
     integrated: bool,
     suppressed: Mutex<SuppressedSaveFailures>,
+    target: Option<ReportTarget>,
+}
+
+type ReportJob = Box<dyn FnOnce() + Send>;
+
+struct ReportTarget {
+    debug_dir: PathBuf,
+    level_id: String,
+    worker: OnceLock<io::Result<ReportWorker>>,
+}
+
+struct ReportWorker {
+    send: mpsc::Sender<ReportJob>,
+    thread: JoinHandle<()>,
+}
+
+impl ReportTarget {
+    fn enqueue(&self, job: ReportJob) -> io::Result<()> {
+        let worker = self.worker.get_or_init(|| {
+            let (send, recv) = mpsc::channel::<ReportJob>();
+            let thread = thread::Builder::new()
+                .name("Chunk IO reports".into())
+                .spawn(move || {
+                    for job in recv {
+                        job();
+                    }
+                })?;
+            Ok(ReportWorker { send, thread })
+        });
+        match worker {
+            Ok(worker) => worker
+                .send
+                .send(job)
+                .map_err(|_| io::Error::other("chunk IO report worker exited")),
+            Err(error) => Err(io::Error::new(error.kind(), error.to_string())),
+        }
+    }
+}
+
+impl Drop for ReportTarget {
+    fn drop(&mut self) {
+        // Drain scheduled reports at server teardown, not on the save path.
+        if let Some(Ok(ReportWorker { send, thread })) = self.worker.take() {
+            drop(send);
+            let _ = thread.join();
+        }
+    }
 }
 
 /// The launch's current server report source. An integrated server shuts down
@@ -119,17 +167,23 @@ struct SuppressedSaveFailures {
 
 struct SaveFailure<'a> {
     world_root: &'a Path,
-    dimension: &'a str,
-    storage: &'a str,
+    dimension: &'static str,
+    storage: &'static str,
     pos: (i32, i32),
     error: &'a (dyn Error + 'static),
 }
 
 impl SaveFailureReporter {
+    /// Write reports under the server's root, not the world's storage root.
     /// An integrated server also reports the failure to its local client.
-    pub fn new(integrated: bool) -> Self {
+    pub fn new(integrated: bool, server_root: &Path, level_id: &str) -> Self {
         Self {
             integrated,
+            target: Some(ReportTarget {
+                debug_dir: server_root.join("debug"),
+                level_id: level_id.to_owned(),
+                worker: OnceLock::new(),
+            }),
             ..Self::default()
         }
     }
@@ -175,7 +229,7 @@ impl SaveFailureReporter {
         &self,
         failure: SaveFailure<'_>,
         pending: &Mutex<Pending>,
-        space: impl Fn(&Path) -> io::Result<u64>,
+        space: impl Fn(&Path) -> io::Result<u64> + Clone + Send + 'static,
     ) {
         let (x, z) = failure.pos;
         let message = failure.error.to_string();
@@ -192,9 +246,36 @@ impl SaveFailureReporter {
         } else {
             "Error"
         };
-        self.record(time.timestamp_millis(), class, message);
-        if let Err(error) = store_chunk_io_error(&failure, &time, &space) {
-            log::warn!("Failed to store chunk IO exception: {error}");
+        self.record(time.timestamp_millis(), class, message.clone());
+        if let Some(target) = &self.target {
+            let debug = target.debug_dir.clone();
+            let level = target.level_id.clone();
+            let mut causes = Vec::new();
+            let mut source = failure.error.source();
+            while let Some(cause) = source {
+                causes.push(cause.to_string());
+                source = cause.source();
+            }
+            let report = ChunkIoReport {
+                time,
+                level,
+                dimension: failure.dimension,
+                storage: failure.storage,
+                pos: failure.pos,
+                message,
+                causes,
+            };
+            let report_space = space.clone();
+            if let Err(error) = target.enqueue(Box::new(move || {
+                if let Err(error) = report.write_to(&debug, report_space) {
+                    log::warn!(
+                        "Failed to store chunk IO exception at {}: {error}",
+                        debug.display()
+                    );
+                }
+            })) {
+                log::warn!("Failed to queue chunk IO report: {error}");
+            }
         }
         let estimate = |path: &Path| space(path).unwrap_or(u64::MAX);
         let low = warn_on_low_disk_space(failure.world_root, estimate);
@@ -232,57 +313,60 @@ impl SuppressedSaveFailures {
     }
 }
 
-/// `MinecraftServer.storeChunkIoError`: a diagnostic in the world's `debug` folder,
-/// separate from fatal crash handling. This runs on the region writer thread.
-fn store_chunk_io_error(
-    failure: &SaveFailure<'_>,
-    time: &DateTime<Local>,
-    space: impl FnOnce(&Path) -> io::Result<u64>,
-) -> io::Result<()> {
-    let debug = failure.world_root.join("debug");
-    fs::create_dir_all(&debug)?;
-    if space(&debug)? < 8192 {
-        log::warn!(
-            "Not storing chunk IO report due to low space at {}",
-            debug.display()
+/// An owned snapshot for `MinecraftServer.storeChunkIoError`, independent of the region writer.
+struct ChunkIoReport {
+    time: DateTime<Local>,
+    level: String,
+    dimension: &'static str,
+    storage: &'static str,
+    pos: (i32, i32),
+    message: String,
+    causes: Vec<String>,
+}
+
+impl ChunkIoReport {
+    fn write_to(
+        &self,
+        debug: &Path,
+        space: impl FnOnce(&Path) -> io::Result<u64>,
+    ) -> io::Result<()> {
+        fs::create_dir_all(debug)?;
+        if space(debug)? < 8192 {
+            log::warn!(
+                "Not storing chunk IO report due to low space at {}",
+                debug.display()
+            );
+            return Ok(());
+        }
+        let safe_level = crate::title::sanitize_world_name(&self.level);
+        let date = Local::now().format("%Y-%m-%d_%H.%M.%S");
+        let path = debug.join(format!("chunk-{safe_level}-{date}-server.txt"));
+        let (x, z) = self.pos;
+        let mut text = format!(
+            "---- Minecraft Chunk IO Error Report ----\n\nTime: {}\nDescription: Chunk save failure\n\n{}\n",
+            self.time.format("%Y-%m-%d %H:%M:%S"),
+            self.message,
         );
-        return Ok(());
+        for cause in &self.causes {
+            let _ = writeln!(text, "Caused by: {cause}");
+        }
+        let _ = writeln!(
+            text,
+            "\n-- Chunk Info --\nDetails:\n\tLevel: {}\n\tDimension: {}\n\tStorage: {}\n\tPosition: [{x}, {z}]",
+            self.level, self.dimension, self.storage,
+        );
+        fs::write(&path, text)?;
+        log::info!("Saved chunk IO details to {}", path.display());
+        Ok(())
     }
-    let level = failure
-        .world_root
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy();
-    let safe_level = crate::title::sanitize_world_name(&level);
-    let date = time.format("%Y-%m-%d_%H.%M.%S");
-    let path = debug.join(format!("chunk-{safe_level}-{date}-server.txt"));
-    let (x, z) = failure.pos;
-    let mut text = format!(
-        "---- Minecraft Chunk IO Error Report ----\n\nTime: {}\nDescription: Chunk save failure\n\n{}\n",
-        time.format("%Y-%m-%d %H:%M:%S"),
-        failure.error,
-    );
-    let mut source = failure.error.source();
-    while let Some(cause) = source {
-        let _ = writeln!(text, "Caused by: {cause}");
-        source = cause.source();
-    }
-    let _ = writeln!(
-        text,
-        "\n-- Chunk Info --\nDetails:\n\tLevel: {level}\n\tDimension: {}\n\tStorage: {}\n\tPosition: [{x}, {z}]",
-        failure.dimension, failure.storage,
-    );
-    fs::write(&path, text)?;
-    log::info!("Saved chunk IO details to {}", path.display());
-    Ok(())
 }
 
 /// `MinecraftServer.reportChunkSaveFailure`: record a failure without retrying or aborting the save.
 pub fn report_save_failure(
     reporter: &SaveFailureReporter,
     world_root: &Path,
-    dimension: &str,
-    storage: &str,
+    dimension: &'static str,
+    storage: &'static str,
     pos: (i32, i32),
     error: &(dyn Error + 'static),
 ) {
@@ -387,14 +471,33 @@ mod tests {
         assert!(take().low_disk_space);
     }
 
+    // The capture logger is thread-local. Read the worker's records after its queued write.
+    fn report_worker_records(reporter: &SaveFailureReporter) -> Vec<(log::Level, String)> {
+        let (send, recv) = mpsc::channel();
+        reporter
+            .target
+            .as_ref()
+            .unwrap()
+            .enqueue(Box::new(move || {
+                send.send(crate::test_log::records()).unwrap()
+            }))
+            .unwrap();
+        recv.recv().unwrap()
+    }
+
     #[test]
     fn integrated_save_failure_logs_records_reports_and_toasts() {
         crate::test_log::install();
         crate::test_log::clear();
         let tmp = tempfile::tempdir().unwrap();
-        let world = tmp.path().join("My.World");
+        let game_dir = tmp.path().join("game");
+        let world = game_dir.join("saves").join("world-on-disk");
+        let debug = game_dir.join("debug");
+        let world_path = world.clone();
+        let debug_path = debug.clone();
+        let caller = thread::current().id();
         let pending = Mutex::new(Pending::default());
-        let reporter = SaveFailureReporter::new(true);
+        let reporter = SaveFailureReporter::new(true, &game_dir, "My.World");
         reporter.report(
             SaveFailure {
                 world_root: &world,
@@ -404,19 +507,32 @@ mod tests {
                 error: &io::Error::other("refused POI encoding"),
             },
             &pending,
-            |_| Ok(8192),
+            move |path| {
+                if path == world_path {
+                    assert_eq!(thread::current().id(), caller);
+                    Ok(save::LOW_DISK_SPACE - 1)
+                } else {
+                    assert_eq!(path, debug_path);
+                    assert_ne!(thread::current().id(), caller);
+                    Ok(8192)
+                }
+            },
         );
 
         let records = crate::test_log::records();
-        assert!(records.contains(&(
-            log::Level::Error,
-            "Failed to save chunk -2,5: refused POI encoding".to_owned(),
-        )));
         assert!(
             records
                 .iter()
-                .any(|(level, text)| *level == log::Level::Warn
-                    && text == "Low disk space! Might not be able to save the world.")
+                .any(|(level, text)| *level == log::Level::Error
+                    && text.contains("-2,5")
+                    && text.contains("refused POI encoding"))
+        );
+        assert_eq!(
+            records
+                .iter()
+                .filter(|(level, _)| *level == log::Level::Warn)
+                .count(),
+            2
         );
         assert_eq!(
             pending.into_inner().unwrap(),
@@ -433,7 +549,9 @@ mod tests {
                 .contains("chunk/save:std::io::Error: refused POI encoding")
         );
 
-        let mut files = fs::read_dir(world.join("debug")).unwrap();
+        drop(reporter); // The server's worker drains its queue before exiting.
+        assert!(!world.join("debug").exists());
+        let mut files = fs::read_dir(debug).unwrap();
         let path = files.next().unwrap().unwrap().path();
         assert!(files.next().is_none());
         let name = path.file_name().unwrap().to_str().unwrap();
@@ -453,49 +571,74 @@ mod tests {
     }
 
     #[test]
-    fn low_space_refuses_only_the_report_file_and_dedicated_does_not_toast() {
-        crate::test_log::install();
-        crate::test_log::clear();
-        let world = tempfile::tempdir().unwrap();
+    fn dedicated_report_uses_working_directory_not_the_world_universe() {
+        let tmp = tempfile::tempdir().unwrap();
+        let working_dir = tmp.path().join("server");
+        let world = tmp.path().join("universe/path/to/world");
         let pending = Mutex::new(Pending::default());
-        let reporter = SaveFailureReporter::new(false);
+        let reporter = SaveFailureReporter::new(false, &working_dir, "path/to/world");
         reporter.report(
             SaveFailure {
-                world_root: world.path(),
+                world_root: &world,
                 dimension: "minecraft:overworld",
                 storage: "chunk",
                 pos: (3, 4),
                 error: &io::Error::other("write refused"),
             },
             &pending,
-            |_| Ok(8191),
+            |_| Ok(save::LOW_DISK_SPACE),
         );
-        assert!(
-            fs::read_dir(world.path().join("debug"))
-                .unwrap()
-                .next()
-                .is_none()
+        drop(reporter);
+        assert!(!world.join("debug").exists());
+        let mut files = fs::read_dir(working_dir.join("debug")).unwrap();
+        let entry = files.next().unwrap().unwrap();
+        assert!(files.next().is_none());
+        let name = entry.file_name();
+        let name = name.to_str().unwrap();
+        assert!(name.starts_with("chunk-path_to_world-") && name.ends_with("-server.txt"));
+        let text = fs::read_to_string(entry.path()).unwrap();
+        assert!(text.contains("Level: path/to/world"));
+        assert!(text.contains("Position: [3, 4]"));
+        assert!(text.contains("write refused"));
+        assert_eq!(pending.into_inner().unwrap(), Pending::default());
+    }
+
+    #[test]
+    fn low_space_on_the_debug_filesystem_refuses_only_the_report_file() {
+        crate::test_log::install();
+        crate::test_log::clear();
+        let server = tempfile::tempdir().unwrap();
+        let debug = server.path().join("debug");
+        let world = server.path().join("world");
+        let debug_path = debug.clone();
+        let pending = Mutex::new(Pending::default());
+        let reporter = SaveFailureReporter::new(false, server.path(), "world");
+        reporter.report(
+            SaveFailure {
+                world_root: &world,
+                dimension: "minecraft:overworld",
+                storage: "chunk",
+                pos: (3, 4),
+                error: &io::Error::other("write refused"),
+            },
+            &pending,
+            move |path| {
+                Ok(if path == debug_path {
+                    8191
+                } else {
+                    save::LOW_DISK_SPACE
+                })
+            },
         );
+        let records = report_worker_records(&reporter);
+        assert!(fs::read_dir(&debug).unwrap().next().is_none());
         assert_eq!(reporter.reported_failures(), 1);
-        assert_eq!(
-            pending.into_inner().unwrap(),
-            Pending {
-                low_disk_space: true,
-                ..Pending::default()
-            }
-        );
-        let records = crate::test_log::records();
+        assert_eq!(pending.into_inner().unwrap(), Pending::default());
         assert!(
             records
                 .iter()
                 .any(|(level, text)| *level == log::Level::Warn
-                    && text.starts_with("Not storing chunk IO report due to low space"))
-        );
-        assert!(
-            records
-                .iter()
-                .any(|(level, text)| *level == log::Level::Warn
-                    && text == "Low disk space! Might not be able to save the world.")
+                    && text.contains(debug.to_str().unwrap()))
         );
     }
 
@@ -503,14 +646,16 @@ mod tests {
     fn a_report_write_error_does_not_hide_the_chunk_failure() {
         crate::test_log::install();
         crate::test_log::clear();
-        let world = tempfile::tempdir().unwrap();
+        let server = tempfile::tempdir().unwrap();
+        let world = server.path().join("world");
+        let debug = server.path().join("debug");
         // An existing file blocks creation of the report directory on every platform.
-        fs::write(world.path().join("debug"), "unrelated file").unwrap();
+        fs::write(&debug, "unrelated file").unwrap();
         let pending = Mutex::new(Pending::default());
-        let reporter = SaveFailureReporter::new(true);
+        let reporter = SaveFailureReporter::new(true, server.path(), "world");
         reporter.report(
             SaveFailure {
-                world_root: world.path(),
+                world_root: &world,
                 dimension: "minecraft:overworld",
                 storage: "entities",
                 pos: (3, 4),
@@ -528,34 +673,30 @@ mod tests {
                 load_failure: None
             }
         );
-        let records = crate::test_log::records();
+        let worker_records = report_worker_records(&reporter);
         assert!(
-            records
+            worker_records
                 .iter()
                 .any(|(level, text)| *level == log::Level::Warn
-                    && text.starts_with("Failed to store chunk IO exception:"))
+                    && text.contains(debug.to_str().unwrap()))
         );
-        assert_eq!(
-            records[0],
-            (
-                log::Level::Error,
-                "Failed to store entity chunk [3, 4]: entities refused".into()
-            )
-        );
-        assert_eq!(
-            records[1],
-            (
-                log::Level::Error,
-                "Failed to save chunk 3,4: entities refused".into()
-            )
-        );
+        let records = crate::test_log::records();
+        for pos in ["[3, 4]", "3,4"] {
+            assert!(
+                records
+                    .iter()
+                    .any(|(level, text)| *level == log::Level::Error
+                        && text.contains(pos)
+                        && text.contains("entities refused"))
+            );
+        }
     }
 
     #[test]
     fn crash_diagnostics_follow_the_launch_servers_lifetime() {
         let diagnostics = SaveFailureDiagnostics::default();
         assert_eq!(diagnostics.suppressed_summary(), None);
-        let integrated = Arc::new(SaveFailureReporter::new(true));
+        let integrated = Arc::new(SaveFailureReporter::new(true, Path::new("."), "world"));
         integrated.record(0, "Error", "integrated failure".into());
         diagnostics.register(&integrated);
         assert!(
@@ -566,7 +707,7 @@ mod tests {
         );
         drop(integrated);
         assert_eq!(diagnostics.suppressed_summary(), None);
-        let dedicated = Arc::new(SaveFailureReporter::new(false));
+        let dedicated = Arc::new(SaveFailureReporter::new(false, Path::new("."), "world"));
         dedicated.record(0, "Error", "dedicated failure".into());
         diagnostics.register(&dedicated);
         drop(dedicated);

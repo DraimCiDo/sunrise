@@ -89,6 +89,20 @@ fn prepare_level_data(
     Ok(())
 }
 
+/// `MinecraftServer.getServerDirectory` and its integrated override.
+fn chunk_report_root<'a>(
+    role: execution_role::ExecutionRole,
+    game_dir: Option<&'a std::path::Path>,
+    working_dir: &'a std::path::Path,
+) -> &'a std::path::Path {
+    if role == execution_role::ExecutionRole::IntegratedServer {
+        // `Options::read` may already have made the configured game directory the cwd.
+        game_dir.unwrap_or(working_dir)
+    } else {
+        working_dir
+    }
+}
+
 impl WorldRequest {
     pub fn new(
         folder: &str,
@@ -304,6 +318,25 @@ impl WorldRequest {
             &level.enabled_features,
             &pack.additional_data,
         );
+        let integrated = options.execution_role == execution_role::ExecutionRole::IntegratedServer;
+        let working_dir = std::env::current_dir()?;
+        let server_root = chunk_report_root(
+            options.execution_role,
+            options.game_dir.as_deref(),
+            &working_dir,
+        );
+        // The dedicated request carries the absolute storage path as `folder`, and
+        // its configured level id as `name`. Integrated requests carry the id as `folder`.
+        let level_id = if options.execution_role.is_dedicated_server() {
+            name.unwrap_or(&folder)
+        } else {
+            &folder
+        };
+        let save_reporter = Arc::new(sunrise_client::chunk_io::SaveFailureReporter::new(
+            integrated,
+            server_root,
+            level_id,
+        ));
         let (mut streaming, save, locator) = make_streaming(
             res,
             pack,
@@ -316,9 +349,7 @@ impl WorldRequest {
             &level,
             biomes.clone(),
             None,
-            Arc::new(sunrise_client::chunk_io::SaveFailureReporter::new(
-                options.execution_role == execution_role::ExecutionRole::IntegratedServer,
-            )),
+            save_reporter,
         )?;
         drop(streaming_step);
         streaming.radius = settings.render_distance;
@@ -1286,6 +1317,18 @@ pub(super) fn make_streaming(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn report_root_follows_the_server_role() {
+        use execution_role::ExecutionRole::{DedicatedServer, IntegratedServer};
+        use std::path::Path;
+
+        let cwd = Path::new("server");
+        let game = Path::new("game");
+        assert_eq!(chunk_report_root(DedicatedServer, Some(game), cwd), cwd);
+        assert_eq!(chunk_report_root(IntegratedServer, Some(game), cwd), game);
+        assert_eq!(chunk_report_root(IntegratedServer, None, cwd), cwd);
+    }
 
     #[test]
     fn unreadable_level_backup_refuses_before_biome_adoption() {
