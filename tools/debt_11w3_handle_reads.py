@@ -299,6 +299,12 @@ EDITS = {
             swap("            assert_eq!(`game.menu_slot_count(missing)`, None);",
                  "missing.with_view(game, |view| view.slot_count()).flatten()", 1),
         ),
+        GAME / "runtime/transactions.rs": (
+            swap("                `menu.slot(game, 1)`,",
+                 "menu.with_view(game, |view| view.slot(1)).flatten()", 2),
+            swap("                assert_eq!(`menu.slot(game, 1)`.unwrap().unwrap().count(), 9);",
+                 "menu.with_view(game, |view| view.slot(1)).flatten()", 1),
+        ),
         Path("crates/sunrise-client/tests/it/mod_api_hooks.rs"): (
             Edit("            let _ = menu.slot_count(host);\n            let _ = menu.slot(host, 0);\n            let _ = menu.carried(host);",
                  "            let _ = menu.with_view(host, |view| {\n                let _ = view.slot_count();\n                let _ = view.slot(0);\n                let _ = view.carried();\n            });", 1),

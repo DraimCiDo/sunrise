@@ -2228,7 +2228,7 @@ mod tests {
             *game.native_menu_storage(menu, 1).unwrap() = Some(stone.clone());
             assert!(game.transactions.is_empty());
             assert_eq!(
-                menu.slot(game, 1),
+                menu.with_view(game, |view| view.slot(1)).flatten(),
                 Some(Some(stone.try_into_api().unwrap()))
             );
         });
@@ -2250,13 +2250,20 @@ mod tests {
                 let journal = &game.transactions.last().unwrap().menus;
                 assert_eq!(journal.len(), 1);
                 assert_eq!(journal[&12].craft_grid[0], Some(stone.clone()));
-                assert_eq!(menu.slot(game, 1).unwrap().unwrap().count(), 9);
+                assert_eq!(
+                    menu.with_view(game, |view| view.slot(1))
+                        .flatten()
+                        .unwrap()
+                        .unwrap()
+                        .count(),
+                    9
+                );
                 Err(())
             });
             assert_eq!(aborted, Err(()));
             assert!(game.transactions.is_empty());
             assert_eq!(
-                menu.slot(game, 1),
+                menu.with_view(game, |view| view.slot(1)).flatten(),
                 Some(Some(stone.try_into_api().unwrap()))
             );
         });
