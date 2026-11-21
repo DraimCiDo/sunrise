@@ -163,10 +163,11 @@ pub fn fetch(
             let agent = crate::net::agent(&checksum).map_err(|e| format!("{checksum}: {e}"))?;
             let sha1 = agent
                 .get(&checksum)
-                .set("User-Agent", modrinth::AGENT)
-                .call()
-                .ok()
-                .and_then(|r| r.into_string().ok());
+                .header("User-Agent", modrinth::AGENT)
+                .send()
+                .and_then(|r| r.error_for_status())
+                .and_then(|r| r.text())
+                .ok();
             if let Some(parent) = dest.parent() {
                 fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
@@ -243,7 +244,7 @@ pub(crate) fn download(
         ],
     )?
     .ok_or_else(|| format!("{url}: not found"))?;
-    store_download(response.into_reader(), sha1, dest, overwrite).map_err(|e| format!("{url}: {e}"))
+    store_download(response, sha1, dest, overwrite).map_err(|e| format!("{url}: {e}"))
 }
 
 /// Hash and copy a jar stream, refusing inputs larger than 512 MiB.

@@ -2,45 +2,54 @@
 
 /// An agent for downloading `url`: through the proxy when one is set, unless `url` is a host that
 /// must be reached directly.
-pub(crate) fn agent(url: &str) -> Result<ureq::Agent, sunrise_proxy::ProxyError> {
+pub(crate) fn agent(url: &str) -> Result<reqwest::blocking::Client, String> {
     sunrise_proxy::agent("port-pack", url, std::convert::identity)
 }
 
 /// GET from allowed HTTPS hosts, validating every redirect before contacting it.
-pub(crate) fn get_from_hosts(url: &str, hosts: &[&str]) -> Result<Option<ureq::Response>, String> {
+pub(crate) fn get_from_hosts(
+    url: &str,
+    hosts: &[&str],
+) -> Result<Option<reqwest::blocking::Response>, String> {
     follow(url, hosts, |address| {
         let agent = sunrise_proxy::agent("port-pack-no-redirect", address, |builder| {
-            builder.redirects(0)
+            builder.redirect(reqwest::redirect::Policy::none())
         })
         .map_err(|e| format!("{address}: {e}"))?;
-        match agent
+        let response = agent
             .get(address)
-            .set("User-Agent", crate::modrinth::AGENT)
-            .call()
-        {
-            Ok(response) => Ok(Some(response)),
-            Err(ureq::Error::Status(404, _)) => Ok(None),
-            Err(error) => Err(format!("{address}: {error}")),
+            .header("User-Agent", crate::modrinth::AGENT)
+            .send()
+            .map_err(|e| format!("{address}: {e}"))?;
+        if response.status() == 404 {
+            return Ok(None);
         }
+        response
+            .error_for_status()
+            .map(Some)
+            .map_err(|e| format!("{address}: {e}"))
     })
 }
 
 fn follow(
     url: &str,
     hosts: &[&str],
-    mut request: impl FnMut(&str) -> Result<Option<ureq::Response>, String>,
-) -> Result<Option<ureq::Response>, String> {
+    mut request: impl FnMut(&str) -> Result<Option<reqwest::blocking::Response>, String>,
+) -> Result<Option<reqwest::blocking::Response>, String> {
     let mut current = checked_url(url, hosts)?;
     for _ in 0..=5 {
         let Some(response) = request(current.as_str())? else {
             return Ok(None);
         };
-        if !(300..400).contains(&response.status()) {
+        if !response.status().is_redirection() {
             return Ok(Some(response));
         }
         let location = response
-            .header("Location")
-            .ok_or("Redirect without Location")?;
+            .headers()
+            .get("Location")
+            .ok_or("Redirect without Location")?
+            .to_str()
+            .map_err(|_| "Invalid redirect Location")?;
         current = checked_url(
             current.join(location).map_err(|e| e.to_string())?.as_str(),
             hosts,
@@ -65,17 +74,26 @@ fn checked_url(address: &str, hosts: &[&str]) -> Result<url::Url, String> {
 #[cfg(test)]
 mod redirect_tests {
     use super::*;
+    fn response(location: Option<&str>) -> reqwest::blocking::Response {
+        let builder = http::Response::builder();
+        let builder = match location {
+            Some(location) => builder.status(302).header("Location", location),
+            None => builder.status(200),
+        };
+        builder.body("").unwrap().into()
+    }
+
     #[test]
     fn checks_each_redirect_before_requesting_it() {
         let mut seen = Vec::new();
         let result = follow("https://cdn.modrinth.com/a", &["cdn.modrinth.com"], |url| {
             seen.push(url.to_owned());
-            let raw = if seen.len() == 1 {
-                "HTTP/1.1 302 Found\r\nLocation: /b\r\n\r\n"
+            let location = if seen.len() == 1 {
+                "/b"
             } else {
-                "HTTP/1.1 302 Found\r\nLocation: https://evil.example/steal\r\n\r\n"
+                "https://evil.example/steal"
             };
-            Ok(Some(raw.parse().unwrap()))
+            Ok(Some(response(Some(location))))
         });
         assert!(result.is_err());
         assert_eq!(
@@ -83,15 +101,17 @@ mod redirect_tests {
             ["https://cdn.modrinth.com/a", "https://cdn.modrinth.com/b"]
         );
         let mut seen = Vec::new();
-        let result = follow("https://github.com/a", &["github.com", "release-assets.githubusercontent.com"], |url| {
-            seen.push(url.to_owned());
-            let raw = if seen.len() == 1 {
-                "HTTP/1.1 302 Found\r\nLocation: https://release-assets.githubusercontent.com/file\r\n\r\n"
-            } else {
-                "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
-            };
-            Ok(Some(raw.parse().unwrap()))
-        }).unwrap();
+        let result = follow(
+            "https://github.com/a",
+            &["github.com", "release-assets.githubusercontent.com"],
+            |url| {
+                seen.push(url.to_owned());
+                Ok(Some(response((seen.len() == 1).then_some(
+                    "https://release-assets.githubusercontent.com/file",
+                ))))
+            },
+        )
+        .unwrap();
         assert!(result.is_some());
         assert_eq!(seen.len(), 2);
         for url in [
@@ -106,11 +126,7 @@ mod redirect_tests {
         assert!(
             follow("https://cdn.modrinth.com/a", &["cdn.modrinth.com"], |_| {
                 count += 1;
-                Ok(Some(
-                    "HTTP/1.1 302 Found\r\nLocation: /a\r\n\r\n"
-                        .parse()
-                        .unwrap(),
-                ))
+                Ok(Some(response(Some("/a"))))
             })
             .is_err()
         );

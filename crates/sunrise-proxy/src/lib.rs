@@ -9,8 +9,11 @@ use std::fmt;
 use std::net::Ipv6Addr;
 use std::num::NonZeroU16;
 use std::sync::{LazyLock, Mutex};
+use std::time::Duration;
 
-type Agents = HashMap<AgentKey, ureq::Agent>;
+use reqwest::blocking::{Client, ClientBuilder};
+
+type Agents = HashMap<AgentKey, Client>;
 
 /// A fresh agent starts a new connection pool, so reuse agents with the same settings.
 static KEPT: LazyLock<Mutex<Agents>> = LazyLock::new(Mutex::default);
@@ -23,7 +26,7 @@ struct AgentKey {
 
 /// A configuration error that can be reported without showing the proxy address or credentials.
 #[derive(Debug)]
-pub struct ProxyError {
+struct ProxyError {
     setting: &'static str,
     kind: InvalidProxy,
 }
@@ -55,8 +58,8 @@ impl std::error::Error for ProxyError {}
 pub fn agent(
     slot: &str,
     url: &str,
-    configure: impl FnOnce(ureq::AgentBuilder) -> ureq::AgentBuilder,
-) -> Result<ureq::Agent, ProxyError> {
+    configure: impl FnOnce(ClientBuilder) -> ClientBuilder,
+) -> Result<Client, String> {
     let destination = url::Url::parse(url).ok();
     let selected = if destination
         .as_ref()
@@ -65,15 +68,24 @@ pub fn agent(
         None
     } else {
         let scheme = destination.as_ref().map_or("https", url::Url::scheme);
-        env_proxy(scheme, |name| std::env::var_os(name))?
+        env_proxy(scheme, |name| std::env::var_os(name)).map_err(|e| e.to_string())?
     };
     let mut agents = KEPT.lock().unwrap_or_else(|e| e.into_inner());
     keep(&mut agents, slot, selected, |proxy| {
-        let builder = configure(ureq::AgentBuilder::new()).try_proxy_from_env(false);
+        let builder = configure(
+            Client::builder()
+                .no_proxy()
+                .user_agent("sunrise-tools")
+                .referer(false)
+                .connect_timeout(Duration::from_secs(30))
+                .timeout(None),
+        );
         match proxy {
-            Some(proxy) => builder.proxy(proxy).build(),
-            None => builder.build(),
+            Some(proxy) => builder.proxy(proxy),
+            None => builder,
         }
+        .build()
+        .map_err(|e| format!("could not initialize HTTP client: {}", e.without_url()))
     })
 }
 
@@ -84,8 +96,8 @@ fn keep(
     agents: &mut Agents,
     slot: &str,
     selected: Option<(&'static str, String)>,
-    build: impl FnOnce(Option<ureq::Proxy>) -> ureq::Agent,
-) -> Result<ureq::Agent, ProxyError> {
+    build: impl FnOnce(Option<reqwest::Proxy>) -> Result<Client, String>,
+) -> Result<Client, String> {
     let (setting, proxy) = selected.map_or(("", None), |(name, spec)| (name, Some(spec)));
     let key = AgentKey {
         slot: slot.into(),
@@ -100,27 +112,25 @@ fn keep(
                 .as_deref()
                 .map(parse_proxy)
                 .transpose()
-                .map_err(|kind| ProxyError { setting, kind })?;
-            Ok(entry.insert(build(proxy)).clone())
+                .map_err(|kind| ProxyError { setting, kind }.to_string())?;
+            Ok(entry.insert(build(proxy)?).clone())
         }
     }
 }
 
-fn parse_proxy(spec: &str) -> Result<ureq::Proxy, InvalidProxy> {
+fn parse_proxy(spec: &str) -> Result<reqwest::Proxy, InvalidProxy> {
     let spec = spec.trim_end_matches('/');
     let (scheme, authority) = spec.split_once("://").unwrap_or(("http", spec));
     let scheme = match scheme {
-        "http" | "socks4" | "socks4a" | "socks" | "socks5" => scheme,
-        // ureq's SOCKS5 already sends the proxy host names to resolve.
-        "socks5h" => "socks5",
+        "http" | "socks4" | "socks4a" | "socks5h" => scheme,
+        // Both spellings already resolved host names at the proxy under the old transport.
+        "socks" | "socks5" => "socks5h",
         scheme if valid_scheme(scheme) => return Err(InvalidProxy::Scheme),
         _ => return Err(InvalidProxy::Authority),
     };
-    // ureq splits the address at colons and silently defaults an unparseable port. Reject a
-    // malformed authority (including IPv6 proxy endpoints, which that parser cannot represent).
-    let address = authority
+    let (credentials, address) = authority
         .rsplit_once('@')
-        .map_or(authority, |(_, addr)| addr);
+        .map_or((None, authority), |(creds, addr)| (Some(creds), addr));
     let (host, port) = address
         .split_once(':')
         .map_or((address, None), |(host, port)| (host, Some(port)));
@@ -135,7 +145,17 @@ fn parse_proxy(spec: &str) -> Result<ureq::Proxy, InvalidProxy> {
     {
         return Err(InvalidProxy::Authority);
     }
-    ureq::Proxy::new(format!("{scheme}://{authority}")).map_err(|_| InvalidProxy::Authority)
+    let mut url =
+        url::Url::parse(&format!("{scheme}://{address}")).map_err(|_| InvalidProxy::Authority)?;
+    if let Some(credentials) = credentials {
+        let (user, password) = credentials.split_once(':').ok_or(InvalidProxy::Authority)?;
+        // The environment setting accepts raw userinfo; only the backend expects URL encoding.
+        url.set_username(&user.replace('%', "%25"))
+            .map_err(|()| InvalidProxy::Authority)?;
+        url.set_password(Some(&password.replace('%', "%25")))
+            .map_err(|()| InvalidProxy::Authority)?;
+    }
+    reqwest::Proxy::all(url).map_err(|_| InvalidProxy::Authority)
 }
 
 fn valid_scheme(scheme: &str) -> bool {
@@ -398,7 +418,10 @@ mod tests {
         let mut agents = Agents::new();
         // An existing direct agent must not be reused when selection produces an invalid proxy.
         keep(&mut agents, "invalid", None, |_| {
-            ureq::AgentBuilder::new().build()
+            Client::builder()
+                .no_proxy()
+                .build()
+                .map_err(|e| e.to_string())
         })
         .unwrap();
         for (spec, kind) in [
@@ -427,9 +450,15 @@ mod tests {
                 fail,
             )
             .unwrap_err();
-            assert_eq!(error.setting, "HTTP_PROXY");
-            assert_eq!(error.kind, kind);
-            let message = error.to_string();
+            assert_eq!(
+                error,
+                ProxyError {
+                    setting: "HTTP_PROXY",
+                    kind
+                }
+                .to_string()
+            );
+            let message = error;
             assert!(!message.contains("dummy-user"));
             assert!(!message.contains("dummy-password"));
         }
@@ -479,6 +508,47 @@ mod tests {
         (port, server)
     }
 
+    #[test]
+    #[ignore = "daily"]
+    fn a_refused_connect_is_a_transport_error() {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let proxy = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(TIMEOUT)).unwrap();
+            stream.set_write_timeout(Some(TIMEOUT)).unwrap();
+            let mut request = BufReader::new(&stream);
+            let mut first = String::new();
+            request.read_line(&mut first).unwrap();
+            let mut line = String::new();
+            while request.read_line(&mut line).unwrap() > 2 {
+                line.clear();
+            }
+            stream
+                .write_all(
+                    b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+            first
+        });
+        let client = Client::builder()
+            .no_proxy()
+            .proxy(parse_proxy(&proxy).unwrap())
+            .timeout(TIMEOUT)
+            .build()
+            .unwrap();
+        let error = client
+            .get("https://sunrise.invalid/payload")
+            .send()
+            .unwrap_err();
+        assert!(error.is_connect(), "{error}");
+        assert_eq!(
+            server.join().unwrap(),
+            "CONNECT sunrise.invalid:443 HTTP/1.1\r\n"
+        );
+    }
+
     /// `.invalid` never resolves here (RFC 2606), so the answer can only have come through the
     /// proxy, which is handed the name to resolve.
     #[test]
@@ -487,13 +557,15 @@ mod tests {
         for scheme in ["socks5", "socks5h"] {
             let (port, server) = socks5_proxy();
             let proxy = parse_proxy(&format!("{scheme}://127.0.0.1:{port}")).unwrap();
-            let agent = ureq::AgentBuilder::new()
-                .timeout_connect(TIMEOUT)
+            let agent = Client::builder()
+                .no_proxy()
+                .connect_timeout(TIMEOUT)
                 .timeout(TIMEOUT)
                 .proxy(proxy)
-                .build();
-            let answer = agent.get("http://sunrise.invalid/a.jar").call().unwrap();
-            assert_eq!(answer.into_string().unwrap(), "ok", "{scheme}");
+                .build()
+                .unwrap();
+            let answer = agent.get("http://sunrise.invalid/a.jar").send().unwrap();
+            assert_eq!(answer.text().unwrap(), "ok", "{scheme}");
             assert_eq!(server.join().unwrap(), "sunrise.invalid", "{scheme}");
         }
     }
@@ -509,19 +581,16 @@ mod tests {
             let get = |url: &str| {
                 agent("test-configured", url, |builder| {
                     builder
-                        .redirects(0)
-                        .timeout_connect(TIMEOUT)
+                        .redirect(reqwest::redirect::Policy::none())
+                        .connect_timeout(TIMEOUT)
                         .timeout(TIMEOUT)
                 })
                 .unwrap()
                 .get(url)
-                .call()
+                .send()
                 .unwrap()
             };
-            assert_eq!(
-                get("http://sunrise.invalid/a.jar").into_string().unwrap(),
-                "ok"
-            );
+            assert_eq!(get("http://sunrise.invalid/a.jar").text().unwrap(), "ok");
             assert_eq!(
                 get(&local_url).status(),
                 302,
@@ -531,10 +600,7 @@ mod tests {
                 panic!("a rejected setting must stop before building the agent")
             })
             .unwrap_err();
-            assert_eq!(error.setting, "HTTPS_PROXY");
-            assert_eq!(error.kind, InvalidProxy::Scheme);
-            assert!(error.to_string().contains("HTTPS_PROXY"));
-            assert!(!error.to_string().contains("dummy-password"));
+            assert_eq!(error, "HTTPS_PROXY: unsupported proxy scheme");
             return;
         }
 
@@ -606,11 +672,13 @@ mod tests {
                 spec.map(|s| ("HTTP_PROXY", s.into())),
                 |proxy| {
                     built.push((slot, spec));
-                    let builder = ureq::AgentBuilder::new();
-                    proxy.map_or_else(
-                        || ureq::AgentBuilder::new().build(),
-                        |p| builder.proxy(p).build(),
-                    )
+                    let builder = Client::builder().no_proxy();
+                    match proxy {
+                        Some(proxy) => builder.proxy(proxy),
+                        None => builder,
+                    }
+                    .build()
+                    .map_err(|e| e.to_string())
                 },
             )
             .unwrap();

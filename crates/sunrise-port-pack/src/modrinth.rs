@@ -88,9 +88,11 @@ fn post(url: &str, body: &Value) -> Result<Value, String> {
     let response = crate::net::agent(url)
         .map_err(|e| format!("{url}: {e}"))?
         .post(url)
-        .set("User-Agent", AGENT)
-        .set("Content-Type", "application/json")
-        .send_string(&body.to_string())
+        .header("User-Agent", AGENT)
+        .header("Content-Type", "application/json")
+        .body(body.to_string())
+        .send()
+        .and_then(|r| r.error_for_status())
         .map_err(|e| format!("{url}: {e}"))?;
     read(url, response)
 }
@@ -99,14 +101,15 @@ fn get(url: &str) -> Result<Value, String> {
     let response = crate::net::agent(url)
         .map_err(|e| format!("{url}: {e}"))?
         .get(url)
-        .set("User-Agent", AGENT)
-        .call()
+        .header("User-Agent", AGENT)
+        .send()
+        .and_then(|r| r.error_for_status())
         .map_err(|e| format!("{url}: {e}"))?;
     read(url, response)
 }
 
-fn read(url: &str, response: ureq::Response) -> Result<Value, String> {
-    let text = response.into_string().map_err(|e| format!("{url}: {e}"))?;
+fn read(url: &str, response: reqwest::blocking::Response) -> Result<Value, String> {
+    let text = response.text().map_err(|e| format!("{url}: {e}"))?;
     serde_json::from_str(&text).map_err(|e| format!("{url}: {e}"))
 }
 

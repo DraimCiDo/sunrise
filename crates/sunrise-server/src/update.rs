@@ -252,14 +252,17 @@ fn fetch(url: &str) -> Result<Vec<u8>, String> {
     sunrise_proxy::agent("sunrise-server-update", url, std::convert::identity)
         .map_err(|e| format!("GitHub request: {e}"))?
         .get(url)
-        .set("Accept", "application/vnd.github+json")
-        .set("User-Agent", "sunrise-server")
-        .call()
-        .map_err(|e| match e {
-            ureq::Error::Status(404, _) => "404".to_string(),
-            e => format!("GitHub didn't answer: {e}"),
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "sunrise-server")
+        .send()
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| {
+            if e.status().is_some_and(|status| status == 404) {
+                "404".to_string()
+            } else {
+                format!("GitHub didn't answer: {e}")
+            }
         })?
-        .into_reader()
         .take(64 << 20)
         .read_to_end(&mut body)
         .map_err(|e| format!("GitHub's answer: {e}"))?;
@@ -478,10 +481,10 @@ pub fn download(install: &Install, release: &Release) -> Result<PathBuf, String>
             .map_err(|e| format!("downloading {}: {e}", release.asset))?;
         let mut reader = agent
             .get(url)
-            .set("User-Agent", "sunrise-server")
-            .call()
-            .map_err(|e| format!("downloading {}: {e}", release.asset))?
-            .into_reader();
+            .header("User-Agent", "sunrise-server")
+            .send()
+            .and_then(|r| r.error_for_status())
+            .map_err(|e| format!("downloading {}: {e}", release.asset))?;
         let mut file =
             std::fs::File::create(&part).map_err(|e| format!("{}: {e}", part.display()))?;
         let mut hasher = sha2::Sha256::new();

@@ -50,11 +50,14 @@ pub(crate) fn install_host(work: &Path) {
 fn get(url: &str) -> Result<host::Body, String> {
     let agent = sunrise_proxy::agent("cargo-sunrise-mod", url, std::convert::identity)
         .map_err(|e| format!("{url}: {e}"))?;
-    match agent.get(url).call() {
-        Ok(response) => Ok(Some(Box::new(response.into_reader()))),
-        Err(ureq::Error::Status(404, _)) => Ok(None),
-        Err(error) => Err(format!("{url}: {error}")),
+    let response = agent.get(url).send().map_err(|e| format!("{url}: {e}"))?;
+    if response.status() == 404 {
+        return Ok(None);
     }
+    let response = response
+        .error_for_status()
+        .map_err(|e| format!("{url}: {e}"))?;
+    Ok(Some(Box::new(response)))
 }
 
 /// Reads a check plan from standard input and prints one reply line: 0 checked, 1 an error reply (a file it names didn't read), 2 no plan, 3 another contract.

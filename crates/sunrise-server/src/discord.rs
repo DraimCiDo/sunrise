@@ -41,6 +41,15 @@ fn forward(shared: &Shared, settings: &Discord) {
         |builder| {
             builder
                 .timeout(Duration::from_secs(20))
+                .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                    if attempt.previous().len() == 1
+                        && matches!(attempt.status().as_u16(), 307 | 308)
+                    {
+                        attempt.stop()
+                    } else {
+                        reqwest::redirect::Policy::limited(5).redirect(attempt)
+                    }
+                }))
                 .user_agent(concat!("sunrise-server/", env!("CARGO_PKG_VERSION")))
         },
     ) {
@@ -255,7 +264,7 @@ fn payload(lines: &[Line], picture: bool) -> Value {
 
 /// Posts the lines as a picture, or as plain text when drawing fails; waits out a 429 (three times at most).
 fn post(
-    agent: &ureq::Agent,
+    agent: &reqwest::blocking::Client,
     webhook: &str,
     lines: &[Line],
     font: &FontRef,
@@ -286,35 +295,42 @@ fn post(
     for _ in 0..3 {
         let sent = agent
             .post(webhook)
-            .set("Content-Type", &content_type)
-            .send_bytes(&body);
+            .header("Content-Type", &content_type)
+            .body(body.clone())
+            .send();
         let now = Instant::now();
         // Errors never say the URL: it holds the webhook's token.
-        let response = match sent {
-            Ok(response) => response,
-            Err(ureq::Error::Status(429, response)) => {
+        let response = sent.map_err(|error| {
+            limiter.posted(now, GAP * 5);
+            Failure::Other(format!(
+                "Discord can't be reached ({})",
+                error.without_url()
+            ))
+        })?;
+        match response.status().as_u16() {
+            429 => {
                 let wait = retry_after(response);
                 limiter.posted(now, wait);
                 thread::sleep(wait.max(GAP));
                 continue;
             }
-            Err(ureq::Error::Status(code @ (401 | 403 | 404), _)) => {
-                return Err(Failure::Gone(code));
-            }
-            Err(ureq::Error::Status(code, _)) => {
+            code @ (401 | 403 | 404) => return Err(Failure::Gone(code)),
+            code if code >= 400 => {
                 limiter.posted(now, GAP);
                 return Err(Failure::Other(format!("the webhook answered {code}")));
             }
-            Err(ureq::Error::Transport(t)) => {
-                limiter.posted(now, GAP * 5);
-                return Err(Failure::Other(format!(
-                    "Discord can't be reached ({})",
-                    t.kind()
-                )));
-            }
-        };
-        let wait = match response.header("x-ratelimit-remaining") {
-            Some("0") => secs(response.header("x-ratelimit-reset-after")),
+            _ => {}
+        }
+        let headers = response.headers();
+        let wait = match headers
+            .get("x-ratelimit-remaining")
+            .and_then(|v| v.to_str().ok())
+        {
+            Some("0") => secs(
+                headers
+                    .get("x-ratelimit-reset-after")
+                    .and_then(|v| v.to_str().ok()),
+            ),
             _ => GAP,
         };
         limiter.posted(now, wait);
@@ -326,10 +342,14 @@ fn post(
 }
 
 /// A 429's wait: `retry_after` in the JSON body, else the header; 60 s at most.
-fn retry_after(response: ureq::Response) -> Duration {
-    let header = response.header("retry-after").map(str::to_owned);
+fn retry_after(response: reqwest::blocking::Response) -> Duration {
+    let header = response
+        .headers()
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
     let body: Value = response
-        .into_string()
+        .text()
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_default();

@@ -236,8 +236,12 @@ impl Base {
                 let url = format!("{base}/{release}/{file}");
                 let agent = sunrise_proxy::agent("cargo-sunrise-mod", &url, std::convert::identity)
                     .map_err(|e| format!("{url}: {e}"))?;
-                let response = agent.get(&url).call().map_err(|e| format!("{url}: {e}"))?;
-                Ok(Box::new(response.into_reader()))
+                let response = agent
+                    .get(&url)
+                    .send()
+                    .and_then(|r| r.error_for_status())
+                    .map_err(|e| format!("{url}: {e}"))?;
+                Ok(Box::new(response))
             }
             Self::Folder(base) => {
                 let path = base.join(release).join(file);
@@ -272,9 +276,10 @@ impl Base {
                 let text = sunrise_proxy::agent("cargo-sunrise-mod", api, std::convert::identity)
                     .map_err(|e| format!("{api}: {e}"))?
                     .get(api)
-                    .call()
+                    .send()
+                    .and_then(|r| r.error_for_status())
                     .map_err(|e| format!("{api}: {e}"))?
-                    .into_string()
+                    .text()
                     .map_err(|e| e.to_string())?;
                 let releases: Vec<serde_json::Value> =
                     serde_json::from_str(&text).map_err(|e| format!("{api}: {e}"))?;

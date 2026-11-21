@@ -35,20 +35,21 @@ pub(super) fn fetch(out: &Path) -> Result<(), String> {
     // to URLs supplied by pagination headers or Git objects.
     write_list(out, |url| {
         let agent = sunrise_proxy::agent("cargo-sunrise-mod-registry", url, |builder| {
-            builder.redirects(0).timeout(Duration::from_secs(30))
+            builder
+                .redirect(reqwest::redirect::Policy::none())
+                .timeout(Duration::from_secs(30))
         })
         .map_err(|e| format!("GitHub request failed: {e}"))?;
         let mut request = agent
             .get(url)
-            .set("Accept", "application/vnd.github+json")
-            .set("User-Agent", "cargo-sunrise-mod");
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "cargo-sunrise-mod");
         if let Some(auth) = &auth {
-            request = request.set("Authorization", auth);
+            request = request.header("Authorization", auth);
         }
-        let response = request.call().map_err(|error| match error {
-            ureq::Error::Status(status, _) => format!("GitHub returned HTTP {status}"),
-            ureq::Error::Transport(error) => format!("GitHub request failed: {:?}", error.kind()),
-        })?;
+        let response = request
+            .send()
+            .map_err(|e| format!("GitHub request failed: {}", e.without_url()))?;
         if response.status() != 200 {
             return Err(format!(
                 "GitHub returned HTTP {}, expected 200",
@@ -56,13 +57,14 @@ pub(super) fn fetch(out: &Path) -> Result<(), String> {
             ));
         }
         let links = response
-            .all("Link")
-            .into_iter()
-            .map(str::to_owned)
-            .collect();
+            .headers()
+            .get_all("Link")
+            .iter()
+            .map(|header| header.to_str().map(str::to_owned))
+            .collect::<Result<_, _>>()
+            .map_err(|_| "GitHub sent an invalid Link header")?;
         let mut body = Vec::new();
         response
-            .into_reader()
             .take(MAX_RESPONSE + 1)
             .read_to_end(&mut body)
             .map_err(|e| format!("could not read the whole GitHub response: {e}"))?;

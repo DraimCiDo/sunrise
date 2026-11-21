@@ -20,8 +20,7 @@ getrandom = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1.1"
-# Updates: the release from GitHub, checked against the SHA-256 in its signed checksums (both already in the
-# lockfile, ureq through sunrise-server-files).
+# Updates: the release from GitHub, checked against the SHA-256 in its signed checksums.
 sunrise-release-sign = { path = "../sunrise-release-sign" }
 sunrise-proxy = { path = "../sunrise-proxy" }
 sha2 = "0.10"
@@ -33,7 +32,7 @@ base64 = "0.22"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 p12-keystore = "0.2"
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
-ureq = { version = "2", default-features = false, features = ["tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking"] }
 # [discord]: the chat drawn as a PNG with Pixelify Sans (SIL OFL, crates/sunrise-theme/fonts).
 ab_glyph = "0.2.32"
 png = "0.18"
