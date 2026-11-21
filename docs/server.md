@@ -733,7 +733,8 @@ runtime or new dependency. Server-sent events can replace the polling later if a
   program still running from it on Windows) is left for the next update.
 - **Manager updates** (`crates/sunrise-server/src/self_update.rs`). `self-update --check` reads the signed
   `server-tool.json` from the separate `server-tool` release and compares its commit and commit time with
-  the running manager. `self-update` also checks the release's signed archive checksum and refuses to
+  the running manager. A previously signed but older release is refused; only `self-update --rollback`
+  goes back. `self-update` also checks the release's signed archive checksum and refuses to
   replace the manager if its supported contract range excludes the installed game. It stages the new
   executable beside the resolved manager path, replaces it, and keeps the previous executable as
   `<exe>.previous` for `self-update --rollback`. A running supervisor continues on its old executable until

@@ -8,11 +8,31 @@ const ARCHIVE: &str = "server-tool-linux-x86_64.tar.gz";
 fn another_commit_on_the_same_day_can_be_newer() {
     let current: Build = serde_json::from_str(CURRENT).unwrap();
     let next: Build = serde_json::from_str(NEXT).unwrap();
-    assert!(next.newer_than(&current));
-    assert!(!current.newer_than(&next));
-    assert!(!current.newer_than(&current));
+    assert!(next.newer_than(&current).unwrap());
+    assert!(!current.newer_than(&current).unwrap());
     let relabeled: Build = serde_json::from_str(&CURRENT.replace("16:00:00", "16:00:01")).unwrap();
-    assert!(!relabeled.newer_than(&current));
+    assert!(!relabeled.newer_than(&current).unwrap());
+}
+
+#[test]
+fn refuses_a_rolling_release_with_an_older_build() {
+    let current: Build = serde_json::from_str(NEXT).unwrap();
+    let older: Build = serde_json::from_str(CURRENT).unwrap();
+    assert!(older.newer_than(&current).is_err());
+}
+
+#[test]
+fn each_architecture_selects_its_own_archive() {
+    assert_eq!(
+        platform_archive("windows", "aarch64").unwrap(),
+        "server-tool-windows-arm64.zip"
+    );
+    assert_eq!(
+        platform_archive("windows", "x86_64").unwrap(),
+        "server-tool-windows-x64.zip"
+    );
+    let error = platform_archive("linux", "aarch64").unwrap_err();
+    assert!(error.contains("linux aarch64"));
 }
 
 #[test]
@@ -46,7 +66,7 @@ fn authenticates_the_release_tag_and_compatibility_metadata() {
         };
         signed_release(
             release,
-            &[ARCHIVE.into()],
+            ARCHIVE,
             |file| {
                 Ok(match file {
                     sign::SUMS => sums.as_bytes().to_vec(),
