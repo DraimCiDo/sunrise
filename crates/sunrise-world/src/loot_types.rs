@@ -1,9 +1,12 @@
 //! Load validation and direct type dispatch, shared by both loot evaluators.
 use crate::loot::{LootContext, LootStack, LootTags};
+use declarations::builtin;
 use serde_json::Value;
 #[cfg(test)]
 #[path = "loot_types/argument_tests.rs"]
 mod argument_tests;
+#[path = "loot_types/declarations.rs"]
+mod declarations;
 #[path = "loot_types/normalize.rs"]
 mod normalize;
 #[path = "loot_types/parameters.rs"]

@@ -2,9 +2,9 @@
 use serde_json::Value;
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     rc::Rc,
-    sync::{Arc, Mutex, OnceLock, RwLock},
+    sync::{Arc, OnceLock, RwLock},
 };
 use sunrise_core::{
     geometry::Direction,
@@ -30,6 +30,8 @@ use {
     },
     sunrise_core::nbt::{Compound, Tag},
 };
+
+mod declarations;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Projection {

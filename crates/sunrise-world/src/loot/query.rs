@@ -3,6 +3,9 @@ use super::LootStack;
 use std::{cell::RefCell, rc::Rc};
 pub use sunrise_core::UNKNOWN_LOOT_TABLE;
 
+mod declarations;
+pub use declarations::condition;
+
 /// Parameters shared unchanged by all nested tables. The first id set wins.
 #[derive(Default)]
 pub struct LootQuery {

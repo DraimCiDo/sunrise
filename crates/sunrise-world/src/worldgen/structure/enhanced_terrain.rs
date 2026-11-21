@@ -3,8 +3,6 @@
 //! density. Carried as `"sunrise:enhanced_terrain_adaptation"` on a structure
 //! and on its pool elements (docs/modding/src/how-to/content-mods.md); the kernel itself is
 //! [`TerrainKernel`].
-use crate::worldgen::DecodeError;
-use serde_json::Value;
 use std::sync::Arc;
 use sunrise_core::{
     density::{KernelJunction, KernelPiece, StructureBounds, TerrainKernel},
@@ -18,6 +16,8 @@ use {
     },
     sunrise_core::bounding_box::BoundingBox,
 };
+
+mod declarations;
 
 /// One adaptation: the kernel, and how a piece's box is moved, padded or
 /// cut to a band before the kernel measures from it.
@@ -200,7 +200,7 @@ mod tests {
         LazyTemplate, StructureTemplate,
         jigsaw::{Junction, PoolElement, PoolPiece},
     };
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     fn adaptation(v: Value) -> Adaptation {
         Adaptation::decode(&v).unwrap()

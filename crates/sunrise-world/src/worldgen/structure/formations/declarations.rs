@@ -1,3 +1,7 @@
+use super::{Def, Placement};
+use crate::worldgen::DecodeError;
+use serde_json::Value;
+
 impl Placement {
     pub fn decode(name: &str) -> Result<Self, DecodeError> {
         Ok(match name {

@@ -1,3 +1,5 @@
+use super::{LootQuery, LootStack, UNKNOWN_LOOT_TABLE};
+
 /// Recognise stock conditions before the mod-kind fallback, without drawing randomness.
 pub fn condition(
     value: &serde_json::Value,

@@ -1,3 +1,7 @@
+use super::{Condition, ConditionError, Context, Handlers, LoadConditions, Verdict};
+use serde_json::Value;
+use std::collections::BTreeSet;
+
 impl LoadConditions {
     /// `ConditionalOps.decodeListWithElementConditions` on one list: drop an
     /// element whose own `neoforge:conditions` fail and strip the key from one
@@ -5,7 +9,7 @@ impl LoadConditions {
     /// element conditions (a loot table's pools, data-map values, overlays and
     /// atlas sources, each read by its own reader); anywhere else a nested
     /// `neoforge:conditions` key is ordinary data and is never evaluated.
-    fn filter_list(&self, elements: &mut Vec<Value>, path: &dyn Fn() -> String) -> bool {
+    pub(super) fn filter_list(&self, elements: &mut Vec<Value>, path: &dyn Fn() -> String) -> bool {
         let mut valid = true;
         elements.retain_mut(|element| match self.registry_verdict(element, path) {
             Some(true) => {
@@ -40,7 +44,7 @@ impl LoadConditions {
             .is_none_or(|pools| self.filter_list(pools, &path))
     }
 
-    fn verdict(&self, file: &Value, path: &dyn Fn() -> String) -> Verdict {
+    pub(super) fn verdict(&self, file: &Value, path: &dyn Fn() -> String) -> Verdict {
         let Some(payload) = file.get("neoforge:conditions") else {
             return Ok(true);
         };
@@ -230,7 +234,7 @@ impl<'a> Condition<'a> {
     }
 }
 
-fn evaluate(
+pub(super) fn evaluate(
     payload: &Value,
     loaded: &dyn Fn(&str) -> bool,
     handlers: Option<&Handlers>,

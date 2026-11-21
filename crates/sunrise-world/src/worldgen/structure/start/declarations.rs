@@ -1,5 +1,30 @@
+use super::{
+    Avoid, AvoidBiomes, JigsawDef, ModType, Placement, Reduction, RingSections, STEPS,
+    StructureDef, StructureKind, StructureRegistry, StructureSet,
+};
+use crate::{
+    heightmap::HeightmapType,
+    worldgen::{
+        DecodeError,
+        biome::BiomeId,
+        height_provider::HeightProvider,
+        structure::{
+            enhanced_terrain, formations,
+            jigsaw::{Draws, Pools},
+            mod_types::ModStructureTypes,
+            piece_limited, ruined_portal, start_checks,
+        },
+    },
+};
+use serde_json::Value;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
+use sunrise_core::{density::TerrainAdjustment, position::ChunkPos};
+
 impl RingSections {
-    fn decode(v: &Value) -> Self {
+    pub(super) fn decode(v: &Value) -> Self {
         let int = |k: &str| v[k].as_i64().map(|n| n as i32);
         Self {
             first: int("distance_to_first_ring").unwrap_or(0),
@@ -98,8 +123,8 @@ impl StructureRegistry {
         for (name, json) in structures {
             let v: Value = serde_json::from_str(json)?;
             let draws = match v["type"].as_str() {
-                Some("yungsapi:yung_jigsaw") => super::jigsaw::Draws::Yung,
-                _ => super::jigsaw::Draws::Vanilla,
+                Some("yungsapi:yung_jigsaw") => Draws::Yung,
+                _ => Draws::Vanilla,
             };
             let kind = match v["type"].as_str().unwrap_or_default() {
                 "minecraft:jigsaw" | "yungsapi:yung_jigsaw" => {
@@ -116,12 +141,10 @@ impl StructureRegistry {
                         aliases: v["pool_aliases"].as_array().cloned().unwrap_or_default(),
                         padding: pair(v.get("dimension_padding"), "bottom", "top", 0, 0),
                         waterlogging: v["liquid_settings"].as_str() != Some("ignore_waterlogging"),
-                        checks: super::start_checks::StartChecks::decode(
-                            v.get("sunrise:start_checks"),
-                        ),
+                        checks: start_checks::StartChecks::decode(v.get("sunrise:start_checks")),
                         piece_limited: v
                             .get("sunrise:piece_limited")
-                            .map(super::piece_limited::Config::decode),
+                            .map(piece_limited::Config::decode),
                     };
                     // JigsawStructure's codec bounds `size` and
                     // `max_distance_from_center`: vanilla registers no
@@ -148,7 +171,7 @@ impl StructureRegistry {
                         .as_array()
                         .into_iter()
                         .flatten()
-                        .map(super::ruined_portal::Setup::decode)
+                        .map(ruined_portal::Setup::decode)
                         .collect(),
                 ),
                 "minecraft:shipwreck" => StructureKind::Shipwreck {
@@ -171,7 +194,7 @@ impl StructureRegistry {
                 "minecraft:nether_fossil" => StructureKind::NetherFossil(
                     HeightProvider::from_json(&v["height"].to_string())?,
                 ),
-                "sunrise:formations" => match super::formations::Def::decode(&v) {
+                "sunrise:formations" => match formations::Def::decode(&v) {
                     Ok(def) => StructureKind::Formations(def),
                     Err(_) => StructureKind::Unsupported("sunrise:formations".into()),
                 },
@@ -196,7 +219,7 @@ impl StructureRegistry {
                 terrain: terrain(v["terrain_adaptation"].as_str()),
                 enhanced_terrain: v
                     .get("sunrise:enhanced_terrain_adaptation")
-                    .map(super::enhanced_terrain::StructureAdaptation::decode)
+                    .map(enhanced_terrain::StructureAdaptation::decode)
                     .transpose()?,
             });
         }

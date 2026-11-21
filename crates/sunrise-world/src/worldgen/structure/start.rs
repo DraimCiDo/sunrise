@@ -3,7 +3,6 @@
 use crate::{
     heightmap::HeightmapType,
     worldgen::{
-        DecodeError,
         anchor::WorldGenerationContext,
         biome::BiomeId,
         block_feature::FeatureBlockBindings,
@@ -31,10 +30,12 @@ use {
             lay_out_children, place_start,
         },
         legacy::{LegacyPiece, PieceContext},
-        mod_types::{ModStructureType, ModStructureTypes},
+        mod_types::ModStructureType,
     },
     sunrise_core::bounding_box::BoundingBox,
 };
+
+mod declarations;
 
 pub const STEPS: [&str; 11] = [
     "raw_generation",
@@ -1508,6 +1509,7 @@ fn influence_box(minimum: [i32; 3], maximum: [i32; 3]) -> BoundingBox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::worldgen::{DecodeError, structure::mod_types::ModStructureTypes};
     use serde_json::json;
 
     #[test]

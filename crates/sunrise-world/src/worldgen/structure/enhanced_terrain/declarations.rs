@@ -1,3 +1,9 @@
+use super::{Adaptation, Band, StructureAdaptation};
+use crate::worldgen::DecodeError;
+use serde_json::Value;
+use std::sync::Arc;
+use sunrise_core::density::TerrainKernel;
+
 impl Adaptation {
     pub fn decode(v: &Value) -> Result<Self, DecodeError> {
         let int = |v: &Value, key: &'static str| -> Result<i32, DecodeError> {

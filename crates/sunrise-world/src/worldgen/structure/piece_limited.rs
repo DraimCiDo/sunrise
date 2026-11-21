@@ -28,7 +28,6 @@
 //! chunk corner, then buried in the terrain or moved onto Nether land.
 //! Repurposed's overworld mineshafts are not centred: their top goes 15
 //! blocks under the terrain around the chunk.
-use serde_json::Value;
 use std::{
     cell::RefCell,
     collections::{HashSet, VecDeque},
@@ -52,8 +51,10 @@ use {
 };
 use {
     crate::{heightmap::HeightmapType, worldgen::block_feature::FeatureBlockBindings},
-    sunrise_core::{identifier::Identifier, java_hash_map::JavaHashMap},
+    sunrise_core::identifier::Identifier,
 };
+
+mod declarations;
 
 /// Which mod's copy of the code: they differ in a few post-layout steps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

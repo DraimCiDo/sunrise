@@ -28,9 +28,11 @@ use crate::{
         structure::{BlockInfo, StructureResources},
     },
 };
-use serde_json::Value;
 use std::{collections::BTreeSet, sync::Arc};
 use sunrise_core::geometry::Direction;
+
+mod declarations;
+use declarations::{DIRECTION_NAMES, direction};
 
 /// Blocks whose `defaultDestroyTime` is negative in 26.3 (unbreakable):
 /// forced pillars go through every block but these.
@@ -646,7 +648,7 @@ impl StairPillar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     /// Scripted floats.
     struct Floats(Vec<f32>);

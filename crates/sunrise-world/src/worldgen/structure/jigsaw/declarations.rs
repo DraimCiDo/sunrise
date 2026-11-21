@@ -1,3 +1,15 @@
+use super::{Limit, Pool, PoolElement, Pools, Projection, Rules};
+use crate::worldgen::{
+    DecodeError,
+    block_feature::FeatureBlockBindings,
+    structure::{StructureResources, enhanced_terrain, processor::ProcessorList},
+};
+use serde_json::Value;
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, Mutex, OnceLock},
+};
+
 fn projection(value: &Value) -> Result<Projection, DecodeError> {
     match value["projection"].as_str() {
         Some("rigid") => Ok(Projection::Rigid),
@@ -7,7 +19,7 @@ fn projection(value: &Value) -> Result<Projection, DecodeError> {
 }
 
 impl PoolElement {
-    fn decode(
+    pub(super) fn decode(
         value: &Value,
         resources: &StructureResources,
         bindings: &FeatureBlockBindings<'_>,
@@ -53,7 +65,7 @@ impl PoolElement {
                     },
                     enhanced_terrain: value
                         .get("sunrise:enhanced_terrain_adaptation")
-                        .map(|a| super::enhanced_terrain::Adaptation::decode(a).map(Arc::new))
+                        .map(|a| enhanced_terrain::Adaptation::decode(a).map(Arc::new))
                         .transpose()?,
                     ground_level: match value.get("sunrise:ground_level") {
                         None => 1,
@@ -86,7 +98,7 @@ impl PoolElement {
 }
 
 impl Rules {
-    fn of(element: &Value) -> Self {
+    pub(super) fn of(element: &Value) -> Self {
         if element["element_type"] != "yungsapi:yung_single_element" {
             return Self::default();
         }
@@ -103,7 +115,7 @@ impl Rules {
 }
 
 impl Limit {
-    fn of(element: &Value) -> Option<Self> {
+    pub(super) fn of(element: &Value) -> Option<Self> {
         let int = |key: &str| {
             element[key]
                 .as_i64()

@@ -1,4 +1,6 @@
-fn builtin(kind: &str, function: bool) -> bool {
+use super::shapes;
+
+pub(super) fn builtin(kind: &str, function: bool) -> bool {
     shapes::contains(kind, function)
         || (!function
             && matches!(

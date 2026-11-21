@@ -16,7 +16,6 @@ use {
         registry::BlockStateId,
         worldgen::{
             DecodeError,
-            block_feature::FeatureBlockBindings,
             feature::FeatureWorld,
             placement::{PlacementContext, PlacementQueryError},
             rule_test::RuleTest,
@@ -26,9 +25,12 @@ use {
     sunrise_core::nbt::{Compound, JavaString, Tag},
 };
 
+mod declarations;
 mod litho;
 mod pillars;
 mod sea_level;
+
+use declarations::SPAWNER_FIELDS;
 
 /// The draws processors make from StructurePlaceSettings' random.
 pub trait ProcessorRandom {
@@ -1355,7 +1357,8 @@ fn update_shape_at_edge<W: PlacementContext>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{declarations::holder_set, *};
+    use crate::worldgen::block_feature::FeatureBlockBindings;
     use serde_json::json;
     use std::collections::BTreeMap;
 

@@ -25,9 +25,10 @@
 //! in the chunks around, its Nether shipwreck open air or lava around the
 //! start, and its End stronghold land around the chunk.
 use crate::{heightmap::HeightmapType, worldgen::biome::BiomeId};
-use serde_json::Value;
 use std::collections::BTreeSet;
 use sunrise_core::position::ChunkPos;
+
+mod declarations;
 
 /// Which block of the start column must not be a liquid.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,7 +105,6 @@ impl<T: super::start::StartContext> CheckQueries for T {
 }
 
 impl StartChecks {
-
     /// GenericJigsawStructure.extraSpawningChecks: whether the structure may
     /// start in `chunk` at `y` (the sampled start height).
     pub fn pass(
@@ -242,7 +242,7 @@ fn repurposed(check: Repurposed, queries: &mut impl CheckQueries, chunk: ChunkPo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::collections::BTreeMap;
 
     /// Heights per (x, z), a liquid column, one biome per quart column.

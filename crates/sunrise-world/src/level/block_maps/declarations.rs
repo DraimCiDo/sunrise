@@ -1,3 +1,6 @@
+use super::{BlockMaps, cycles, full, inverse};
+use serde_json::Value;
+
 impl BlockMaps {
     /// The maps from their merged values (block id to the value a file gave
     /// it). A value of another shape is skipped with a warning, as a codec

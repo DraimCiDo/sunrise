@@ -6,9 +6,10 @@
 //! vanilla's own answer.
 use super::Behaviours;
 use crate::registry::BlockStateId;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+
+mod declarations;
 
 /// The three maps by block id (`minecraft:stone`), values decoded.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

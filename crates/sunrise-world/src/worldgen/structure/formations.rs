@@ -8,11 +8,7 @@
 //! the element's jigsaw children with vanilla's jigsaw
 //! ([`super::jigsaw::add_children`]): `sunrise:pieced` on the structure
 //! holds its `max_depth` and `max_distance_from_center`.
-use crate::{
-    heightmap::HeightmapType,
-    worldgen::{DecodeError, block_feature::FeatureBlockBindings},
-};
-use serde_json::Value;
+use crate::{heightmap::HeightmapType, worldgen::block_feature::FeatureBlockBindings};
 use sunrise_core::position::ChunkPos;
 use sunrise_core::random::RandomSource;
 use {
@@ -23,6 +19,8 @@ use {
     },
     sunrise_core::bounding_box::BoundingBox,
 };
+
+mod declarations;
 
 /// StructurePlacement: how the height is found.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

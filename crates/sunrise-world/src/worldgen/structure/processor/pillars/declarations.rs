@@ -1,7 +1,22 @@
 /// Direction's serialized names, in Direction.values() order.
-const DIRECTION_NAMES: [&str; 6] = ["down", "up", "north", "south", "west", "east"];
+use super::{
+    Blocks, BottomPillar, CloseOffAirSources, CloseOffFluidSources, HeightRandomizer, Pillar,
+    StairPillar, YungPillar, YungRandomizer,
+};
+use crate::{
+    registry::BlockStateId,
+    worldgen::{
+        DecodeError,
+        block_feature::FeatureBlockBindings,
+        structure::{StructureResources, processor::ProcessorList},
+    },
+};
+use serde_json::Value;
+use sunrise_core::geometry::Direction;
 
-fn direction(name: &str) -> Result<Direction, DecodeError> {
+pub(super) const DIRECTION_NAMES: [&str; 6] = ["down", "up", "north", "south", "west", "east"];
+
+pub(super) fn direction(name: &str) -> Result<Direction, DecodeError> {
     let i = DIRECTION_NAMES
         .iter()
         .position(|n| *n == name)
@@ -55,7 +70,7 @@ fn weighted_blocks(
 }
 
 impl HeightRandomizer {
-    fn decode(
+    pub(super) fn decode(
         v: &Value,
         state: &impl Fn(&Value) -> Result<BlockStateId, DecodeError>,
     ) -> Result<Self, DecodeError> {
@@ -80,7 +95,7 @@ impl HeightRandomizer {
 }
 
 impl YungRandomizer {
-    fn decode(
+    pub(super) fn decode(
         v: &Value,
         state: &impl Fn(&Value) -> Result<BlockStateId, DecodeError>,
     ) -> Result<Self, DecodeError> {
@@ -111,7 +126,7 @@ impl YungRandomizer {
 }
 
 impl Pillar {
-    pub(super) fn decode(
+    pub(in super::super) fn decode(
         v: &Value,
         resources: &StructureResources,
         bindings: &FeatureBlockBindings<'_>,
@@ -140,7 +155,7 @@ impl Pillar {
 }
 
 impl BottomPillar {
-    pub(super) fn decode(
+    pub(in super::super) fn decode(
         v: &Value,
         resources: &StructureResources,
         bindings: &FeatureBlockBindings<'_>,
@@ -155,7 +170,7 @@ impl BottomPillar {
 }
 
 impl CloseOffFluidSources {
-    pub(super) fn decode(
+    pub(in super::super) fn decode(
         v: &Value,
         resources: &StructureResources,
         bindings: &FeatureBlockBindings<'_>,
@@ -171,7 +186,7 @@ impl CloseOffFluidSources {
 }
 
 impl CloseOffAirSources {
-    pub(super) fn decode(
+    pub(in super::super) fn decode(
         v: &Value,
         resources: &StructureResources,
         bindings: &FeatureBlockBindings<'_>,
@@ -184,7 +199,7 @@ impl CloseOffAirSources {
 }
 
 impl YungPillar {
-    pub(super) fn decode(
+    pub(in super::super) fn decode(
         v: &Value,
         bindings: &FeatureBlockBindings<'_>,
         state: impl Fn(&Value) -> Result<BlockStateId, DecodeError>,
@@ -201,7 +216,7 @@ impl YungPillar {
 }
 
 impl StairPillar {
-    pub(super) fn decode(
+    pub(in super::super) fn decode(
         v: &Value,
         resources: &StructureResources,
         bindings: &FeatureBlockBindings<'_>,

@@ -6,6 +6,9 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+mod declarations;
+pub use declarations::is_builtin_condition;
+
 /// Enabled package IDs captured by the engine for one owning data load.
 /// Readers share this immutable view; they never recover IDs from namespaces.
 /// Resource selection happens before evaluating ordinary JSON files. Stacked
@@ -380,7 +383,6 @@ enum Condition<'a> {
 }
 
 impl<'a> Condition<'a> {
-
     // Only pure tests with available inputs can be skipped after the result
     // is decided. Decode has already checked even the branches we skip.
     fn must_test(&self, context: &Context) -> bool {

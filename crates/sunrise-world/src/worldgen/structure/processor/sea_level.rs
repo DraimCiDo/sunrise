@@ -24,8 +24,9 @@ use crate::{
     registry::{BlockRegistry, BlockStateId},
     worldgen::{DecodeError, placement::PlacementContext, structure::BlockInfo},
 };
-use serde_json::Value;
 use std::collections::BTreeSet;
+
+mod declarations;
 
 fn known(registry: &BlockRegistry, name: &str) -> Result<BlockStateId, DecodeError> {
     registry
@@ -211,7 +212,7 @@ impl MineshaftSkyView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde_json::{Value, json};
     use {
         crate::{
             heightmap::HeightmapType,

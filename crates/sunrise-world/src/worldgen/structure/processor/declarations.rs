@@ -1,6 +1,26 @@
+use super::{
+    CountCap, Modifier, Outcome, Pick, PickedList, PosRule, Processor, ProcessorList, Rule,
+    SpawnerMobs, json_to_nbt, litho, pillars, sea_level,
+};
+use crate::{
+    heightmap::HeightmapType,
+    registry::BlockStateId,
+    worldgen::{
+        DecodeError,
+        block_feature::{BlockSetLookup, FeatureBlockBindings},
+        rule_test::RuleTest,
+        structure::StructureResources,
+        tags,
+        value_provider::IntProvider,
+    },
+};
+use serde_json::Value;
+use std::{collections::BTreeSet, sync::Arc};
+use sunrise_core::nbt::{Compound, JavaString, Tag};
+
 /// The spawner fields `sunrise:spawner_mobs` writes: its JSON key, the NBT
 /// key and the default (BaseSpawner's).
-const SPAWNER_FIELDS: [(&str, &str, i16); 7] = [
+pub(super) const SPAWNER_FIELDS: [(&str, &str, i16); 7] = [
     ("delay", "Delay", 20),
     ("min_spawn_delay", "MinSpawnDelay", 200),
     ("max_spawn_delay", "MaxSpawnDelay", 800),
@@ -14,14 +34,14 @@ impl PosRule {
     /// A rule's `position_predicate` (always true when missing). Types are
     /// identifiers: `"always_true"` is `minecraft:always_true`, as vanilla
     /// reads it.
-    fn decode(value: Option<&Value>) -> Result<Self, DecodeError> {
+    pub(super) fn decode(value: Option<&Value>) -> Result<Self, DecodeError> {
         let Some(p) = value else {
             return Ok(Self::Always);
         };
         let kind = p["predicate_type"]
             .as_str()
             .unwrap_or("minecraft:always_true");
-        Ok(match super::super::tags::identifier(kind)?.as_str() {
+        Ok(match tags::identifier(kind)?.as_str() {
             "minecraft:always_true" => Self::Always,
             kind @ ("minecraft:linear_pos" | "minecraft:axis_aligned_linear_pos") => Self::Linear {
                 min_chance: p.get("min_chance").and_then(Value::as_f64).unwrap_or(0.) as f32,
@@ -75,12 +95,12 @@ impl PosRule {
 
 impl Modifier {
     /// A rule's `block_entity_modifier` (passthrough when missing).
-    fn decode(value: Option<&Value>) -> Result<Self, DecodeError> {
+    pub(super) fn decode(value: Option<&Value>) -> Result<Self, DecodeError> {
         let Some(m) = value else {
             return Ok(Self::Passthrough);
         };
         Ok(
-            match super::super::tags::identifier(m["type"].as_str().unwrap_or(""))?.as_str() {
+            match tags::identifier(m["type"].as_str().unwrap_or(""))?.as_str() {
                 "minecraft:passthrough" => Self::Passthrough,
                 "minecraft:clear" => Self::Clear,
                 "minecraft:append_loot" => {
@@ -117,7 +137,7 @@ fn below(v: &Value) -> Result<f32, DecodeError> {
 }
 
 impl Pick {
-    fn decode(
+    pub(super) fn decode(
         value: &Value,
         state: impl Fn(&Value) -> Result<BlockStateId, DecodeError>,
     ) -> Result<Self, DecodeError> {
@@ -167,7 +187,7 @@ impl Pick {
         Ok(Self {
             block: value["block"]
                 .as_str()
-                .map(|b| super::super::tags::identifier(b).map(|i| i.to_string()))
+                .map(|b| tags::identifier(b).map(|i| i.to_string()))
                 .ok_or(DecodeError::Field("pick block"))??,
             picks: value["picks"]
                 .as_array()
@@ -183,7 +203,7 @@ impl Pick {
 }
 
 impl CountCap {
-    fn decode(
+    pub(super) fn decode(
         value: &Value,
         state: impl Fn(&Value) -> Result<BlockStateId, DecodeError>,
     ) -> Result<Self, DecodeError> {
@@ -200,7 +220,7 @@ impl CountCap {
                 .iter()
                 .map(|b| {
                     let b = b.as_str().ok_or(DecodeError::Field("blocks"))?;
-                    Ok(super::super::tags::identifier(b)?.to_string())
+                    Ok(tags::identifier(b)?.to_string())
                 })
                 .collect::<Result<_, DecodeError>>()?,
             min: count("min")?,
@@ -212,7 +232,7 @@ impl CountCap {
 }
 
 impl SpawnerMobs {
-    fn decode(
+    pub(super) fn decode(
         value: &Value,
         replacement: impl FnOnce(Option<&Value>) -> Result<BlockStateId, DecodeError>,
     ) -> Result<Self, DecodeError> {
@@ -255,11 +275,11 @@ impl SpawnerMobs {
 
 /// A block holder set in any form `crate::holder_set` reads; a tag no pack
 /// defines holds no blocks.
-fn holder_set(
+pub(super) fn holder_set(
     value: &Value,
     bindings: &FeatureBlockBindings<'_>,
 ) -> Result<Arc<BTreeSet<BlockStateId>>, DecodeError> {
-    let lookup = super::super::block_feature::BlockSetLookup {
+    let lookup = BlockSetLookup {
         bindings,
         unknown_tags_empty: true,
     };
@@ -310,7 +330,7 @@ impl Processor {
                 .decode(&v.to_string(), false)
                 .map_err(|e| DecodeError::Registry(e.to_string()))
         };
-        Ok(match super::super::tags::identifier(kind)?.as_str() {
+        Ok(match tags::identifier(kind)?.as_str() {
             "minecraft:nop" => Self::Nop,
             "minecraft:block_ignore" => Self::BlockIgnore(
                 value["blocks"]
@@ -388,8 +408,8 @@ impl Processor {
                     .map(|(from, to)| {
                         let to = to.as_str().ok_or(DecodeError::Field("blocks"))?;
                         Ok((
-                            super::super::tags::identifier(from)?.to_string(),
-                            super::super::tags::identifier(to)?.to_string(),
+                            tags::identifier(from)?.to_string(),
+                            tags::identifier(to)?.to_string(),
                         ))
                     })
                     .collect::<Result<_, DecodeError>>()?,
@@ -467,7 +487,7 @@ impl ProcessorList {
         let value: Value = serde_json::from_str(json)?;
         let value = match &value {
             Value::String(name) => {
-                let name = super::super::tags::identifier(name)?;
+                let name = tags::identifier(name)?;
                 let raw = resources.processor_lists.get(&name).ok_or_else(|| {
                     DecodeError::Registry(format!("unknown processor list {name}"))
                 })?;

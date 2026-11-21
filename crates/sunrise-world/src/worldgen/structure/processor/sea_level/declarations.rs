@@ -1,5 +1,9 @@
+use super::KeepWorldBlock;
+use crate::worldgen::DecodeError;
+use serde_json::Value;
+
 impl KeepWorldBlock {
-    pub(super) fn decode(value: &Value) -> Result<Self, DecodeError> {
+    pub(in super::super) fn decode(value: &Value) -> Result<Self, DecodeError> {
         let blocks = value["blocks"]
             .as_array()
             .ok_or(DecodeError::Field("keep_world_block blocks"))?

@@ -4,10 +4,10 @@
 #[path = "global_modifiers_tests.rs"]
 mod tests;
 use super::{LootContext, LootStack};
-use crate::conditions::LoadConditions;
 use serde_json::Value;
-use std::{collections::BTreeMap, sync::Arc};
-use sunrise_core::identifier::Identifier;
+use std::sync::Arc;
+
+mod declarations;
 
 /// Borrowed access to the evaluator that owns this root roll. No operation starts
 /// another root, changes its parameters, or selects a different random sequence.
@@ -80,7 +80,6 @@ pub struct GlobalLootModifiers {
     instances: Vec<PreparedModifier>,
 }
 impl GlobalLootModifiers {
-
     /// Selected instance ids in application order.
     pub fn ids(&self) -> impl Iterator<Item = &str> {
         self.instances.iter().map(|instance| instance.id.as_str())
