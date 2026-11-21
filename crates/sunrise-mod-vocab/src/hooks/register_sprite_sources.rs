@@ -1,8 +1,8 @@
 //! The `register_sprite_sources` hooks: declarations the mod API generator reads (see `hooks/mod.rs`).
 
 pub trait Hooks {
-    /// The atlas sprite source types a mod adds (NeoForge's `RegisterSpriteSourcesEvent`): push
-    /// each type id, `<mod id>:<path>`. Asked once at start on the client, before resources load.
+    /// The atlas sprite source types a mod adds (NeoForge's `RegisterSpriteSourcesEvent`): call
+    /// `event.register(id)` with each `<mod id>:<path>` type ID. Asked once at start on the client, before resources load.
     /// An entry of an atlas definition's `sources` whose `type` is a registered id is answered by
     /// `sprite_source` at its place in the list, on every load and reload. An id in vanilla's
     /// namespace, not of that form, or registered already is logged and left out.
@@ -11,7 +11,7 @@ pub trait Hooks {
 An atlas definition (`assets/<namespace>/atlases/<path>.json`) lists the sources that give the atlas its
 sprites: vanilla's `directory`, `single`, `filter`, `unstitch` and `paletted_permutations`. A mod adds a
 source type of its own (NeoForge's `RegisterSpriteSourcesEvent`) in two steps, as an item tint source:
-`Hooks::register_sprite_sources` pushes the type's id once at start, before resources load, and
+call `event.register(id)` in `Hooks::register_sprite_sources` once at start, before resources load, and
 `Hooks::sprite_source` answers each entry of that type when a definition is read, on every load and
 reload.
 
@@ -21,7 +21,7 @@ fn register_sprite_sources(
     _context: &RegistrationContext,
     event: &mut RegisterSpriteSourcesEvent<'_>,
 ) {
-    event.sources.push("example:checker".into());
+    event.register("example:checker".into());
 }
 
 fn sprite_source(&self, _context: &RegistrationContext, event: &mut SpriteSourceEvent<'_>) {
@@ -76,9 +76,10 @@ isn't `width * height * 4` or whose side is over 32768 pixels, are logged and sk
         receiver = "associated",
         dispatch = "flat",
         side = "client",
-        version = 2,
+        version = 3,
         contract = "collect",
         out = "sources",
+        registration_append = "register",
         context = "registration",
         neoforge = "RegisterSpriteSourcesEvent"
     )]

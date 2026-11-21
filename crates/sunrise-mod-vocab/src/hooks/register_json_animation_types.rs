@@ -2,8 +2,8 @@
 
 pub trait Hooks {
     /// The animation targets and interpolations a mod adds for keyframe animation files to name
-    /// (NeoForge's `RegisterJsonAnimationTypesEvent`): push each id, `<namespace>:<path>`, as a
-    /// `JsonAnimationType::Target` or `JsonAnimationType::Interpolation`. Asked once at start on
+    /// (NeoForge's `RegisterJsonAnimationTypesEvent`): pass each `JsonAnimationType::Target` or
+    /// `JsonAnimationType::Interpolation` to `event.register(kind)`. Asked once at start on
     /// the client, before resources load. An id in vanilla's namespace, not of that form, or
     /// registered already as the same kind is logged and left out.
     #[notes = r#"## Animation types
@@ -11,8 +11,8 @@ pub trait Hooks {
 A keyframe animation file (`assets/<namespace>/neoforge/animations/entity/<path>.json`) names a target per
 entry and an interpolation per keyframe: vanilla's `minecraft:position`, `minecraft:rotation` and
 `minecraft:scale`, and `minecraft:linear` and `minecraft:catmullrom`. A mod adds its own (NeoForge's
-`RegisterJsonAnimationTypesEvent`) in two steps. `Hooks::register_json_animation_types` pushes the ids once
-at start, so files may name them: an id no mod registered still fails its file, naming it. The code that
+`RegisterJsonAnimationTypesEvent`) in two steps. Call `event.register(kind)` in
+`Hooks::register_json_animation_types` at startup so files may name them: an id no mod registered still fails its file, naming it. The code that
 plays them is an `AnimationTypes` the playing mod gives `AnimationHolder::bake_with`, which the baked
 animation keeps and runs in that mod, with no hook per sample.
 
@@ -22,8 +22,8 @@ fn register_json_animation_types(
     _context: &RegistrationContext,
     event: &mut RegisterJsonAnimationTypesEvent<'_>,
 ) {
-    event.types.push(JsonAnimationType::Target(Identifier::parse("example:glow").unwrap()));
-    event.types.push(JsonAnimationType::Interpolation(Identifier::parse("example:step").unwrap()));
+    event.register(JsonAnimationType::Target(Identifier::parse("example:glow").unwrap()));
+    event.register(JsonAnimationType::Interpolation(Identifier::parse("example:step").unwrap()));
 }
 
 struct Types;
@@ -70,8 +70,10 @@ type and the mod that registered it."#]
         receiver = "associated",
         dispatch = "flat",
         side = "client",
+        version = 2,
         contract = "collect",
         out = "types",
+        registration_append = "register",
         context = "registration",
         answered_by = "mod",
         neoforge = "RegisterJsonAnimationTypesEvent"

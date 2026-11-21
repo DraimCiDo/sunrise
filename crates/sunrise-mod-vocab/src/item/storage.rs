@@ -103,12 +103,12 @@ pub trait ItemStorage {
     ///
     /// Providers skip empty entries and report repeated kinds separately, each with its own
     /// amount. Read entries as needed: `ControlFlow::Continue(())` asks for the next entry;
-    /// `ControlFlow::Break(())` returns `Ok(())` without reading another. Exhaustion also
-    /// returns `Ok(())`; a read failure returns `Err`.
+    /// `ControlFlow::Break(())` stops the visit without reading another entry and is returned
+    /// in `Ok`. Exhaustion returns `Ok(ControlFlow::Continue(()))`; a read failure returns `Err`.
     ///
     /// The provider may hold a read borrow for the duration of the visit. Use each kind only
     /// within its callback or clone it to keep it. Do not re-enter the provider or write from
-    /// the callback: wait until the visit returns `Ok(())`.
+    /// the callback: wait until the visit returns successfully.
     ///
     /// ```
     /// use mod_api::{ItemResource, ItemStorage, ServerHost, StorageError};
@@ -120,7 +120,7 @@ pub trait ItemStorage {
     ///     minimum: u64,
     /// ) -> Result<Option<(ItemResource, u64)>, StorageError> {
     ///     let mut found = None;
-    ///     storage.visit_entries(host, &mut |kind, amount| {
+    ///     let _ = storage.visit_entries(host, &mut |kind, amount| {
     ///         if amount >= minimum {
     ///             found = Some((kind.clone(), amount));
     ///             ControlFlow::Break(())
@@ -135,7 +135,7 @@ pub trait ItemStorage {
         &self,
         host: &mut dyn ServerHost,
         visitor: &mut dyn FnMut(&ItemResource, u64) -> ControlFlow<()>,
-    ) -> Result<(), StorageError>;
+    ) -> Result<ControlFlow<()>, StorageError>;
 }
 
 const STORAGE_SOURCE: &CapabilityKey<dyn ResourceHandler<ItemResource>> = &ITEMS;
@@ -214,7 +214,7 @@ impl ItemStorage for GameStorage {
         &self,
         host: &mut dyn ServerHost,
         visitor: &mut dyn FnMut(&ItemResource, u64) -> ControlFlow<()>,
-    ) -> Result<(), StorageError> {
+    ) -> Result<ControlFlow<()>, StorageError> {
         crate::backend_of(&*host)
             .ok_or(crate::LevelReadError::Unavailable)
             .and_then(|backend| backend.container_visit_entries(self.0, visitor))
@@ -333,16 +333,17 @@ impl ItemStorage for Slots {
         &self,
         host: &mut dyn ServerHost,
         visitor: &mut dyn FnMut(&ItemResource, u64) -> ControlFlow<()>,
-    ) -> Result<(), StorageError> {
+    ) -> Result<ControlFlow<()>, StorageError> {
         for index in 0..self.0.size(host) {
             if let Some(resource) = self.0.resource(host, index) {
                 let amount = u64::from(self.0.amount(host, index));
-                if visitor(&resource, amount).is_break() {
-                    break;
+                let flow = visitor(&resource, amount);
+                if flow.is_break() {
+                    return Ok(flow);
                 }
             }
         }
-        Ok(())
+        Ok(ControlFlow::Continue(()))
     }
 }
 
@@ -401,7 +402,7 @@ pub fn transfer_matching(
     while moved < max {
         let mut seen = 0u64;
         let mut selected = Ok(None);
-        from.visit_entries(host, &mut |resource, _| {
+        let _ = from.visit_entries(host, &mut |resource, _| {
             let Some(occurrence) = seen.checked_add(1) else {
                 selected = Err(StorageError::Overflow);
                 return ControlFlow::Break(());
@@ -504,13 +505,16 @@ mod tests {
             &self,
             _: &mut dyn ServerHost,
             visitor: &mut dyn FnMut(&ItemResource, u64) -> ControlFlow<()>,
-        ) -> Result<(), StorageError> {
+        ) -> Result<ControlFlow<()>, StorageError> {
             for (resource, &amount) in self.0.held.borrow().iter() {
-                if amount != 0 && visitor(resource, amount).is_break() {
-                    break;
+                if amount != 0 {
+                    let flow = visitor(resource, amount);
+                    if flow.is_break() {
+                        return Ok(flow);
+                    }
                 }
             }
-            Ok(())
+            Ok(ControlFlow::Continue(()))
         }
     }
     fn bulk(
@@ -555,7 +559,7 @@ mod tests {
         let came = host.transaction(|host, tx| Ok::<_, ()>(storage.extract(host, tx, stone, 100)));
         assert_eq!(came, Ok(100));
         let mut total = 0;
-        storage
+        let _ = storage
             .visit_entries(host, &mut |_, amount| {
                 total += amount;
                 ControlFlow::Continue(())
@@ -587,12 +591,11 @@ mod tests {
         chest(&mut host, [0, 64, 0], &slots);
         let storage = storage_at(&mut host, [0, 64, 0]);
         let mut entries = Vec::new();
-        storage
-            .visit_entries(&mut host, &mut |resource, amount| {
-                entries.push((resource.clone(), amount));
-                ControlFlow::Continue(())
-            })
-            .unwrap();
+        let flow = storage.visit_entries(&mut host, &mut |resource, amount| {
+            entries.push((resource.clone(), amount));
+            ControlFlow::Continue(())
+        });
+        assert_eq!(flow, Ok(ControlFlow::Continue(())));
         assert_eq!(
             entries,
             (1..=300u64)
@@ -662,16 +665,15 @@ mod tests {
             owner: None,
         });
         let mut delivered = Vec::new();
-        storage
-            .visit_entries(&mut host, &mut |kind, amount| {
-                delivered.push((kind.clone(), amount));
-                if *kind == r[0] {
-                    ControlFlow::Break(())
-                } else {
-                    ControlFlow::Continue(())
-                }
-            })
-            .unwrap();
+        let flow = storage.visit_entries(&mut host, &mut |kind, amount| {
+            delivered.push((kind.clone(), amount));
+            if *kind == r[0] {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        });
+        assert_eq!(flow, Ok(ControlFlow::Break(())));
         assert_eq!(reads.resources.borrow().as_slice(), &[0, 1]);
         assert_eq!(reads.amounts.borrow().as_slice(), &[1]);
         assert_eq!(delivered, [(r[0].clone(), 7)]);
@@ -796,14 +798,15 @@ mod tests {
                 &self,
                 _: &mut dyn ServerHost,
                 visitor: &mut dyn FnMut(&ItemResource, u64) -> ControlFlow<()>,
-            ) -> Result<(), StorageError> {
+            ) -> Result<ControlFlow<()>, StorageError> {
                 let entries = self.entries.borrow();
                 for (kind, amount) in entries.iter() {
-                    if visitor(kind, *amount).is_break() {
-                        break;
+                    let flow = visitor(kind, *amount);
+                    if flow.is_break() {
+                        return Ok(flow);
                     }
                 }
-                Ok(())
+                Ok(ControlFlow::Continue(()))
             }
         }
 

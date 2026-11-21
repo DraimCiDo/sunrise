@@ -21,7 +21,7 @@ mod tests {
             _: &RegistrationContext,
             event: &mut RegisterPresetEditorsEvent<'_>,
         ) {
-            event.editors.push(PresetEditor {
+            event.register(PresetEditor {
                 preset: "example:islands".into(),
                 screen: "example:editor".into(),
             });

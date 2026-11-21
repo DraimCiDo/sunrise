@@ -2,7 +2,8 @@
 
 pub trait Hooks {
     /// The numeric item model properties a mod adds (NeoForge's
-    /// `RegisterRangeSelectItemModelPropertyEvent`): push each id, `<mod id>:<path>`. Asked once at
+    /// `RegisterRangeSelectItemModelPropertyEvent`): call `event.register(id)` with each
+    /// `<mod id>:<path>` ID. Asked once at
     /// start on the client, before resources load. A `minecraft:range_dispatch` naming a registered
     /// property thresholds on the number `item_model_range_property` answers per stack, also after a
     /// resource reload. An id in vanilla's namespace, not of that form, or registered already is
@@ -10,8 +11,8 @@ pub trait Hooks {
     #[notes = r#"## Numeric item model properties
 
 A client mod adds a numeric `minecraft:range_dispatch` property (NeoForge's
-`RegisterRangeSelectItemModelPropertyEvent`) in two steps. `Hooks::register_range_select_item_model_property`
-pushes its id once at start, before resources load; `Hooks::item_model_range_property` answers the number
+`RegisterRangeSelectItemModelPropertyEvent`) in two steps. Call `event.register(id)` in
+`Hooks::register_range_select_item_model_property` once at start, before resources load; `Hooks::item_model_range_property` answers the number
 for each stack while a model picks a branch.
 
 ```rust,ignore
@@ -20,7 +21,7 @@ fn register_range_select_item_model_property(
     _context: &RegistrationContext,
     event: &mut RegisterRangeSelectItemModelPropertyEvent<'_>,
 ) {
-    event.properties.push("example:fill".into());
+    event.register("example:fill".into());
 }
 
 fn item_model_range_property(&self, _host: &dyn ClientHost, event: &mut ItemModelRangePropertyEvent<'_>) {
@@ -38,8 +39,10 @@ registered twice is logged and left out. A property no mod registers reads 0, de
         receiver = "associated",
         dispatch = "flat",
         side = "client",
+        version = 2,
         contract = "collect",
         out = "properties",
+        registration_append = "register",
         context = "registration",
         neoforge = "RegisterRangeSelectItemModelPropertyEvent"
     )]

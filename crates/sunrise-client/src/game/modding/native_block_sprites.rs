@@ -182,7 +182,7 @@ mod texture_atlas_stitched_tests {
             _: &mod_api::RegistrationContext,
             event: &mut mod_api::RegisterSpriteSourcesEvent<'_>,
         ) {
-            event.sources.push("marker:own".into());
+            event.register("marker:own".into());
         }
         fn sprite_source(
             &self,

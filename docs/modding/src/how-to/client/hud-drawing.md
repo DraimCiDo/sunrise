@@ -57,8 +57,8 @@ runs. For work that must happen even when the HUD is hidden, use the independent
 
 ## Registering F3 text
 
-Push a `DebugEntry::text(id, group, lines)` in `Hooks::register_debug_entries` at client
-startup. Use a non-vanilla namespaced ID, which also identifies the entry in the debug options
+Pass a `DebugEntry::text(id, group, lines)` to `event.register` in `Hooks::register_debug_entries`
+at client startup. Use a non-vanilla namespaced ID, which also identifies the entry in the debug options
 and saved profile. The group says which vanilla lines yours join; the closure receives the
 current client host and appends to the entry's lines.
 
@@ -66,7 +66,7 @@ current client host and appends to the entry's lines.
 use mod_api::{DebugEntry, DebugGroup, RegisterDebugEntriesEvent, RegistrationContext};
 
 fn register_debug_entries(&self, _: &RegistrationContext, event: &mut RegisterDebugEntriesEvent<'_>) {
-    event.entries.push(DebugEntry::text(
+    event.register(DebugEntry::text(
         "example:queue".into(),
         DebugGroup::Memory,
         |_host, lines| lines.push("Queue: ready".into()),
@@ -74,14 +74,13 @@ fn register_debug_entries(&self, _: &RegistrationContext, event: &mut RegisterDe
 }
 ```
 
-Each mod starts with an empty batch. The client keeps the closure and calls it as your mod only
-while the entry is visible. Reduced debug info hides it, even if it is set to always on.
+The client keeps the closure and calls it as your mod only while the entry is visible. Reduced debug info hides it, even if it is set to always on.
 
 ## Registering world-space debug renderers
 
-Push `DebugEntry::renderer(id)` in `Hooks::register_debug_entries` at client startup to
-create the toggle. In `Hooks::register_debug_renderers`, push `DebugRenderer::new(id, draw)`
-with the same ID. Use the callback's `ClientHost`, `WorldRenderView` and `WorldDrawContext` to
+Register `DebugEntry::renderer(id)` in `Hooks::register_debug_entries` at client startup to
+create the toggle. In `Hooks::register_debug_renderers`, pass `DebugRenderer::new(id, draw)`
+with the same ID to `event.register`. Use the callback's `ClientHost`, `WorldRenderView` and `WorldDrawContext` to
 draw, and capture any state specific to this renderer instead of handling an ID in a draw hook.
 
 ```rust,ignore
@@ -93,19 +92,19 @@ use mod_api::{
 const GUIDE_LINE: &str = "example:guide_line";
 
 fn register_debug_entries(&self, _: &RegistrationContext, event: &mut RegisterDebugEntriesEvent<'_>) {
-    event.entries.push(DebugEntry::renderer(GUIDE_LINE.into()));
+    event.register(DebugEntry::renderer(GUIDE_LINE.into()));
 }
 
 fn register_debug_renderers(&self, _: &RegistrationContext, event: &mut RegisterDebugRenderersEvent<'_>) {
     let line = WorldLine::new([0.0, 65.0, 0.0], [2.0, 65.0, 0.0], 0xFF00_FF00, 2.0, WorldDepth::Tested);
-    event.renderers.push(DebugRenderer::new(GUIDE_LINE.into(), move |_host, _view, draw| {
+    event.register(DebugRenderer::new(GUIDE_LINE.into(), move |_host, _view, draw| {
         let _ = draw.lines(std::slice::from_ref(&line));
     }));
 }
 ```
 
 The client collects a fresh list at startup, login, the first world view and the next world view
-after a selection rebuild or respawn. Keep per-refresh state in the new callbacks. Push all
+after a selection rebuild or respawn. Keep per-refresh state in the new callbacks. Register all
 renderers every time, even if their toggles are off; the first active registration for a switch
 wins. Only installed callbacks run in a world view, as their registering mods, after
 `submit_custom_geometry` and within its shared draw limits. Off or hidden toggles do not draw.

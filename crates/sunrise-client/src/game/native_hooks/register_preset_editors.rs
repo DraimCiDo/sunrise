@@ -58,7 +58,7 @@ mod tests {
             _: &mod_api::RegistrationContext,
             event: &mut RegisterPresetEditorsEvent<'_>,
         ) {
-            event.editors.push(mod_api::PresetEditor {
+            event.register(mod_api::PresetEditor {
                 preset: "example:islands".into(),
                 screen: "example:editor".into(),
             });

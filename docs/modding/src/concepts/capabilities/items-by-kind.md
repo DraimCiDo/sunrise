@@ -33,7 +33,7 @@ fn first_at_least(
     minimum: u64,
 ) -> Result<Option<(ItemResource, u64)>, StorageError> {
     let mut found = None;
-    storage.visit_entries(host, &mut |kind, amount| {
+    let _ = storage.visit_entries(host, &mut |kind, amount| {
         if amount >= minimum {
             found = Some((kind.clone(), amount));
             ControlFlow::Break(())
@@ -46,8 +46,9 @@ fn first_at_least(
 ```
 
 Providers skip empty entries and report repeated kinds separately. Read only as far as the visitor asks:
-`Continue(())` requests the next entry, and `Break(())` ends the visit with `Ok(())` without reading another.
-Exhaustion also returns `Ok(())`; a read failure returns `Err`.
+`Continue(())` requests the next entry, and `Break(())` ends the visit without reading another.
+The caller gets `Ok(ControlFlow::Break(()))` on an early stop or `Ok(ControlFlow::Continue(()))`
+on exhaustion, including an empty store. A read failure returns `Err`.
 
 The provider may hold a read borrow until the visit returns. Use each kind within its callback or clone it
 as above; do not re-enter the provider or write inside the callback. Act on the result only after the visit succeeds.

@@ -43,9 +43,8 @@ mod tests {
                 _: &mod_api::RegistrationContext,
                 event: &mut mod_api::RegisterDebugEntriesEvent<'_>,
             ) {
-                assert!(event.entries.is_empty());
                 let owned = DropCount(Arc::clone(&self.drops));
-                event.entries.push(DebugEntry::text(
+                event.register(DebugEntry::text(
                     self.id.into(),
                     mod_api::DebugGroup::Memory,
                     move |_, _| {

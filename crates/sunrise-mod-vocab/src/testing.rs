@@ -538,20 +538,21 @@ impl crate::prelude::ItemsBackend for FakeHost {
         &self,
         at: BlockSide,
         visitor: &mut dyn FnMut(&crate::ItemResource, u64) -> std::ops::ControlFlow<()>,
-    ) -> Result<(), crate::LevelReadError> {
+    ) -> Result<std::ops::ControlFlow<()>, crate::LevelReadError> {
         let Some(items) = self
             .level
             .standing(at.level, at.pos)
             .and_then(|s| s.items.as_ref())
         else {
-            return Ok(());
+            return Ok(std::ops::ControlFlow::Continue(()));
         };
         for stack in items.slots.iter().flatten() {
-            if visitor(&crate::ItemResource::of(stack), u64::from(stack.count())).is_break() {
-                break;
+            let flow = visitor(&crate::ItemResource::of(stack), u64::from(stack.count()));
+            if flow.is_break() {
+                return Ok(flow);
             }
         }
-        Ok(())
+        Ok(std::ops::ControlFlow::Continue(()))
     }
     fn container_size(&self, at: BlockSide) -> Option<usize> {
         let items = self.level.standing(at.level, at.pos)?.items.as_ref()?;

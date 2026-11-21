@@ -2,7 +2,8 @@
 
 pub trait Hooks {
     /// The block-state definition types a mod adds (NeoForge's `RegisterBlockStateModels`,
-    /// its `registerDefinition`): push each type id, `<mod id>:<path>`. Asked once at start on
+    /// its `registerDefinition`): call `event.register(id)` with each `<mod id>:<path>` type ID.
+    /// Asked once at start on
     /// the client, before resources load. A blockstate file whose `neoforge:definition_type` is
     /// a registered id has each state's model picked by `instantiate_block_state_definition`, on
     /// every load and reload. An id in vanilla's namespace, not of that form, or registered
@@ -11,8 +12,8 @@ pub trait Hooks {
 
 A blockstate file (`assets/<namespace>/blockstates/<block>.json`) picks each state's model with vanilla's
 `variants` or `multipart`. A mod adds a definition type of its own (NeoForge's `RegisterBlockStateModels`)
-in two steps, as a model loader: `Hooks::register_block_state_models` pushes the type id once at start,
-before resources load, and `Hooks::instantiate_block_state_definition` answers each file that names it in
+in two steps, as a model loader: call `event.register(id)` in `Hooks::register_block_state_models`
+once at start, before resources load, and `Hooks::instantiate_block_state_definition` answers each file that names it in
 `neoforge:definition_type`, decoding the file and picking the model of every state, on every load and
 reload.
 
@@ -22,7 +23,7 @@ fn register_block_state_models(
     _context: &RegistrationContext,
     event: &mut RegisterBlockStateModelsEvent<'_>,
 ) {
-    event.definitions.push("example:by_power".into());
+    event.register("example:by_power".into());
 }
 
 fn instantiate_block_state_definition(
@@ -60,8 +61,10 @@ layer on its own, as vanilla does: a refused layer leaves the states to the laye
         receiver = "associated",
         dispatch = "flat",
         side = "client",
+        version = 2,
         contract = "collect",
         out = "definitions",
+        registration_append = "register",
         context = "registration",
         neoforge = "RegisterBlockStateModels"
     )]

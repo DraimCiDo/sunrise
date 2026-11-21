@@ -155,7 +155,7 @@ mod dimension_transition_tests {
             _: &RegistrationContext,
             event: &mut RegisterDimensionTransitionScreenEvent<'_>,
         ) {
-            event.screens.push(DimensionTransitionScreen::new(
+            event.register(DimensionTransitionScreen::new(
                 "test:arrival".into(),
                 DimensionTransition::Conditional {
                     to: "test:b".into(),

@@ -2,8 +2,8 @@
 
 pub trait Hooks {
     /// Collect world-space debug renderers at each client renderer-list refresh (NeoForge's
-    /// `RegisterDebugRenderersEvent`). Push `DebugRenderer::new(id, draw)` for each renderer
-    /// on every refresh, using the ID of its startup `DebugEntry::renderer` toggle.
+    /// `RegisterDebugRenderersEvent`). Pass `DebugRenderer::new(id, draw)` to `event.register`
+    /// for each renderer on every refresh, using the ID of its startup `DebugEntry::renderer` toggle.
     #[notes = r#"## Debug renderers
 
 `Hooks::register_debug_renderers` is the client counterpart of NeoForge 26.3's
@@ -13,11 +13,11 @@ of a world since the start, and on the next view of a world after the debug sele
 That is a status set in the debug options or by a key, a profile loaded, the F3 overlay opened or
 closed, or reduced debug info rebuilt. Respawn also invalidates the list for the next view.
 Drawing the title or connect screen doesn't refresh anything. The hook receives a
-`RegistrationContext`, so it reads no world. Each mod receives an empty `event.renderers`
-batch and pushes `DebugRenderer::new(id, draw)` per renderer.
+`RegistrationContext`, so it reads no world. Call `event.register(DebugRenderer::new(id, draw))`
+for each renderer.
 
-Each refresh replaces the active list, so push every renderer you want to provide and capture
-its per-refresh state in the callback. Pushing a renderer does not list an option: register
+Each refresh replaces the active list, so register every renderer you want to provide and capture
+its per-refresh state in the callback. Registering a renderer does not list an option: register
 `DebugEntry::renderer(id)` once at startup with the same ID in `Hooks::register_debug_entries`.
 The switch starts off, and its status (`alwaysOn`, `inOverlay`, `never`) is saved in
 `debug-profile.json` under its full ID. Reduced debug info hides it. A renderer without a
@@ -36,11 +36,11 @@ or connect screens."#]
         side = "client",
         contract = "collect",
         out = "renderers",
+        registration_append = "register",
         context = "registration",
         answered_by = "mod",
-        owned_answer_batch = true,
         neoforge = "RegisterDebugRenderersEvent",
-        version = 2
+        version = 3
     )]
     fn register_debug_renderers(renderers: &mut Vec<Answered<DebugRenderer>>);
 }

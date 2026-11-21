@@ -1,8 +1,8 @@
 //! The `register_model_loaders` hooks: declarations the mod API generator reads (see `hooks/mod.rs`).
 
 pub trait Hooks {
-    /// The model loaders a mod adds (NeoForge's `ModelEvent.RegisterLoaders`): push each loader
-    /// id, `<mod id>:<path>`. Asked once at start on the client, before resources load. A model
+    /// The model loaders a mod adds (NeoForge's `ModelEvent.RegisterLoaders`): call `event.register(id)`
+    /// with each `<mod id>:<path>` loader ID. Asked once at start on the client, before resources load. A model
     /// whose `loader` is a registered id gets the quads `bake_model_loader` answers, baked with
     /// its elements, on every load and reload. An id in vanilla's namespace, not of that form, or
     /// registered already is logged and left out.
@@ -10,7 +10,7 @@ pub trait Hooks {
 
 A model JSON may name a `loader`: NeoForge's `neoforge:composite` and `neoforge:obj` are built in, and a mod
 adds one of its own (NeoForge's `ModelEvent.RegisterLoaders`) in two steps, as a sprite source:
-`Hooks::register_model_loaders` pushes the loader id once at start, before resources load, and
+call `event.register(id)` in `Hooks::register_model_loaders` once at start, before resources load, and
 `Hooks::bake_model_loader` answers the quads of each model that names it, when the model is baked on every
 load and reload. A loader is for geometry the vanilla `elements` can't express; a model that only needs
 cuboids uses `elements`.
@@ -21,7 +21,7 @@ fn register_model_loaders(
     _context: &RegistrationContext,
     event: &mut RegisterModelLoadersEvent<'_>,
 ) {
-    event.loaders.push("example:pillar".into());
+    event.register("example:pillar".into());
 }
 
 fn bake_model_loader(&self, _context: &RegistrationContext, event: &mut BakeModelLoaderEvent<'_>) {
@@ -52,8 +52,10 @@ logged as an error naming it and the model, which then draws only its elements."
         receiver = "associated",
         dispatch = "flat",
         side = "client",
+        version = 2,
         contract = "collect",
         out = "loaders",
+        registration_append = "register",
         context = "registration",
         neoforge = "ModelEvent.RegisterLoaders"
     )]

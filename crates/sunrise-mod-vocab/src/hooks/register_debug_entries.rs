@@ -2,15 +2,15 @@
 
 pub trait Hooks {
     /// Register F3 debug entries once at client startup (NeoForge's `RegisterDebugEntriesEvent`).
-    /// Each mod receives an empty batch. Push `DebugEntry::text` with its line callback or
-    /// `DebugEntry::renderer` for a renderer toggle. Text callbacks run only while their entry
+    /// Pass `DebugEntry::text` with its line callback or `DebugEntry::renderer` for a renderer
+    /// toggle to `event.register(entry)`. Text callbacks run only while their entry
     /// is visible. Malformed or duplicate IDs, and IDs in the `minecraft` namespace, are
     /// logged and left out.
     #[notes = r#"## Debug screen entries
 
 `Hooks::register_debug_entries` is the client registration-phase counterpart of NeoForge
-26.3's `RegisterDebugEntriesEvent`. It receives a `RegistrationContext` once at client startup
-and gives each mod an empty `event.entries` batch. Use a non-vanilla `<namespace>:<path>`
+26.3's `RegisterDebugEntriesEvent`. Call `event.register(entry)` once per entry at client
+startup. Use a non-vanilla `<namespace>:<path>`
 for the ID. A malformed or duplicate ID, or one in the `minecraft` namespace, is logged
 and left out.
 
@@ -35,11 +35,11 @@ Native text is appended after vanilla's entries in registration order."#]
         side = "client",
         contract = "collect",
         out = "entries",
+        registration_append = "register",
         context = "registration",
         answered_by = "mod",
-        owned_answer_batch = true,
         neoforge = "RegisterDebugEntriesEvent",
-        version = 2
+        version = 3
     )]
     fn register_debug_entries(entries: &mut Vec<Answered<DebugEntry>>);
 }

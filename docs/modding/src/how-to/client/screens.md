@@ -51,8 +51,8 @@ closes; there is no close that skips it, because the vanilla client never omits 
 
 ## Drawing a dimension transition
 
-In `Hooks::register_dimension_transition_screen`, push a `DimensionTransitionScreen` for
-each trip you want to cover. Each mod receives an empty batch at client startup.
+At client startup, `Hooks::register_dimension_transition_screen` gives you `event.register(screen)`.
+Pass a `DimensionTransitionScreen` for each trip you want to cover.
 `Conditional { to, from }` wins over `Incoming(to)`, then `Outgoing(from)`. The first valid
 registration for each key wins. Use a namespaced, non-`minecraft` screen ID for diagnostics;
 nothing looks it up during drawing.
@@ -68,7 +68,7 @@ fn register_dimension_transition_screen(
     _context: &RegistrationContext,
     event: &mut RegisterDimensionTransitionScreenEvent<'_>,
 ) {
-    event.screens.push(DimensionTransitionScreen::new(
+    event.register(DimensionTransitionScreen::new(
         "example:arrival".into(),
         DimensionTransition::Incoming("example:moon".into()),
         |_, initial_reason| {

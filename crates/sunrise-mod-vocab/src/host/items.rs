@@ -321,15 +321,15 @@ pub trait ItemsBackend {
     fn container_kind_space(&self, at: BlockSide, resource: &ItemResource) -> Option<u64>;
     /// Side: server.
     /// Visits the occupied slots `at`'s side reaches, in sided order, including duplicate
-    /// kinds. Stops before reading another slot when the visitor breaks. If no supported
-    /// container or composter port exists, there are no entries to visit. Refuses the read
-    /// if a visited stack cannot be represented as an API value.
+    /// kinds. Returns the visitor's break without reading another slot, or continue on
+    /// exhaustion (including no supported container or composter port). Refuses the read if
+    /// a visited stack cannot be represented as an API value.
     #[access(WorldOnly)]
     fn container_visit_entries(
         &self,
         at: BlockSide,
         visitor: &mut dyn FnMut(&ItemResource, u64) -> std::ops::ControlFlow<()>,
-    ) -> Result<(), LevelReadError>;
+    ) -> Result<std::ops::ControlFlow<()>, LevelReadError>;
     /// Side: both.
     /// Whether an enchantment on `stack` has effect component `effect`, by the world's
     /// enchantment definitions (`EnchantmentHelper.has`), behind

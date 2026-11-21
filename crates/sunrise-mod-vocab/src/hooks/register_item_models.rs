@@ -1,8 +1,8 @@
 //! The `register_item_models` hooks: declarations the mod API generator reads (see `hooks/mod.rs`).
 
 pub trait Hooks {
-    /// The item model node types a mod adds (NeoForge's `RegisterItemModelsEvent`): push each
-    /// type id, `<mod id>:<path>`. Asked once at start on the client, before resources load. An
+    /// The item model node types a mod adds (NeoForge's `RegisterItemModelsEvent`): call
+    /// `event.register(id)` with each `<mod id>:<path>` type ID. Asked once at start on the client, before resources load. An
     /// item definition's node whose `type` is a registered id draws, per stack, the named models
     /// `item_model_update` answers. An id in vanilla's namespace, not of that form, or registered
     /// already is logged and left out.
@@ -10,8 +10,8 @@ pub trait Hooks {
 
 An item definition (`assets/<namespace>/items/<path>.json`) is a tree of model nodes: vanilla's `minecraft:model`,
 `condition`, `select`, `range_dispatch`, `composite`, `special` and the rest. A mod adds a node type of its own
-(NeoForge's `RegisterItemModelsEvent`) in two steps, as an item tint source: `Hooks::register_item_models`
-pushes the type id once at start, before resources load, and `Hooks::item_model_update` answers each time an item
+(NeoForge's `RegisterItemModelsEvent`) in two steps, as an item tint source: call `event.register(id)` in
+`Hooks::register_item_models` once at start, before resources load, and `Hooks::item_model_update` answers each time an item
 whose definition holds that node is drawn.
 
 The node lists the models it can draw in a `models` object; they are ordinary nodes, decoded and baked by the
@@ -23,7 +23,7 @@ fn register_item_models(
     _context: &RegistrationContext,
     event: &mut RegisterItemModelsEvent<'_>,
 ) {
-    event.models.push("example:charge".into());
+    event.register("example:charge".into());
 }
 
 fn item_model_update(&self, _host: &dyn ClientHost, event: &mut ItemModelUpdateEvent<'_>) {
@@ -55,8 +55,10 @@ and the item draws the missing model."#]
         receiver = "associated",
         dispatch = "flat",
         side = "client",
+        version = 2,
         contract = "collect",
         out = "models",
+        registration_append = "register",
         context = "registration",
         neoforge = "RegisterItemModelsEvent"
     )]

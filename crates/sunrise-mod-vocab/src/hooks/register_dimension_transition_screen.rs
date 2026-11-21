@@ -2,13 +2,13 @@
 
 pub trait Hooks {
     /// Register loading-screen factories once at client startup (NeoForge's
-    /// `RegisterDimensionTransitionScreenEvent`). Each mod receives an empty batch.
+    /// `RegisterDimensionTransitionScreenEvent`). Call `event.register(screen)` for each trip.
     /// Conditional pairs take priority over incoming, then outgoing. The first valid
     /// factory for a key wins. Unmatched travel, login and death use vanilla for a new screen.
     /// The client keeps whichever presentation is already open on an in-place load update.
     #[notes = r#"## Dimension transition screens
 
-Push `DimensionTransitionScreen::new(id, transition, factory)` into `event.screens`.
+Pass `DimensionTransitionScreen::new(id, transition, factory)` to `event.register(screen)`.
 Use `DimensionTransition::Incoming(to)`, `Outgoing(from)` or `Conditional { to, from }`
 with namespaced dimension IDs. The client resolves those IDs at registration and rejects
 invalid registrations and screen IDs in the `minecraft` namespace. A screen ID is for
@@ -27,11 +27,11 @@ readiness, timeout and closing."#]
         side = "client",
         contract = "collect",
         out = "screens",
+        registration_append = "register",
         context = "registration",
         answered_by = "mod",
-        owned_answer_batch = true,
         neoforge = "RegisterDimensionTransitionScreenEvent",
-        version = 2
+        version = 3
     )]
     fn register_dimension_transition_screen(
         screens: &mut Vec<mod_api::Answered<mod_api::DimensionTransitionScreen>>,

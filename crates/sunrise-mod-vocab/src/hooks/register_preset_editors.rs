@@ -1,13 +1,13 @@
 //! World-preset editor registration.
 
 pub trait Hooks {
-    /// Register client screens for world-preset keys once at startup. The first
+    /// Call `event.register(editor)` to register a screen for a world-preset key at startup. The first
     /// registration for a key wins. Invalid ids are refused. Unregistered presets
     /// retain their built-in editor, or their disabled Customize button.
     #[notes = r#"## World preset editors
 
 `register_preset_editors` is the client registration-phase counterpart of NeoForge's
-`RegisterPresetEditorsEvent`. Push `PresetEditor { preset, screen }` into `event.editors`.
+`RegisterPresetEditorsEvent`. Pass `PresetEditor { preset, screen }` to `event.register(editor)`.
 The preset comes from the enabled data packs' `worldgen/world_preset` JSON; registering
 an editor alone does not create a preset. Editor ids must be namespaced outside `minecraft`.
 Add the preset to `data/minecraft/tags/worldgen/world_preset/normal.json` to offer it
@@ -19,7 +19,7 @@ fn register_preset_editors(
     _: &RegistrationContext,
     event: &mut RegisterPresetEditorsEvent<'_>,
 ) {
-    event.editors.push(PresetEditor {
+    event.register(PresetEditor {
         preset: "example:islands".into(),
         screen: "example:islands_editor".into(),
     });
@@ -41,8 +41,10 @@ an edit; registry resolution and generator-specific decoding still run when open
         receiver = "associated",
         dispatch = "flat",
         side = "client",
+        version = 2,
         contract = "collect",
         out = "editors",
+        registration_append = "register",
         context = "registration",
         neoforge = "RegisterPresetEditorsEvent"
     )]

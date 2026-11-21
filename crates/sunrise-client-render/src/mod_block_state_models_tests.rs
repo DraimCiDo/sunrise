@@ -70,6 +70,43 @@ fn a_malformed_answer_refuses_the_file_with_a_reason() {
     }
 }
 
+#[test]
+fn scoped_model_registration_keeps_other_listeners_entries_on_refusal() {
+    use mod_api::__private::game::RegistrationContextNew;
+    use mod_api::__private::{LoadAccess, ModPhase, PhaseOwner, check_access};
+
+    struct Registers(&'static str, bool);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Registers {
+        fn register_block_state_models(
+            &self,
+            _: &RegistrationContext,
+            event: &mut mod_api::RegisterBlockStateModelsEvent<'_>,
+        ) {
+            event.register(self.0.into());
+            if self.1 {
+                check_access("block_state", LoadAccess::WorldOnly);
+            }
+        }
+    }
+
+    let mods = [
+        ("first", "first:one", false),
+        ("refused", "refused:one", true),
+        ("last", "last:one", false),
+    ]
+    .into_iter()
+    .map(|(owner, id, refuse)| mod_api::ModEntry::new(owner, Box::new(Registers(id, refuse))))
+    .collect::<Vec<_>>()
+    .into();
+    mod_platform::testing::with_mods(mods, || {
+        let _phase = PhaseOwner::scope(ModPhase::Registration);
+        let mut ids = vec![String::from("before:one")];
+        mod_api::dispatch_register_block_state_models(&RegistrationContext::new(), &mut ids);
+        assert_eq!(ids, ["before:one", "first:one", "last:one"]);
+    });
+}
+
 /// A lamp's definition type: state by state, `on` when `powered` is true, else `off`.
 struct Lamps;
 #[mod_api::__subscriptions]
@@ -79,7 +116,7 @@ impl mod_api::Hooks for Lamps {
         _: &RegistrationContext,
         event: &mut mod_api::RegisterBlockStateModelsEvent<'_>,
     ) {
-        event.definitions.push("rendtest:by_power".into());
+        event.register("rendtest:by_power".into());
     }
     fn instantiate_block_state_definition(
         &self,

@@ -1400,7 +1400,7 @@ the entity and rotate with its yaw.
 
 ### Custom block-state definition types
 
-Register a type id with `Hooks::register_block_state_models` before client resources
+Call `event.register(id)` in `Hooks::register_block_state_models` before client resources
 load. Set `neoforge:definition_type` to that id in the blockstate JSON, and answer
 `Hooks::instantiate_block_state_definition` on every load and reload. Read the whole
 file from `event.config` and enumerate `event.states` in registry order. Append a

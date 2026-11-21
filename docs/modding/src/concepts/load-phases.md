@@ -57,14 +57,17 @@ receive no `Host` and read startup facts through `RegistrationContext`.
 `event.register("mymod:charge".into())` with each owned, namespaced ID. The game checks IDs and
 duplicates before freezing the component registry.
 
-A registration event is borrowed only for that callback. The game accepts a listener's pending
-registrations in call order when the callback completes. Where the registrar supports replacement
-or relative placement, later calls in that callback can use its pending edits. A panic or phase
-refusal discards the failed callback's whole batch; installed entries stand and later listeners
-can register. Only a panic disables the callback for the session; an ordinary refusal is reported
-on each call. A normal registration method returning an error still follows that registrar's
-contract. For example, a duplicate can reject one entry or reject the whole resource candidate,
-depending on the registrar. Handle the returned error; it is not a callback panic.
+A registration event is borrowed only for that callback. For an append-only event, call
+`event.register(entry)` once per entry; the pending entries are not exposed. Events with specialized
+operations, such as adding blocks to a block entity type, expose methods for those operations.
+The game accepts a listener's pending registrations in call order when the callback completes.
+Where the registrar supports replacement or relative placement, later calls in that callback can
+use its pending edits. A panic or phase refusal discards the failed callback's whole batch;
+installed entries stand and later listeners can register. Only a panic disables the callback for
+the session; an ordinary refusal is reported on each call. A normal registration method returning
+an error still follows that registrar's contract. For example, a duplicate can reject one entry
+or reject the whole resource candidate, depending on the registrar. Handle the returned error;
+it is not a callback panic.
 
 A callback registered on the event cannot borrow the event or the context. Capture owned inputs
 for its `Send + Sync + 'static` closure. A model layer supplier runs once at the startup freeze;

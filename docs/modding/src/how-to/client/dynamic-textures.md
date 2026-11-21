@@ -146,7 +146,7 @@ sprites.
 ## Sprites made at load instead
 
 An image that does not change while the game runs belongs in a sprite source, not in a live texture: register a type
-with `register_sprite_sources`, list an entry of it in the GUI atlas's definition
+with `event.register(id)` in `register_sprite_sources`, list an entry of it in the GUI atlas's definition
 (`assets/minecraft/atlases/gui.json`) and answer it in `sprite_source` with `SpriteSourceOutput::Pixels` for the id you
 want (`mymod:panel`, or `minecraft:container/slot` to replace a vanilla sprite). The GUI atlas publishes it by that id:
 `gui_sprite`, `DrawContext::sprite` and the GUI's own draws find it there, with the animation and nine-slice metadata

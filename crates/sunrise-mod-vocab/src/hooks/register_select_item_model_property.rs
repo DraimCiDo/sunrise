@@ -2,7 +2,8 @@
 
 pub trait Hooks {
     /// The categorical item model properties a mod adds (NeoForge's
-    /// `RegisterSelectItemModelPropertyEvent`): push each id, `<mod id>:<path>`. Asked once at start
+    /// `RegisterSelectItemModelPropertyEvent`): call `event.register(id)` with each
+    /// `<mod id>:<path>` ID. Asked once at start
     /// on the client, before resources load. A `minecraft:select` naming a registered property picks
     /// the case whose `when` string equals what `item_model_select_property` answers per stack, also
     /// after a resource reload. An id in vanilla's namespace, not of that form, or registered already
@@ -11,15 +12,17 @@ pub trait Hooks {
         receiver = "associated",
         dispatch = "flat",
         side = "client",
+        version = 2,
         contract = "collect",
         out = "properties",
+        registration_append = "register",
         context = "registration",
         neoforge = "RegisterSelectItemModelPropertyEvent"
     )]
     #[notes = r##"## Categorical item model properties
 
 A categorical `minecraft:select` property (NeoForge's `RegisterSelectItemModelPropertyEvent`) works the same
-way: `Hooks::register_select_item_model_property` pushes its id once at start, and
+way: call `event.register(id)` in `Hooks::register_select_item_model_property` once at start, and
 `Hooks::item_model_select_property` answers a string for each stack.
 
 ```rust,ignore
@@ -28,7 +31,7 @@ fn register_select_item_model_property(
     _context: &RegistrationContext,
     event: &mut RegisterSelectItemModelPropertyEvent<'_>,
 ) {
-    event.properties.push("example:mode".into());
+    event.register("example:mode".into());
 }
 
 fn item_model_select_property(&self, _host: &dyn ClientHost, event: &mut ItemModelSelectPropertyEvent<'_>) {

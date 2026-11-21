@@ -1142,7 +1142,7 @@ mod tests {
             _: &mod_api::RegistrationContext,
             event: &mut mod_api::RegisterRangeSelectItemModelPropertyEvent<'_>,
         ) {
-            event.properties.push("example:fill".into());
+            event.register("example:fill".into());
         }
         fn item_model_range_property(
             &self,
@@ -1199,7 +1199,7 @@ mod tests {
             _: &mod_api::RegistrationContext,
             event: &mut mod_api::RegisterSelectItemModelPropertyEvent<'_>,
         ) {
-            event.properties.push("example:mode".into());
+            event.register("example:mode".into());
         }
         fn item_model_select_property(
             &self,
@@ -1304,7 +1304,7 @@ mod tests {
             _: &mod_api::RegistrationContext,
             event: &mut mod_api::RegisterItemTintSourcesEvent<'_>,
         ) {
-            event.sources.push("example:charge".into());
+            event.register("example:charge".into());
         }
         fn item_tint_source(
             &self,
@@ -1336,7 +1336,7 @@ mod tests {
             _: &mod_api::RegistrationContext,
             event: &mut mod_api::RegisterItemModelsEvent<'_>,
         ) {
-            event.models.push("cellmod:cell".into());
+            event.register("cellmod:cell".into());
         }
         fn item_model_update(
             &self,
