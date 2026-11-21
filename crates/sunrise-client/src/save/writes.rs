@@ -5,8 +5,13 @@ mod saved_portals;
 /// The background thread that encodes chunks and writes them into the region files, grouped
 /// by folder within each drained pass. Submission order is preserved within each folder.
 pub(super) struct Writer {
-    send: mpsc::Sender<WriteBatch>,
+    send: mpsc::Sender<WriteRequest>,
     thread: std::thread::JoinHandle<()>,
+}
+
+enum WriteRequest {
+    Batch(WriteBatch),
+    Flush(mpsc::Sender<std::io::Result<()>>),
 }
 
 struct WriteBatch {
@@ -181,7 +186,9 @@ impl SaveDir {
             } else {
                 records
             };
-            let writer = writer.get_or_insert_with(|| self.start_writer(fs::File::sync_data));
+            let writer = writer.get_or_insert_with(|| {
+                self.start_writer(fs::File::sync_data, RegionFile::sync_all)
+            });
             let mut batch = Vec::with_capacity(records.len());
             {
                 let mut pending = self.pending.lock().map_err(|_| "pending writes poisoned")?;
@@ -210,7 +217,7 @@ impl SaveDir {
                 0
             };
             self.outstanding.chunks.fetch_add(chunks, Ordering::Relaxed);
-            if let Err(unsent) = writer.send.send(WriteBatch {
+            if let Err(unsent) = writer.send.send(WriteRequest::Batch(WriteBatch {
                 folder,
                 jobs: batch,
                 completion: BatchCompletion {
@@ -218,7 +225,7 @@ impl SaveDir {
                     chunks,
                     batches: 1,
                 },
-            }) {
+            })) {
                 self.outstanding
                     .error
                     .lock()
@@ -233,11 +240,26 @@ impl SaveDir {
         }
         Ok(())
     }
+    /// Queue a durable barrier behind all earlier writes. The window only polls
+    /// its receiver; draining writes and forcing regions stay off the event loop.
+    pub fn flush_later(&self) -> Result<mpsc::Receiver<std::io::Result<()>>> {
+        let mut writer = self.writer.lock().map_err(|_| "writer poisoned")?;
+        let writer = writer
+            .get_or_insert_with(|| self.start_writer(fs::File::sync_data, RegionFile::sync_all));
+        let (send, receive) = mpsc::channel();
+        writer
+            .send
+            .send(WriteRequest::Flush(send))
+            .map_err(|_| "the region writer stopped")?;
+        Ok(receive)
+    }
+
     fn start_writer(
         &self,
         sync_data: impl Fn(&fs::File) -> std::io::Result<()> + Send + 'static,
+        mut force: impl FnMut(&RegionFile) -> std::io::Result<()> + Send + 'static,
     ) -> Writer {
-        let (send, receive) = mpsc::channel::<WriteBatch>();
+        let (send, receive) = mpsc::channel::<WriteRequest>();
         let root = self.root.clone();
         let reporting = self.save_reporting.clone();
         let (regions, entity_regions, poi_regions) = (
@@ -262,12 +284,19 @@ impl SaveDir {
                     let mut groups: [WriteGroup; 3] = Default::default();
                     let mut total = 0;
                     let mut next = Some(first);
-                    while let Some(WriteBatch {
-                        folder,
-                        jobs,
-                        completion,
-                    }) = next.take()
-                    {
+                    let mut flush = None;
+                    while let Some(request) = next.take() {
+                        let WriteBatch {
+                            folder,
+                            jobs,
+                            completion,
+                        } = match request {
+                            WriteRequest::Batch(batch) => batch,
+                            WriteRequest::Flush(reply) => {
+                                flush = Some(reply);
+                                break;
+                            }
+                        };
                         total += jobs.len();
                         let group = &mut groups[slot(folder)];
                         group.jobs.extend(jobs);
@@ -348,6 +377,14 @@ impl SaveDir {
                             }
                         }
                     }
+                    if let Some(reply) = flush {
+                        let result = force_cached_regions(
+                            [&regions, &entity_regions, &poi_regions],
+                            &mut force,
+                            outstanding.write_result(true),
+                        );
+                        let _ = reply.send(result);
+                    }
                 }
             })
             .expect("spawn region writer");
@@ -378,45 +415,15 @@ impl SaveDir {
                 .wait(count)
                 .map_err(|_| "writer poisoned")?;
         }
-        let mut result = self.write_result(true);
+        let result = self.outstanding.write_result(true);
         // A completion poll must not block behind this explicit flush's disk I/O.
         drop(count);
-
-        // `RegionFileStorage.flush` forces the whole cache even when no new records were queued.
-        for (folder, cache) in [
-            (Folder::Region, &self.regions),
-            (Folder::Entities, &self.entity_regions),
-            (Folder::Poi, &self.poi_regions),
-        ] {
-            let Ok(cache) = cache.lock() else {
-                if result.is_ok() {
-                    result = Err(std::io::Error::other("region cache poisoned").into());
-                }
-                continue;
-            };
-            let regions: Vec<_> = cache
-                .regions
-                .iter()
-                .filter_map(|(&key, (file, _))| Some((key, file.as_ref()?.clone())))
-                .collect();
-            drop(cache);
-            for ((rx, rz), region) in regions {
-                let synced = region
-                    .lock()
-                    .map_err(|_| std::io::Error::other("region file poisoned"))
-                    .and_then(|region| force(&region));
-                if let Err(error) = synced {
-                    log::warn!(
-                        "Failed to synchronize {} region [{rx}, {rz}]: {error}",
-                        folder.name()
-                    );
-                    if result.is_ok() {
-                        result = Err(error.into());
-                    }
-                }
-            }
-        }
-        result
+        force_cached_regions(
+            [&self.regions, &self.entity_regions, &self.poi_regions],
+            &mut force,
+            result,
+        )?;
+        Ok(())
     }
     /// Wait until at most `low` chunk records are still queued, without waiting
     /// for all of them; a save pass resuming at half the cap keeps the writer fed
@@ -441,44 +448,93 @@ impl SaveDir {
                 .map_err(|_| "writer poisoned")?;
         }
         // Backpressure is not a durability barrier; continue submitting independent work.
-        self.write_result(false)
+        self.outstanding.write_result(false)?;
+        Ok(())
     }
     /// `ChunkMap.activeChunkWrites`: chunk records, excluding entity/POI IO.
     pub fn active_chunk_writes(&self) -> usize {
         self.outstanding.chunks.load(Ordering::Relaxed)
     }
-    /// Poll completion of queued write attempts without blocking the event loop. Once drained,
-    /// return a hard sync error, if any; individual record failures do not fail the poll.
+    /// Poll completion of queued write attempts without blocking. This does not force cached
+    /// regions; callers that need a durable barrier use `flush` or `flush_later`.
     pub fn writes_finished(&self) -> Result<bool> {
         let count = self
             .outstanding
             .count
             .lock()
             .map_err(|_| "writer poisoned")?;
-        self.write_result(*count == 0)?;
+        self.outstanding.write_result(*count == 0)?;
         Ok(*count == 0)
     }
-    fn write_result(&self, drained: bool) -> Result<()> {
+}
+
+impl Outstanding {
+    fn write_result(&self, drained: bool) -> std::io::Result<()> {
         if let Some(error) = &*self
-            .outstanding
             .error
             .lock()
-            .map_err(|_| "writer poisoned")?
+            .map_err(|_| std::io::Error::other("writer poisoned"))?
         {
-            return Err(error.clone().into());
+            return Err(std::io::Error::other(error.clone()));
         }
         if drained
             && let Some(error) = self
-                .outstanding
                 .sync_error
                 .lock()
-                .map_err(|_| "writer poisoned")?
+                .map_err(|_| std::io::Error::other("writer poisoned"))?
                 .take()
         {
-            return Err(error.into());
+            return Err(error);
         }
         Ok(())
     }
+}
+
+fn force_cached_regions(
+    caches: [&RegionCache; 3],
+    force: &mut impl FnMut(&RegionFile) -> std::io::Result<()>,
+    mut result: std::io::Result<()>,
+) -> std::io::Result<()> {
+    // Force every cache even after an error, as RegionFileStorage.close does.
+    for (folder, cache) in [Folder::Region, Folder::Entities, Folder::Poi]
+        .into_iter()
+        .zip(caches)
+    {
+        let Ok(mut cache) = cache.lock() else {
+            if result.is_ok() {
+                result = Err(std::io::Error::other("region cache poisoned"));
+            }
+            continue;
+        };
+        let eviction_error = cache.eviction_error.take();
+        if result.is_ok()
+            && let Some(error) = eviction_error
+        {
+            result = Err(error);
+        }
+        let regions: Vec<_> = cache
+            .regions
+            .iter()
+            .filter_map(|(&key, (file, _))| Some((key, file.as_ref()?.clone())))
+            .collect();
+        drop(cache);
+        for ((rx, rz), region) in regions {
+            let synced = region
+                .lock()
+                .map_err(|_| std::io::Error::other("region file poisoned"))
+                .and_then(|region| force(&region));
+            if let Err(error) = synced {
+                log::warn!(
+                    "Failed to synchronize {} region [{rx}, {rz}]: {error}",
+                    folder.name()
+                );
+                if result.is_ok() {
+                    result = Err(error);
+                }
+            }
+        }
+    }
+    result
 }
 
 impl Drop for SaveDir {
@@ -540,12 +596,15 @@ mod tests {
         let sync_attempts = Arc::new(AtomicUsize::new(0));
         let attempts = sync_attempts.clone();
         let kind = std::io::ErrorKind::PermissionDenied;
-        *save.writer.lock().unwrap() = Some(save.start_writer(move |file| {
-            if attempts.fetch_add(1, Ordering::Relaxed) == 0 {
-                return Err(kind.into());
-            }
-            file.sync_data()
-        }));
+        *save.writer.lock().unwrap() = Some(save.start_writer(
+            move |file| {
+                if attempts.fetch_add(1, Ordering::Relaxed) == 0 {
+                    return Err(kind.into());
+                }
+                file.sync_data()
+            },
+            RegionFile::sync_all,
+        ));
         let record = || NamedTag {
             name: "".into(),
             tag: Tag::compound([("marker", Tag::Int(3))]),
@@ -577,6 +636,120 @@ mod tests {
         let disk = open();
         assert_eq!(disk.read_record_raw("region", 0, 0), Some(record()));
         assert_eq!(disk.read_record_raw("region", 32, 0), Some(record()));
+    }
+
+    #[test]
+    fn eviction_closes_a_region_after_its_force_failed() {
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        let save = SaveDir::new(dir.path().to_path_buf(), LevelShape::OVERWORLD, None);
+        let path = save.region_path("region", 0, 0);
+        cached_region(&save.regions, (0, 0), &path, true).unwrap();
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(&[1])
+            .unwrap();
+        let failure = std::io::ErrorKind::PermissionDenied;
+        let error = save.flush_with(|_| Err(failure.into())).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<std::io::Error>().unwrap().kind(),
+            failure
+        );
+        assert_eq!(fs::metadata(&path).unwrap().len(), 1);
+
+        for x in 1..=MAX_OPEN_REGIONS as i32 {
+            let missing = save.region_path("region", x, 0);
+            assert!(
+                cached_region(&save.regions, (x, 0), &missing, false)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        assert!(!save.regions.lock().unwrap().regions.contains_key(&(0, 0)));
+        // The production eviction path pads the file before forcing and closing it.
+        assert_eq!(fs::metadata(&path).unwrap().len(), 4096);
+        save.flush().unwrap();
+    }
+
+    #[test]
+    fn an_eviction_failure_fails_the_operation_and_the_next_barrier() {
+        let dir = tempfile::tempdir().unwrap();
+        let save = SaveDir::new(dir.path().to_path_buf(), LevelShape::OVERWORLD, None);
+        for x in 0..MAX_OPEN_REGIONS as i32 {
+            let path = save.region_path("region", x, 0);
+            cached_region(&save.regions, (x, 0), &path, x == 0).unwrap();
+        }
+        let failure = std::io::ErrorKind::PermissionDenied;
+        let error = save
+            .regions
+            .lock()
+            .unwrap()
+            .make_room(|region| {
+                assert_eq!(region.position(), ChunkPos::new(0, 0));
+                Err(failure.into())
+            })
+            .unwrap_err();
+        assert_eq!(error.kind(), failure);
+        let error = save.flush().unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<std::io::Error>().unwrap().kind(),
+            failure
+        );
+        save.flush().unwrap();
+    }
+
+    #[test]
+    fn a_second_staged_barrier_forces_the_failed_region_without_replaying_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let save = SaveDir::new(dir.path().to_path_buf(), LevelShape::OVERWORLD, None);
+        let writes = Arc::new(AtomicUsize::new(0));
+        let writes_on_worker = writes.clone();
+        let (forced, attempts) = mpsc::channel();
+        let failure = std::io::ErrorKind::PermissionDenied;
+        let mut failed = false;
+        *save.writer.lock().unwrap() = Some(save.start_writer(
+            move |file| {
+                writes_on_worker.fetch_add(1, Ordering::Relaxed);
+                file.sync_data()
+            },
+            move |region| {
+                let x = region.position().x;
+                forced.send(x).unwrap();
+                if x == 0 && !failed {
+                    failed = true;
+                    return Err(failure.into());
+                }
+                region.sync_all()
+            },
+        ));
+        let record = || NamedTag {
+            name: "".into(),
+            tag: Tag::compound([("marker", Tag::Int(3))]),
+        };
+        save.write_records(
+            "region",
+            vec![((0, 0), Some(record())), ((32, 0), Some(record()))],
+            false,
+        )
+        .unwrap();
+        let barrier = || {
+            let result = save
+                .flush_later()
+                .unwrap()
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+            let mut forced: Vec<_> = attempts.try_iter().collect();
+            forced.sort_unstable();
+            assert_eq!(forced, [0, 1]);
+            assert_eq!(writes.load(Ordering::Relaxed), 2);
+            result
+        };
+        let error = barrier().unwrap_err();
+        assert_eq!(error.kind(), failure);
+        barrier().unwrap();
     }
 
     #[test]

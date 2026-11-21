@@ -1980,6 +1980,8 @@ const MAX_OPEN_REGIONS: usize = 256;
 struct RegionFiles {
     regions: HashMap<(i32, i32), (Option<Arc<Mutex<RegionFile>>>, u64)>,
     clock: u64,
+    /// A failed eviction also fails the next barrier, even if a reader caused it.
+    eviction_error: Option<std::io::Error>,
     /// Each region's write stamp (`far_regions::writing`).
     written: HashMap<(i32, i32), u64>,
 }
@@ -1997,7 +1999,10 @@ impl RegionFiles {
     /// more, as `RegionFileStorage.getRegionFile` does. A region a reader or
     /// the writer still holds stays: closing it under them would let a
     /// second handle read a header older than its sectors.
-    fn make_room(&mut self) {
+    fn make_room(
+        &mut self,
+        mut close: impl FnMut(RegionFile) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
         while self.regions.len() >= MAX_OPEN_REGIONS {
             let oldest = self
                 .regions
@@ -2006,10 +2011,27 @@ impl RegionFiles {
                 .min_by_key(|(_, (_, used))| *used)
                 .map(|(key, _)| *key);
             let Some(key) = oldest else {
-                return;
+                break;
             };
-            self.regions.remove(&key);
+            let (file, _) = self.regions.remove(&key).unwrap();
+            if let Some(file) = file {
+                // The cache owns the only reference, as checked above under its lock.
+                let result = Arc::into_inner(file)
+                    .unwrap()
+                    .into_inner()
+                    .map_err(|_| std::io::Error::other("region file poisoned"))
+                    .and_then(&mut close);
+                if let Err(error) = result {
+                    log::warn!("Failed to close evicted region {key:?}: {error}");
+                    let kind = error.kind();
+                    let error = Arc::new(error);
+                    self.eviction_error
+                        .get_or_insert_with(|| std::io::Error::new(kind, error.clone()));
+                    return Err(std::io::Error::new(kind, error));
+                }
+            }
         }
+        Ok(())
     }
 }
 /// The region file at `path` through the cache, which readers and the writer
@@ -2033,7 +2055,7 @@ fn cached_region(
         *used = now;
         return Ok(cached.clone());
     }
-    cache.make_room();
+    cache.make_room(RegionFile::close)?;
     if create && let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }

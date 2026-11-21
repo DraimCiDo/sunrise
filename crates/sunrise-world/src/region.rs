@@ -433,6 +433,24 @@ impl RegionFile {
         Ok(())
     }
 
+    /// `RegionFile.close`: pad the last sector, force data and metadata even if
+    /// padding fails, then close the file on either outcome.
+    pub fn close(self) -> io::Result<()> {
+        if !self.writable {
+            return Ok(());
+        }
+        let padding = self.file.metadata().and_then(|metadata| {
+            let len = metadata.len();
+            let padded = len.next_multiple_of(SECTOR as u64);
+            if padded == len {
+                Ok(())
+            } else {
+                self.file.set_len(padded)
+            }
+        });
+        self.file.sync_all().and(padding)
+    }
+
     /// Clone the file handle so a caller can flush after releasing the region lock.
     pub fn sync_handle(&self) -> io::Result<File> {
         self.file.try_clone()

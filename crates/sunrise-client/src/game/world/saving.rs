@@ -3,6 +3,7 @@
 use super::{Game, loading_frame};
 use std::{
     collections::{HashSet, VecDeque},
+    sync::mpsc::{Receiver, TryRecvError},
     time::{Duration, Instant},
 };
 use sunrise_client::{Result, hud::HudBatch};
@@ -18,7 +19,7 @@ enum Stage {
     Generation,
     Chunks(VecDeque<(i32, i32)>),
     Entities(VecDeque<(i32, i32)>),
-    Writes,
+    Writes(Option<Receiver<std::io::Result<()>>>),
     Server,
     Quit,
 }
@@ -244,20 +245,35 @@ impl Game<'_> {
                         self.save.save_attachments(&self.world.attachments)?;
                         self.save_chunk_tickets()?;
                         self.save_game_metadata()?;
-                        save.stage = Stage::Writes;
+                        save.stage = Stage::Writes(Some(self.save.flush_later()?));
                     }
                     Ok(false)
                 }
-                Stage::Writes => {
-                    let players = self.finish_player_autosaves(false)?;
-                    let finished = self.save.writes_finished()? && players;
-                    if finished && !save.close {
+                Stage::Writes(flush) => {
+                    let Some(receive) = flush else {
+                        *flush = Some(self.save.flush_later()?);
+                        return Ok(false);
+                    };
+                    if !self.finish_player_autosaves(false)? {
+                        return Ok(false);
+                    }
+                    let result = match receive.try_recv() {
+                        Ok(result) => result,
+                        Err(TryRecvError::Empty) => return Ok(false),
+                        Err(TryRecvError::Disconnected) => {
+                            Err(std::io::Error::other("the region writer stopped"))
+                        }
+                    };
+                    // A later shutdown barrier must force the files again if this one failed.
+                    *flush = None;
+                    result?;
+                    if !save.close {
                         self.message = Some((
                             sunrise_client::lang::get("commands.save.success"),
                             Instant::now(),
                         ));
                     }
-                    Ok(finished)
+                    Ok(true)
                 }
             }
         })();
@@ -292,8 +308,8 @@ impl Game<'_> {
                     let _ =
                         reply.send(serde_json::json!({ "error": error.to_string() }).to_string());
                 }
-                // Keep ownership (and the lock) on errors too. Native shutdown
-                // sees the same durable-write failure instead of declaring success.
+                // Keep ownership (and the lock) on errors too. Native shutdown must
+                // finish a durable barrier before it can declare the save completed.
                 self.pending_save = Some(save);
                 other
             }
@@ -309,7 +325,7 @@ impl Game<'_> {
         }
         let waiting = matches!(
             self.pending_save.as_ref().map(|save| &save.stage),
-            Some(Stage::Server | Stage::Writes)
+            Some(Stage::Server | Stage::Writes(_))
         );
         if waiting {
             thread_local! {
@@ -344,7 +360,7 @@ impl Game<'_> {
         let progress = match self.pending_save.as_ref().map(|save| &save.stage) {
             Some(Stage::Chunks(_)) => 0.25,
             Some(Stage::Entities(_)) => 0.5,
-            Some(Stage::Writes) => 0.9,
+            Some(Stage::Writes(_)) => 0.9,
             _ => 0.0,
         };
         sunrise_client::level_loading::draw_progress(
@@ -472,6 +488,21 @@ mod tests {
     use sunrise_client::save::{LevelShape, SaveDir};
     use sunrise_core::nbt::{DISK_WRITE_NESTING_GUARD, Tag};
 
+    fn finish_staged_save(game: &mut Game<'_>) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let quit = game.poll_closing_save().unwrap();
+            if game.pending_save.is_none() {
+                return quit;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the region writer never acknowledged the save"
+            );
+            std::thread::yield_now();
+        }
+    }
+
     #[test]
     #[ignore = "daily"]
     fn both_successful_save_paths_resolve_the_banner_in_the_active_language() {
@@ -499,9 +530,9 @@ mod tests {
                         close: false,
                         reply: None,
                         started: Instant::now(),
-                        stage: Stage::Writes,
+                        stage: Stage::Writes(Some(game.save.flush_later().unwrap())),
                     });
-                    game.poll_closing_save().unwrap();
+                    assert!(!finish_staged_save(game));
                     assert!(game.pending_save.is_none());
                     let incremental = game.message.take().unwrap().0;
                     assert_eq!(
@@ -537,11 +568,11 @@ mod tests {
                         close: quit,
                         reply: (!quit).then_some(send),
                         started: Instant::now(),
-                        stage: Stage::Writes,
+                        stage: Stage::Writes(Some(game.save.flush_later().unwrap())),
                     });
                     game.saved_for_exit = false;
                     game.message = None;
-                    assert_eq!(game.poll_closing_save().unwrap(), quit);
+                    assert_eq!(finish_staged_save(game), quit);
                     assert!(game.pending_save.is_none());
                     if !quit {
                         let reply: serde_json::Value =
