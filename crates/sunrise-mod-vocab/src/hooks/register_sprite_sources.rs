@@ -21,7 +21,7 @@ fn register_sprite_sources(
     _context: &RegistrationContext,
     event: &mut RegisterSpriteSourcesEvent<'_>,
 ) {
-    event.sources.push("example:checker".into());
+    event.register("example:checker".into());
 }
 
 fn sprite_source(&self, _context: &RegistrationContext, event: &mut SpriteSourceEvent<'_>) {
@@ -76,9 +76,10 @@ isn't `width * height * 4` or whose side is over 32768 pixels, are logged and sk
         receiver = "associated",
         dispatch = "flat",
         side = "client",
-        version = 2,
+        version = 3,
         contract = "collect",
         out = "sources",
+        registration_append = "register",
         context = "registration",
         neoforge = "RegisterSpriteSourcesEvent"
     )]

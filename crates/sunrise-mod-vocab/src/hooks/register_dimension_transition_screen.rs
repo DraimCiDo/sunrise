@@ -27,11 +27,11 @@ readiness, timeout and closing."#]
         side = "client",
         contract = "collect",
         out = "screens",
+        registration_append = "register",
         context = "registration",
         answered_by = "mod",
-        owned_answer_batch = true,
         neoforge = "RegisterDimensionTransitionScreenEvent",
-        version = 2
+        version = 3
     )]
     fn register_dimension_transition_screen(
         screens: &mut Vec<mod_api::Answered<mod_api::DimensionTransitionScreen>>,

@@ -609,7 +609,7 @@ mod tests {
             _: &mod_api::RegistrationContext,
             event: &mut mod_api::RegisterSpriteSourcesEvent<'_>,
         ) {
-            event.sources.push("checker_mod:checker".into());
+            event.register("checker_mod:checker".into());
         }
         fn sprite_source(
             &self,

@@ -73,7 +73,7 @@ current client host and appends to the entry's lines.
 use mod_api::{DebugEntry, DebugGroup, RegisterDebugEntriesEvent, RegistrationContext};
 
 fn register_debug_entries(&self, _: &RegistrationContext, event: &mut RegisterDebugEntriesEvent<'_>) {
-    event.entries.push(DebugEntry::text(
+    event.register(DebugEntry::text(
         "example:queue".into(),
         DebugGroup::Memory,
         |_host, lines| lines.push("Queue: ready".into()),
@@ -100,12 +100,12 @@ use mod_api::{
 const GUIDE_LINE: &str = "example:guide_line";
 
 fn register_debug_entries(&self, _: &RegistrationContext, event: &mut RegisterDebugEntriesEvent<'_>) {
-    event.entries.push(DebugEntry::renderer(GUIDE_LINE.into()));
+    event.register(DebugEntry::renderer(GUIDE_LINE.into()));
 }
 
 fn register_debug_renderers(&self, _: &RegistrationContext, event: &mut RegisterDebugRenderersEvent<'_>) {
     let line = WorldLine::new([0.0, 65.0, 0.0], [2.0, 65.0, 0.0], 0xFF00_FF00, 2.0, WorldDepth::Tested);
-    event.renderers.push(DebugRenderer::new(GUIDE_LINE.into(), move |_host, _view, draw| {
+    event.register(DebugRenderer::new(GUIDE_LINE.into(), move |_host, _view, draw| {
         let _ = draw.lines(std::slice::from_ref(&line));
     }));
 }

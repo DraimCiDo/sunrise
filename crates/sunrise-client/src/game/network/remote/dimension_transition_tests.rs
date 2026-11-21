@@ -45,7 +45,7 @@ fn dimension_transition_screen_is_selected_at_entry_drawn_and_dropped() {
                     },
                 ),
             ] {
-                event.screens.push(DimensionTransitionScreen::new(
+                event.register(DimensionTransitionScreen::new(
                     id.into(),
                     transition,
                     move |_, initial_reason| {

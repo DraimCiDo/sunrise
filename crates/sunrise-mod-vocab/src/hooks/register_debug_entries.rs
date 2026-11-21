@@ -35,11 +35,11 @@ Native text is appended after vanilla's entries in registration order."#]
         side = "client",
         contract = "collect",
         out = "entries",
+        registration_append = "register",
         context = "registration",
         answered_by = "mod",
-        owned_answer_batch = true,
         neoforge = "RegisterDebugEntriesEvent",
-        version = 2
+        version = 3
     )]
     fn register_debug_entries(entries: &mut Vec<Answered<DebugEntry>>);
 }

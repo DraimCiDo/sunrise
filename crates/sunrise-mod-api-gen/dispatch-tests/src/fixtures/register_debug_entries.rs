@@ -13,10 +13,9 @@ fn registered_debug_entries_retain_their_owner_in_registration_order() {
             _: &RegistrationContext,
             event: &mut RegisterDebugEntriesEvent<'_>,
         ) {
-            assert!(event.entries.is_empty(), "each mod receives its own batch");
-            event
-                .entries
-                .extend(self.0.iter().map(|&id| DebugEntry(id)));
+            for &id in self.0 {
+                event.register(DebugEntry(id));
+            }
         }
     }
 

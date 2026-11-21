@@ -36,11 +36,11 @@ or connect screens."#]
         side = "client",
         contract = "collect",
         out = "renderers",
+        registration_append = "register",
         context = "registration",
         answered_by = "mod",
-        owned_answer_batch = true,
         neoforge = "RegisterDebugRenderersEvent",
-        version = 2
+        version = 3
     )]
     fn register_debug_renderers(renderers: &mut Vec<Answered<DebugRenderer>>);
 }

@@ -68,7 +68,7 @@ fn register_dimension_transition_screen(
     _context: &RegistrationContext,
     event: &mut RegisterDimensionTransitionScreenEvent<'_>,
 ) {
-    event.screens.push(DimensionTransitionScreen::new(
+    event.register(DimensionTransitionScreen::new(
         "example:arrival".into(),
         DimensionTransition::Incoming("example:moon".into()),
         |_, initial_reason| {

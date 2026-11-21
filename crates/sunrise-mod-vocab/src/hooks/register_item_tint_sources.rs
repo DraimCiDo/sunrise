@@ -19,7 +19,7 @@ fn register_item_tint_sources(
     _context: &RegistrationContext,
     event: &mut RegisterItemTintSourcesEvent<'_>,
 ) {
-    event.sources.push("example:charge".into());
+    event.register("example:charge".into());
 }
 
 fn item_tint_source(&self, _host: &dyn ClientHost, event: &mut ItemTintSourceEvent<'_>) {
@@ -42,8 +42,10 @@ white, decided once at load, and so does an entry no mod answers; an item with n
         receiver = "associated",
         dispatch = "flat",
         side = "client",
+        version = 2,
         contract = "collect",
         out = "sources",
+        registration_append = "register",
         context = "registration",
         neoforge = "RegisterColorHandlersEvent.ItemTintSources"
     )]

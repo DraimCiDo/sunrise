@@ -46,9 +46,9 @@ impl Hooks for Marker {
         event: &mut RegisterDebugEntriesEvent<'_>,
     ) {
         for id in [SHOWN, OTHER] {
-            event.entries.push(DebugEntry::renderer(id.into()));
+            event.register(DebugEntry::renderer(id.into()));
         }
-        event.entries.push(DebugEntry::text(
+        event.register(DebugEntry::text(
             TEXT_ONLY.into(),
             DebugGroup::Memory,
             |_, _| {},
@@ -67,20 +67,18 @@ impl Hooks for Marker {
             // Height identifies the refresh; depth distinguishes registrations for the same ID.
             let y = 64.0 + refresh as f64;
             let z = 99.0 - slot as f64;
-            event
-                .renderers
-                .push(DebugRenderer::new(id.into(), move |_, _, draw| {
-                    assert_eq!(current_native_mod(), owner);
-                    ASKED.lock().unwrap().push(id);
-                    let marker = WorldLine::new(
-                        [100.25, y, z],
-                        [101.0, y, z],
-                        0xFF00FF00,
-                        2.0,
-                        WorldDepth::Tested,
-                    );
-                    draw.lines(&[marker]).unwrap();
-                }));
+            event.register(DebugRenderer::new(id.into(), move |_, _, draw| {
+                assert_eq!(current_native_mod(), owner);
+                ASKED.lock().unwrap().push(id);
+                let marker = WorldLine::new(
+                    [100.25, y, z],
+                    [101.0, y, z],
+                    0xFF00FF00,
+                    2.0,
+                    WorldDepth::Tested,
+                );
+                draw.lines(&[marker]).unwrap();
+            }));
         }
     }
 }

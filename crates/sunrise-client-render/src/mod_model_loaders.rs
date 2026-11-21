@@ -167,7 +167,7 @@ mod tests {
             _: &RegistrationContext,
             event: &mut mod_api::RegisterModelLoadersEvent<'_>,
         ) {
-            event.loaders.push("rendtest:panel".into());
+            event.register("rendtest:panel".into());
         }
         fn bake_model_loader(
             &self,

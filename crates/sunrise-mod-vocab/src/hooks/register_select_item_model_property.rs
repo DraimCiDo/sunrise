@@ -11,8 +11,10 @@ pub trait Hooks {
         receiver = "associated",
         dispatch = "flat",
         side = "client",
+        version = 2,
         contract = "collect",
         out = "properties",
+        registration_append = "register",
         context = "registration",
         neoforge = "RegisterSelectItemModelPropertyEvent"
     )]
@@ -28,7 +30,7 @@ fn register_select_item_model_property(
     _context: &RegistrationContext,
     event: &mut RegisterSelectItemModelPropertyEvent<'_>,
 ) {
-    event.properties.push("example:mode".into());
+    event.register("example:mode".into());
 }
 
 fn item_model_select_property(&self, _host: &dyn ClientHost, event: &mut ItemModelSelectPropertyEvent<'_>) {

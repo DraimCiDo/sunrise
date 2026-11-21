@@ -20,7 +20,7 @@ fn register_range_select_item_model_property(
     _context: &RegistrationContext,
     event: &mut RegisterRangeSelectItemModelPropertyEvent<'_>,
 ) {
-    event.properties.push("example:fill".into());
+    event.register("example:fill".into());
 }
 
 fn item_model_range_property(&self, _host: &dyn ClientHost, event: &mut ItemModelRangePropertyEvent<'_>) {
@@ -38,8 +38,10 @@ registered twice is logged and left out. A property no mod registers reads 0, de
         receiver = "associated",
         dispatch = "flat",
         side = "client",
+        version = 2,
         contract = "collect",
         out = "properties",
+        registration_append = "register",
         context = "registration",
         neoforge = "RegisterRangeSelectItemModelPropertyEvent"
     )]

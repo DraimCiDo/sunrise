@@ -79,7 +79,7 @@ impl mod_api::Hooks for Lamps {
         _: &RegistrationContext,
         event: &mut mod_api::RegisterBlockStateModelsEvent<'_>,
     ) {
-        event.definitions.push("rendtest:by_power".into());
+        event.register("rendtest:by_power".into());
     }
     fn instantiate_block_state_definition(
         &self,

@@ -22,8 +22,8 @@ fn register_json_animation_types(
     _context: &RegistrationContext,
     event: &mut RegisterJsonAnimationTypesEvent<'_>,
 ) {
-    event.types.push(JsonAnimationType::Target(Identifier::parse("example:glow").unwrap()));
-    event.types.push(JsonAnimationType::Interpolation(Identifier::parse("example:step").unwrap()));
+    event.register(JsonAnimationType::Target(Identifier::parse("example:glow").unwrap()));
+    event.register(JsonAnimationType::Interpolation(Identifier::parse("example:step").unwrap()));
 }
 
 struct Types;
@@ -70,8 +70,10 @@ type and the mod that registered it."#]
         receiver = "associated",
         dispatch = "flat",
         side = "client",
+        version = 2,
         contract = "collect",
         out = "types",
+        registration_append = "register",
         context = "registration",
         answered_by = "mod",
         neoforge = "RegisterJsonAnimationTypesEvent"

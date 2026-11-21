@@ -15,10 +15,9 @@ fn each_registered_animation_type_names_the_mod_that_pushed_it() {
             _: &RegistrationContext,
             event: &mut RegisterJsonAnimationTypesEvent<'_>,
         ) {
-            assert!(event.types.is_empty(), "each mod starts from its own batch");
-            event
-                .types
-                .extend(self.0.iter().map(|id| JsonAnimationType(id)));
+            for id in self.0 {
+                event.register(JsonAnimationType(id));
+            }
         }
     }
     install(

@@ -19,7 +19,7 @@ fn register_preset_editors(
     _: &RegistrationContext,
     event: &mut RegisterPresetEditorsEvent<'_>,
 ) {
-    event.editors.push(PresetEditor {
+    event.register(PresetEditor {
         preset: "example:islands".into(),
         screen: "example:islands_editor".into(),
     });
@@ -41,8 +41,10 @@ an edit; registry resolution and generator-specific decoding still run when open
         receiver = "associated",
         dispatch = "flat",
         side = "client",
+        version = 2,
         contract = "collect",
         out = "editors",
+        registration_append = "register",
         context = "registration",
         neoforge = "RegisterPresetEditorsEvent"
     )]

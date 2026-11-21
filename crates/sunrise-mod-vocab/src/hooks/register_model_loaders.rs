@@ -21,7 +21,7 @@ fn register_model_loaders(
     _context: &RegistrationContext,
     event: &mut RegisterModelLoadersEvent<'_>,
 ) {
-    event.loaders.push("example:pillar".into());
+    event.register("example:pillar".into());
 }
 
 fn bake_model_loader(&self, _context: &RegistrationContext, event: &mut BakeModelLoaderEvent<'_>) {
@@ -52,8 +52,10 @@ logged as an error naming it and the model, which then draws only its elements."
         receiver = "associated",
         dispatch = "flat",
         side = "client",
+        version = 2,
         contract = "collect",
         out = "loaders",
+        registration_append = "register",
         context = "registration",
         neoforge = "ModelEvent.RegisterLoaders"
     )]

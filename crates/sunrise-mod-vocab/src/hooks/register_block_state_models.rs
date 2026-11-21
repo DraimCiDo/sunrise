@@ -22,7 +22,7 @@ fn register_block_state_models(
     _context: &RegistrationContext,
     event: &mut RegisterBlockStateModelsEvent<'_>,
 ) {
-    event.definitions.push("example:by_power".into());
+    event.register("example:by_power".into());
 }
 
 fn instantiate_block_state_definition(
@@ -60,8 +60,10 @@ layer on its own, as vanilla does: a refused layer leaves the states to the laye
         receiver = "associated",
         dispatch = "flat",
         side = "client",
+        version = 2,
         contract = "collect",
         out = "definitions",
+        registration_append = "register",
         context = "registration",
         neoforge = "RegisterBlockStateModels"
     )]

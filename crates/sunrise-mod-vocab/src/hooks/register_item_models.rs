@@ -23,7 +23,7 @@ fn register_item_models(
     _context: &RegistrationContext,
     event: &mut RegisterItemModelsEvent<'_>,
 ) {
-    event.models.push("example:charge".into());
+    event.register("example:charge".into());
 }
 
 fn item_model_update(&self, _host: &dyn ClientHost, event: &mut ItemModelUpdateEvent<'_>) {
@@ -55,8 +55,10 @@ and the item draws the missing model."#]
         receiver = "associated",
         dispatch = "flat",
         side = "client",
+        version = 2,
         contract = "collect",
         out = "models",
+        registration_append = "register",
         context = "registration",
         neoforge = "RegisterItemModelsEvent"
     )]
