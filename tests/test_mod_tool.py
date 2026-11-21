@@ -53,7 +53,7 @@ class ToolFoldersTests(unittest.TestCase):
 
 
 class ServerToolTests(unittest.TestCase):
-    def test_matrix_uses_release_platform_names_and_adds_new_game_legs(self):
+    def test_manager_selects_legs_and_uses_the_game_workflows_build_settings(self):
         with tempfile.TemporaryDirectory() as folder:
             game_build = Path(folder) / "game-build.yml"
             game_build.write_text("""
@@ -62,23 +62,35 @@ jobs:
     strategy:
       matrix:
         include:
-          - {name: new-arm, os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, asset: sunrise-linux-aarch64.tar.gz}
-          - {name: intel-mac, os: macos-15, target: x86_64-apple-darwin, asset: sunrise-macos-x64.zip}
-          - {name: windows, os: windows-latest, asset: sunrise-windows-x64.zip, exe: .exe, rustflags: static}
+          - {os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, asset: sunrise-linux-aarch64.tar.gz}
+          - {os: macos-15, target: x86_64-apple-darwin, asset: sunrise-macos-x64.zip}
+          - {os: windows-latest, asset: sunrise-windows-x64.zip, rustflags: static}
   macos-x64-intel:
     runs-on: macos-15-intel
-  musl:
+""")
+            platforms = Path(folder) / "server-tool-platforms.txt"
+            platforms.write_text("macos x86_64 server-tool-macos-x64.tar.gz\nwindows x86_64 server-tool-windows-x64.zip\n")
+            legs = server_tool.matrix(game_build, platforms)["include"]
+        self.assertEqual([(leg["asset"], leg["os"], leg["target"], leg["rustflags"], leg["exe"]) for leg in legs], [
+            ("server-tool-macos-x64.tar.gz", "macos-15-intel", "x86_64-apple-darwin", "", ""),
+            ("server-tool-windows-x64.zip", "windows-latest", "", "static", ".exe"),
+        ])
+
+    def test_matrix_refuses_a_manager_platform_without_a_game_leg(self):
+        with tempfile.TemporaryDirectory() as folder:
+            game_build = Path(folder) / "game-build.yml"
+            game_build.write_text("""
+jobs:
+  build:
     strategy:
       matrix:
         include:
-          - {name: musl, os: ubuntu-22.04, asset: sunrise-linux-musl-x86_64.tar.gz}
+          - {os: ubuntu-22.04, asset: sunrise-linux-x86_64.tar.gz}
 """)
-            legs = server_tool.matrix(game_build)["include"]
-        self.assertEqual([(leg["asset"], leg["os"], leg["target"], leg["rustflags"]) for leg in legs], [
-            ("server-tool-linux-aarch64.tar.gz", "ubuntu-22.04-arm", "aarch64-unknown-linux-gnu", ""),
-            ("server-tool-macos-x64.tar.gz", "macos-15-intel", "x86_64-apple-darwin", ""),
-            ("server-tool-windows-x64.zip", "windows-latest", "", "static"),
-        ])
+            platforms = Path(folder) / "server-tool-platforms.txt"
+            platforms.write_text("linux aarch64 server-tool-linux-aarch64.tar.gz\n")
+            with self.assertRaises(SystemExit):
+                server_tool.matrix(game_build, platforms)
 
     def test_metadata_binds_the_binary_to_the_build_and_keeps_its_range(self):
         commit = "1" * 40

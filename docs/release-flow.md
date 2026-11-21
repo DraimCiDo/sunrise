@@ -419,7 +419,8 @@ Why it exists: the tool shipped only inside each `sdk-<commit>`, so a tool fix r
 [`server-tool.yml`](../.github/workflows/server-tool.yml) publishes the manager separately from the game. It follows
 completed dyna-checks main pushes or runs by dispatch. It needs a green gate for the selected commit, refuses to move
 the tag backwards, and skips when the manager's Cargo dependencies and build inputs are unchanged unless forced.
-The platform matrix comes from the game build's release legs; the manager archives contain no game files.
+The [manager's platform list](../crates/sunrise-server/server-tool-platforms.txt) names the required archives.
+Each entry uses the matching game build leg's runner, target and Rust flags. The archives contain no game files.
 
 Only `sign` takes the `release` environment's key. It signs `horizon release server-tool\n` followed by `SHA256SUMS`,
 covering the metadata and every archive. Only `publish` can replace release assets. Main pushes publish when
