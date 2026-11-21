@@ -322,7 +322,7 @@ class StableModApiTests(unittest.TestCase):
                     mock.patch.object(nightly.train, "gh_json", return_value=[[release(PREVIOUS)]]), \
                     mock.patch.object(nightly.train, "origin_tags", return_value={tag: HEAD, PREVIOUS: OLD}), \
                     mock.patch.object(nightly, "git"), mock.patch.object(nightly, "require_stable_lineage"), \
-                    mock.patch.object(nightly, "require_unchanged_content_schema"), \
+                    mock.patch.object(nightly, "require_stable_content"), \
                     mock.patch.object(nightly, "released_assets", side_effect=lambda sha, *names: assets[sha]), \
                     mock.patch.object(nightly.subprocess, "run",
                                       side_effect=self.judge(SURFACE, export, "identical" if tag == "26.3-0.1.11"
@@ -363,7 +363,7 @@ class StableModApiTests(unittest.TestCase):
                     mock.patch.object(nightly.train, "gh_json", return_value=[[release(PREVIOUS)]]), \
                     mock.patch.object(nightly.train, "origin_tags", return_value={"26.3-0.1.11": HEAD, PREVIOUS: OLD}), \
                     mock.patch.object(nightly, "git"), mock.patch.object(nightly, "require_stable_lineage"), \
-                    mock.patch.object(nightly, "require_unchanged_content_schema"), \
+                    mock.patch.object(nightly, "require_stable_content"), \
                     mock.patch.object(nightly, "released_assets", side_effect=lambda sha, *names: assets[sha]), \
                     mock.patch.object(nightly.subprocess, "run", side_effect=self.judge(export, two)):
                 if error:
