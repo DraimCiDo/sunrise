@@ -500,18 +500,12 @@ fn force_cached_regions(
         .into_iter()
         .zip(caches)
     {
-        let Ok(mut cache) = cache.lock() else {
+        let Ok(cache) = cache.lock() else {
             if result.is_ok() {
                 result = Err(std::io::Error::other("region cache poisoned"));
             }
             continue;
         };
-        let eviction_error = cache.eviction_error.take();
-        if result.is_ok()
-            && let Some(error) = eviction_error
-        {
-            result = Err(error);
-        }
         let regions: Vec<_> = cache
             .regions
             .iter()
@@ -675,7 +669,7 @@ mod tests {
     }
 
     #[test]
-    fn an_eviction_failure_fails_the_operation_and_the_next_barrier() {
+    fn an_eviction_failure_fails_only_the_triggering_operation() {
         let dir = tempfile::tempdir().unwrap();
         let save = SaveDir::new(dir.path().to_path_buf(), LevelShape::OVERWORLD, None);
         for x in 0..MAX_OPEN_REGIONS as i32 {
@@ -693,11 +687,7 @@ mod tests {
             })
             .unwrap_err();
         assert_eq!(error.kind(), failure);
-        let error = save.flush().unwrap_err();
-        assert_eq!(
-            error.downcast_ref::<std::io::Error>().unwrap().kind(),
-            failure
-        );
+        assert!(!save.regions.lock().unwrap().regions.contains_key(&(0, 0)));
         save.flush().unwrap();
     }
 
