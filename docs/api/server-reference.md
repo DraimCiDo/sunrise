@@ -50,6 +50,8 @@ Usage: sunrise-server [--dir DIR] <command>
               restart on it; goes back by itself if the game isn't up within the timeout (300 s).
               --archive FILE --version NAME installs an archive you have
   rollback    Back to the release used before the update
+  mods list [--json]
+              Show the mods recorded in mods.lock; never fetches or changes anything
   config [--json]
               The settings in server.toml
   config set KEY=VALUE... [--json]

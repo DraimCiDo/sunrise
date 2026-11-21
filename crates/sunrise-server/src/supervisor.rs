@@ -4,8 +4,9 @@
 //! back by itself when the new game doesn't come up.
 
 use crate::{
+    StartError,
     api::{self, Phase, Shared},
-    backup, engine, prune, signals,
+    backup, engine, mods, prune, signals,
     update::{self, UpdateInstall},
 };
 use serde_json::json;
@@ -190,10 +191,14 @@ struct Watch {
     keep: u32,
 }
 
-pub fn run(dir: &Path) -> Result<(), String> {
+pub fn run(dir: &Path) -> Result<(), StartError> {
     signals::install();
     let config = Config::load(dir)?;
-    let program = launch::program(&config, dir)?;
+    let install = launch::Install::find();
+    let program = match mods::check_start(dir, &config, install.as_ref())? {
+        Some(checked) => checked,
+        None => launch::program_in(&config, dir, install.as_ref())?,
+    };
     let resources = launch::resources(&config, dir, Some(&program))?;
     // Half-copied game files would only crash the engine again at every restart: name what is missing.
     engine::check_prepared(&resources)?;
@@ -238,20 +243,37 @@ pub fn run(dir: &Path) -> Result<(), String> {
     let mut crashes: Vec<Instant> = Vec::new();
     let mut watch: Option<Watch> = None;
     let (mut program, mut resources) = (program, resources);
+    let mut first = Some(config);
     loop {
-        // Read again before every start: edits to server.toml apply on the next restart, and so does a
-        // switch to another release.
-        let config = Config::load(dir)?;
-        // Queued while the game ran, stopped or was already stopping: applied before this start,
-        // whatever ended the last game, not left for some later restart.
-        if let Some(w) = apply_queued(&shared, dir, &config) {
-            watch = Some(w);
-        }
-        if let Ok(found) = launch::program_in(&config, dir, shared.install.as_ref())
-            && let Ok(found_resources) = launch::resources(&config, dir, Some(&found))
-        {
-            (program, resources) = (found, found_resources);
-        }
+        let config = if let Some(config) = first.take() {
+            config
+        } else {
+            // Edits to server.toml and a switch to another release apply on the next restart.
+            let config = Config::load(dir)?;
+            if let Some(w) = apply_queued(&shared, dir, &config) {
+                watch = Some(w);
+            }
+            match mods::check_start(dir, &config, shared.install.as_ref()) {
+                Ok(Some(checked)) => {
+                    resources = launch::resources(&config, dir, Some(&checked))?;
+                    program = checked;
+                }
+                Ok(None) => {
+                    if let Ok(found) = launch::program_in(&config, dir, shared.install.as_ref())
+                        && let Ok(found_resources) = launch::resources(&config, dir, Some(&found))
+                    {
+                        (program, resources) = (found, found_resources);
+                    }
+                }
+                Err(error) => {
+                    if let Some(w) = watch.take() {
+                        roll_back(&shared, dir, &config, &w, &error.to_string());
+                    }
+                    return Err(error.into());
+                }
+            }
+            config
+        };
         let written = config
             .write_properties(dir)
             .map_err(|e| format!("server.properties: {e}"))?;
@@ -358,7 +380,8 @@ pub fn run(dir: &Path) -> Result<(), String> {
         if !config.engine.restart_on_crash {
             return Err(format!(
                 "the game stopped unexpectedly ({status}); engine.restart_on_crash is off"
-            ));
+            )
+            .into());
         }
         let now = Instant::now();
         crashes.retain(|t| now.duration_since(*t) < CRASH_WINDOW);
@@ -368,7 +391,7 @@ pub fn run(dir: &Path) -> Result<(), String> {
                 "the game stopped unexpectedly {MAX_CRASHES} times in {} minutes: not restarting it. \
                  See logs/latest.log and crash-reports/",
                 CRASH_WINDOW.as_secs() / 60
-            ));
+            ).into());
         }
         let wait = backoff(crashes.len());
         note(

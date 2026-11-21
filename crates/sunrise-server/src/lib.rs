@@ -19,6 +19,7 @@ mod management_methods;
 mod management_schema;
 mod management_tls;
 mod mcp;
+mod mods;
 mod panel;
 mod process;
 mod prune;
@@ -87,6 +88,8 @@ Usage: sunrise-server [--dir DIR] <command>
               restart on it; goes back by itself if the game isn't up within the timeout (300 s).
               --archive FILE --version NAME installs an archive you have
   rollback    Back to the release used before the update
+  mods list [--json]
+              Show the mods recorded in mods.lock; never fetches or changes anything
   config [--json]
               The settings in server.toml
   config set KEY=VALUE... [--json]
@@ -113,6 +116,23 @@ Usage: sunrise-server [--dir DIR] <command>
 Settings live in server.toml; the server writes server.properties from it before every start.
 ";
 
+enum StartError {
+    Other(String),
+    Mods(mods::Refusal),
+}
+
+impl From<String> for StartError {
+    fn from(error: String) -> Self {
+        Self::Other(error)
+    }
+}
+
+impl From<mods::Refusal> for StartError {
+    fn from(error: mods::Refusal) -> Self {
+        Self::Mods(error)
+    }
+}
+
 /// Run the server CLI with the process's arguments.
 pub fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
@@ -128,7 +148,28 @@ pub fn main() -> ExitCode {
     if args.first().map(String::as_str) == Some("engine-command") {
         return engine_command::command(&dir, &args[1..]);
     }
-    let result = match args.first().map(String::as_str) {
+    let command = args.first().map(String::as_str);
+    if matches!(command, Some("start" | "run")) {
+        let result = if command == Some("start") {
+            cli::start(&dir)
+        } else {
+            let result = supervisor::run(&dir);
+            signals::stopped();
+            result
+        };
+        return match result {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(StartError::Mods(error)) => {
+                eprintln!("error: {error}");
+                ExitCode::from(2)
+            }
+            Err(StartError::Other(error)) => {
+                eprintln!("sunrise-server: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    let result = match command {
         None | Some("help" | "-h" | "--help") => {
             print!("{HELP}");
             Ok(())
@@ -138,12 +179,6 @@ pub fn main() -> ExitCode {
             Ok(())
         }
         Some("init") => init_answers(&args[1..]).and_then(|a| init::run(&dir, a)),
-        Some("run") => {
-            let done = supervisor::run(&dir);
-            signals::stopped();
-            done
-        }
-        Some("start") => cli::start(&dir),
         Some("stop") => cli::stop(&dir, false),
         Some("restart") => cli::stop(&dir, true),
         Some("status") => cli::status(&dir, args[1..].iter().any(|a| a == "--json")),
@@ -176,6 +211,7 @@ pub fn main() -> ExitCode {
         Some("import-resources") => import_resources::command(&dir, &args[1..]),
         Some("import") => import(&dir, &args[1..]),
         Some("config") => settings::command(&dir, &args[1..]),
+        Some("mods") => mods::command(&dir, &args[1..]),
         Some("update") => update::command(&dir, &args[1..]),
         Some("rollback") => update::rollback(&dir, &args[1..]),
         Some(command @ ("op" | "deop" | "whitelist")) => lists::run(&dir, command, &args[1..]),
