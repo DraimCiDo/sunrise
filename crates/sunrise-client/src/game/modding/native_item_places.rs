@@ -3624,7 +3624,9 @@ pub(super) mod tests {
             let made = host.transaction(|host, tx| {
                 Err::<(), _>(host.scratch_stack(tx, bucket.clone()).unwrap().unwrap())
             });
-            let lost = made.unwrap_err();
+            let mod_api::TransactionError::Aborted(lost) = made.unwrap_err() else {
+                panic!("expected a scratch place from the aborted action")
+            };
             let gone = host.transaction(|host, tx| Ok::<_, ()>(host.scratch_take(tx, &lost)));
             assert_eq!(gone, Ok(None));
             let got = host.transaction(|host, tx| {

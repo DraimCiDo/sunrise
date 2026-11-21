@@ -590,7 +590,7 @@ impl ItemPlace {
     /// what doesn't stack, as vanilla's `ItemUtils.createFilledResult` puts a filled bucket. In a
     /// transaction of its own, nested in `tx`: all of it, or nothing and 0. Inside an item that
     /// shares its place with others like it, it's done in one of them: that one splits off,
-    /// changed, and the others stay as they were.
+    /// changed, and the others stay as they were. Returns 0 if it cannot open a transaction.
     pub fn exchange(
         &self,
         host: &mut dyn ServerHost,
@@ -607,9 +607,8 @@ impl ItemPlace {
                 false => Err(()),
             }
         };
-        let done =
-            host.transaction(|host, tx| alone(self, host, tx, &mut |host, tx| swap(host, tx)));
-        done.unwrap_or(0)
+        host.transaction(|host, tx| alone(self, host, tx, &mut |host, tx| swap(host, tx)))
+            .unwrap_or(0)
     }
 
     /// Runs the item's `ItemStack.onCraftedBy` processing for a stack this place holds, as a

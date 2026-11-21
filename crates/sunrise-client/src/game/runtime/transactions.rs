@@ -2427,12 +2427,13 @@ mod tests {
             assert_eq!(handler.capacity(host, 0, Some(&stick)), 64);
             assert_eq!(handler.capacity(host, 0, Some(&large)), 99);
             assert_eq!(handler.amount(host, 0), 0);
-            host.transaction(|host, tx| {
+            let aborted = host.transaction(|host, tx| {
                 assert!(handler.set_max_stack_size(host, tx, 10));
-                let _ = host.transaction(|host, tx| {
+                let child = host.transaction(|host, tx| {
                     assert!(handler.set_max_stack_size(host, tx, 4));
                     Err::<(), ()>(())
                 });
+                assert_eq!(child, Err(mod_api::TransactionError::Aborted(())));
                 assert_eq!(handler.capacity(host, 0, Some(&stick)), 10);
                 for invalid in [0, 100, u32::MAX] {
                     assert!(!handler.set_max_stack_size(host, tx, invalid));
@@ -2447,8 +2448,8 @@ mod tests {
                 assert_eq!(handler.amount(host, 0), 5);
                 assert_eq!(handler.insert_at(host, tx, 0, &stick, 64), 5);
                 Err::<(), ()>(())
-            })
-            .unwrap_err();
+            });
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
 
             let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let _: Result<(), mod_api::TransactionError<()>> = host.transaction(|host, tx| {
@@ -2461,7 +2462,7 @@ mod tests {
             assert_eq!(handler.capacity(host, 0, Some(&stick)), 64);
             assert_eq!(handler.capacity(host, 0, Some(&large)), 99);
             assert_eq!(handler.amount(host, 0), 0);
-            host.transaction(|host, tx| {
+            let aborted = host.transaction(|host, tx| {
                 let pearl = ItemResource::of(
                     &ItemStack::new("minecraft:ender_pearl", 1)
                         .try_into_api()
@@ -2478,8 +2479,8 @@ mod tests {
                 );
                 assert_eq!(disc.insert_at(host, tx, 0, &record, 64), 1);
                 Err::<(), ()>(())
-            })
-            .unwrap_err();
+            });
+            assert_eq!(aborted, Err(mod_api::TransactionError::Aborted(())));
             // Player clicks and shift-clicks use the menu's separate slot rules.
             let env = game.menu_env();
             let mut menu = sunrise_client::menu::Menu::new(sunrise_client::menu::Kind::Chest(1));
@@ -3272,7 +3273,12 @@ mod mod_capability_tests {
                 assert_eq!(energy(host, stand), Some(300));
                 Err(mod_api::AttachmentError::MissingHolder)
             });
-            assert!(aborted.is_err());
+            assert_eq!(
+                aborted,
+                Err(mod_api::TransactionError::Aborted(
+                    mod_api::AttachmentError::MissingHolder
+                ))
+            );
             assert_eq!(
                 (energy(host, stand), energy(host, player)),
                 (Some(100), Some(40))

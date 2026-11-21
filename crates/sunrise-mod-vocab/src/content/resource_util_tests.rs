@@ -327,7 +327,7 @@ fn a_part_answering_more_than_asked_shows_through_every_total() {
         let inner = tank_then_liar(host);
         assert_eq!(
             insert(host, &inner, amount),
-            Err(Overanswered { owner: None })
+            Err(TransactionError::Aborted(Overanswered { owner: None }))
         );
     }
     // The ranged wrapper inherits the default slot-less implementation.
@@ -341,7 +341,7 @@ fn a_part_answering_more_than_asked_shows_through_every_total() {
     let indices = RangedResourceHandler::of(host, Box::new(indices), 0..2).unwrap();
     assert_eq!(
         insert(host, &indices, 20),
-        Err(Overanswered { owner: None })
+        Err(TransactionError::Aborted(Overanswered { owner: None }))
     );
     assert_eq!(
         insert_stacking(host, &indices, &HYDROGEN, 20, None),
@@ -624,6 +624,8 @@ fn optional_tokens_must_name_the_current_transaction() {
             assert_refused(host, Some(parent));
             Ok::<_, ()>(())
         })
+        .unwrap();
+        Ok::<_, ()>(())
     })
     .unwrap();
     assert_eq!(counts(&fake, A), [5]);
@@ -655,9 +657,9 @@ fn an_overanswer_after_an_honest_part_undoes_the_whole_move() {
         });
         assert_eq!(
             moved,
-            Err(Overanswered {
+            Err(TransactionError::Aborted(Overanswered {
                 owner: Some("test:liar".into())
-            })
+            }))
         );
         assert_eq!(counts(&fake, A), [5]);
         assert_eq!(counts(&fake, B), [62]);

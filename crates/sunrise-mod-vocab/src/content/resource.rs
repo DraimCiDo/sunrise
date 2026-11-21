@@ -2,7 +2,8 @@
 //! ([`ItemResource`]), and a [`ResourceHandler`] is the indexed contents of one holder, written
 //! only inside a transaction.
 use crate::{
-    Capability, Host, HostTransaction, ItemStack, ServerHost, Tag, TransactionContext, backend_of,
+    Capability, Host, HostTransaction, ItemStack, ServerHost, Tag, TransactionContext,
+    TransactionError, backend_of,
 };
 use std::fmt;
 use sunrise_core::nbt::JavaString;
@@ -589,7 +590,11 @@ pub(crate) fn in_turn<P>(
     if amount == 0 || host.transaction_current().as_ref() != Some(tx) {
         return Ok(0);
     }
-    host.transaction(|host, tx| try_in_turn(host, tx, amount, parts, ask))
+    match host.transaction(|host, tx| try_in_turn(host, tx, amount, parts, ask)) {
+        Ok(moved) => Ok(moved),
+        Err(TransactionError::Unavailable) => Ok(0),
+        Err(TransactionError::Aborted(error)) => Err(error),
+    }
 }
 
 /// Asks each part for the full remaining amount. The owning transaction aborts on `Err`.
@@ -667,11 +672,15 @@ pub(crate) fn move_once<A: ?Sized, B: ?Sized, N: Copy + PartialOrd + Default>(
             }
         })
     };
-    match step(host, want) {
-        Err(Ok(took)) if took > N::default() => step(host, took),
+    let result = match step(host, want) {
+        Err(TransactionError::Aborted(Ok(took))) if took > N::default() => step(host, took),
         answer => answer,
+    };
+    match result {
+        Ok(moved) => Ok(moved),
+        Err(TransactionError::Unavailable | TransactionError::Aborted(Ok(_))) => Ok(N::default()),
+        Err(TransactionError::Aborted(Err(error))) => Err(error),
     }
-    .or_else(|answer| answer.map(|_| N::default()))
 }
 
 #[cfg(test)]

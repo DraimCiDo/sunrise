@@ -368,7 +368,10 @@ pub mod tests {
                     went => Err(went),
                 },
             );
-        went.unwrap_or_else(|went| went)
+        match went {
+            Ok(went) | Err(crate::TransactionError::Aborted(went)) => went,
+            Err(crate::TransactionError::Unavailable) => panic!("expected a transaction"),
+        }
     }
 
     /// A mod declaring its own key under a name another mod's providers answer with another

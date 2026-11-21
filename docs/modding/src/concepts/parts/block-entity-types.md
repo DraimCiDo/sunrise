@@ -115,9 +115,10 @@ let done = Press::edit_state(host, entity, |_, progress| {
   insert the default. `edit_state` takes `&mut dyn ServerHost` and runs in a nested transaction
   of its own. The closure gets a copy and the host, and no store borrow is held while it runs. The
   result is stored when the closure returns.
-- Every call checks the handle first. A handle from another level gives `PartStateError::OtherLevel`.
-  A removed, replaced or unloaded block entity gives `Stale`. After a reload the saved value is read
-  under the new handle.
+- A handle from another level gives `PartStateError::OtherLevel`. A removed, replaced or unloaded
+  block entity gives `Stale`. After a reload the saved value is read under the new handle.
+- An edit that cannot open its transaction returns `PartStateError::Unavailable` without calling
+  the closure or changing the stored value.
 - An edit stores nothing, and its transaction aborts with everything the closure wrote, in these
   cases:
   - the closure panics and the panic unwinds. A panic that aborts

@@ -269,7 +269,7 @@ pub mod tests {
             (from, from_side): ([i32; 3], Option<Direction>),
             (to, to_side): ([i32; 3], Option<Direction>),
             max: u32,
-        ) -> Result<u32, Overanswered> {
+        ) -> Result<u32, crate::TransactionError<Overanswered>> {
             let host: &mut dyn ServerHost = self;
             let source = here().capability(host, &FLUIDS, from, from_side).unwrap();
             let target = here().capability(host, &FLUIDS, to, to_side).unwrap();
@@ -569,7 +569,9 @@ pub mod tests {
                 let second = move_resources(host, &source, &tank, |_| true, 300, Some(tx))?;
                 Ok(first + second)
             });
-            let error: Overanswered = moved.unwrap_err();
+            let crate::TransactionError::Aborted(error) = moved.unwrap_err() else {
+                panic!("expected {liar} to overanswer")
+            };
             assert_eq!(error.owner.as_deref(), Some("doubler"), "{liar}");
             assert!(crate::parts::warned_about("doubler"));
             let held = [SOURCE, OTHER, TANK].map(|pos| world.held(pos));
@@ -583,7 +585,11 @@ pub mod tests {
         world.types.insert(SOURCE, "test:gives_more");
         world.tank(TANK, None, true);
         world.tanks.get_mut(&TANK).unwrap().halving = true;
-        let error = world.moved((SOURCE, None), (TANK, None), 1000).unwrap_err();
+        let crate::TransactionError::Aborted(error) =
+            world.moved((SOURCE, None), (TANK, None), 1000).unwrap_err()
+        else {
+            panic!("expected the source to overanswer")
+        };
         assert_eq!(error.owner.as_deref(), Some("doubler"));
         assert_eq!([world.held(SOURCE), world.held(TANK)], [water(1000), None]);
     }

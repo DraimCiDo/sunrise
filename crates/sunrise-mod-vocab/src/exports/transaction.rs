@@ -1,5 +1,5 @@
 pub use item::transaction::{
-    HostTransaction, TransactionContext, TransactionLifecycle, TransactionSeal,
+    HostTransaction, TransactionContext, TransactionError, TransactionLifecycle, TransactionSeal,
     TransactionUnavailable, run_transaction,
 };
 mod __private {

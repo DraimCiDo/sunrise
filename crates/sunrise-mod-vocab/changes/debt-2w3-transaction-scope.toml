@@ -1,0 +1,13 @@
+ids = [
+    "method:HostTransaction::transaction",
+    "type:TransactionError",
+    "type:TransactionError.Aborted",
+    "type:TransactionError.Unavailable",
+    "type:PartStateError",
+    "type:PartStateError.Unavailable",
+    "fn:edit_part_state",
+    "method:BlockEntityPartState::edit_state",
+    "method:EntityPartState::edit_state",
+]
+why = "A host that cannot open a transaction has not run the closure. Returning a separate error distinguishes that refusal from an application error that rolled back a running transaction. Part-state edits likewise distinguish an unavailable transaction from stale storage."
+migrate = "Keep the closure passed to `host.transaction` returning `Result<T, E>`. Change the call's return type, and any function forwarding it, from `Result<T, E>` to `Result<T, TransactionError<E>>`. Change an outer `Err(error)` arm that handles application errors to `Err(TransactionError::Aborted(error))` and handle `Err(TransactionError::Unavailable)` separately; it has no application error because the closure did not run. If you use `?` in a function with its own error type, map both transaction variants to that type first. Successful values are unchanged. When `edit_state` returns `PartStateError::Unavailable`, handle it as a transaction refusal, not a stale handle; the edit closure did not run."

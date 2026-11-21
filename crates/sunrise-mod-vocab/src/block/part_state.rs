@@ -30,10 +30,11 @@ use std::{cell::RefCell, fmt, sync::Arc};
 ///
 /// Reads take `&dyn Host` and return a snapshot. Edits take `&mut dyn ServerHost`, run in
 /// their own nested transaction and store the new value only when the closure returns.
-/// Every call first checks that `entity` is still the block entity it named, in the
-/// level this host is in: a replaced, removed or unloaded one refuses with
+/// Before reaching the state, each call checks that `entity` is still the block entity it
+/// named, in the level this host is in: a replaced, removed or unloaded one refuses with
 /// [`PartStateError::Stale`]. A block entity out of the world for its own tick still
-/// answers, through [`BlockEntitiesHost::block_entity_identity`].
+/// answers, through [`BlockEntitiesHost::block_entity_identity`]. If an edit cannot open a
+/// transaction, it returns [`PartStateError::Unavailable`] without calling `edit`.
 ///
 /// Server-side only for now: `DATA` must not sync, and a client's copy holds nothing
 /// of it, so a client reads the default.
@@ -130,6 +131,8 @@ pub enum PartStateError {
         /// What the store said.
         error: AttachmentError,
     },
+    /// No transaction could be opened for the edit. The edit closure did not run.
+    Unavailable,
 }
 
 impl fmt::Display for PartStateError {
@@ -140,6 +143,7 @@ impl fmt::Display for PartStateError {
             Self::HolderBusy => f.write_str("the entity is out of its level for its own tick"),
             Self::Reentrant => f.write_str("this holder's state is already being edited"),
             Self::Changed => f.write_str("the state changed while it was being edited"),
+            Self::Unavailable => f.write_str("a transaction is unavailable for this state edit"),
             Self::Attachment {
                 namespace,
                 name,
@@ -410,7 +414,8 @@ impl Drop for Editing {
 /// Otherwise, or when the value does not encode, the transaction aborts with everything
 /// `edit` wrote and the old value stays, with its saved bytes. A panic in `edit` aborts it
 /// too. An undecodable saved value refuses before `edit` runs and is kept as it was.
-/// An edit of the same holder and key from inside `edit` is refused.
+/// An edit of the same holder and key from inside `edit` is refused. When the host cannot
+/// open a transaction, this returns [`PartStateError::Unavailable`] before invoking `edit`.
 pub fn edit_part_state<H: PartStateHolder, T: Clone + Send + Sync + 'static, R>(
     host: &mut dyn ServerHost,
     entity: H,
@@ -443,6 +448,10 @@ pub fn edit_part_state<H: PartStateHolder, T: Clone + Send + Sync + 'static, R>(
         key.set(store, at, value)
             .map_err(|error| attachment(key, error))?;
         Ok(answer)
+    })
+    .map_err(|error| match error {
+        TransactionError::Unavailable => PartStateError::Unavailable,
+        TransactionError::Aborted(error) => error,
     })
 }
 

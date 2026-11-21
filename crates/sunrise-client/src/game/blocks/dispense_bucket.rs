@@ -46,7 +46,7 @@ impl Game<'_> {
             false => Ok(None),
         };
         let emptied = match answer {
-            Err(()) => return Ok((Some(stack), FAIL)),
+            Err(_) => return Ok((Some(stack), FAIL)),
             Ok(Some(emptied)) => emptied,
             Ok(None) => self.empty_bucket_contents(target, &stack)?,
         };

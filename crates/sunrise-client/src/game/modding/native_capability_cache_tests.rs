@@ -417,8 +417,9 @@ fn moves_through_kept_handlers_conserve_every_item_when_some_abort() {
                 });
                 match result {
                     Ok(n) => moved += n,
-                    Err(n) if n > 0 => aborted += 1,
-                    Err(_) => {}
+                    Err(mod_api::TransactionError::Aborted(n)) if n > 0 => aborted += 1,
+                    Err(mod_api::TransactionError::Aborted(_)) => {}
+                    Err(mod_api::TransactionError::Unavailable) => panic!("expected a transaction"),
                 }
                 assert_eq!(count(game), before, "round {round}");
                 assert_eq!(

@@ -101,12 +101,14 @@ let full = Robot::edit_state(host, robot, |_, charge| {
 
 - `state` and `state_existing` read a snapshot and insert nothing; `edit_state` runs in a nested
   transaction of its own, as for block entities.
-- Every call checks the handle first:
+- Each call checks the handle before reaching its state:
   - a handle of another world open, or of an entity that was removed (or whose removal waits for
     the root commit), unloaded or moved under a new id, gives `PartStateError::Stale`, and
     `edit_state` creates no map;
   - an entity resident in another level than the host's gives `OtherLevel`;
   - an entity out of its level's lists for its own tick gives `HolderBusy`.
+- An edit that cannot open its transaction returns `PartStateError::Unavailable` without calling
+  the closure.
 - A reloaded entity has a new handle, which reads the saved value; a value without a codec is gone.
 - Changing level, a lone mob or general entity is rebuilt under a new id: the old handle is `Stale`,
   and the state arrives with the entity under its new id. A vehicle a player rides keeps its id, and

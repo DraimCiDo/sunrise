@@ -110,8 +110,8 @@ pub mod tests {
             let owner = "doubler".to_owned();
             assert_eq!(
                 moved,
-                Err(mod_vocab::__private::parts_installation::overanswered(
-                    owner
+                Err(crate::TransactionError::Aborted(
+                    mod_vocab::__private::parts_installation::overanswered(owner)
                 )),
                 "{liar}"
             );

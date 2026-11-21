@@ -2,12 +2,17 @@
 
 Use `HostTransaction` on a `ServerHost` to group capability writes. The closure's
 `Ok` commits; `Err` aborts. Pass the borrowed `&TransactionContext` to each
-handler or place write.
+handler or place write. The closure still returns `Result<T, E>`, but the call
+returns `Result<T, TransactionError<E>>`:
+
+- `Ok(value)` means the transaction committed.
+- `Err(TransactionError::Aborted(error))` carries the closure's original error. Its writes were rolled back.
+- `Err(TransactionError::Unavailable)` means the host could not open a transaction. The closure did not run.
 
 ```rust,ignore
-use mod_api::{HostTransaction, ServerHost};
+use mod_api::{HostTransaction, ServerHost, TransactionError};
 
-fn update(host: &mut dyn ServerHost) -> Result<(), ()> {
+fn update(host: &mut dyn ServerHost) -> Result<(), TransactionError<()>> {
     host.transaction(|host, tx| {
         // Pass host and tx to your capability writes.
         Ok(())

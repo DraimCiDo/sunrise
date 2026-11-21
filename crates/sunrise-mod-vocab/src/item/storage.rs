@@ -880,7 +880,11 @@ mod tests {
                 }
                 Ok(moved)
             });
-            assert_eq!(result.is_err(), round.is_multiple_of(3));
+            if round.is_multiple_of(3) {
+                assert_eq!(result, Err(crate::TransactionError::Aborted(())));
+            } else {
+                assert!(result.is_ok());
+            }
             assert_eq!(total(host), before, "round {round}");
         }
     }

@@ -1256,8 +1256,8 @@ pub mod tests {
         let owner = "doubler".to_owned();
         assert_eq!(
             moved,
-            Err(mod_vocab::__private::parts_installation::overanswered(
-                owner
+            Err(crate::TransactionError::Aborted(
+                mod_vocab::__private::parts_installation::overanswered(owner)
             ))
         );
         assert_eq!(
@@ -1714,6 +1714,13 @@ pub mod tests {
                 slot: 0,
             };
             for abort_depth in 0..3 {
+                let expected = |depth| {
+                    if depth == abort_depth {
+                        Err(crate::TransactionError::Aborted(()))
+                    } else {
+                        Ok(())
+                    }
+                };
                 let initial = stack("test:outer", 1, 2);
                 let mut player = player_world(Some(initial.clone()));
                 let host: &mut dyn ServerHost = &mut player;
@@ -1729,19 +1736,13 @@ pub mod tests {
                             );
                             if abort_depth == 2 { Err(()) } else { Ok(()) }
                         });
-                        if abort_depth == 1 {
-                            Err(())
-                        } else {
-                            inner.or(Ok(()))
-                        }
+                        assert_eq!(inner, expected(2));
+                        if abort_depth == 1 { Err(()) } else { Ok(()) }
                     });
-                    if abort_depth == 0 {
-                        Err(())
-                    } else {
-                        middle.or(Ok(()))
-                    }
+                    assert_eq!(middle, expected(1));
+                    if abort_depth == 0 { Err(()) } else { Ok(()) }
                 });
-                assert_eq!(result.is_err(), abort_depth == 0);
+                assert_eq!(result, expected(0));
                 assert_eq!(main_hand(&player), Some(initial), "depth {abort_depth}");
                 assert!(player_of(&player).given.is_empty());
                 // Committed, the outer bag is rewritten whole.

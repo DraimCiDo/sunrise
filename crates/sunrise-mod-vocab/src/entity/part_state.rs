@@ -32,12 +32,15 @@ use std::fmt;
 ///
 /// Reads take `&dyn Host` and return a snapshot; edits take `&mut dyn ServerHost`, run in
 /// their own nested transaction and store the new value only when the closure returns, as
-/// [`BlockEntityPartState`]'s do. Every call first checks that `entity` is of the open
-/// world and still names a resident entity, in the level this host is in:
+/// [`BlockEntityPartState`]'s do. Before reaching the state, each call checks that `entity`
+/// is of the open world and still names a resident entity, in the level this host is in:
 /// - a removed, unloaded or moved entity refuses with [`PartStateError::Stale`];
 /// - an entity in another level refuses with [`PartStateError::OtherLevel`];
 /// - an entity out of its level's lists for its own tick refuses with
 ///   [`PartStateError::HolderBusy`].
+///
+/// If an edit cannot open a transaction, it returns [`PartStateError::Unavailable`] without
+/// invoking the edit closure.
 ///
 /// An entity that changes level without a player riding it is rebuilt under a new id: the
 /// old handle is `Stale` and the state arrives with the entity under its new id, so a mod

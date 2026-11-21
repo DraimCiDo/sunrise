@@ -1,10 +1,12 @@
 //! Stock resource handlers and transfer helpers, following NeoForge's `ResourceHandlerUtil`.
 //! Writes and probes take `Some(tx)` for the current transaction or `None` to open a root.
 //! They refuse without calling handlers if the token does not name the current transaction,
-//! or if a transaction is open but no token was supplied. Probes always roll back.
+//! or if a transaction is open but no token was supplied. If no transaction can be opened,
+//! nothing moves. Probes always roll back.
 use crate::content::resource::{checked_transfer, in_turn, try_in_turn};
 use crate::{
     Capability, HostTransaction, Overanswered, ResourceHandler, ServerHost, TransactionContext,
+    TransactionError,
 };
 use std::ops::Range;
 
@@ -484,7 +486,13 @@ pub fn insert_stacking<R: PartialEq>(
     if !can_open(host, tx) || amount == 0 {
         return Ok(0);
     }
-    host.transaction(|host, tx| try_insert_stacking(host, &handler.into(), resource, amount, tx))
+    match host
+        .transaction(|host, tx| try_insert_stacking(host, &handler.into(), resource, amount, tx))
+    {
+        Ok(moved) => Ok(moved),
+        Err(TransactionError::Unavailable) => Ok(0),
+        Err(TransactionError::Aborted(error)) => Err(error),
+    }
 }
 
 fn try_insert_stacking<R: PartialEq>(
@@ -571,16 +579,28 @@ fn probe_extractable<R>(
     handler: &dyn ResourceHandler<R>,
     filter: impl Fn(&R) -> bool,
 ) -> Option<R> {
-    (0..handler.size(host)).find_map(|index| {
-        let amount = u32::try_from(handler.amount_int(host, index)).ok()?;
-        let resource = handler
+    for index in 0..handler.size(host) {
+        let Ok(amount) = u32::try_from(handler.amount_int(host, index)) else {
+            continue;
+        };
+        let Some(resource) = handler
             .resource(host, index)
-            .filter(|r| amount != 0 && filter(r))?;
-        let probe: Result<std::convert::Infallible, _> = host
+            .filter(|r| amount != 0 && filter(r))
+        else {
+            continue;
+        };
+        let probe: Result<std::convert::Infallible, TransactionError<_>> = host
             .transaction(|host, tx| Err(handler.extract_at(host, tx, index, &resource, amount)));
-        let answer = probe.unwrap_err();
-        (answer > 0 && answer <= amount).then_some(resource)
-    })
+        match probe {
+            Err(TransactionError::Aborted(answer)) if answer > 0 && answer <= amount => {
+                return Some(resource);
+            }
+            Err(TransactionError::Aborted(_)) => {}
+            Err(TransactionError::Unavailable) => return None,
+            Ok(never) => match never {},
+        }
+    }
+    None
 }
 
 /// Validates an optional enclosing transaction before opening any new journal.
@@ -779,7 +799,11 @@ fn with_move_transaction<T: Default>(
     if !can_open(host, tx) {
         return Ok(T::default());
     }
-    host.transaction(|host, _| run(host))
+    match host.transaction(|host, _| run(host)) {
+        Ok(moved) => Ok(moved),
+        Err(TransactionError::Unavailable) => Ok(T::default()),
+        Err(TransactionError::Aborted(error)) => Err(error),
+    }
 }
 
 fn move_slot<R>(
@@ -795,13 +819,18 @@ fn move_slot<R>(
         return Ok(0);
     }
     // The destination must see the source before extraction, even though the probe may write.
-    let probe: Result<std::convert::Infallible, _> =
+    let probe: Result<std::convert::Infallible, TransactionError<_>> =
         host.transaction(|host, tx| Err(from.handler.extract_at(host, tx, index, resource, want)));
-    let available = checked_transfer(probe.unwrap_err(), want).map_err(|e| from.attribute(e))?;
+    let amount = match probe {
+        Err(TransactionError::Aborted(amount)) => amount,
+        Err(TransactionError::Unavailable) => return Ok(0),
+        Ok(never) => match never {},
+    };
+    let available = checked_transfer(amount, want).map_err(|e| from.attribute(e))?;
     if available == 0 {
         return Ok(0);
     }
-    host.transaction(|host, tx| {
+    match host.transaction(|host, tx| {
         let accepted = insert(host, tx, resource, available).map_err(Some)?;
         if accepted == 0 {
             return Err(None);
@@ -812,8 +841,11 @@ fn move_slot<R>(
             return Err(None);
         }
         Ok(accepted)
-    })
-    .or_else(|error| error.map_or(Ok(0), Err))
+    }) {
+        Ok(moved) => Ok(moved),
+        Err(TransactionError::Unavailable | TransactionError::Aborted(None)) => Ok(0),
+        Err(TransactionError::Aborted(Some(error))) => Err(error),
+    }
 }
 
 #[cfg(test)]

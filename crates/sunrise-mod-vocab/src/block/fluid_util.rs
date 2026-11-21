@@ -10,7 +10,7 @@ use crate::content::resource::{Ends, move_once};
 use crate::{
     Capability, Direction, DispenseItemEvent, Dispensed, FLUIDS, FluidResource, FluidStack,
     GameEventContext, Hand, HostTransaction, ITEM_FLUIDS, ItemPlace, LevelRef, PlayerRef,
-    ResourceHandler, ServerHost, SoundSource,
+    ResourceHandler, ServerHost, SoundSource, TransactionError,
 };
 
 /// `FluidType.BUCKET_VOLUME`: what a source block holds, and what a placement takes.
@@ -155,7 +155,7 @@ pub fn trigger_sound_and_game_event(
 /// (nested in one the caller has open, which then decides). What moved, or None with nothing
 /// changed. Either way the bucket's fill sound and `minecraft:fluid_pickup` go out at the
 /// block's centre at the outermost commit ([`LevelRef::play_fluid_effects`]), and not at all if
-/// it aborts.
+/// it aborts. Returns `None` if no transaction can be opened.
 pub fn try_pickup_fluid(
     host: &mut dyn ServerHost,
     destination: &Capability<dyn ResourceHandler<FluidResource>>,
@@ -182,8 +182,8 @@ pub fn try_pickup_fluid(
 /// waterlogged block's water or a bubble column's ([`LevelRef::pickup_fluid`]), a bucket of it,
 /// into `destination`, all of it or none, in a transaction of its own (nested in one the caller
 /// has open, which then decides). What was picked up, or None with nothing changed: no source
-/// there, or `destination` doesn't take the whole bucket. The block's updates, the bucket's
-/// fill sound and `minecraft:fluid_pickup` follow at the outermost commit.
+/// there, no available transaction, or `destination` doesn't take the whole bucket. The block's
+/// updates, the fill sound and `minecraft:fluid_pickup` follow at the outermost commit.
 pub fn try_pickup_world_fluid(
     host: &mut dyn ServerHost,
     destination: &Capability<dyn ResourceHandler<FluidResource>>,
@@ -213,8 +213,9 @@ pub fn try_pickup_world_fluid(
 /// lends `player` when supplied. `validate` treats a container's false placement answer as failure,
 /// while a normal bucket still empties (NeoForge's `validatePlaced`). Each try is a transaction
 /// of its own (nested in one the caller has open, which then decides). What was placed, or
-/// None with nothing changed. The block's updates, the fluid tick, a replaced block's drops
-/// and the bucket's empty sound and `minecraft:fluid_place` follow at the outermost commit.
+/// `None` with nothing changed, including when no transaction can be opened. The block's
+/// updates, the fluid tick, a replaced block's drops, the empty sound and `minecraft:fluid_place`
+/// follow at the outermost commit.
 pub fn try_place_fluid(
     host: &mut dyn ServerHost,
     source: &Capability<dyn ResourceHandler<FluidResource>>,
@@ -239,8 +240,10 @@ pub fn try_place_fluid(
                 false => Err(()),
             }
         });
-        if let Ok(placed) = placed {
-            return Some(placed);
+        match placed {
+            Ok(placed) => return Some(placed),
+            Err(TransactionError::Aborted(())) => {}
+            Err(TransactionError::Unavailable) => return None,
         }
     }
     None
@@ -259,8 +262,8 @@ pub fn try_place_fluid(
 /// the slot keeps the rest and the changed container goes into the dispenser, else out of its
 /// front with a second click ([`dispense_with_remainder`](crate::prelude::ItemsServerHost::dispense_with_remainder)).
 /// Where neither moves anything, nothing is changed and one container is dispensed as it is
-/// ([`dispense_default`](crate::prelude::ItemsServerHost::dispense_default)). None, for vanilla
-/// to decide, only where the dispenser's level isn't open.
+/// ([`dispense_default`](crate::prelude::ItemsServerHost::dispense_default)). Returns `None`
+/// if the dispenser's level isn't open or no transaction can be opened.
 pub fn dispense_container(
     host: &mut dyn ServerHost,
     event: &DispenseItemEvent<'_>,
@@ -293,7 +296,10 @@ pub fn dispense_container(
         Ok((_, Some(changed))) => {
             host.dispense_with_remainder(event.dimension, event.pos, event.facing, stack, changed)
         }
-        Err(()) => host.dispense_default(event.dimension, event.pos, event.facing, stack),
+        Err(TransactionError::Aborted(())) => {
+            host.dispense_default(event.dimension, event.pos, event.facing, stack)
+        }
+        Err(TransactionError::Unavailable) => return None,
     };
     Some((left.ok()?, 1000))
 }

@@ -314,11 +314,11 @@ fn container_moves_roll_back_slots_and_saved_data_in_any_order() {
                         Ok::<_, ()>(())
                     })
                     .unwrap();
-                    host.transaction(|host, child| {
+                    let child = host.transaction(|host, child| {
                         assert_eq!(items.insert_at(host, child, 8, &dirt, 1), 1);
                         Err::<(), ()>(())
-                    })
-                    .unwrap_err();
+                    });
+                    assert_eq!(child, Err(mod_api::TransactionError::Aborted(())));
                     assert_eq!(items.amount(host, 8), 0, "the child's abort undid its slot");
                     assert_eq!(items.amount(host, 0), 56);
                     Err(())

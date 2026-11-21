@@ -29,7 +29,7 @@ pub struct TransactionContext(pub(crate) u64);
 /// ```compile_fail
 /// use mod_api::{HostTransaction, ServerHost};
 /// fn handler(host: &mut dyn ServerHost) {
-///     let _: Result<(), ()> = host.transaction(|host, tx| {
+///     let _ = host.transaction(|host, tx| -> Result<(), ()> {
 ///         host.transaction_close(tx, true);
 ///         Ok(())
 ///     });
@@ -105,30 +105,41 @@ pub fn seal_tokens(seal: &TransactionSeal) -> (u64, u64) {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TransactionUnavailable;
 
+// no wire: the error belongs to a local closure and can contain any Rust type.
+// exhaustive: the closure either did not run or ran and returned an error.
+/// Why [`HostTransaction::transaction`] did not commit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransactionError<E> {
+    /// The host could not open a transaction. The closure was not called.
+    Unavailable,
+    /// The closure returned this error. Its writes were rolled back.
+    Aborted(E),
+}
+
 /// Transactions are available only on the logical server and preserve the receiver type.
 ///
 /// ```
-/// use mod_api::{BlockEntityError, BlockEntityRef, HostTransaction, ServerHost};
+/// use mod_api::{BlockEntityError, BlockEntityRef, HostTransaction, ServerHost, TransactionError};
 /// fn write(host: &mut dyn ServerHost, block: BlockEntityRef) {
-///     let _: Result<(), BlockEntityError> = host.transaction(|host, _tx| {
+///     let _: Result<(), TransactionError<BlockEntityError>> = host.transaction(|host, _tx| {
 ///         block.set_changed(host)?;
 ///         Ok(())
 ///     });
 /// }
 /// ```
 /// ```compile_fail
-/// use mod_api::{BlockEntityError, BlockEntityRef, Host, HostTransaction};
+/// use mod_api::{BlockEntityError, BlockEntityRef, Host, HostTransaction, TransactionError};
 /// fn write(host: &mut dyn Host, block: BlockEntityRef) {
-///     let _: Result<(), BlockEntityError> = host.transaction(|host, _tx| {
+///     let _: Result<(), TransactionError<BlockEntityError>> = host.transaction(|host, _tx| {
 ///         block.set_changed(host)?;
 ///         Ok(())
 ///     });
 /// }
 /// ```
 /// ```compile_fail
-/// use mod_api::{ClientHost, HostTransaction};
+/// use mod_api::{ClientHost, HostTransaction, TransactionError};
 /// fn client(host: &mut dyn ClientHost) {
-///     let _: Result<(), ()> = host.transaction(|_, _| Ok(()));
+///     let _: Result<(), TransactionError<()>> = host.transaction(|_, _| Ok(()));
 /// }
 /// ```
 pub trait HostTransaction: ServerHost {
@@ -140,6 +151,9 @@ pub trait HostTransaction: ServerHost {
     /// nothing `f` changed, and the transaction around it stays open. A transaction `f` opened
     /// itself and left open is aborted first, when this one closes.
     ///
+    /// An error returned by `f` becomes [`TransactionError::Aborted`]. If a transaction cannot
+    /// be opened, [`TransactionError::Unavailable`] means `f` did not run.
+    ///
     /// `f` gets the [`TransactionContext`] to write in, never its [`TransactionSeal`]: only this
     /// guard ends the transaction.
     ///
@@ -149,7 +163,7 @@ pub trait HostTransaction: ServerHost {
     fn transaction<T, E>(
         &mut self,
         f: impl FnOnce(&mut Self, &TransactionContext) -> Result<T, E>,
-    ) -> Result<T, E>;
+    ) -> Result<T, TransactionError<E>>;
 
     /// Lends the innermost open action's context, or returns `Ok(None)` without calling `f`
     /// if there is no open action. Returns [`TransactionUnavailable`] outside world access.
@@ -173,8 +187,8 @@ impl<H: ServerHost + ?Sized> HostTransaction for H {
     fn transaction<T, E>(
         &mut self,
         f: impl FnOnce(&mut Self, &TransactionContext) -> Result<T, E>,
-    ) -> Result<T, E> {
-        run_transaction(self, f)
+    ) -> Result<T, TransactionError<E>> {
+        run_transaction(self, f).map_err(TransactionError::Aborted)
     }
 }
 
@@ -239,10 +253,11 @@ mod tests {
                     }
                 }
                 Ok::<_, ()>(())
-            })?;
+            })
+            .unwrap();
             Err::<(), ()>(())
         });
-        assert_eq!(outer, Err(()));
+        assert_eq!(outer, Err(TransactionError::Aborted(())));
         assert_eq!(
             fake.journal.closed(),
             [(2, true), (1, false)],
@@ -261,7 +276,7 @@ mod tests {
             let _left_open = host.transaction_open();
             Err::<(), ()>(())
         });
-        assert_eq!(outer, Err(()));
+        assert_eq!(outer, Err(TransactionError::Aborted(())));
         assert_eq!(fake.journal.closed(), [(2, false), (1, false)]);
         assert_eq!(fake.journal.depth(), 0);
         // The caller commits: the abandoned child still aborts.
@@ -290,9 +305,10 @@ mod tests {
         let mut fake = FakeHost::new();
         let host: &mut dyn ServerHost = &mut fake;
         let outer = host.transaction(|host, _| {
-            let inner: Result<(), &str> = host.transaction(|_, _| Err("refused"));
-            assert_eq!(inner, Err("refused"));
-            host.transaction(|_, _| Ok::<_, ()>(7))
+            let inner = host.transaction(|_, _| Err::<(), _>("refused"));
+            assert_eq!(inner, Err(TransactionError::Aborted("refused")));
+            let committed = host.transaction(|_, _| Ok::<_, ()>(7)).unwrap();
+            Ok::<_, ()>(committed)
         });
         assert_eq!(outer, Ok(7));
         assert_eq!(fake.journal.closed(), [(2, false), (2, true), (1, true)]);
@@ -325,9 +341,12 @@ mod tests {
                 host.join_transaction(|host, tx| items.extract_at(host, tx, 0, &resource, 1));
             assert_eq!(joined, Ok(Some(1)));
             assert_eq!(items.amount(host, 0), 0);
-            Err::<(), ()>(())
+            Err::<(), _>("leave the item in place")
         });
-        assert_eq!(result, Err(()));
+        assert_eq!(
+            result,
+            Err(TransactionError::Aborted("leave the item in place"))
+        );
         assert_eq!(items.amount(host, 0), 1);
         assert_eq!(fake.journal.closed(), [(1, false)]);
     }

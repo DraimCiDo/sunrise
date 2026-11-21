@@ -215,7 +215,15 @@ fn a_give_command_in_a_transaction_for_a_borrowed_player_lands_in_their_level() 
                     })
                 })
                 .unwrap();
-            assert!(ran.unwrap_or_else(|ok| ok), "{case}");
+            assert_eq!(
+                ran,
+                if commit {
+                    Ok(true)
+                } else {
+                    Err(mod_api::TransactionError::Aborted(true))
+                },
+                "{case}"
+            );
             assert_eq!(game.dim, Dim::Overworld, "{case}");
             assert_eq!(diamonds(game, 13), 0, "{case}: the inventory is full");
             if commit {
