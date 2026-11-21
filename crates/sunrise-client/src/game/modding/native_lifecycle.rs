@@ -120,12 +120,6 @@ impl NativeLifecycle {
         attempt.server_context()
     }
 
-    pub(super) fn is_opening(&self) -> bool {
-        self.attempt
-            .as_ref()
-            .is_some_and(|attempt| attempt.session == OpenState::Opening)
-    }
-
     /// `WorldOpenFailed`: only while opening; the attempt is invalidated.
     pub(super) fn world_open_failed(&mut self) -> Option<LifecycleContext> {
         let attempt = self.attempt.as_mut()?;
@@ -264,7 +258,7 @@ impl Game<'_> {
         self.resident_entities.table.get_mut().reset();
     }
 
-    /// Report a hard close failure once and retire its epoch.
+    /// Report a server-loop or shutdown failure once and retire its epoch.
     pub(super) fn native_lifecycle_close_failed(&mut self, error_text: &str) {
         if self.remote.is_none() {
             self.native_levels_closing();

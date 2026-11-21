@@ -77,13 +77,10 @@ impl Game<'_> {
             remember_shutdown(&mut failure, shutdown_panic(payload.as_ref()).into());
         }
         self.exclude_interrupted_players(crashed, |m| log::warn!("{m}"));
-        // A failed open has its own phase. A crash after readiness still has a
-        // separate close outcome, determined by the shutdown below.
-        if let Some(error) = run_error
-            && self.native_lifecycle.is_opening()
-        {
+        if let Some(error) = run_error {
             if let Err(payload) = catch_unwind(AssertUnwindSafe(|| {
                 self.native_lifecycle_world_failed(error);
+                self.native_lifecycle_close_failed(error);
             })) {
                 remember_shutdown(&mut failure, shutdown_panic(payload.as_ref()).into());
             }
@@ -265,7 +262,7 @@ impl Game<'_> {
                     "Partial save during crash shutdown: {failed} chunk records could not be saved"
                 );
             }
-            // A reported record refusal does not fail the close, even after a crash.
+            // Reported records do not fail the save. A prior crash phase has already retired its epoch.
             if let Err(payload) = catch_unwind(AssertUnwindSafe(|| {
                 self.native_lifecycle_world_closed();
             })) {

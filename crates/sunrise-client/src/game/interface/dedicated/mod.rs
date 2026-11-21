@@ -2410,37 +2410,30 @@ impl Game<'_> {
                 log("WARN", message);
             }
         };
-        if integrated {
+        let cause = if integrated {
             // `message` already says whether the tick panicked or failed.
             log::error!("Sunrise: {message}");
+            message.to_owned()
         } else {
             log("ERROR", &format!("The server thread panicked: {message}"));
-        }
+            format!("the server thread panicked: {message}")
+        };
+        self.exclude_interrupted_players(true, warn);
+        // The crash, not any record failure during its checkpoint, fails this close.
+        self.native_lifecycle_close_failed(&cause);
         self.exclude_interrupted_players(true, warn);
         if integrated {
             // `IntegratedServer.stopServer`'s steps; `save_guest` skips the guest unplaced above.
-            let result = self.stop_integrated(true);
-            if let Err(error) = &result {
-                self.native_lifecycle_close_failed(&error.to_string());
-            }
-            return result;
+            return self.stop_integrated(true);
         }
-        self.native_lifecycle.begin_close();
         log("INFO", "Saving worlds");
         match self.save_dedicated_checkpoint("crash shutdown") {
-            Ok(failed) => {
-                if failed == 0 {
-                    self.log_saved_levels();
-                }
-                self.native_lifecycle_world_closed();
-            }
-            Err(error) => {
-                log::error!("Exception saving during crash shutdown: {error}");
-                self.native_lifecycle_close_failed(&error.to_string());
-            }
+            Ok(0) => self.log_saved_levels(),
+            Ok(_) => (),
+            Err(error) => log::error!("Exception saving during crash shutdown: {error}"),
         }
         self.lan_close(false);
-        Err(format!("the server thread panicked: {message}").into())
+        Err(cause.into())
     }
 }
 
@@ -2521,10 +2514,12 @@ mod tests {
                 let cause = "injected dedicated crash";
                 let error = game.stop_after_crash(cause).unwrap_err();
                 assert!(error.to_string().contains(cause));
-                assert_eq!(
-                    *events.lock().unwrap(),
-                    [(WorldPhase::WorldCloseFinal, String::new())]
-                );
+                {
+                    let events = events.lock().unwrap();
+                    assert_eq!(events.len(), 1);
+                    assert_eq!(events[0].0, WorldPhase::WorldCloseFailed);
+                    assert!(events[0].1.contains(cause));
+                }
                 assert_eq!(game.save.record_save_failures(), 3);
 
                 let blocked = dir.path().join("level.dat_new");
@@ -2539,7 +2534,10 @@ mod tests {
                 game.native_lifecycle.world_open_ready().unwrap();
                 let error = game.stop_after_crash(cause).unwrap_err();
                 assert!(error.to_string().contains(cause));
-                assert_eq!(events.lock().unwrap()[1].0, WorldPhase::WorldCloseFailed);
+                let events = events.lock().unwrap();
+                assert_eq!(events.len(), 2);
+                assert_eq!(events[1].0, WorldPhase::WorldCloseFailed);
+                assert!(events[1].1.contains(cause));
             });
         });
     }

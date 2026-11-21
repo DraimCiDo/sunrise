@@ -36,6 +36,19 @@ fn integrated_stop_finishes_after_an_unencodable_record() {
         fn world_saved(&self, _: &mut dyn ServerHost, _: &mut mod_api::WorldSavedEvent) {
             self.0.lock().unwrap().push("world saved");
         }
+        fn world_lifecycle(
+            &self,
+            _: &mut dyn ServerHost,
+            event: &mut mod_api::WorldLifecycleEvent<'_>,
+        ) {
+            match event.phase {
+                mod_api::WorldPhase::WorldCloseFinal => self.0.lock().unwrap().push("closed"),
+                mod_api::WorldPhase::WorldCloseFailed => {
+                    self.0.lock().unwrap().push("close failed")
+                }
+                _ => (),
+            }
+        }
     }
 
     let root = tempfile::tempdir().unwrap();
@@ -58,6 +71,9 @@ fn integrated_stop_finishes_after_an_unencodable_record() {
             game.save = Arc::new(open());
             game.session_lock = Some(SessionLock::acquire(root.path()).unwrap());
             game.world_adopted = true;
+            game.native_lifecycle
+                .begin_open(mod_api::Authority::IntegratedServer);
+            game.native_lifecycle.world_open_ready().unwrap();
             game.save_game().unwrap();
             assert_eq!(*events.lock().unwrap(), ["level saved", "world saved"]);
             events.lock().unwrap().clear();
@@ -97,7 +113,10 @@ fn integrated_stop_finishes_after_an_unencodable_record() {
             );
             game.save.flush().unwrap();
             assert_eq!(game.save.record_save_failures(), 1);
-            assert_eq!(*events.lock().unwrap(), ["level saved", "world saved"]);
+            assert_eq!(
+                *events.lock().unwrap(),
+                ["level saved", "world saved", "closed"]
+            );
         });
     });
 }
