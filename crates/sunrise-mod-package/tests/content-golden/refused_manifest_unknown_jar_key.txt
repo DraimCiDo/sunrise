@@ -1,0 +1,2 @@
+manifest:
+refused: sunrise-mod.toml: unknown field `loader`, expected one of `id`, `version`, `sha512` (line 8)

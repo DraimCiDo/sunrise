@@ -1119,6 +1119,27 @@ pub struct Content {
     pub namespaces: Vec<String>,
 }
 
+/// Exposes the declaration file types to the integration test's Serde schema probe.
+#[doc(hidden)]
+pub fn probe_declaration<'de, D: serde::Deserializer<'de>>(
+    kind: &str,
+    deserializer: D,
+) -> Result<(), D::Error> {
+    match kind {
+        "block" => BlockFile::deserialize(deserializer).map(drop),
+        "item" => ItemFile::deserialize(deserializer).map(drop),
+        "mob_effect" => MobEffect::deserialize(deserializer).map(drop),
+        "creative_tab" => CreativeTabFile::deserialize(deserializer).map(drop),
+        "fluid" => FluidFile::deserialize(deserializer).map(drop),
+        "fluid_interaction" => FluidInteraction::deserialize(deserializer).map(drop),
+        "entity_type" => EntityType::deserialize(deserializer).map(drop),
+        "menu" => MenuType::deserialize(deserializer).map(drop),
+        _ => Err(serde::de::Error::custom(format_args!(
+            "unknown declaration kind {kind:?}"
+        ))),
+    }
+}
+
 /// Reads a mod's content files ([`Content::reader`]).
 pub enum FileReader<'a> {
     Dir(&'a Path),

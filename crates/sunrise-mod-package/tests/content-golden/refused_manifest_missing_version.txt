@@ -1,0 +1,2 @@
+manifest:
+refused: sunrise-mod.toml: the field version is missing; add version = "0.1.0"

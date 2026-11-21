@@ -1,0 +1,2 @@
+manifest:
+refused: sunrise-mod.toml: jar overlay: version is empty (line 4)

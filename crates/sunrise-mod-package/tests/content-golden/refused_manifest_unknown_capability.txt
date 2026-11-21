@@ -1,0 +1,2 @@
+manifest:
+refused: sunrise-mod.toml: unknown variant `recipes_only`, expected `registries` (line 4)

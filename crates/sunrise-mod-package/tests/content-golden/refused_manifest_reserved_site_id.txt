@@ -1,0 +1,2 @@
+manifest:
+refused: sunrise-mod.toml: id "submit" is a page of the mod site, so no mod can be published under it: pick another id

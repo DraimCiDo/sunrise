@@ -1,0 +1,2 @@
+manifest:
+refused: sunrise-mod.toml: duplicate key (line 4)

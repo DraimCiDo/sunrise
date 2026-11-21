@@ -1,0 +1,2 @@
+manifest:
+refused: sunrise-mod.toml: id "con" is a reserved Windows device name
