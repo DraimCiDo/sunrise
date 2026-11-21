@@ -35,27 +35,6 @@ pub fn start(shared: Arc<Shared>, settings: Discord) {
 
 fn forward(shared: &Shared, settings: &Discord) {
     let wanted = |kind: &str| settings.events.iter().any(|e| e == kind);
-    let agent = match sunrise_proxy::agent(
-        "sunrise-server-discord",
-        settings.webhook.trim(),
-        |builder| {
-            builder
-                .timeout(Duration::from_secs(20))
-                .redirect(reqwest::redirect::Policy::custom(|attempt| {
-                    if attempt.previous().len() == 1
-                        && matches!(attempt.status().as_u16(), 307 | 308)
-                    {
-                        attempt.stop()
-                    } else {
-                        reqwest::redirect::Policy::limited(5).redirect(attempt)
-                    }
-                }))
-                .user_agent(concat!("sunrise-server/", env!("CARGO_PKG_VERSION")))
-        },
-    ) {
-        Ok(agent) => agent,
-        Err(e) => return crate::supervisor::note(shared, "WARN", &format!("Discord: {e}")),
-    };
     let font = FontRef::try_from_slice(FONT).expect("the bundled font parses");
     let mut glyphs = HashMap::new();
     let mut cursor = shared.events.lock().unwrap().after(u64::MAX, &wanted).0;
@@ -89,7 +68,6 @@ fn forward(shared: &Shared, settings: &Discord) {
             pending.push(Line::note(&format!("({skipped} more lines skipped)")));
         }
         match post(
-            &agent,
             settings.webhook.trim(),
             &pending,
             &font,
@@ -264,7 +242,6 @@ fn payload(lines: &[Line], picture: bool) -> Value {
 
 /// Posts the lines as a picture, or as plain text when drawing fails; waits out a 429 (three times at most).
 fn post(
-    agent: &reqwest::blocking::Client,
     webhook: &str,
     lines: &[Line],
     font: &FontRef,
@@ -293,19 +270,23 @@ fn post(
         None => ("application/json".into(), payload.to_string().into_bytes()),
     };
     for _ in 0..3 {
-        let sent = agent
-            .post(webhook)
-            .header("Content-Type", &content_type)
-            .body(body.clone())
-            .send();
+        let sent = sunrise_proxy::post(
+            webhook,
+            &[
+                ("Content-Type", &content_type),
+                (
+                    "User-Agent",
+                    concat!("sunrise-server/", env!("CARGO_PKG_VERSION")),
+                ),
+            ],
+            body.clone(),
+            Some(Duration::from_secs(20)),
+        );
         let now = Instant::now();
         // Errors never say the URL: it holds the webhook's token.
         let response = sent.map_err(|error| {
             limiter.posted(now, GAP * 5);
-            Failure::Other(format!(
-                "Discord can't be reached ({})",
-                error.without_url()
-            ))
+            Failure::Other(format!("Discord can't be reached ({error})"))
         })?;
         match response.status().as_u16() {
             429 => {

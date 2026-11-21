@@ -85,31 +85,32 @@ fn version_files(hashes: impl Serialize, algorithm: &str) -> Result<Value, Strin
 }
 
 fn post(url: &str, body: &Value) -> Result<Value, String> {
-    let response = crate::net::agent(url)
-        .map_err(|e| format!("{url}: {e}"))?
-        .post(url)
-        .header("User-Agent", AGENT)
-        .header("Content-Type", "application/json")
-        .body(body.to_string())
-        .send()
-        .and_then(|r| r.error_for_status())
-        .map_err(|e| format!("{url}: {e}"))?;
+    let response = sunrise_proxy::post(
+        url,
+        &[("User-Agent", AGENT), ("Content-Type", "application/json")],
+        body.to_string().into_bytes(),
+        None,
+    )
+    .map_err(|e| format!("{url}: {e}"))?;
     read(url, response)
 }
 
 fn get(url: &str) -> Result<Value, String> {
-    let response = crate::net::agent(url)
-        .map_err(|e| format!("{url}: {e}"))?
-        .get(url)
-        .header("User-Agent", AGENT)
-        .send()
-        .and_then(|r| r.error_for_status())
-        .map_err(|e| format!("{url}: {e}"))?;
+    let response = sunrise_proxy::get(
+        url,
+        &[("User-Agent", AGENT)],
+        sunrise_proxy::Redirects::Follow,
+        None,
+    )
+    .map_err(|e| format!("{url}: {e}"))?;
     read(url, response)
 }
 
 fn read(url: &str, response: reqwest::blocking::Response) -> Result<Value, String> {
-    let text = response.text().map_err(|e| format!("{url}: {e}"))?;
+    let text = response
+        .error_for_status()
+        .and_then(|r| r.text())
+        .map_err(|e| format!("{url}: {e}"))?;
     serde_json::from_str(&text).map_err(|e| format!("{url}: {e}"))
 }
 

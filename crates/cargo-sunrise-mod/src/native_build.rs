@@ -48,9 +48,8 @@ pub(crate) fn install_host(work: &Path) {
 
 /// Fetches through the proxy named in the environment (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY`).
 fn get(url: &str) -> Result<host::Body, String> {
-    let agent = sunrise_proxy::agent("cargo-sunrise-mod", url, std::convert::identity)
+    let response = sunrise_proxy::get(url, &[], sunrise_proxy::Redirects::Follow, None)
         .map_err(|e| format!("{url}: {e}"))?;
-    let response = agent.get(url).send().map_err(|e| format!("{url}: {e}"))?;
     if response.status() == 404 {
         return Ok(None);
     }

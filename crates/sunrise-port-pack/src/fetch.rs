@@ -160,23 +160,24 @@ pub fn fetch(
     {
         let checksum = format!("{url}.sha1");
         let result = (|| {
-            let agent = crate::net::agent(&checksum).map_err(|e| format!("{checksum}: {e}"))?;
-            let sha1 = agent
-                .get(&checksum)
-                .header("User-Agent", modrinth::AGENT)
-                .send()
-                .and_then(|r| r.error_for_status())
-                .and_then(|r| r.text())
-                .ok();
+            let sha1 = sunrise_proxy::get(
+                &checksum,
+                &[("User-Agent", modrinth::AGENT)],
+                sunrise_proxy::Redirects::Follow,
+                None,
+            )
+            .map_err(|e| format!("{checksum}: {e}"))?
+            .error_for_status()
+            .and_then(|r| r.text())
+            .map_err(|e| format!("{checksum}: {e}"))?;
             if let Some(parent) = dest.parent() {
                 fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
             // Maven's `.sha1` or nothing: a jar whose checksum couldn't be read isn't taken.
-            let sha1 = sha1
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit()))
-                .ok_or_else(|| format!("{checksum}: no SHA-1"))?;
+            let sha1 = sha1.trim();
+            if sha1.len() != 40 || !sha1.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return Err(format!("{checksum}: no SHA-1"));
+            }
             download(&url, Some(sha1), &dest, true)
         })();
         match result {
@@ -231,9 +232,10 @@ pub(crate) fn download(
     dest: &Path,
     overwrite: bool,
 ) -> Result<(), String> {
-    let response = crate::net::get_from_hosts(
+    let response = sunrise_proxy::get(
         url,
-        &[
+        &[("User-Agent", modrinth::AGENT)],
+        sunrise_proxy::Redirects::HttpsHosts(&[
             "cdn.modrinth.com",
             "github.com",
             "raw.githubusercontent.com",
@@ -241,9 +243,16 @@ pub(crate) fn download(
             "release-assets.githubusercontent.com",
             "gitlab.com",
             "maven.neoforged.net",
-        ],
-    )?
-    .ok_or_else(|| format!("{url}: not found"))?;
+        ]),
+        None,
+    )
+    .map_err(|e| format!("{url}: {e}"))?;
+    if response.status() == 404 {
+        return Err(format!("{url}: not found"));
+    }
+    let response = response
+        .error_for_status()
+        .map_err(|e| format!("{url}: {e}"))?;
     store_download(response, sha1, dest, overwrite).map_err(|e| format!("{url}: {e}"))
 }
 

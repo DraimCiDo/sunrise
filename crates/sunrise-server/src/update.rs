@@ -249,23 +249,27 @@ pub struct Release {
 /// GitHub's API, or a release asset: the body of `url`.
 fn fetch(url: &str) -> Result<Vec<u8>, String> {
     let mut body = Vec::new();
-    sunrise_proxy::agent("sunrise-server-update", url, std::convert::identity)
-        .map_err(|e| format!("GitHub request: {e}"))?
-        .get(url)
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "sunrise-server")
-        .send()
-        .and_then(|r| r.error_for_status())
-        .map_err(|e| {
-            if e.status().is_some_and(|status| status == 404) {
-                "404".to_string()
-            } else {
-                format!("GitHub didn't answer: {e}")
-            }
-        })?
-        .take(64 << 20)
-        .read_to_end(&mut body)
-        .map_err(|e| format!("GitHub's answer: {e}"))?;
+    sunrise_proxy::get(
+        url,
+        &[
+            ("Accept", "application/vnd.github+json"),
+            ("User-Agent", "sunrise-server"),
+        ],
+        sunrise_proxy::Redirects::Follow,
+        None,
+    )
+    .map_err(|e| format!("GitHub didn't answer: {e}"))?
+    .error_for_status()
+    .map_err(|e| {
+        if e.status().is_some_and(|status| status == 404) {
+            "404".to_string()
+        } else {
+            format!("GitHub didn't answer: {e}")
+        }
+    })?
+    .take(64 << 20)
+    .read_to_end(&mut body)
+    .map_err(|e| format!("GitHub's answer: {e}"))?;
     Ok(body)
 }
 
@@ -476,15 +480,15 @@ pub fn download(install: &Install, release: &Release) -> Result<PathBuf, String>
     let path = folder.join(&release.asset);
     let part = folder.join(format!("{}.part", release.asset));
     let result = (|| {
-        let url = &release.url;
-        let agent = sunrise_proxy::agent("sunrise-server-update", url, std::convert::identity)
-            .map_err(|e| format!("downloading {}: {e}", release.asset))?;
-        let mut reader = agent
-            .get(url)
-            .header("User-Agent", "sunrise-server")
-            .send()
-            .and_then(|r| r.error_for_status())
-            .map_err(|e| format!("downloading {}: {e}", release.asset))?;
+        let mut reader = sunrise_proxy::get(
+            &release.url,
+            &[("User-Agent", "sunrise-server")],
+            sunrise_proxy::Redirects::Follow,
+            None,
+        )
+        .map_err(|e| format!("downloading {}: {e}", release.asset))?
+        .error_for_status()
+        .map_err(|e| format!("downloading {}: {e}", release.asset))?;
         let mut file =
             std::fs::File::create(&part).map_err(|e| format!("{}: {e}", part.display()))?;
         let mut hasher = sha2::Sha256::new();

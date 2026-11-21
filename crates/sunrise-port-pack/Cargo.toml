@@ -18,11 +18,9 @@ sha1 = "0.10"
 sha2 = "0.10"
 toml = "1.1.6"
 reqwest = { version = "0.12", default-features = false, features = ["blocking"] }
-url = "2"
 zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
-http = "1"
 mod_api = { package = "sunrise-mod-api", path = "../sunrise-mod-api" }
 
 [build-dependencies]

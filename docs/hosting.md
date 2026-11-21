@@ -423,9 +423,10 @@ time. Set `SUNRISE_NO_UPDATE_CHECK=1` in the server's environment to turn the ch
 
 Release checks and downloads, and the Discord webhook, use the first nonblank setting in this order:
 `HTTPS_PROXY`, `https_proxy`, `ALL_PROXY`, `all_proxy` for HTTPS, or `HTTP_PROXY`, `http_proxy`,
-`ALL_PROXY`, `all_proxy` for HTTP. A proxy address without a scheme means HTTP. Supported schemes are
-`http://`, `socks4://`, `socks4a://`, `socks5://`, `socks5h://` and `socks://` (an alias for SOCKS5).
-An `https://` proxy address is not supported, even for HTTPS downloads. HTTP proxy credentials are sent to the proxy for both HTTP requests and HTTPS CONNECT.
+`ALL_PROXY`, `all_proxy` for HTTP. The route is selected again at each redirect. A proxy address
+without a scheme means HTTP. Supported schemes are `http://`, `socks4://`, `socks4a://`, `socks5://`,
+`socks5h://` and `socks://` (an alias for SOCKS5). An `https://` proxy address is not supported, even
+for HTTPS downloads. HTTP proxy credentials are sent to the proxy for both HTTP requests and HTTPS CONNECT.
 
 Local addresses bypass the proxy. `NO_PROXY` (or `no_proxy` if `NO_PROXY` is unset) is a comma-separated
 list: `*` bypasses all hosts; a host or domain (`example.org`, `.example.org`, `*.example.org`) matches

@@ -234,13 +234,11 @@ impl Base {
         match self {
             Self::Url(base) => {
                 let url = format!("{base}/{release}/{file}");
-                let agent = sunrise_proxy::agent("cargo-sunrise-mod", &url, std::convert::identity)
-                    .map_err(|e| format!("{url}: {e}"))?;
-                let response = agent
-                    .get(&url)
-                    .send()
-                    .and_then(|r| r.error_for_status())
-                    .map_err(|e| format!("{url}: {e}"))?;
+                let response =
+                    sunrise_proxy::get(&url, &[], sunrise_proxy::Redirects::Follow, None)
+                        .map_err(|e| format!("{url}: {e}"))?
+                        .error_for_status()
+                        .map_err(|e| format!("{url}: {e}"))?;
                 Ok(Box::new(response))
             }
             Self::Folder(base) => {
@@ -273,14 +271,11 @@ impl Base {
                 .collect()),
             Self::Url(base) if base == BASE => {
                 let api = sunrise_addresses::SDK_RELEASE_LIST;
-                let text = sunrise_proxy::agent("cargo-sunrise-mod", api, std::convert::identity)
+                let text = sunrise_proxy::get(api, &[], sunrise_proxy::Redirects::Follow, None)
                     .map_err(|e| format!("{api}: {e}"))?
-                    .get(api)
-                    .send()
-                    .and_then(|r| r.error_for_status())
-                    .map_err(|e| format!("{api}: {e}"))?
-                    .text()
-                    .map_err(|e| e.to_string())?;
+                    .error_for_status()
+                    .and_then(|r| r.text())
+                    .map_err(|e| format!("{api}: {e}"))?;
                 let releases: Vec<serde_json::Value> =
                     serde_json::from_str(&text).map_err(|e| format!("{api}: {e}"))?;
                 Ok(releases

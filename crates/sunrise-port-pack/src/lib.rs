@@ -19,7 +19,6 @@ pub mod jar;
 pub(crate) mod legacy_structure_mods;
 mod lithostitched;
 pub mod modrinth;
-mod net;
 pub mod oracle;
 pub mod pipeline;
 pub mod processors;

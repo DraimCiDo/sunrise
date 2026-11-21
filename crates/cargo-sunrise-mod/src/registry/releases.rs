@@ -33,27 +33,25 @@ pub(super) fn fetch(out: &Path) -> Result<(), String> {
     }
     // Request only the fixed Sunrise repository. Do not forward credentials to redirects or
     // to URLs supplied by pagination headers or Git objects.
+    let mut headers = vec![
+        ("Accept", "application/vnd.github+json"),
+        ("User-Agent", "cargo-sunrise-mod"),
+    ];
+    if let Some(auth) = &auth {
+        headers.push(("Authorization", auth));
+    }
     write_list(out, |url| {
-        let agent = sunrise_proxy::agent("cargo-sunrise-mod-registry", url, |builder| {
-            builder
-                .redirect(reqwest::redirect::Policy::none())
-                .timeout(Duration::from_secs(30))
-        })
+        let response = sunrise_proxy::get(
+            url,
+            &headers,
+            sunrise_proxy::Redirects::None,
+            Some(Duration::from_secs(30)),
+        )
         .map_err(|e| format!("GitHub request failed: {e}"))?;
-        let mut request = agent
-            .get(url)
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "cargo-sunrise-mod");
-        if let Some(auth) = &auth {
-            request = request.header("Authorization", auth);
-        }
-        let response = request
-            .send()
-            .map_err(|e| format!("GitHub request failed: {}", e.without_url()))?;
         if response.status() != 200 {
             return Err(format!(
                 "GitHub returned HTTP {}, expected 200",
-                response.status()
+                response.status().as_u16()
             ));
         }
         let links = response

@@ -516,7 +516,6 @@ dependencies = [
  "lzma-rust2",
  "minisign",
  "minisign-verify",
- "reqwest",
  "ring",
  "rpassword",
  "rustc-demangle",
@@ -5254,7 +5253,6 @@ dependencies = [
 name = "sunrise-port-pack"
 version = "0.1.0"
 dependencies = [
- "http",
  "reqwest",
  "serde",
  "serde_json",
@@ -5265,7 +5263,6 @@ dependencies = [
  "sunrise-mod-package",
  "sunrise-proxy",
  "toml",
- "url",
  "zip",
 ]
 
@@ -5304,6 +5301,7 @@ dependencies = [
 name = "sunrise-proxy"
 version = "0.1.0"
 dependencies = [
+ "http",
  "reqwest",
  "url",
 ]

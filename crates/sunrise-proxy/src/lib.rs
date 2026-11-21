@@ -9,20 +9,16 @@ use std::fmt;
 use std::net::Ipv6Addr;
 use std::num::NonZeroU16;
 use std::sync::{LazyLock, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use reqwest::blocking::{Client, ClientBuilder};
+use reqwest::blocking::{Client, Response};
+use url::Url;
 
-type Agents = HashMap<AgentKey, Client>;
+type Agents = HashMap<Option<String>, Client>;
 
-/// A fresh agent starts a new connection pool, so reuse agents with the same settings.
+/// A fresh client starts a new connection pool. The proxy is the only setting that varies by client;
+/// timeouts and headers belong to individual requests.
 static KEPT: LazyLock<Mutex<Agents>> = LazyLock::new(Mutex::default);
-
-#[derive(PartialEq, Eq, Hash)]
-struct AgentKey {
-    slot: String,
-    proxy: Option<String>,
-}
 
 /// A configuration error that can be reported without showing the proxy address or credentials.
 #[derive(Debug)]
@@ -51,35 +47,139 @@ impl fmt::Display for ProxyError {
 
 impl std::error::Error for ProxyError {}
 
-/// A kept agent for `url`, using the environment unless the destination is reached directly.
-/// An invalid selected proxy is an error, not a direct route.
-/// Each `slot` names one builder configuration. `configure` only runs when the slot has no agent
-/// for the selected proxy, and should not set a proxy itself.
-pub fn agent(
-    slot: &str,
+/// Which redirect targets a GET may contact.
+#[derive(Clone, Copy)]
+pub enum Redirects<'a> {
+    /// Follow HTTP(S) redirects.
+    Follow,
+    /// Only use these exact HTTPS hosts on the default port, including the initial request.
+    HttpsHosts(&'a [&'a str]),
+    /// Return the first response, even if it is a redirect.
+    None,
+}
+
+/// Download a response, choosing the proxy again before every permitted redirect. HTTP error
+/// statuses are returned as responses so callers can handle cases such as 404 themselves.
+pub fn get(
     url: &str,
-    configure: impl FnOnce(ClientBuilder) -> ClientBuilder,
-) -> Result<Client, String> {
-    let destination = url::Url::parse(url).ok();
-    let selected = if destination
-        .as_ref()
-        .is_some_and(|url| bypasses_proxy(url, &no_proxy()))
-    {
+    headers: &[(&str, &str)],
+    redirects: Redirects<'_>,
+    timeout: Option<Duration>,
+) -> Result<Response, String> {
+    request(url, headers, None, redirects, timeout)
+}
+
+/// Send a POST. Follow 301/302/303 as GET, but never resend its body to a redirect target.
+pub fn post(
+    url: &str,
+    headers: &[(&str, &str)],
+    body: Vec<u8>,
+    timeout: Option<Duration>,
+) -> Result<Response, String> {
+    request(url, headers, Some(body), Redirects::Follow, timeout)
+}
+
+fn request(
+    url: &str,
+    headers: &[(&str, &str)],
+    mut body: Option<Vec<u8>>,
+    redirects: Redirects<'_>,
+    timeout: Option<Duration>,
+) -> Result<Response, String> {
+    let start = Instant::now();
+    follow(url, redirects, body.is_some(), |current, first| {
+        let client = client_for(current)?;
+        let mut request = match body.take() {
+            Some(body) => client.post(current.clone()).body(body),
+            None => client.get(current.clone()),
+        };
+        for &(name, value) in headers {
+            // Don't forward authentication, cookies or entity headers on a redirect.
+            if first
+                || ["accept", "user-agent"]
+                    .iter()
+                    .any(|h| name.eq_ignore_ascii_case(h))
+            {
+                request = request.header(name, value);
+            }
+        }
+        if let Some(timeout) = timeout {
+            let remaining = timeout
+                .checked_sub(start.elapsed())
+                .ok_or("HTTP request timed out")?;
+            request = request.timeout(remaining);
+        }
+        request.send().map_err(|e| e.without_url().to_string())
+    })
+}
+
+fn follow(
+    url: &str,
+    redirects: Redirects<'_>,
+    mut posting: bool,
+    mut send: impl FnMut(&Url, bool) -> Result<Response, String>,
+) -> Result<Response, String> {
+    const MAX_REDIRECTS: usize = 5;
+    let mut current = Url::parse(url).map_err(|_| "Invalid HTTP URL")?;
+    for hop in 0..=MAX_REDIRECTS {
+        if let Redirects::HttpsHosts(hosts) = redirects
+            && (current.scheme() != "https"
+                || !current.host_str().is_some_and(|host| hosts.contains(&host))
+                || current.port().is_some()
+                || !current.username().is_empty()
+                || current.password().is_some())
+        {
+            return Err("Refused download URL outside allowed HTTPS hosts".into());
+        }
+        if !matches!(current.scheme(), "http" | "https") {
+            return Err("Refused non-HTTP URL".into());
+        }
+        let response = send(&current, hop == 0)?;
+        let follow = match redirects {
+            Redirects::None => false,
+            Redirects::HttpsHosts(_) => response.status().is_redirection(),
+            Redirects::Follow => match response.status().as_u16() {
+                301..=303 => true,
+                307 | 308 => !posting,
+                _ => false,
+            },
+        };
+        if !follow {
+            return Ok(response);
+        }
+        let Some(location) = response.headers().get("Location") else {
+            return if matches!(redirects, Redirects::HttpsHosts(_)) {
+                Err("Redirect without Location".into())
+            } else {
+                Ok(response)
+            };
+        };
+        if hop == MAX_REDIRECTS {
+            break;
+        }
+        let location = location.to_str().map_err(|_| "Invalid redirect Location")?;
+        current = current
+            .join(location)
+            .map_err(|_| "Invalid redirect Location")?;
+        posting = false;
+    }
+    Err("Too many redirects".into())
+}
+
+fn client_for(url: &Url) -> Result<Client, String> {
+    let selected = if bypasses_proxy(url, &no_proxy()) {
         None
     } else {
-        let scheme = destination.as_ref().map_or("https", url::Url::scheme);
-        env_proxy(scheme, |name| std::env::var_os(name)).map_err(|e| e.to_string())?
+        env_proxy(url.scheme(), |name| std::env::var_os(name)).map_err(|e| e.to_string())?
     };
     let mut agents = KEPT.lock().unwrap_or_else(|e| e.into_inner());
-    keep(&mut agents, slot, selected, |proxy| {
-        let builder = configure(
-            Client::builder()
-                .no_proxy()
-                .user_agent("sunrise-tools")
-                .referer(false)
-                .connect_timeout(Duration::from_secs(30))
-                .timeout(None),
-        );
+    keep(&mut agents, selected, |proxy| {
+        let builder = Client::builder()
+            .no_proxy()
+            .user_agent("sunrise-tools")
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(Duration::from_secs(30))
+            .timeout(None);
         match proxy {
             Some(proxy) => builder.proxy(proxy),
             None => builder,
@@ -89,26 +189,18 @@ pub fn agent(
     })
 }
 
-/// An agent built by `build` and kept for the next request with the same `slot` and proxy.
-/// Building a fresh agent every time would give each request a new connection pool.
-/// Only `None` requests a direct agent; an invalid `spec` returns an error without calling `build`.
+/// Testable with a local pool. Only an absent setting requests a direct client.
 fn keep(
     agents: &mut Agents,
-    slot: &str,
     selected: Option<(&'static str, String)>,
     build: impl FnOnce(Option<reqwest::Proxy>) -> Result<Client, String>,
 ) -> Result<Client, String> {
     let (setting, proxy) = selected.map_or(("", None), |(name, spec)| (name, Some(spec)));
-    let key = AgentKey {
-        slot: slot.into(),
-        proxy,
-    };
-    match agents.entry(key) {
+    match agents.entry(proxy) {
         std::collections::hash_map::Entry::Occupied(entry) => Ok(entry.get().clone()),
         std::collections::hash_map::Entry::Vacant(entry) => {
             let proxy = entry
                 .key()
-                .proxy
                 .as_deref()
                 .map(parse_proxy)
                 .transpose()
@@ -146,7 +238,7 @@ fn parse_proxy(spec: &str) -> Result<reqwest::Proxy, InvalidProxy> {
         return Err(InvalidProxy::Authority);
     }
     let mut url =
-        url::Url::parse(&format!("{scheme}://{address}")).map_err(|_| InvalidProxy::Authority)?;
+        Url::parse(&format!("{scheme}://{address}")).map_err(|_| InvalidProxy::Authority)?;
     if let Some(credentials) = credentials {
         let (user, password) = credentials.split_once(':').ok_or(InvalidProxy::Authority)?;
         // The environment setting accepts raw userinfo; only the backend expects URL encoding.
@@ -216,7 +308,7 @@ fn is_loopback_v4(host: &str) -> bool {
 
 /// Whether the destination is local or in `NO_PROXY`: `*`, `host`, `.domain`, `*.domain` and
 /// `host:port` entries (matching the effective port, including the scheme's default).
-fn bypasses_proxy(url: &url::Url, no_proxy: &str) -> bool {
+fn bypasses_proxy(url: &Url, no_proxy: &str) -> bool {
     let Some(host) = url.host_str() else {
         return false;
     };
@@ -274,7 +366,6 @@ fn bare(host: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     const TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -348,7 +439,7 @@ mod tests {
     }
 
     fn bypasses(url: &str, no_proxy: &str) -> bool {
-        bypasses_proxy(&url::Url::parse(url).unwrap(), no_proxy)
+        bypasses_proxy(&Url::parse(url).unwrap(), no_proxy)
     }
 
     #[test]
@@ -414,10 +505,10 @@ mod tests {
     }
 
     #[test]
-    fn a_selected_invalid_proxy_never_builds_a_direct_agent() {
+    fn a_selected_invalid_proxy_never_builds_a_direct_client() {
         let mut agents = Agents::new();
         // An existing direct agent must not be reused when selection produces an invalid proxy.
-        keep(&mut agents, "invalid", None, |_| {
+        keep(&mut agents, None, |_| {
             Client::builder()
                 .no_proxy()
                 .build()
@@ -443,13 +534,7 @@ mod tests {
             ),
         ] {
             let fail = |_| panic!("an invalid proxy must not be used to build an agent");
-            let error = keep(
-                &mut agents,
-                "invalid",
-                Some(("HTTP_PROXY", spec.into())),
-                fail,
-            )
-            .unwrap_err();
+            let error = keep(&mut agents, Some(("HTTP_PROXY", spec.into())), fail).unwrap_err();
             assert_eq!(
                 error,
                 ProxyError {
@@ -470,6 +555,119 @@ mod tests {
         ] {
             assert!(parse_proxy(spec).is_ok());
         }
+    }
+
+    fn response(status: u16, location: Option<&str>) -> Response {
+        let builder = http::Response::builder().status(status);
+        let builder = match location {
+            Some(location) => builder.header("Location", location),
+            None => builder,
+        };
+        builder.body("").unwrap().into()
+    }
+
+    #[test]
+    fn download_allowlist_is_checked_before_contacting_each_hop() {
+        let allowed =
+            Redirects::HttpsHosts(&["github.com", "release-assets.githubusercontent.com"]);
+        let mut contacted = Vec::new();
+        let refused = follow("https://github.com/file", allowed, false, |url, _| {
+            contacted.push(url.to_string());
+            let next = match contacted.len() {
+                1 => "/release",
+                2 => "https://release-assets.githubusercontent.com/file",
+                _ => "https://unlisted.invalid/",
+            };
+            Ok(response(302, Some(next)))
+        });
+        assert_eq!(
+            refused.unwrap_err(),
+            "Refused download URL outside allowed HTTPS hosts"
+        );
+        assert_eq!(
+            contacted,
+            [
+                "https://github.com/file",
+                "https://github.com/release",
+                "https://release-assets.githubusercontent.com/file",
+            ]
+        );
+        for url in [
+            "http://github.com/file",
+            "https://github.com.invalid/",
+            "https://u@github.com/file",
+            "https://github.com:444/file",
+        ] {
+            assert!(follow(url, allowed, false, |_, _| panic!("must not contact {url}")).is_err());
+        }
+    }
+
+    #[test]
+    fn redirects_stop_at_the_limit() {
+        let mut contacted = 0;
+        let result = follow(
+            "https://origin.invalid/",
+            Redirects::Follow,
+            false,
+            |_, _| {
+                contacted += 1;
+                Ok(response(302, Some("/again")))
+            },
+        );
+        assert_eq!(result.unwrap_err(), "Too many redirects");
+        assert_eq!(contacted, 6);
+    }
+
+    #[test]
+    fn release_discovery_returns_a_redirect_without_following_it() {
+        let result = follow(
+            "https://origin.invalid/",
+            Redirects::None,
+            false,
+            |_, first| {
+                assert!(
+                    first,
+                    "authenticated discovery must not make a second request"
+                );
+                Ok(response(302, Some("https://other.invalid/")))
+            },
+        )
+        .unwrap();
+        assert_eq!(result.status(), 302);
+    }
+
+    #[test]
+    fn a_post_only_follows_redirects_that_switch_to_get() {
+        for status in [307, 308] {
+            let result = follow(
+                "https://origin.invalid/",
+                Redirects::Follow,
+                true,
+                |_, first| {
+                    assert!(first, "must not replay the POST at the new URL");
+                    Ok(response(status, Some("/other")))
+                },
+            )
+            .unwrap();
+            assert_eq!(result.status(), status);
+        }
+        let result = follow(
+            "https://origin.invalid/",
+            Redirects::Follow,
+            true,
+            |url, first| {
+                if first {
+                    return Ok(response(303, Some("/get")));
+                }
+                if url.path() == "/get" {
+                    return Ok(response(307, Some("/final")));
+                }
+                assert_eq!(url.path(), "/final");
+                Ok(response(200, None))
+            },
+        )
+        .unwrap();
+        assert_eq!(result.status(), 200);
     }
 
     /// A stand-in SOCKS5 proxy: answers one request itself and returns the host it was asked for.
@@ -508,29 +706,36 @@ mod tests {
         (port, server)
     }
 
+    fn read_http_head(stream: &std::net::TcpStream) -> String {
+        use std::io::{BufRead, BufReader};
+        stream.set_read_timeout(Some(TIMEOUT)).unwrap();
+        stream.set_write_timeout(Some(TIMEOUT)).unwrap();
+        let mut reader = BufReader::new(stream);
+        let mut head = String::new();
+        loop {
+            let n = reader.read_line(&mut head).unwrap();
+            if n == 2 && head.ends_with("\r\n\r\n") {
+                return head;
+            }
+            assert_ne!(n, 0, "client closed before the end of its HTTP headers");
+        }
+    }
+
     #[test]
     #[ignore = "daily"]
     fn a_refused_connect_is_a_transport_error() {
-        use std::io::{BufRead, BufReader, Write};
+        use std::io::Write;
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let proxy = format!("http://{}", listener.local_addr().unwrap());
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            stream.set_read_timeout(Some(TIMEOUT)).unwrap();
-            stream.set_write_timeout(Some(TIMEOUT)).unwrap();
-            let mut request = BufReader::new(&stream);
-            let mut first = String::new();
-            request.read_line(&mut first).unwrap();
-            let mut line = String::new();
-            while request.read_line(&mut line).unwrap() > 2 {
-                line.clear();
-            }
+            let request = read_http_head(&stream);
             stream
                 .write_all(
                     b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                 )
                 .unwrap();
-            first
+            request
         });
         let client = Client::builder()
             .no_proxy()
@@ -544,8 +749,8 @@ mod tests {
             .unwrap_err();
         assert!(error.is_connect(), "{error}");
         assert_eq!(
-            server.join().unwrap(),
-            "CONNECT sunrise.invalid:443 HTTP/1.1\r\n"
+            server.join().unwrap().lines().next(),
+            Some("CONNECT sunrise.invalid:443 HTTP/1.1")
         );
     }
 
@@ -603,58 +808,72 @@ mod tests {
 
     #[test]
     #[ignore = "daily"]
-    fn a_configured_agent_uses_the_env_proxy_but_goes_direct_for_localhost() {
-        use std::io::{BufRead, BufReader, Write};
+    fn redirects_select_the_proxy_for_each_destination() {
+        use std::io::Write;
         use std::net::TcpListener;
 
         const LOCAL_URL: &str = "SUNRISE_PROXY_TEST_LOCAL_URL";
-        if let Ok(local_url) = std::env::var(LOCAL_URL) {
-            let get = |url: &str| {
-                agent("test-configured", url, |builder| {
-                    builder
-                        .redirect(reqwest::redirect::Policy::none())
-                        .connect_timeout(TIMEOUT)
-                        .timeout(TIMEOUT)
-                })
-                .unwrap()
-                .get(url)
-                .send()
-                .unwrap()
-            };
-            assert_eq!(get("http://sunrise.invalid/a.jar").text().unwrap(), "ok");
-            assert_eq!(
-                get(&local_url).status(),
-                302,
-                "the direct agent must not redirect"
-            );
-            let error = agent("test-configured", "https://sunrise.invalid/", |_| {
-                panic!("a rejected setting must stop before building the agent")
-            })
+        if let Ok(origin) = std::env::var(LOCAL_URL) {
+            let result = get(
+                &format!("{origin}/start"),
+                &[("Authorization", "Bearer dummy-origin-token")],
+                Redirects::Follow,
+                Some(TIMEOUT),
+            )
+            .unwrap();
+            assert_eq!(result.text().unwrap(), "direct again");
+            let error = get(
+                &format!("{origin}/secure"),
+                &[],
+                Redirects::Follow,
+                Some(TIMEOUT),
+            )
             .unwrap_err();
             assert_eq!(error, "HTTPS_PROXY: unsupported proxy scheme");
             return;
         }
 
-        let (port, proxy) = socks5_proxy();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let local_url = format!(
-            "http://localhost:{}/",
-            listener.local_addr().unwrap().port()
-        );
+        let local_url = format!("http://localhost:{}", listener.local_addr().unwrap().port());
+        let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
+        let proxy_url = format!("http://user:pass@{}", proxy.local_addr().unwrap());
+        let next = format!("{local_url}/finish");
+        let proxy = std::thread::spawn(move || {
+            let (mut stream, _) = proxy.accept().unwrap();
+            let request = read_http_head(&stream);
+            assert!(request.starts_with("GET http://sunrise.invalid/asset HTTP/1.1\r\n"));
+            let auth = request
+                .lines()
+                .filter_map(|line| line.split_once(':'))
+                .find(|(name, _)| name.eq_ignore_ascii_case("proxy-authorization"))
+                .map(|(_, value)| value.trim());
+            assert_eq!(auth, Some("Basic dXNlcjpwYXNz"));
+            assert!(!request.contains("dummy-origin-token"));
+            write!(stream, "HTTP/1.1 302 Found\r\nLocation: {next}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+        });
         let origin = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream.set_read_timeout(Some(TIMEOUT)).unwrap();
-            stream.set_write_timeout(Some(TIMEOUT)).unwrap();
-            let mut line = String::new();
-            let mut request = BufReader::new(&stream);
-            while request.read_line(&mut line).unwrap() > 2 {
-                line.clear();
+            for (path, reply) in [
+                (
+                    "/start",
+                    "HTTP/1.1 302 Found\r\nLocation: http://sunrise.invalid/asset\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                ),
+                (
+                    "/finish",
+                    "HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\ndirect again",
+                ),
+                (
+                    "/secure",
+                    "HTTP/1.1 302 Found\r\nLocation: https://sunrise.invalid/asset\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                ),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let request = read_http_head(&stream);
+                assert!(request.starts_with(&format!("GET {path} HTTP/1.1\r\n")));
+                let request = request.to_ascii_lowercase();
+                assert!(!request.contains("proxy-authorization"));
+                assert_eq!(request.contains("dummy-origin-token"), path == "/start");
+                stream.write_all(reply.as_bytes()).unwrap();
             }
-            stream
-                .write_all(
-                    b"HTTP/1.1 302 Found\r\nLocation: /next\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                )
-                .unwrap();
         });
 
         // Set the proxy only in a fresh process, never in the test runner's shared environment.
@@ -662,10 +881,10 @@ mod tests {
             .args([
                 "--ignored",
                 "--exact",
-                "tests::a_configured_agent_uses_the_env_proxy_but_goes_direct_for_localhost",
+                "tests::redirects_select_the_proxy_for_each_destination",
             ])
             .env(LOCAL_URL, local_url)
-            .env("HTTP_PROXY", format!("socks5h://127.0.0.1:{port}"))
+            .env("HTTP_PROXY", proxy_url)
             .env(
                 "HTTPS_PROXY",
                 "https://dummy-user:dummy-password@proxy.example",
@@ -677,32 +896,30 @@ mod tests {
             output.status.success(),
             "{}\n{}",
             String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr),
+            String::from_utf8_lossy(&output.stderr)
         );
-        assert_eq!(proxy.join().unwrap(), "sunrise.invalid");
+        proxy.join().unwrap();
         origin.join().unwrap();
     }
 
-    /// The agent a second request gets is the one the first built: one connection pool, not one
+    /// The client a second request gets is the one the first built: one connection pool, not one
     /// handshake per jar.
     #[test]
-    fn an_agent_is_kept_for_the_next_request() {
+    fn a_client_is_kept_for_the_next_request() {
         let mut agents = Agents::new();
         let mut built = Vec::new();
-        for (slot, spec) in [
-            ("a", None),
-            ("a", Some("http://localhost:7890")),
-            ("a", None),
-            ("a", Some("http://localhost:7891")),
-            ("a", Some("http://localhost:7890")),
-            ("b", Some("http://localhost:7890")),
+        for spec in [
+            None,
+            Some("http://localhost:7890"),
+            None,
+            Some("http://localhost:7891"),
+            Some("http://localhost:7890"),
         ] {
             keep(
                 &mut agents,
-                slot,
                 spec.map(|s| ("HTTP_PROXY", s.into())),
                 |proxy| {
-                    built.push((slot, spec));
+                    built.push(spec);
                     let builder = Client::builder().no_proxy();
                     match proxy {
                         Some(proxy) => builder.proxy(proxy),
@@ -717,10 +934,9 @@ mod tests {
         assert_eq!(
             built,
             [
-                ("a", None),
-                ("a", Some("http://localhost:7890")),
-                ("a", Some("http://localhost:7891")),
-                ("b", Some("http://localhost:7890")),
+                None,
+                Some("http://localhost:7890"),
+                Some("http://localhost:7891"),
             ]
         );
     }
