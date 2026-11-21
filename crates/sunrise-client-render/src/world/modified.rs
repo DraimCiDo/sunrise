@@ -134,7 +134,10 @@ impl ModifiedChunks {
             if saved == 20 || !available() {
                 break;
             }
-            if !loaded(key) || !self.dirty.contains(&key) {
+            if !loaded(key) {
+                self.dirty.remove(&key);
+                remove.push((sequence, key));
+            } else if !self.dirty.contains(&key) {
                 remove.push((sequence, key));
             } else if self.next_save.get(&key).is_none_or(|&at| now >= at) && save(key) {
                 self.dirty.remove(&key);

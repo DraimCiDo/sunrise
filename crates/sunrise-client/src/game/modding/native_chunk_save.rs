@@ -79,7 +79,9 @@ impl Game<'_> {
     /// of the same data. As in `ChunkMap.save`, an eager attempt consumes the edit mark.
     pub(in crate::game) fn requeue_failed_chunk_saves(&mut self) {
         for key in self.save.take_failed_chunk_saves() {
-            self.world.modified.retain_refused_save(key);
+            if self.world.chunks.contains_key(&key) {
+                self.world.modified.retain_refused_save(key);
+            }
         }
     }
 
@@ -216,6 +218,57 @@ mod tests {
                     .insert("test:attempt".into(), Tag::Int(3));
                 assert!(game.save_game().unwrap_err().is::<RecordSaveFailures>());
                 refused(game, 3);
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn an_unloaded_refusal_cannot_hide_a_later_edit_from_eager_saves() {
+        let dir = tempfile::tempdir().unwrap();
+        mod_platform::testing::with_mods(Vec::new().into(), || {
+            with_game(|game| {
+                game.world_root = dir.path().to_path_buf();
+                let open = || {
+                    SaveDir::new(
+                        dir.path().to_path_buf(),
+                        LevelShape::OVERWORLD,
+                        Some(Default::default()),
+                    )
+                };
+                game.save = Arc::new(open());
+                let key = (2, 0);
+                let registry = game.pack.assets.registry;
+                let mut unloaded = Chunk::with_layout(key.0, key.1, game.world.layout());
+                let invalid = (0..=DISK_WRITE_NESTING_GUARD)
+                    .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
+                Arc::make_mut(unloaded.saved.get_or_insert_with(Default::default))
+                    .root
+                    .insert("test:invalid".into(), invalid);
+                game.save
+                    .save_later(&[Arc::new(unloaded)], registry, world_biomes!(game))
+                    .unwrap();
+                assert!(game.save.flush().unwrap_err().is::<RecordSaveFailures>());
+                game.requeue_failed_chunk_saves();
+                assert!(!game.world.modified.contains(&key));
+
+                // Even a stale edit mark visited after unload must not poison the queue.
+                game.world.modified.insert(key);
+                game.save_chunks_eagerly();
+                assert!(!game.world.modified.contains(&key));
+
+                let mut loaded = Chunk::with_layout(key.0, key.1, game.world.layout());
+                loaded.lit = true;
+                let stone = registry.default_state("minecraft:stone").unwrap();
+                loaded.set(1, 64, 1, stone.0);
+                game.world.chunks.insert(key, Arc::new(loaded));
+                game.world.modified.insert(key);
+                game.save_chunks_eagerly();
+                game.save.flush().unwrap();
+                let disk = open()
+                    .load(key.0, key.1, registry, world_biomes!(game))
+                    .unwrap();
+                assert_eq!(disk.block(1, 64, 1), stone);
             });
         });
     }
