@@ -74,6 +74,65 @@ pub(super) fn with_listener(run: impl FnOnce(Arc<AtomicUsize>, Arc<AtomicUsize>)
 }
 
 #[test]
+fn a_disk_encoder_panic_leaves_the_original_readable_and_siblings_durable() {
+    use std::{sync::mpsc, time::Duration};
+
+    let (registry, biomes) = super::loot_tests::fixture();
+    let encoding = Arc::new(Encoding {
+        registry: Box::leak(Box::new(registry)),
+        biomes: Arc::new(biomes),
+        items: Default::default(),
+        tables: None,
+        shape: LevelShape::OVERWORLD,
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let open = || SaveDir::new(dir.path().to_path_buf(), LevelShape::OVERWORLD, None);
+    with_listener(|_, _| {
+        let save = open();
+        context(&save);
+        let key = (2, -3);
+        let mut wrapped = save
+            .capture_disk_record(Record::Chunk(Arc::new(chunk(0)), encoding, None))
+            .unwrap();
+        let Record::Disk(disk) = &mut wrapped else {
+            panic!("save callback must be captured")
+        };
+        let marker = |i| NamedTag {
+            name: "".into(),
+            tag: Tag::compound([("marker", Tag::Int(i))]),
+        };
+        let original = Arc::new(marker(42));
+        Arc::get_mut(disk).unwrap().original = Record::TestEncode(Arc::new({
+            let original = original.clone();
+            move |edits| {
+                assert!(!edits, "injected disk encoder panic");
+                Some(original.clone())
+            }
+        }));
+        let neighbor = Arc::new(marker(7));
+        save.queue(
+            Folder::Region,
+            vec![(key, wrapped), ((3, -3), Record::Tag(neighbor.clone()))],
+            false,
+        )
+        .unwrap();
+        let (send, receive) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            assert!(save.flush().unwrap_err().is::<RecordSaveFailures>());
+            send.send(save.raw_chunk(key.0, key.1)).unwrap();
+        });
+        let pending = receive
+            .recv_timeout(Duration::from_secs(1))
+            .expect("disk reader did not finish");
+        reader.join().unwrap();
+        assert_eq!(pending.as_ref(), Some(original.as_ref()));
+        let disk = open();
+        assert_eq!(disk.raw_chunk(3, -3).as_ref(), Some(neighbor.as_ref()));
+        assert!(disk.raw_chunk(key.0, key.1).is_none());
+    });
+}
+
+#[test]
 fn capture_7_callback_8_live_9_round_trips_through_region_writer() {
     let (registry, biomes) = super::loot_tests::fixture();
     let registry = Box::leak(Box::new(registry));
@@ -468,7 +527,7 @@ fn a_coalesced_refusal_runs_its_callback_without_poisoning_the_newer_record() {
         let (entered, wait_for_encoder) = mpsc::channel();
         let (release, wait_for_release) = mpsc::channel();
         let wait_for_release = Mutex::new(wait_for_release);
-        let blocker = Record::TestEncode(Arc::new(move || {
+        let blocker = Record::TestEncode(Arc::new(move |_| {
             entered.send(()).unwrap();
             wait_for_release
                 .lock()

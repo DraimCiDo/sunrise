@@ -302,6 +302,7 @@ impl SaveDir {
                                 p.get(&(kind, k.0, k.1)).is_none_or(|p| p.0 <= seq)
                             })
                         };
+                        let mut refused_poi = BTreeMap::new();
                         let resolved: Vec<_> = batch
                             .iter()
                             .filter_map(|job| {
@@ -318,12 +319,23 @@ impl SaveDir {
                                 if !newest {
                                     return None;
                                 }
-                                Some((job.key, resolve_poi(&root, cache, job.key, &job.record)?))
+                                match compression_pool::catch_encoding_panic(|| {
+                                    Ok(resolve_poi(&root, cache, job.key, &job.record))
+                                }) {
+                                    Ok(record) => record.map(|record| (job.key, record)),
+                                    Err(error) => {
+                                        let (x, z) = job.key;
+                                        crate::chunk_io::report_save_failure(&root, x, z, &error);
+                                        refused_poi.insert(job.key, error);
+                                        None
+                                    }
+                                }
                             })
                             .collect();
                         let records: Vec<_> = resolved.iter().map(|(k, r)| (*k, r)).collect();
                         match write_region_records(&root, cache, folder, &records) {
-                            Ok(failed) => {
+                            Ok(mut failed) => {
+                                failed.append(&mut refused_poi);
                                 let mut errors = outstanding.record_errors.lock().unwrap();
                                 if let Ok(mut pending) = pending.lock() {
                                     let mut retry = (kind == Folder::Region)
@@ -574,6 +586,44 @@ mod tests {
         let empty = Record::Poi(Arc::new(Chunk::empty(key.0, key.1)), tables, None);
         save.queue(Folder::Poi, vec![(key, empty)], true).unwrap();
         assert!(!dir.path().join("poi/r.0.0.mca").exists());
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn a_poi_resolution_panic_refuses_only_that_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let open = || SaveDir::new(dir.path().to_path_buf(), LevelShape::OVERWORLD, None);
+        let tables = Arc::new(SaveTables {
+            block_names: Vec::new(),
+            block_ids: HashMap::new(),
+            default_state: Vec::new(),
+            block_entity: Vec::new(),
+            heightmaps: crate::assets::Properties::for_tests(&[]),
+            air: 0,
+            poi: vec![Some(("minecraft:home", 1))],
+        });
+        // Resolving a POI for this synthetic out-of-world chunk overflows its block position.
+        let key = (i32::MAX, 0);
+        let invalid = Record::Poi(Arc::new(Chunk::empty(key.0, key.1)), tables, None);
+        let good = Arc::new(NamedTag {
+            name: "".into(),
+            tag: Tag::compound([("marker", Tag::Int(3))]),
+        });
+        let save = open();
+        let error = save
+            .queue(
+                Folder::Poi,
+                vec![(key, invalid), ((0, 0), Record::Tag(good.clone()))],
+                true,
+            )
+            .unwrap_err();
+        assert!(error.is::<RecordSaveFailures>());
+        let disk = open();
+        assert_eq!(
+            disk.read_record_raw("poi", 0, 0).as_ref(),
+            Some(good.as_ref())
+        );
+        assert!(disk.read_record_raw("poi", key.0, key.1).is_none());
     }
 
     #[test]

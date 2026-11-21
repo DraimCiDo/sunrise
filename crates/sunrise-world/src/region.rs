@@ -65,7 +65,8 @@ impl ChunkRecord {
             timestamp,
         })
     }
-    fn check_compressed_size(&self) -> io::Result<()> {
+    /// Check the compressed payload's region-file limit before entering the write lock.
+    pub fn check_compressed_size(&self) -> io::Result<()> {
         if self.compressed.len() > MAX_COMPRESSED {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,

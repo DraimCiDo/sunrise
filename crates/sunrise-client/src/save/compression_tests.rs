@@ -9,8 +9,7 @@ use sunrise_world::region::RegionFile;
 use super::{
     Chunk, ChunkExtras, Compression, Encoding, LevelShape, Record,
     compression_pool::{
-        CompressedWrite, CompressionPool, compress_record, compress_records,
-        compress_records_with_pool,
+        CompressionPool, compress_record, compress_records, compress_records_with_pool,
     },
     write_chunk_record, write_prepared_region_records,
     writes::QueuedWrite,
@@ -70,25 +69,47 @@ fn full_record_overflow_discards_edits_without_losing_current_chunk_data() {
     let record = Record::Chunk(Arc::new(chunk), encoding, None);
     let dir = tempfile::tempdir().unwrap();
     let mut region = RegionFile::open_writable(dir.path().join("r.0.0.mca"), true).unwrap();
-    let pos = ChunkPos::new(0, 0);
+    let region_pos = ChunkPos::new(0, 0);
     for (limits, compressed_overflow, admitted) in [
         (Limits::saved(), false, true),
         (limits, false, false),
         (Limits::saved(), true, false),
     ] {
-        let job = QueuedWrite::new((0, 0), record.clone(), 0);
+        let (record, compression) = if compressed_overflow {
+            let Record::Chunk(chunk, encoding, blending) = &record else {
+                unreachable!()
+            };
+            let mut chunk = (**chunk).clone();
+            let extras = Arc::make_mut(chunk.saved.as_mut().unwrap());
+            let edits = Arc::make_mut(extras.block_entity_save_edits.as_mut().unwrap());
+            edits
+                .get_mut(&pos)
+                .unwrap()
+                .insert("edit".into(), Tag::ByteArray(vec![0; 64 * 1024 * 1024]));
+            (
+                Record::Chunk(Arc::new(chunk), encoding.clone(), blending.clone()),
+                Compression::None,
+            )
+        } else {
+            (record.clone(), Compression::Zlib)
+        };
+        let job = QueuedWrite::new((0, 0), record, 0);
         let pending = job.record.clone();
-        let mut compressed = compress_record(&job.record, Compression::Zlib, 0, limits)
+        let compressed = compress_record(&job.record, compression, 0, limits)
             .unwrap()
             .unwrap();
-        if compressed_overflow {
-            // Simulate an oversized compressor result without the cost of
-            // zlib encoding a large incompressible input.
-            compressed.record.compressed = vec![0; 64 * 1024 * 1024 + 1];
-        }
-        write_chunk_record(&mut region, pos, &job.record, compressed).unwrap();
+        assert_eq!(
+            compressed.primary, admitted,
+            "prepare the stored fallback before writing the region"
+        );
+        write_chunk_record(&mut region, region_pos, &job.record, compressed).unwrap();
         drop(job);
-        let saved = region.read(pos).unwrap().unwrap().nbt(limits).unwrap();
+        let saved = region
+            .read(region_pos)
+            .unwrap()
+            .unwrap()
+            .nbt(limits)
+            .unwrap();
         assert_eq!(pending.tag().unwrap().as_ref(), &saved);
         assert_eq!(saved.tag.get("LastUpdate"), Some(&Tag::Long(37)));
         assert_eq!(saved.tag.get("test:unrelated"), Some(&unrelated));
@@ -118,7 +139,7 @@ fn an_encoder_panic_does_not_strand_serial_or_parallel_writes() {
         let records = (0..count)
             .map(|x| {
                 let record = if x == 1 {
-                    Record::TestEncode(Arc::new(|| panic!("injected encoding panic")))
+                    Record::TestEncode(Arc::new(|_| panic!("injected encoding panic")))
                 } else {
                     Record::Tag(Arc::new(sample_tag(20 + x)))
                 };
@@ -153,8 +174,21 @@ fn an_encoder_panic_does_not_strand_serial_or_parallel_writes() {
 }
 
 #[test]
+fn a_compressed_size_fallback_panic_is_rejected_before_region_writes() {
+    let oversized = Arc::new(NamedTag {
+        name: "".into(),
+        tag: Tag::ByteArray(vec![0; 64 * 1024 * 1024]),
+    });
+    let record = Record::TestEncode(Arc::new(move |edits| {
+        assert!(edits, "injected fallback encoder panic");
+        Some(oversized.clone())
+    }));
+    assert!(compress_record(&record, Compression::None, 0, Limits::saved()).is_err());
+}
+
+#[test]
 fn a_compressed_size_rejection_does_not_skip_healthy_records_in_either_region() {
-    use super::{ChunkRecord, SaveDir};
+    use super::SaveDir;
     use sunrise_core::nbt::Compound;
 
     const OVERSIZED: usize = 64 * 1024 * 1024 + 1;
@@ -174,14 +208,12 @@ fn a_compressed_size_rejection_does_not_skip_healthy_records_in_either_region() 
             .unwrap();
         let old = open().raw_chunk(1, 0).unwrap();
         let mut chunk = Chunk::empty(1, 0);
-        if with_fallback {
-            // Throwing out the block-entity edits still leaves this oversized stored payload.
-            chunk.saved = Some(Arc::new(ChunkExtras {
-                root: Compound::from([("test:stored".into(), Tag::ByteArray(vec![0; OVERSIZED]))]),
-                block_entity_save_edits: Some(Arc::default()),
-                ..Default::default()
-            }));
-        }
+        // Dropping the block-entity edits still leaves this oversized stored payload.
+        chunk.saved = Some(Arc::new(ChunkExtras {
+            root: Compound::from([("test:stored".into(), Tag::ByteArray(vec![0; OVERSIZED]))]),
+            block_entity_save_edits: with_fallback.then(Arc::default),
+            ..Default::default()
+        }));
         let bad = Record::Chunk(Arc::new(chunk), encoding.clone(), None);
         let healthy = Record::Tag(Arc::new(sample_tag(11)));
         let neighbour = Record::Tag(Arc::new(sample_tag(33)));
@@ -192,27 +224,10 @@ fn a_compressed_size_rejection_does_not_skip_healthy_records_in_either_region() 
             ((2, 0), &neighbour),
             ((32, 0), &later),
         ];
-        // Inject the oversized compression result at the real RegionFile admission boundary.
-        let mut prepared = Vec::new();
-        for record in [&healthy, &neighbour, &later] {
-            prepared.push(compress_record(
-                record,
-                Compression::None,
-                0,
-                Limits::saved(),
-            ));
-        }
-        prepared.insert(
-            1,
-            Ok(Some(CompressedWrite {
-                record: ChunkRecord {
-                    compression: Compression::None,
-                    compressed: vec![0; OVERSIZED],
-                    timestamp: 0,
-                },
-                primary: true,
-            })),
-        );
+        let prepared = records
+            .iter()
+            .map(|(_, record)| compress_record(record, Compression::None, 0, Limits::saved()))
+            .collect();
         let failed = write_prepared_region_records(
             &save.root,
             &save.regions,

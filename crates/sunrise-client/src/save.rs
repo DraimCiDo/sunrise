@@ -2158,34 +2158,11 @@ fn write_chunk_record(
     source: &Record,
     CompressedWrite { record, primary }: CompressedWrite,
 ) -> std::result::Result<(), ChunkWriteError> {
-    let error = match region.write(pos, &record) {
-        Ok(()) => {
-            if primary {
-                source.accept_block_entity_edits();
-            }
-            return Ok(());
-        }
-        Err(error) => ChunkWriteError::from(error),
-    };
-    let ChunkWriteError::Record(error) = error else {
-        return Err(error);
-    };
-    let (compression, timestamp) = (record.compression, record.timestamp);
-    drop(record);
-    let Some(stored) = primary
-        .then(|| source.without_block_entity_edits())
-        .flatten()
-    else {
-        return Err(ChunkWriteError::Record(error));
-    };
-    log::warn!(
-        "block_entity_save_additional: discarding listener edits from chunk {},{}: {error}",
-        pos.x,
-        pos.z
-    );
-    let stored = ChunkRecord::from_nbt(&stored, compression, timestamp, Limits::saved())
-        .map_err(ChunkWriteError::Record)?;
-    region.write(pos, &stored).map_err(ChunkWriteError::from)
+    region.write(pos, &record)?;
+    if primary {
+        source.accept_block_entity_edits();
+    }
+    Ok(())
 }
 
 /// `job(i)` for every `i` below `count`, in order, shared between this thread

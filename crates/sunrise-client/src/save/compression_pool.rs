@@ -8,7 +8,7 @@ use std::{
     },
 };
 
-use sunrise_core::nbt::Limits;
+use sunrise_core::nbt::{Limits, NamedTag};
 use sunrise_world::{compression::Compression, region::ChunkRecord};
 
 use super::Record;
@@ -200,7 +200,12 @@ pub(super) fn compress_record(
     let Some(tag) = super::chunk_disk::encode_record(record)? else {
         return Ok(None);
     };
-    let error = match ChunkRecord::from_nbt(&tag, compression, timestamp, limits) {
+    let encode = |tag: &NamedTag| -> io::Result<ChunkRecord> {
+        let record = ChunkRecord::from_nbt(tag, compression, timestamp, limits)?;
+        record.check_compressed_size()?;
+        Ok(record)
+    };
+    let error = match encode(&tag) {
         Ok(record) => {
             return Ok(Some(CompressedWrite {
                 record,
@@ -210,17 +215,20 @@ pub(super) fn compress_record(
         Err(error) => error,
     };
     drop(tag);
-    let Some(stored) = record.without_block_entity_edits() else {
-        return Err(error);
-    };
-    log::warn!(
-        "block_entity_save_additional: discarding listener edits from the chunk record: {error}"
-    );
-    let record = ChunkRecord::from_nbt(&stored, compression, timestamp, limits)?;
-    Ok(Some(CompressedWrite {
-        record,
-        primary: false,
-    }))
+    // This can re-encode a full chunk; choose its payload before the region is locked.
+    catch_encoding_panic(|| {
+        let Some(stored) = record.without_block_entity_edits() else {
+            return Err(error);
+        };
+        log::warn!(
+            "block_entity_save_additional: discarding listener edits from the chunk record: {error}"
+        );
+        let record = encode(&stored)?;
+        Ok(Some(CompressedWrite {
+            record,
+            primary: false,
+        }))
+    })
 }
 
 pub(super) fn compress_records_with_pool(
