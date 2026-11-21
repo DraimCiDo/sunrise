@@ -123,7 +123,8 @@ struct Declare {
 #[mod_api::__subscriptions]
 impl Hooks for Declare {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type("mymod:counter", false).unwrap();
+        r.register_attachment_type(mod_api::AttachmentDescriptor::new("mymod:counter", || ()))
+            .unwrap();
         for (path, save) in [("robot", true), ("ghost", false)] {
             r.declare_general_entity(
                 path,

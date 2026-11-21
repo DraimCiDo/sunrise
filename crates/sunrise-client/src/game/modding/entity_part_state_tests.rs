@@ -61,8 +61,11 @@ struct StateMod {
 #[mod_api::__subscriptions]
 impl Hooks for StateMod {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type("part_state:charge", false)
-            .unwrap();
+        r.register_attachment_type(mod_api::AttachmentDescriptor::new(
+            "part_state:charge",
+            || (),
+        ))
+        .unwrap();
         r.declare_general_entity(
             "robot",
             mod_api::GeneralEntityCategory::Misc,

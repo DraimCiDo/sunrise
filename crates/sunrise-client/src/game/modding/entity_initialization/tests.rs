@@ -22,8 +22,11 @@ struct Listener(Calls);
 #[mod_api::__subscriptions]
 impl Hooks for Listener {
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type("constructing:value", false)
-            .unwrap();
+        r.register_attachment_type(mod_api::AttachmentDescriptor::new(
+            "constructing:value",
+            || (),
+        ))
+        .unwrap();
     }
     fn entity_constructing(&self, host: HostSide<'_>, event: &mut EntityConstructingEvent) {
         self.0
@@ -452,10 +455,16 @@ struct Saving(Kinds);
 #[mod_api::__subscriptions]
 impl Hooks for Saving {
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type("constructing:value", false)
-            .unwrap();
-        r.register_attachment_type("constructing:saved", false)
-            .unwrap();
+        r.register_attachment_type(mod_api::AttachmentDescriptor::new(
+            "constructing:value",
+            || (),
+        ))
+        .unwrap();
+        r.register_attachment_type(mod_api::AttachmentDescriptor::new(
+            "constructing:saved",
+            || (),
+        ))
+        .unwrap();
     }
     fn entity_constructing(&self, host: HostSide<'_>, event: &mut EntityConstructingEvent) {
         self.0
@@ -629,8 +638,11 @@ fn marker_constructor_store_reaches_its_real_owned_map() {
     #[mod_api::__subscriptions]
     impl Hooks for Store {
         fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-            r.register_attachment_type("constructing:value", false)
-                .unwrap();
+            r.register_attachment_type(mod_api::AttachmentDescriptor::new(
+                "constructing:value",
+                || (),
+            ))
+            .unwrap();
         }
         fn entity_constructing(&self, host: HostSide<'_>, event: &mut EntityConstructingEvent) {
             if let HostSide::Server(host) = host {

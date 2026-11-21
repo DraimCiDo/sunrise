@@ -66,7 +66,8 @@ struct Observer;
 #[mod_api::__subscriptions]
 impl Hooks for Observer {
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type("journal:mark", false).unwrap();
+        r.register_attachment_type(mod_api::AttachmentDescriptor::new("journal:mark", || ()))
+            .unwrap();
     }
     fn entity_constructing(&self, host: HostSide<'_>, event: &mut EntityConstructingEvent) {
         if let (HostSide::Server(host), Holder::Entity(id)) = (host, event.holder) {

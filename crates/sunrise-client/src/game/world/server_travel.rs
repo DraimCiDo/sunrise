@@ -1796,8 +1796,11 @@ mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for Constructed {
             fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-                r.register_attachment_type("natural_tree:state", false)
-                    .unwrap();
+                r.register_attachment_type(mod_api::AttachmentDescriptor::new(
+                    "natural_tree:state",
+                    || (),
+                ))
+                .unwrap();
             }
             fn entity_constructing(&self, host: HostSide<'_>, event: &mut EntityConstructingEvent) {
                 self.0.lock().unwrap().push(event.holder);

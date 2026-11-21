@@ -1741,7 +1741,10 @@ mod nested_vehicle_discard_tests {
             _: &mod_api::RegistrationContext,
         ) {
             registrar
-                .register_attachment_type("vehicle_boundary:value", false)
+                .register_attachment_type(mod_api::AttachmentDescriptor::new(
+                    "vehicle_boundary:value",
+                    || (),
+                ))
                 .unwrap();
         }
 
@@ -2052,7 +2055,10 @@ mod nested_vehicle_discard_tests {
             _: &mod_api::RegistrationContext,
         ) {
             registrar
-                .register_attachment_type("vehicle_boundary:value", false)
+                .register_attachment_type(mod_api::AttachmentDescriptor::new(
+                    "vehicle_boundary:value",
+                    || (),
+                ))
                 .unwrap();
         }
 

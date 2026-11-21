@@ -737,7 +737,8 @@ pub mod tests {
         Keeps<OWNERS>: BlockEntityPartState + 'static,
     {
         fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
-            r.register_attachment_type("b:progress", false).unwrap();
+            r.register_attachment_type(crate::AttachmentDescriptor::new("b:progress", || ()))
+                .unwrap();
             let press = r.block_entity_type_key("owner:press");
             let _ = r.block_entity_part_with_state(&press, Keeps::<OWNERS>);
         }
@@ -756,7 +757,11 @@ pub mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for OwnerDeclaresKey {
             fn register(&self, r: &mut dyn Registrar, cx: &RegistrationContext) {
-                r.register_attachment_type("owner:progress", false).unwrap();
+                r.register_attachment_type(crate::AttachmentDescriptor::new(
+                    "owner:progress",
+                    || (),
+                ))
+                .unwrap();
                 Owner.register(r, cx);
             }
         }

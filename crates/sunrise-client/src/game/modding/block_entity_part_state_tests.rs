@@ -70,8 +70,11 @@ struct StateMod;
 #[mod_api::__subscriptions]
 impl Hooks for StateMod {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-        r.register_attachment_type("part_state:progress", false)
-            .unwrap();
+        r.register_attachment_type(mod_api::AttachmentDescriptor::new(
+            "part_state:progress",
+            || (),
+        ))
+        .unwrap();
         let kind = r
             .block_entity_type("press")
             .blocks(&["part_state:press"])
