@@ -62,28 +62,10 @@ impl AttachmentTypesRegistrar for PartRegistrar {
 }
 
 impl PartRegistrar {
-    // Declaration conflicts have already refused installation. Check all load-known
-    // uses before considering the side of the package that owns each declaration.
+    // Declaration conflicts and stale part-state keys have already refused installation.
+    // Check that no `side = "server"` package declared a synced attachment.
     pub(crate) fn validate_attachment_admission(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
-        for (caller, namespace, name) in &self.attachment_uses {
-            if mod_vocab::__private::validate_declared_attachment(
-                Some(&self.attachment_types),
-                caller,
-                namespace,
-                name,
-                false,
-            )
-            .is_err()
-            {
-                errors.push(format!(
-                    "package {caller} attachment {namespace}:{name}: undeclared attachment use"
-                ));
-            }
-        }
-        if !errors.is_empty() {
-            return Err(errors);
-        }
         for package in crate::load_state::current_packages()
             .iter()
             .filter(|p| p.side() == crate::Side::Server)
@@ -534,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    fn load_checks_conflicts_then_undeclared_uses_then_server_declarations() {
+    fn load_checks_conflicts_then_stale_part_state_then_server_declarations() {
         crate::load_state::with_test_package_inventory(
             vec![package("test_pkg", crate::Side::Server)],
             || {
@@ -562,33 +544,34 @@ mod tests {
                             .into()
                     ])
                 );
-                let mut missing = PartRegistrar::new("test_pkg");
-                reg(&mut missing)
+                let mut stale_registrar = PartRegistrar::new("test_pkg");
+                reg(&mut stale_registrar)
                     .register_attachment_type(
                         crate::AttachmentDescriptor::new("test_pkg:mana", || 0u32)
                             .sync(u32_codec()),
                     )
                     .unwrap();
-                let key = crate::AttachmentType {
-                    namespace: "test_pkg",
-                    name: "missing",
-                    default: || 0u32,
-                    codec: None,
-                    copy_on_death: false,
-                    sync_codec: None,
-                };
-                missing
-                    .declare_block_entity_part_state(
-                        "test_pkg::Part",
-                        crate::PartStateDeclaration::of(&key),
-                    )
-                    .unwrap();
+                let stale_key = crate::testing::registered_attachment_fixture(
+                    "test_pkg",
+                    crate::AttachmentDescriptor::new("test_pkg:missing", || 0u32),
+                )
+                .1;
+                let declaration = crate::PartStateDeclaration::of(&stale_key);
                 assert_eq!(
-                    super::super::install_registrar(missing, &crate::parts::tests::rule_schema()),
-                    Err(vec![
-                        "package test_pkg attachment test_pkg:missing: undeclared attachment use"
-                            .into()
-                    ])
+                    stale_registrar
+                        .declare_block_entity_part_state("test_pkg::Part", declaration.clone()),
+                    Err(declaration.refused("test_pkg::Part", crate::PartStateRefusal::StaleKey))
+                );
+                let errors = super::super::install_registrar(
+                    stale_registrar,
+                    &crate::parts::tests::rule_schema(),
+                )
+                .unwrap_err();
+                assert_eq!(errors.len(), 1, "{errors:?}");
+                assert!(
+                    errors[0].contains("test_pkg:missing")
+                        && errors[0].contains("not issued in this registration pass"),
+                    "{errors:?}"
                 );
                 assert!(!mod_vocab::__private::parts_installation::parts_installed());
             },

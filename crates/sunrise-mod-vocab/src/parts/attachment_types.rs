@@ -174,8 +174,6 @@ pub(crate) struct AttachmentRegistration<T: 'static> {
 }
 
 /// Process-local identity of a single attachment registration, compared by pointer equality.
-// Used by PartState declarations in step 3.
-#[allow(dead_code)]
 #[derive(Clone)]
 pub(crate) struct AttachmentIdentity(Arc<dyn Any + Send + Sync>);
 
@@ -244,12 +242,6 @@ impl RegisteredAttachment {
         self.policy
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn identity(&self) -> AttachmentIdentity {
-        AttachmentIdentity(Arc::clone(&self.record))
-    }
-
-    #[allow(dead_code)]
     pub(crate) fn matches_identity(&self, identity: &AttachmentIdentity) -> bool {
         std::ptr::addr_eq(Arc::as_ptr(&self.record), Arc::as_ptr(&identity.0))
     }
@@ -397,19 +389,16 @@ impl<T: 'static> AttachmentKey<T> {
         Ok(&self.0.checked)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn parts(&self) -> (&'static str, &'static str) {
         (self.namespace(), self.name())
     }
 
-    #[allow(dead_code)]
     pub(crate) fn descriptor(&self) -> &CheckedAttachmentType<T> {
         &self.0.checked
     }
 }
 
 impl<T: Send + Sync + 'static> AttachmentKey<T> {
-    #[allow(dead_code)]
     pub(crate) fn identity(&self) -> AttachmentIdentity {
         AttachmentIdentity(Arc::clone(&self.0) as Arc<dyn Any + Send + Sync>)
     }

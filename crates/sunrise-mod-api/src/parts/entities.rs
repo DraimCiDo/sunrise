@@ -69,6 +69,67 @@ pub mod tests {
         );
     }
 
+    #[test]
+    fn entity_part_with_state_refuses_stale_key_and_accepts_live_key() {
+        struct Charged(AttachmentKey<u32>);
+        #[mod_api::sunrise_part]
+        impl super::EntityPart for Charged {}
+        impl EntityPartState for Charged {
+            type Data = u32;
+            fn state_key(&self) -> &AttachmentKey<u32> {
+                &self.0
+            }
+        }
+        struct StaleMod(AttachmentKey<u32>);
+        #[mod_api::__subscriptions]
+        impl crate::Hooks for StaleMod {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+                let err = r
+                    .entity_part_with_state("minecraft:cow", Charged(self.0.clone()))
+                    .unwrap_err();
+                assert!(matches!(
+                    err,
+                    EntityPartStateError::State {
+                        kind: "minecraft:cow",
+                        namespace: "test",
+                        name: "charge",
+                        reason: PartStateRefusal::StaleKey,
+                        ..
+                    }
+                ));
+            }
+        }
+        struct LiveMod;
+        #[mod_api::__subscriptions]
+        impl crate::Hooks for LiveMod {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+                let live = r
+                    .register_attachment_type(AttachmentDescriptor::new("test:charge", || 0_u32))
+                    .unwrap();
+                r.entity_part_with_state("minecraft:cow", Charged(live))
+                    .unwrap();
+            }
+        }
+        let stale = crate::testing::registered_attachment_fixture(
+            "test",
+            AttachmentDescriptor::new("test:charge", || 0_u32),
+        )
+        .1;
+        let refused_registrar = crate::parts::shared::register_all(
+            &[ModEntry::new("test", Box::new(StaleMod(stale)))],
+            |_| false,
+        );
+        assert_eq!(refused_registrar.refused.len(), 1);
+        assert!(refused_registrar.refused[0].contains("test:charge"));
+
+        let ok_registrar =
+            crate::parts::shared::register_all(&[ModEntry::new("test", Box::new(LiveMod))], |_| {
+                false
+            });
+        assert!(ok_registrar.refused.is_empty());
+        assert_eq!(ok_registrar.entity_part_states.len(), 1);
+    }
+
     pub(crate) struct EntityBattery(pub(crate) EntityRef);
     impl EnergyHandler for EntityBattery {
         fn amount(&self, host: &mut dyn ServerHost) -> u32 {
@@ -191,7 +252,7 @@ impl EntitiesRegistrar for PartRegistrar {
         // 🤖 Agent: one leaked id per declaration, once at startup, so a refusal can name the
         // type in the `Copy` refusal it shares with block entities.
         let kind: &'static str = Box::leak(entity.into());
-        match self.check_part_state(declaration) {
+        match self.check_part_state(&declaration) {
             Ok(()) => {
                 self.entity_part_states.push(
                     mod_vocab::__private::EntityPartStateDeclaration::new(

@@ -18,13 +18,17 @@ use std::fmt;
 /// unknown type are refused when the game loads.
 ///
 /// ```rust,ignore
-/// struct Robot;
+/// struct Robot {
+///     charge: AttachmentKey<u32>,
+/// }
 /// impl EntityPartState for Robot {
 ///     type Data = u32;
-///     const DATA: &'static AttachmentType<u32> = &CHARGE;
+///     fn state_key(&self) -> &AttachmentKey<u32> {
+///         &self.charge
+///     }
 /// }
 /// // In a hook with `host: &mut dyn ServerHost` and the robot's `entity`:
-/// let full = Robot::edit_state(host, entity, |_, charge| {
+/// let full = self.edit_state(host, entity, |_, charge| {
 ///     *charge += 1;
 ///     *charge >= 100
 /// })?;
@@ -32,8 +36,9 @@ use std::fmt;
 ///
 /// Reads take `&dyn Host` and return a snapshot; edits take `&mut dyn ServerHost`, run in
 /// their own nested transaction and store the new value only when the closure returns, as
-/// [`BlockEntityPartState`]'s do. Every call first checks that `entity` is of the open
-/// world and still names a resident entity, in the level this host is in:
+/// [`BlockEntityPartState`]'s do. Every call first checks that `self.state_key()` belongs to
+/// the active installation and that `entity` is of the open world and still names a resident
+/// entity, in the level this host is in:
 /// - a removed, unloaded or moved entity refuses with [`PartStateError::Stale`];
 /// - an entity in another level refuses with [`PartStateError::OtherLevel`];
 /// - an entity out of its level's lists for its own tick refuses with
@@ -46,36 +51,44 @@ use std::fmt;
 /// after the entity changed level, the state stays with the entity under its new id, and
 /// the old handle stays `Stale`. Travel fires no join or leave hook for it.
 ///
-/// Server-side only for now: `DATA` must not sync or copy on death, and a client reads
+/// Server-side only for now: the state key must not sync or copy on death, and a client reads
 /// the default.
 pub trait EntityPartState: EntityPart + Sized {
     /// The value each entity of the Part's type keeps.
     type Data: Clone + Send + Sync + 'static;
-    /// Its attachment key, default and codec. The owner declares the key at registration;
-    /// without a codec the value is kept for the session only.
-    const DATA: &'static AttachmentType<Self::Data>;
+    /// The issued attachment key this Part keeps its per-entity state under.
+    /// Register its [`AttachmentDescriptor`](crate::AttachmentDescriptor) during
+    /// [`Hooks::register`](crate::Hooks::register) (or look up another package's key with
+    /// [`Registrar::attachment_key`](crate::Registrar)) and store it on the Part; without a
+    /// persistence codec the value is kept for the session only.
+    fn state_key(&self) -> &AttachmentKey<Self::Data>;
 
     /// The entity's value, or the default when it has none. Inserts nothing.
-    fn state(host: &dyn Host, entity: EntityRef) -> Result<Self::Data, PartStateError> {
-        Ok(Self::state_existing(host, entity)?.unwrap_or_else(Self::DATA.default))
+    fn state(&self, host: &dyn Host, entity: EntityRef) -> Result<Self::Data, PartStateError> {
+        let key = self.state_key();
+        Ok(self
+            .state_existing(host, entity)?
+            .unwrap_or_else(|| key.descriptor().default_value()))
     }
 
     /// The entity's value, or `None` when it has none. Inserts nothing.
     fn state_existing(
+        &self,
         host: &dyn Host,
         entity: EntityRef,
     ) -> Result<Option<Self::Data>, PartStateError> {
-        read_state(host, entity, Self::DATA)
+        read_state(host, entity, self.state_key())
     }
 
     /// Changes the entity's value with `edit`, starting from the default when it has none,
     /// and stores the result: see [`edit_part_state`]. A stale handle never creates a map.
     fn edit_state<R>(
+        &self,
         host: &mut dyn ServerHost,
         entity: EntityRef,
         edit: impl FnOnce(&mut dyn ServerHost, &mut Self::Data) -> R,
     ) -> Result<R, PartStateError> {
-        edit_part_state(host, entity, Self::DATA, edit)
+        edit_part_state(host, entity, self.state_key(), edit)
     }
 }
 
@@ -157,9 +170,9 @@ impl std::error::Error for EntityPartStateError {}
 
 /// One entity Part state declaration as registration kept it, for the game to check its
 /// entity type once every type is known.
+// no wire: host-local registration record holding a PartStateDeclaration with registration identity; never crosses the wire.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-#[derive(sunrise_mod_api_macros::Wire)]
 pub struct EntityPartStateDeclaration {
     /// The mod that declared it.
     pub mod_id: String,

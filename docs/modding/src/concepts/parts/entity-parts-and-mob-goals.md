@@ -100,13 +100,21 @@ attachment codec and kept by transactions, through the same calls and rules as
 [block entity Part state](block-entity-types.md#part-state).
 
 ```rust,ignore
+struct Robot {
+    charge: AttachmentKey<u32>,
+}
 impl EntityPartState for Robot {
     type Data = u32;
-    const DATA: &'static AttachmentType<u32> = &CHARGE;
+    fn state_key(&self) -> &AttachmentKey<u32> {
+        &self.charge
+    }
 }
-r.entity_part_with_state("mymod:robot", Robot)?;
+let charge = r.register_attachment_type(
+    AttachmentDescriptor::new("mymod:charge", || 0).serialize(CHARGE_CODEC),
+)?;
+r.entity_part_with_state("mymod:robot", Robot { charge })?;
 
-let full = Robot::edit_state(host, robot, |_, charge| {
+let full = self.edit_state(host, robot, |_, charge| {
     *charge += 1;
     *charge >= 100
 })?;

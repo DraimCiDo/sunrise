@@ -16,13 +16,17 @@ use std::{cell::RefCell, fmt, sync::Arc};
 /// itself stays object-safe: this trait is only for the typed calls below.
 ///
 /// ```rust,ignore
-/// struct Press;
+/// struct Press {
+///     progress: AttachmentKey<u32>,
+/// }
 /// impl BlockEntityPartState for Press {
 ///     type Data = u32;
-///     const DATA: &'static AttachmentType<u32> = &PROGRESS;
+///     fn state_key(&self) -> &AttachmentKey<u32> {
+///         &self.progress
+///     }
 /// }
 /// // In a hook with `host: &mut dyn ServerHost` and the block entity's `entity`:
-/// let done = Press::edit_state(host, entity, |_, progress| {
+/// let done = self.edit_state(host, entity, |_, progress| {
 ///     *progress += 1;
 ///     *progress >= 200
 /// })?;
@@ -30,56 +34,71 @@ use std::{cell::RefCell, fmt, sync::Arc};
 ///
 /// Reads take `&dyn Host` and return a snapshot. Edits take `&mut dyn ServerHost`, run in
 /// their own nested transaction and store the new value only when the closure returns.
-/// Every call first checks that `entity` is still the block entity it named, in the
-/// level this host is in: a replaced, removed or unloaded one refuses with
-/// [`PartStateError::Stale`]. A block entity out of the world for its own tick still
-/// answers, through [`BlockEntitiesHost::block_entity_identity`].
+/// Every call first checks that `self.state_key()` belongs to the active installation and
+/// that `entity` is still the block entity it named, in the level this host is in: a
+/// replaced, removed or unloaded one refuses with [`PartStateError::Stale`]. A block entity
+/// out of the world for its own tick still answers, through
+/// [`BlockEntitiesHost::block_entity_identity`].
 ///
-/// Server-side only for now: `DATA` must not sync, and a client's copy holds nothing
+/// Server-side only for now: the state key must not sync, and a client's copy holds nothing
 /// of it, so a client reads the default.
 pub trait BlockEntityPartState: BlockEntityPart + Sized {
     /// The value each block entity of the Part's type keeps.
     type Data: Clone + Send + Sync + 'static;
-    /// Its attachment key, default and codec. The owner declares the key at registration;
-    /// without a codec the value is kept for the session only.
-    const DATA: &'static AttachmentType<Self::Data>;
+    /// The issued attachment key this Part keeps its per-block-entity state under.
+    /// Register its [`AttachmentDescriptor`](crate::AttachmentDescriptor) during
+    /// [`Hooks::register`](crate::Hooks::register) (or look up another package's key with
+    /// [`Registrar::attachment_key`](crate::Registrar)) and store it on the Part; without a
+    /// persistence codec the value is kept for the session only.
+    fn state_key(&self) -> &AttachmentKey<Self::Data>;
 
     /// The block entity's value, or the default when it has none. Inserts nothing.
-    fn state(host: &dyn Host, entity: BlockEntityRef) -> Result<Self::Data, PartStateError> {
-        Ok(Self::state_existing(host, entity)?.unwrap_or_else(Self::DATA.default))
+    fn state(&self, host: &dyn Host, entity: BlockEntityRef) -> Result<Self::Data, PartStateError> {
+        let key = self.state_key();
+        Ok(self
+            .state_existing(host, entity)?
+            .unwrap_or_else(|| key.descriptor().default_value()))
     }
 
     /// The block entity's value, or `None` when it has none. Inserts nothing.
     fn state_existing(
+        &self,
         host: &dyn Host,
         entity: BlockEntityRef,
     ) -> Result<Option<Self::Data>, PartStateError> {
-        read_state(host, entity, Self::DATA)
+        read_state(host, entity, self.state_key())
     }
 
     /// The value through a read-only level, or its default. Inserts nothing.
     /// No chunk loading or loot generation; unloaded/stale holders fail, clients read the
     /// default. Owning game thread only, never reachable from worker-thread hook bodies.
     fn state_in(
+        &self,
         level: &dyn crate::LevelHost,
         entity: BlockEntityRef,
     ) -> Result<Self::Data, PartStateError> {
-        Ok(Self::state_existing_in(level, entity)?.unwrap_or_else(Self::DATA.default))
+        let key = self.state_key();
+        Ok(self
+            .state_existing_in(level, entity)?
+            .unwrap_or_else(|| key.descriptor().default_value()))
     }
     /// The existing value through a read-only level. No chunk loading or loot generation;
     /// unloaded/stale holders fail and clients return None. Owning game thread only, never
     /// reachable from worker-thread hook bodies.
     fn state_existing_in(
+        &self,
         level: &dyn crate::LevelHost,
         entity: BlockEntityRef,
     ) -> Result<Option<Self::Data>, PartStateError> {
+        let key = self.state_key();
+        let checked = key.live().map_err(|error| attachment(key, error))?;
         level
-            .block_entity_part_snapshot(entity, Self::DATA.namespace, Self::DATA.name)?
-            .query(Self::DATA)
-            .map_err(|error| attachment(Self::DATA, error))?
+            .block_entity_part_snapshot(entity, checked.namespace(), checked.name())?
+            .query(checked.as_type())
+            .map_err(|error| attachment(key, error))?
             .get(AttachmentHolder::BlockEntity(entity))
             .map_err(|error| match error {
-                AttachmentRowError::Value(error) => attachment(Self::DATA, error),
+                AttachmentRowError::Value(error) => attachment(key, error),
                 _ => PartStateError::Stale,
             })
     }
@@ -87,11 +106,12 @@ pub trait BlockEntityPartState: BlockEntityPart + Sized {
     /// Changes the block entity's value with `edit`, starting from the default when it has
     /// none, and stores the result: see [`edit_part_state`].
     fn edit_state<R>(
+        &self,
         host: &mut dyn ServerHost,
         entity: BlockEntityRef,
         edit: impl FnOnce(&mut dyn ServerHost, &mut Self::Data) -> R,
     ) -> Result<R, PartStateError> {
-        edit_part_state(host, entity, Self::DATA, edit)
+        edit_part_state(host, entity, self.state_key(), edit)
     }
 }
 
@@ -155,15 +175,13 @@ impl std::error::Error for PartStateError {}
 #[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PartStateRefusal {
-    /// `DATA.sync_codec` is set: Part state is not sent to clients yet.
+    /// The state key's sync codec is set: Part state is not sent to clients yet.
     Sync,
-    /// `DATA.copy_on_death` is set: a block entity has no death to copy across.
+    /// The state key's `copy_on_death` policy is set: a block entity has no death to copy across.
     CopyOnDeath,
-    /// The same key is already declared with a type of another Rust type name, named here.
-    Incompatible {
-        /// The type the key was first declared with.
-        declared: &'static str,
-    },
+    /// The state key was not issued by the active registration pass (for example, it was kept
+    /// from a previous installation).
+    StaleKey,
     /// The entity type keeps no entity Part state: a player, a vanilla family no entity part
     /// runs on, or no type at all. Decided once every type is known, when the game loads.
     EntityKind {
@@ -180,10 +198,9 @@ impl PartStateRefusal {
         match self {
             Self::Sync => f.write_str("sync is not supported for part state yet"),
             Self::CopyOnDeath => write!(f, "copy_on_death does not apply to {holder}"),
-            Self::Incompatible { declared } => write!(
-                f,
-                "the key is already declared with type {declared}, a different Rust type"
-            ),
+            Self::StaleKey => {
+                f.write_str("the attachment key was not issued in this registration pass")
+            }
             Self::EntityKind { kind, reason } => write!(f, "entity type {kind}: {reason}"),
         }
     }
@@ -242,28 +259,31 @@ impl From<BlockEntityPartError> for BlockEntityStateError {
 }
 
 /// One Part state declaration, as the registrar checks it.
-#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq)]
+// no wire: host-local registration record carrying an issued attachment key's identity; never crosses the wire.
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PartStateDeclaration {
     /// The state's namespace.
     pub namespace: &'static str,
     /// The state's name.
     pub name: &'static str,
-    /// The state type's name, which two declarations of one key must share, and a refusal names.
+    /// The state type's name, which a refusal names.
     pub data_name: &'static str,
     sync: bool,
     copy_on_death: bool,
+    identity: crate::parts::AttachmentIdentity,
 }
 
 impl PartStateDeclaration {
-    /// The declaration of `key`: what the typed declaration is erased to, for registration.
-    pub fn of<T: 'static>(key: &AttachmentType<T>) -> Self {
+    /// The declaration of `key`: what the issued key is erased to, for registration.
+    pub fn of<T: Send + Sync + 'static>(key: &AttachmentKey<T>) -> Self {
         Self {
-            namespace: key.namespace,
-            name: key.name,
+            namespace: key.namespace(),
+            name: key.name(),
             data_name: std::any::type_name::<T>(),
-            sync: key.sync_codec.is_some(),
-            copy_on_death: key.copy_on_death,
+            sync: key.is_synced(),
+            copy_on_death: key.policy().copy_on_death,
+            identity: key.identity(),
         }
     }
 
@@ -307,6 +327,16 @@ impl PartStateDeclaration {
     }
 }
 
+/// Whether `record` is the exact registration that issued `declaration`'s attachment key.
+// hidden: registrar admission check between sunrise-mod-vocab and sunrise-mod-api.
+#[doc(hidden)]
+pub fn part_state_matches_registration(
+    declaration: &PartStateDeclaration,
+    record: &RegisteredAttachment,
+) -> bool {
+    record.matches_identity(&declaration.identity)
+}
+
 /// A holder Part state is kept on: a scoped handle that a call checks against the host before
 /// it reaches the holder's attachment map. Sealed: the game decides which holders keep it.
 pub trait PartStateHolder: Copy + PartialEq + private::Sealed + 'static {
@@ -343,25 +373,26 @@ impl PartStateHolder for BlockEntityRef {
     }
 }
 
-fn attachment<T>(key: &AttachmentType<T>, error: AttachmentError) -> PartStateError {
+fn attachment<T: 'static>(key: &AttachmentKey<T>, error: AttachmentError) -> PartStateError {
     match error {
         AttachmentError::MissingHolder => PartStateError::Stale,
         error => PartStateError::Attachment {
-            namespace: key.namespace,
-            name: key.name,
+            namespace: key.namespace(),
+            name: key.name(),
             error,
         },
     }
 }
 
-/// [`BlockEntityPartState::state_existing`] for any key.
+/// [`BlockEntityPartState::state_existing`] for any issued key.
 pub fn read_state<H: PartStateHolder, T: Clone + Send + Sync + 'static>(
     host: &dyn Host,
     entity: H,
-    key: &AttachmentType<T>,
+    key: &AttachmentKey<T>,
 ) -> Result<Option<T>, PartStateError> {
+    let checked = key.live().map_err(|error| attachment(key, error))?;
     entity.part_state_holder(host)?;
-    host.query(key)
+    host.query(checked.as_type())
         .map_err(|error| attachment(key, error))?
         .get(entity.attachment_holder())
         .map_err(|error| match error {
@@ -380,12 +411,13 @@ thread_local! {
 struct Editing;
 
 impl Editing {
-    fn enter<T>(
+    fn enter<T: 'static>(
         entity: AttachmentHolder,
-        key: &'static AttachmentType<T>,
+        key: &AttachmentKey<T>,
     ) -> Result<Self, PartStateError> {
         EDITING.with_borrow_mut(|editing| {
-            let this = (entity, key.namespace, key.name);
+            let (namespace, name) = key.parts();
+            let this = (entity, namespace, name);
             if editing.contains(&this) {
                 return Err(PartStateError::Reentrant);
             }
@@ -401,7 +433,8 @@ impl Drop for Editing {
     }
 }
 
-/// [`BlockEntityPartState::edit_state`] or [`crate::EntityPartState::edit_state`] for any key.
+/// [`BlockEntityPartState::edit_state`] or [`crate::EntityPartState::edit_state`] for any issued
+/// key.
 ///
 /// Runs in a transaction of its own, nested in the open one if any: the value is read
 /// (decoded once from its saved form, or the default when absent), lent to `edit` as a
@@ -414,33 +447,35 @@ impl Drop for Editing {
 pub fn edit_part_state<H: PartStateHolder, T: Clone + Send + Sync + 'static, R>(
     host: &mut dyn ServerHost,
     entity: H,
-    key: &'static AttachmentType<T>,
+    key: &AttachmentKey<T>,
     edit: impl FnOnce(&mut dyn ServerHost, &mut T) -> R,
 ) -> Result<R, PartStateError> {
+    let checked = key.live().map_err(|error| attachment(key, error))?;
     let _editing = Editing::enter(entity.attachment_holder(), key)?;
     host.transaction(|host, _| {
         let at = entity.part_state_holder(host)?;
         let store = host.attachments();
-        let current = key
+        let current = checked
             .get_existing(store, at)
             .map_err(|error| attachment(key, error))?;
         // The value's own allocation: each store makes a new one and a transaction puts
         // the same one back, so it changed exactly when this differs. Holding it keeps
         // its address from being reused.
         let revision = store
-            .decoded(at, key.namespace, key.name)
+            .decoded(at, checked.namespace(), checked.name())
             .map_err(|error| attachment(key, error))?;
-        let mut value = current.unwrap_or_else(key.default);
+        let mut value = current.unwrap_or_else(|| checked.default_value());
         let answer = edit(host, &mut value);
         entity.part_state_holder(host)?;
         let store = host.attachments();
         let now = store
-            .decoded(at, key.namespace, key.name)
+            .decoded(at, checked.namespace(), checked.name())
             .map_err(|error| attachment(key, error))?;
         if !same(revision.as_ref(), now.as_ref()) {
             return Err(PartStateError::Changed);
         }
-        key.set(store, at, value)
+        checked
+            .set(store, at, value)
             .map_err(|error| attachment(key, error))?;
         Ok(answer)
     })
@@ -458,36 +493,62 @@ fn same(a: Option<&AttachmentValue>, b: Option<&AttachmentValue>) -> bool {
 mod tests {
     use super::*;
 
-    const fn key(sync: bool, copy_on_death: bool, codec: bool) -> AttachmentType<i32> {
+    fn key(sync: bool, copy_on_death: bool, codec: bool) -> AttachmentKey<i32> {
         const CODEC: AttachmentCodec<i32> = AttachmentCodec {
             encode: |_| Ok(Compound::new()),
             decode: |_| Ok(0),
         };
-        AttachmentType {
-            namespace: "test",
-            name: "state",
-            default: || 0,
-            codec: match codec {
-                true => Some(CODEC),
-                false => None,
-            },
-            copy_on_death,
-            sync_codec: match sync {
-                true => Some(CODEC),
-                false => None,
-            },
+        let mut descriptor = AttachmentDescriptor::new("test:state", || 0);
+        if codec {
+            descriptor = descriptor.serialize(CODEC);
         }
+        if sync {
+            descriptor = descriptor.sync(CODEC);
+        }
+        if copy_on_death {
+            descriptor = descriptor.copy_on_death();
+        }
+        crate::parts::registered_attachment_fixture("test", descriptor).1
     }
 
     #[test]
     fn declarations_refuse_sync_and_copy_on_death() {
-        let check = |key: &AttachmentType<i32>| PartStateDeclaration::of(key).check();
+        let check = |key: &AttachmentKey<i32>| PartStateDeclaration::of(key).check();
         assert_eq!(check(&key(false, false, true)), Ok(()));
         assert_eq!(check(&key(false, false, false)), Ok(()));
         assert_eq!(check(&key(true, false, true)), Err(PartStateRefusal::Sync));
+        assert_eq!(check(&key(true, false, false)), Err(PartStateRefusal::Sync));
         assert_eq!(
             check(&key(false, true, true)),
             Err(PartStateRefusal::CopyOnDeath)
+        );
+    }
+
+    #[test]
+    fn read_and_edit_part_state_refuse_stale_keys() {
+        let first = crate::parts::install_attachment_fixture(
+            "test",
+            AttachmentDescriptor::new("test:state", || 0_i32),
+        );
+        let _second = crate::parts::install_attachment_fixture(
+            "test",
+            AttachmentDescriptor::new("test:state", || 0_i32),
+        );
+        let mut host = crate::testing::FakeHost::default();
+        let entity = BlockEntityRef {
+            level: host.level.level(),
+            position: [0, 64, 0],
+            generation: 1,
+        };
+        let expected = Err(PartStateError::Attachment {
+            namespace: "test",
+            name: "state",
+            error: AttachmentError::StaleKey,
+        });
+        assert_eq!(read_state(&host, entity, &first), expected);
+        assert_eq!(
+            edit_part_state(&mut host, entity, &first, |_, _| panic!("ran")),
+            expected
         );
     }
 

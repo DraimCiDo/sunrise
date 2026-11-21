@@ -177,11 +177,9 @@ impl dyn Registrar + '_ {
         self.attach_block_entity_part(kind, type_name::<P>(), Arc::new(part))
     }
     /// [`Self::block_entity_part`] for a Part with typed state (`BlockEntityPartState`):
-    /// each block entity of type `kind` keeps one `P::Data`, under `P::DATA`. Refused, and
-    /// reported as the mod's registration refusal, when `P::DATA` syncs, copies on death,
-    /// is outside the mod's namespaces (a Part on another
-    /// package's type declares its state key as its own package does), or names a key
-    /// this mod already declared with another type.
+    /// each block entity of type `kind` keeps one `P::Data`, under `part.state_key()`.
+    /// Refused, and reported as the mod's registration refusal, when the key syncs, copies on
+    /// death, or was not issued in this registration pass.
     pub fn block_entity_part_with_state<P: crate::BlockEntityPartState>(
         &mut self,
         kind: &crate::BlockEntityTypeKey,
@@ -189,7 +187,7 @@ impl dyn Registrar + '_ {
     ) -> Result<(), crate::BlockEntityStateError> {
         self.declare_block_entity_part_state(
             type_name::<P>(),
-            crate::PartStateDeclaration::of(P::DATA),
+            crate::PartStateDeclaration::of(part.state_key()),
         )?;
         self.block_entity_part(kind, part)
             .map_err(crate::BlockEntityStateError::Part)
@@ -259,9 +257,8 @@ pub trait BlockEntitiesRegistrar {
     ) -> Result<(), crate::BlockEntityPartError>;
 
     /// Record the state declaration of Part `part`, or refuse it (as the mod's registration
-    /// refusal too): see `PartStateDeclaration::check`, and a key outside this mod's
-    /// namespaces or one it declared with another type. Mods reach it through
-    /// `block_entity_part_with_state`.
+    /// refusal too): see `PartStateDeclaration::check` and `PartStateRefusal::StaleKey`. Mods
+    /// reach it through `block_entity_part_with_state`.
     fn declare_block_entity_part_state(
         &mut self,
         part: &'static str,

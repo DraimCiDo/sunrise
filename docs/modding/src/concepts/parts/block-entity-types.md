@@ -93,32 +93,37 @@ table. The game owns the values: one per block entity, in its attachment map, sa
 chunk through the attachment codec and kept by transactions.
 
 ```rust,ignore
-static PROGRESS: AttachmentType<u32> = AttachmentType {
-    namespace: "mymod", name: "press_progress", default: || 0,
-    codec: Some(PROGRESS_CODEC), copy_on_death: false, sync_codec: None,
-};
+struct Press {
+    progress: AttachmentKey<u32>,
+}
 impl BlockEntityPartState for Press {
     type Data = u32;
-    const DATA: &'static AttachmentType<u32> = &PROGRESS;
+    fn state_key(&self) -> &AttachmentKey<u32> {
+        &self.progress
+    }
 }
-r.block_entity_part_with_state(&press, Press)?;
+let progress = r.register_attachment_type(
+    AttachmentDescriptor::new("mymod:press_progress", || 0).serialize(PROGRESS_CODEC),
+)?;
+r.block_entity_part_with_state(&press, Press { progress })?;
 
 // In its tick, where the block entity is out of the world and `block_entity` finds nothing:
 let level = host.level(host.dimension()).unwrap();
 let entity = host.block_entity_identity(level, event.pos).unwrap();
-let done = Press::edit_state(host, entity, |_, progress| {
+let done = self.edit_state(host, entity, |_, progress| {
     *progress += 1;
     *progress >= 200
 })?;
 ```
 
-- `Press::state(host, entity)` and `state_existing` read a snapshot through `&dyn Host` and never
+- `self.state(host, entity)` and `state_existing` read a snapshot through `&dyn Host` and never
   insert the default. `edit_state` takes `&mut dyn ServerHost` and runs in a nested transaction
   of its own. The closure gets a copy and the host, and no store borrow is held while it runs. The
   result is stored when the closure returns.
-- Every call checks the handle first. A handle from another level gives `PartStateError::OtherLevel`.
-  A removed, replaced or unloaded block entity gives `Stale`. After a reload the saved value is read
-  under the new handle.
+- Every call checks the key and handle first. A stale key from a prior installation gives
+  `PartStateError::Attachment { error: AttachmentError::StaleKey, .. }`. A handle from another
+  level gives `PartStateError::OtherLevel`. A removed, replaced or unloaded block entity gives
+  `Stale`. After a reload the saved value is read under the new handle.
 - An edit stores nothing, and its transaction aborts with everything the closure wrote, in these
   cases:
   - the closure panics and the panic unwinds. A panic that aborts
@@ -137,10 +142,11 @@ let done = Press::edit_state(host, entity, |_, progress| {
   vanilla 26.3 reads region files with `NbtAccounter.unlimitedHeap`, an unbounded byte budget and
   depth 512. The 2 MiB quota of a chunk packet's block entity data is a network limit and does not
   cap saved state.
-- Registration refuses a declaration that syncs, copies on death, lies outside the mod's namespaces
-  or reuses a key with a type of another Rust type name. It refuses a type whose Wire form holds a resource
-  handle (an erased handler such as `Arc<dyn BlockPart>`): such a value cannot be saved. The refusal names the Part,
-  the key, the type and the reason.
+- Registration refuses a declaration whose key syncs, copies on death, or was not issued in the
+  active registration pass (`PartStateRefusal::StaleKey`). Because each attachment ID is registered
+  once with a single Rust type, another package using the same state looks up the owner's issued
+  `AttachmentKey<T>` with `r.attachment_key::<T>(id)`. The refusal names the Part, the key, the
+  type and the reason.
 - Values without a codec last for the session. Part state is server-side for now. A client reads the
   default, because nothing is sent to it yet.
 
