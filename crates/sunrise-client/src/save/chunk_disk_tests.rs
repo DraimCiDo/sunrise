@@ -525,14 +525,15 @@ fn a_biome_admission_refusal_keeps_the_rest_of_the_batch_writable() {
     let mut healthy = chunk(11);
     healthy.x = 3;
     let healthy = record(healthy, biomes.clone());
-    let dir = tempfile::tempdir().unwrap();
-    mod_platform::testing::with_mods(Vec::new().into(), || {
+    let run = || {
+        let dir = tempfile::tempdir().unwrap();
         let open = || SaveDir::new(dir.path().to_path_buf(), LevelShape::OVERWORLD, None);
         let save = open();
+        context(&save);
         let error = save
             .queue(
                 Folder::Region,
-                vec![((2, -3), refused), ((3, -3), healthy)],
+                vec![((2, -3), refused.clone()), ((3, -3), healthy.clone())],
                 true,
             )
             .unwrap_err();
@@ -549,6 +550,17 @@ fn a_biome_admission_refusal_keeps_the_rest_of_the_batch_writable() {
             value(&mut open().load(3, -3, registry, &biomes).unwrap()),
             11
         );
+    };
+    mod_platform::testing::with_mods(Vec::new().into(), run);
+    with_echo(|seen| {
+        run();
+        let seen: Vec<i32> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(_, value)| *value)
+            .collect();
+        assert_eq!(seen, [9, 11]);
     });
 }
 

@@ -187,7 +187,11 @@ pub(super) fn compress_record(
     timestamp: u32,
     limits: Limits,
 ) -> Prepared {
-    if let Record::Chunk(_, encoding, _) | Record::Proto(_, encoding) = record.source() {
+    let source = match record.source() {
+        Record::Disk(disk) => &disk.original,
+        source => source,
+    };
+    if let Record::Chunk(_, encoding, _) | Record::Proto(_, encoding) = source {
         encoding
             .biomes
             .ensure_saveable()
