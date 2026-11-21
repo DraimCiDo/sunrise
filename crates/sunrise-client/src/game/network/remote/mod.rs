@@ -310,8 +310,6 @@ pub(super) struct Remote {
     /// The block, item and fluid tags of `registries` by name, as native mods read them
     /// (`install_remote_tags`).
     pub(super) tags: Option<sunrise_client::items::Items>,
-    /// Whether the published snapshot includes the item registry, even if its table is empty.
-    pub(super) has_item_tags: bool,
     /// The game's enchantments and the server's that it lacks (a data
     /// pack's), from their synced data; `None` when the server has none.
     pub(super) enchantments: Option<Arc<sunrise_client::enchant::Enchantments>>,
@@ -436,6 +434,11 @@ pub(super) struct Remote {
     menu_title: Option<sunrise_client::text::Text>,
     menu_title_snapshot: Option<Arc<mod_api::Text>>,
     pub(in crate::game) state_id: i32,
+    /// Window 0's state and carried stack while another menu is active.
+    inventory_state_id: i32,
+    inventory_carried: Option<ItemStack>,
+    inventory_craft_grid: [Option<ItemStack>; 4],
+    inventory_craft_result: Option<ItemStack>,
     use_target: Option<[i32; 3]>,
     /// A mod menu's extra data, kept for the `OpenScreen` of its window that
     /// follows (`sunrise:menu_extra`).

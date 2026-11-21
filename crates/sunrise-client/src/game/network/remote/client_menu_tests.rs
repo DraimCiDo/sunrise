@@ -2,6 +2,97 @@ use super::*;
 
 #[test]
 #[ignore = "daily"]
+fn inventory_repair_does_not_replace_an_open_menus_predicted_cursor() {
+    use crate::game::native_entity_refs::tests::with_game;
+    use sunrise_core::nbt::Tag;
+    use sunrise_protocol::{
+        item::Stack,
+        packets::play::{self, Clientbound as C},
+    };
+
+    with_game(|game| {
+        let (mut reader, _writer) = connect_menu_test(game);
+        spawn_menu_test(game);
+        let table = game
+            .remote
+            .as_ref()
+            .unwrap()
+            .builtin
+            .get("minecraft:menu")
+            .unwrap()
+            .id("minecraft:crafting")
+            .unwrap();
+        let stone = game.item_id("minecraft:stone");
+        let stick = game.item_id("minecraft:stick");
+        game.handle_packet(C::OpenScreen(play::OpenScreen {
+            container: 7,
+            menu: table,
+            title: Tag::String("Crafting".into()),
+        }))
+        .unwrap();
+        let mut items = vec![None; 46];
+        items[2] = Some(Stack::new(stone, 4));
+        game.handle_packet(C::ContainerSetContent(play::ContainerSetContent {
+            container: 7,
+            state: 12,
+            items,
+            carried: None,
+        }))
+        .unwrap();
+        let menu = game
+            .player_container_menu(game.local_player().unwrap())
+            .unwrap();
+        let pickup = mod_api::MenuClick::Pickup {
+            slot: Some(2),
+            button: mod_api::MouseButton::Left,
+        };
+        assert!(menu.click(game, std::slice::from_ref(&pickup)));
+        assert_eq!(menu.slot(game, 2), Some(None));
+
+        // An in-flight inventory repair arrives before the server can acknowledge the pickup.
+        let mut items = vec![None; 46];
+        items[2] = Some(Stack::new(stick, 2));
+        game.handle_packet(C::ContainerSetContent(play::ContainerSetContent {
+            container: 0,
+            state: 45,
+            items,
+            carried: Some(Stack::new(stick, 1)),
+        }))
+        .unwrap();
+        assert_eq!(menu.carried(game).unwrap().unwrap().count(), 4);
+        assert_eq!(menu.slot(game, 2), Some(None));
+        assert!(menu.click(game, &[pickup]));
+        assert_eq!(menu.slot(game, 2).unwrap().unwrap().count(), 4);
+        assert_eq!(menu.carried(game), Some(None));
+        for count in [Some(4), None] {
+            let click = (0..32)
+                .find_map(|_| {
+                    let (id, body) = reader.recv().unwrap();
+                    match play::Serverbound::decode(id, &body).unwrap() {
+                        play::Serverbound::ContainerClick(click) => Some(click),
+                        _ => None,
+                    }
+                })
+                .unwrap();
+            assert_eq!((click.container, click.state, click.slot), (7, 12, 2));
+            assert_eq!(click.carried.map(|hash| hash.count), count);
+        }
+        game.handle_packet(C::ContainerClose(play::ContainerClose { container: 7 }))
+            .unwrap();
+        assert_eq!(
+            game.carried.as_ref().unwrap().item.as_ref(),
+            "minecraft:stick"
+        );
+        assert_eq!(game.remote.as_ref().unwrap().state_id, 45);
+        let inventory = game
+            .player_container_menu(game.local_player().unwrap())
+            .unwrap();
+        assert_eq!(inventory.slot(game, 2).unwrap().unwrap().count(), 2);
+    });
+}
+
+#[test]
+#[ignore = "daily"]
 fn client_menu_reads_follow_packets_and_lifetimes() {
     use crate::game::native_entity_refs::tests::with_game;
     use crate::game::{Screen, execution_role::ExecutionRole};

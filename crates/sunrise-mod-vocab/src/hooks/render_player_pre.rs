@@ -11,10 +11,11 @@ pub trait Hooks {
     /// Skin Customization), as a mod drawing its own outer skin layer does: a hidden part takes its
     /// children with it (the hat goes with the head), while its armour, held items and other
     /// layers, the cape among them, keep every part. In the ordered body pass, the pair wraps
-    /// this player's living hooks at its slot in level join order, for local and remote players alike.
+    /// this player's living hooks at its slot in level join order, interleaved with general
+    /// entity renderer submissions, for local and remote players alike.
     #[hook(
         side = "client",
-        version = 3,
+        version = 4,
         contract = "cancel",
         out = "canceled",
         neoforge = "RenderPlayerEvent.Pre",

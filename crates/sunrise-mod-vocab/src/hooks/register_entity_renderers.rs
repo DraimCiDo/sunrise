@@ -14,16 +14,16 @@ pub trait Hooks {
     /// painting's quads) and of item frames and glow item frames (in place of the frame model and
     /// the item or map on its face);
     /// general entity types draw only through their renderer, if registered. Other entity
-    /// families keep their own drawing. In the ordered body pass, living renderers, primed TNT
-    /// renderers and experience orb renderers submit in level join order, interleaved by entity.
+    /// families keep their own drawing, including the dragon and end crystals. General, living,
+    /// primed TNT and experience orb renderers submit at each entity's slot in level join order.
     #[notes = r#"## Entity renderers
 
 An entity renderer (NeoForge's `EntityRenderersEvent.RegisterRenderers` and `EntityRenderer`) gives an
 entity type code that draws it. `Hooks::register_entity_renderers` registers one renderer per entity type
 once at start, before resources load, and the game resolves each type's renderer on every resource load
 (the first one and every reload after it), so a frame hands an entity to the renderer of its type: no
-lookup by name, no scan over the mods. In the ordered body pass, living, primed TNT and experience orb
-renderers submit in level join order, interleaved by entity.
+lookup by name, no scan over the mods. In the ordered body pass, general, living, primed TNT and
+experience orb renderers submit at each entity's slot in level join order.
 
 ```rust,ignore
 struct Bolt;
@@ -86,7 +86,7 @@ the error and asked no more until the next resource load resolves it again. What
 dropped, and until then its type draws as it would without one."#]
     #[hook(
         side = "client",
-        version = 2,
+        version = 3,
         contract = "listen",
         context = "registration",
         neoforge = "EntityRenderersEvent.RegisterRenderers"

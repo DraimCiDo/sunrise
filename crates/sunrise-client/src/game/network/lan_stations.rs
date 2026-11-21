@@ -594,29 +594,13 @@ impl Game<'_> {
         let page_changed = sent.as_ref().is_none_or(|(_, p)| *p != page);
         let book = book.clone();
         let now = Some((book.clone(), page));
-        if let Some(host) = self.lan.as_mut() {
-            if let Some(gl) = host.play.get_mut(&conn).and_then(|p| p.lectern.as_mut()) {
-                gl.sent = now;
-                gl.state = (gl.state + 1) & 0x7FFF;
-            }
-            let state = host
-                .play
-                .get(&conn)
-                .and_then(|p| p.lectern.as_ref())
-                .map_or(0, |gl| gl.state);
-            let carried = host
-                .hub
-                .guests
-                .iter()
-                .find(|g| g.conn == conn)
-                .and_then(|g| g.carried.clone());
-            let content = C::ContainerSetContent(play::ContainerSetContent {
-                container: window,
-                state,
-                items: vec![host.hub.stack(&book)],
-                carried: host.hub.stack(&carried),
-            });
-            host.hub.send_to(conn, &content);
+        if let Some(host) = self.lan.as_mut()
+            && let Some(gi) = host.hub.guests.connection_index(conn)
+            && let Some(gl) = host.play.get_mut(&conn).and_then(|p| p.lectern.as_mut())
+        {
+            gl.sent = now;
+            gl.state = (gl.state + 1) & 0x7FFF;
+            host.hub.send_menu_snapshot(gi, window, gl.state, &[book]);
             if all || page_changed {
                 host.hub.send_to(
                     conn,
@@ -996,9 +980,9 @@ impl Game<'_> {
                 });
                 if carried != original_carried
                     && let Some(host) = self.lan.as_mut()
+                    && let Some(gi) = host.hub.guests.connection_index(conn)
                 {
-                    let net = host.hub.stack(&carried);
-                    let _ = host.hub.update_guest(conn, move |g| {
+                    let changed = host.hub.guests.update(gi, |g| {
                         if g.menu_generation != menu_generation
                             || !g
                                 .menu
@@ -1008,13 +992,12 @@ impl Game<'_> {
                         {
                             return false;
                         }
-                        if g.carried == carried {
-                            return false;
-                        }
                         g.carried = carried;
-                        g.send(&C::SetCursorItem(play::SetCursorItem { item: net }));
                         true
                     });
+                    if changed {
+                        host.hub.sync_carried(gi, None);
+                    }
                 }
             }
             return;
@@ -1080,13 +1063,7 @@ impl Game<'_> {
             (0..own).map(|s| gs.menu.slot(s).cloned()).collect();
         let g = &host.hub.guests[gi];
         items.extend((9..36).chain(0..9).map(|i| g.inventory[i].clone()));
-        let carried = g.carried.clone();
-        let packet = C::ContainerSetContent(play::ContainerSetContent {
-            container: gs.window,
-            state: gs.state,
-            items: items.iter().map(|s| host.hub.stack(s)).collect(),
-            carried: host.hub.stack(&carried),
-        });
+        let state = gs.state;
         // ContainerSetData's value is a short. An anvil cost outside it
         // would change sign (`-65535` as `+1`), so the signed cost follows
         // on `sunrise:anvil_cost` after that short.
@@ -1112,7 +1089,7 @@ impl Game<'_> {
                 value,
             }));
         }
-        host.hub.send_to(conn, &packet);
+        host.hub.send_menu_snapshot(gi, window, state, &items);
         host.hub.guests.update(gi, |g| g.inventory_told());
         for packet in data {
             host.hub.send_to(conn, &packet);
@@ -1136,16 +1113,19 @@ impl Game<'_> {
     /// window is open.
     pub(super) fn lan_station_closed(&mut self, conn: u32, window: Option<i32>) -> bool {
         // A lectern's menu keeps nothing of its own (the book is the block entity's).
-        let lectern = self
-            .lan
-            .as_mut()
-            .and_then(|host| host.play.get_mut(&conn))
-            .and_then(|p| p.lectern.take_if(|l| window.is_none_or(|w| l.window == w)))
-            .is_some();
-        if lectern {
+        let Some(host) = self.lan.as_mut() else {
+            return false;
+        };
+        let lectern = host
+            .play
+            .get_mut(&conn)
+            .and_then(|p| p.lectern.take_if(|l| window.is_none_or(|w| l.window == w)));
+        if let Some(lectern) = lectern {
             // AbstractContainerMenu.removed: the carried stack goes back.
-            if let Some(gi) = self.guest_index(conn) {
-                self.guest_carried_back(gi);
+            if let Some(gi) = host.hub.guests.connection_index(conn)
+                && let Some(carried) = self.close_guest_menu_cursor(gi, lectern.window)
+            {
+                self.lan_place_back(gi, vec![carried]);
             }
             if window.is_some() {
                 self.player_menu_closing(conn);
@@ -1160,16 +1140,20 @@ impl Game<'_> {
         else {
             return false;
         };
-        let Some(gi) = self.guest_index(conn) else {
+        let Some(host) = self.lan.as_mut() else {
             return true;
         };
+        let Some(gi) = host.hub.guests.connection_index(conn) else {
+            return true;
+        };
+        let carried = self.close_guest_menu_cursor(gi, gs.window);
         let inputs = station_inputs(&gs);
         if gs.kind == StationKind::Beacon {
             // BeaconMenu.removed drops the payment (player.drop).
-            self.guest_carried_back(gi);
+            self.lan_place_back(gi, carried.into_iter().collect());
             self.drop_guest_items(gi, inputs);
         } else {
-            self.return_guest_menu_items(gi, inputs, true);
+            self.lan_place_back(gi, carried.into_iter().chain(inputs).collect());
         }
         if window.is_some() {
             self.player_menu_closing(conn);

@@ -9,12 +9,15 @@ use super::{Game, Lerp, Remote};
 use crate::game::general::general_type_catalog;
 use indexmap::IndexMap;
 use std::collections::HashMap;
+use sunrise_client::join_seq::JoinSeq;
 use sunrise_core::geometry::{Aabb, Vec3};
 use sunrise_protocol::general_entity::{self, Message};
 
 /// One general row the server shows the window.
 #[derive(Clone, Debug, PartialEq)]
 pub(in crate::game) struct RemoteGeneral {
+    /// Admission to the level, even if the first attachment snapshot has yet to arrive.
+    pub join: JoinSeq,
     /// The client's frozen catalog slot for the row's type.
     pub type_slot: usize,
     pub uuid: u128,
@@ -142,6 +145,7 @@ impl Game<'_> {
         r.general.rows.insert(
             id,
             RemoteGeneral {
+                join: JoinSeq::next(),
                 type_slot,
                 uuid,
                 position,
@@ -243,6 +247,7 @@ mod tests {
 
     fn row(at: [f64; 3]) -> RemoteGeneral {
         RemoteGeneral {
+            join: JoinSeq::next(),
             type_slot: 0,
             uuid: 1,
             position: at,

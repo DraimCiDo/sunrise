@@ -285,6 +285,19 @@ pub(super) struct PackIds {
     pub(super) separate_ao: bool,
 }
 
+#[cfg(test)]
+impl PackIds {
+    pub(super) fn with_entity_ids<'a>(ids: impl IntoIterator<Item = (&'a str, i32)>) -> Self {
+        Self {
+            entities: ids
+                .into_iter()
+                .map(|(name, id)| (name.into(), id))
+                .collect(),
+            ..Default::default()
+        }
+    }
+}
+
 impl Game<'_> {
     /// Loads the pack for the current dimension when it changed, and returns this frame's
     /// inputs to the pack's uniforms.
@@ -1298,16 +1311,12 @@ fn projectile_body_uses_its_own_shader_entity_id() {
     use sunrise_client::projectiles::{Projectile, ProjectileKind};
 
     super::native_entity_refs::tests::with_client_game(|game| {
-        game.pack_ids = Some(PackIds {
-            entities: [
-                ("minecraft:snowball".into(), 41),
-                ("minecraft:ominous_item_spawner".into(), 42),
-                ("minecraft:arrow".into(), 43),
-                ("minecraft:spectral_arrow".into(), 44),
-            ]
-            .into(),
-            ..Default::default()
-        });
+        game.pack_ids = Some(PackIds::with_entity_ids([
+            ("minecraft:snowball", 41),
+            ("minecraft:ominous_item_spawner", 42),
+            ("minecraft:arrow", 43),
+            ("minecraft:spectral_arrow", 44),
+        ]));
         let arrow = |effect| ProjectileKind::Arrow {
             base_damage: 2.0,
             critical: false,
@@ -1324,7 +1333,13 @@ fn projectile_body_uses_its_own_shader_entity_id() {
                 None,
             ));
         }
-        game.entity_geometry(glam::DVec3::new(0.5, 64.0, -4.5), 1.0, None, Vec::new());
+        game.entity_geometry(
+            glam::DVec3::new(0.5, 64.0, -4.5),
+            1.0,
+            None,
+            Vec::new(),
+            &mut Vec::new(),
+        );
         let ids: Vec<_> = game
             .entity_spans
             .borrow()

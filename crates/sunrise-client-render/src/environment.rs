@@ -3,7 +3,7 @@
 //! have weather, the rain and thunder layers, sampled into the sky state the renderer draws.
 use crate::Result;
 use serde_json::Value as Json;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, OnceLock, RwLock};
 use sunrise_assets::resource_source::ResourceSource;
 use sunrise_world::environment_attributes::{
@@ -839,101 +839,45 @@ impl Resolver {
     }
 }
 
-/// The biome ids a `#tag` (`data/<namespace>/tags/worldgen/biome/<path>.json`) holds, nested
-/// tags included.
-fn biome_tag(
-    root: &ResourceSource,
-    tag: &str,
-    cache: &mut HashMap<String, HashSet<String>>,
-) -> HashSet<String> {
-    if let Some(hit) = cache.get(tag) {
-        return hit.clone();
-    }
-    cache.insert(tag.to_owned(), HashSet::new());
-    let (namespace, path) = tag.split_once(':').unwrap_or(("minecraft", tag));
-    let file = format!("data/{namespace}/tags/worldgen/biome/{path}.json");
-    let mut out = HashSet::new();
-    if let Ok(json) = root
-        .read(&file)
-        .map_err(|e| e.to_string())
-        .and_then(|bytes| serde_json::from_slice::<Json>(&bytes).map_err(|e| e.to_string()))
-    {
-        out.extend(
-            sunrise_world::tag_layers::TagLayers::from_file(&json)
-                .build(|inner| biome_tag(root, inner, cache).into_iter().collect())
-                .into_iter()
-                .map(|id| {
-                    if id.contains(':') {
-                        id
-                    } else {
-                        format!("minecraft:{id}")
-                    }
-                }),
-        );
-    }
-    cache.insert(tag.to_owned(), out.clone());
-    out
-}
-
-/// The timeline ids a dimension type's `timelines` names: an id, a `#tag` or a list,
-/// tags resolved through `tags/timeline/` (their entries may be `{"id", "required"}`).
-fn timeline_ids(root: &ResourceSource, json: &Json, out: &mut Vec<String>, depth: u32) {
-    // An entry's id and whether it removes (`TagLoader.EntryWithSource.remove`).
-    let entry = |e: &Json| {
-        e.as_str()
-            .or_else(|| e.get("id").and_then(Json::as_str))
-            .map(|id| {
-                (
-                    id.to_owned(),
-                    e.get("remove").and_then(Json::as_bool) == Some(true),
-                )
-            })
+/// The dimension's timeline selection, applying ordered tag members in place.
+fn timeline_ids(root: &ResourceSource, json: &Json) -> Vec<String> {
+    let timeline_path = |id: &str| {
+        let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
+        format!("data/{namespace}/timeline/{path}.json")
     };
-    let items: Vec<(String, bool)> = match json {
-        Json::Array(list) => list.iter().filter_map(entry).collect(),
-        other => entry(other).into_iter().collect(),
+    let tags = crate::pack_tags::bind(root, "timeline", |id| root.contains(&timeline_path(id)));
+    let entries = match json {
+        Json::Array(items) => items.as_slice(),
+        entry => std::slice::from_ref(entry),
     };
-    for (item, removes) in items {
-        if let Some(tag) = item.strip_prefix('#') {
-            let (namespace, path) = tag.split_once(':').unwrap_or(("minecraft", tag));
-            let file = format!("data/{namespace}/tags/timeline/{path}.json");
-            if depth < 8
-                && let Ok(tag) = root
-                    .read(&file)
-                    .map_err(|e| e.to_string())
-                    .and_then(|bytes| {
-                        serde_json::from_slice::<Json>(&bytes).map_err(|e| e.to_string())
-                    })
-            {
-                let mut members = Vec::new();
-                members.extend(sunrise_world::tag_layers::TagLayers::from_file(&tag).build(
-                    |inner| {
-                        let mut child = Vec::new();
-                        timeline_ids(
-                            root,
-                            &Json::String(format!("#{inner}")),
-                            &mut child,
-                            depth + 1,
-                        );
-                        child
-                    },
-                ));
-                if removes {
-                    out.retain(|kept| !members.contains(kept));
-                } else {
-                    for id in members {
-                        if !out.contains(&id) {
-                            out.push(id);
-                        }
-                    }
-                }
+    let mut out = Vec::new();
+    for entry in entries {
+        let Some(id) = sunrise_world::tag_layers::entry_id(entry) else {
+            continue;
+        };
+        let removes = entry["remove"].as_bool() == Some(true);
+        let direct;
+        let members = if let Some(tag) = id.strip_prefix('#') {
+            let Ok(tag) = sunrise_core::identifier::Identifier::parse(tag) else {
+                continue;
+            };
+            let Some(members) = tags.get(tag.to_string().as_str()) else {
+                continue;
+            };
+            members.as_slice()
+        } else {
+            direct = id.to_owned();
+            std::slice::from_ref(&direct)
+        };
+        for member in members {
+            if removes {
+                out.retain(|kept| kept != member);
+            } else if !out.contains(member) {
+                out.push(member.clone());
             }
-        } else if removes {
-            out.retain(|kept| kept != &item);
-        } else if !out.contains(&item) {
-            out.push(item);
         }
     }
+    out
 }
 
 impl Environment {
@@ -1013,7 +957,6 @@ impl Environment {
         // Without biome data (a bare dimension type), there is no biome layer.
         let mut biomes = HashMap::new();
         let mut post = HashMap::new();
-        let tags = std::cell::RefCell::new(HashMap::new());
         for file in root.list_under("data", &["worldgen/biome"]) {
             let Some((namespace, name)) = file
                 .strip_prefix("data/")
@@ -1044,8 +987,7 @@ impl Environment {
             };
             let mut post_map = AttributeMap::default();
             for m in &packs.biomes {
-                let in_tag =
-                    |tag: &str| biome_tag(root, tag, &mut tags.borrow_mut()).contains(&name);
+                let in_tag = |tag: &str| tags.contains("worldgen/biome", tag, &name);
                 if m.targets.matches(&name, in_tag) {
                     resolver.apply(&mut map, &m.base);
                     resolver.apply(&mut post_map, &m.post_process);
@@ -1057,9 +999,7 @@ impl Environment {
             biomes.insert(name, map);
         }
         builder.biome_layer(biomes.values());
-        let mut ids = Vec::new();
-        timeline_ids(root, &json["timelines"], &mut ids, 0);
-        for id in ids {
+        for id in timeline_ids(root, &json["timelines"]) {
             let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", &id));
             let file = format!("data/{namespace}/timeline/{path}.json");
             match root

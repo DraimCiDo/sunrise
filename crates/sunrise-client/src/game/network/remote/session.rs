@@ -195,7 +195,6 @@ impl Game<'_> {
             lang,
             registries: Arc::new(Dynamic::default()),
             tags: None,
-            has_item_tags: false,
             enchantments: None,
             joined: false,
             reconfiguring: None,
@@ -246,6 +245,10 @@ impl Game<'_> {
             menu_title: None,
             menu_title_snapshot: None,
             state_id: 0,
+            inventory_state_id: 0,
+            inventory_carried: None,
+            inventory_craft_grid: Default::default(),
+            inventory_craft_result: None,
             use_target: None,
             menu_extra: None,
             entities: HashMap::new(),
@@ -446,7 +449,6 @@ impl Game<'_> {
             lang,
             registries: Arc::new(Dynamic::default()),
             tags: None,
-            has_item_tags: false,
             enchantments: None,
             joined: false,
             reconfiguring: None,
@@ -498,6 +500,10 @@ impl Game<'_> {
             menu_title: None,
             menu_title_snapshot: None,
             state_id: 0,
+            inventory_state_id: 0,
+            inventory_carried: None,
+            inventory_craft_grid: Default::default(),
+            inventory_craft_result: None,
             use_target: None,
             menu_extra: None,
             entities: HashMap::new(),
@@ -732,10 +738,14 @@ impl Game<'_> {
         // The replacement player starts with its inventory menu, even if the
         // server switched levels without closing the previous container.
         self.remote_close_local();
+        self.carried = None;
+        self.craft_grid.fill(None);
         self.set_screen(Screen::Playing);
-        let Some(r) = self.remote.as_ref() else {
+        let Some(r) = self.remote.as_mut() else {
             return;
         };
+        r.craft_result = None;
+        r.state_id = 0;
         // handleRespawn keeps the ClientLevel only for the same level key:
         // two levels sharing a dimension type are still two levels.
         let same = keep_world && r.heard_level.as_deref() == Some(spawn.dimension.as_str());

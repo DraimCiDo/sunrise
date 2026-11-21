@@ -1851,6 +1851,44 @@ mod tests {
         assert_eq!(order(&map), [6, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 1, 0, 2]);
     }
 
+    #[test]
+    fn compute_if_absent_preserves_java_order_across_treeification_and_split() {
+        let mut map = JavaHashMap::default();
+        for (id, hash) in [(0, 17), (1, 2), (2, 33)] {
+            map.compute_if_absent(key(id, hash), || id);
+        }
+        for id in 3..=9 {
+            map.compute_if_absent(collider(id), || id);
+        }
+        assert_eq!(order(&map), [9, 8, 7, 6, 5, 4, 3, 2, 0, 1]);
+        for id in 10..=14 {
+            map.compute_if_absent(collider(id), || id);
+        }
+        // The crowded bucket grew twice and treeified. The root moved first;
+        // the remaining nodes are still in the bucket's linked-list order.
+        let before_split = [9, 12, 13, 14, 11, 10, 8, 7, 6, 5, 4, 3, 1, 0, 2];
+        assert_eq!(order(&map), before_split);
+        for id in 15..=48 {
+            map.compute_if_absent(key(id, 4000 + id as i32), || id);
+        }
+        let fixture_keys = |map: &JavaHashMap<_, _>| {
+            order(map)
+                .into_iter()
+                .filter(|&id| id < 15)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(fixture_keys(&map), before_split);
+        // At 49 entries, even an existing lookup resizes before the lookup.
+        assert_eq!(
+            map.compute_if_absent(key(0, 17), || panic!("existing key")),
+            &0
+        );
+        assert_eq!(
+            fixture_keys(&map),
+            [9, 13, 11, 7, 5, 3, 1, 0, 2, 14, 12, 10, 8, 6, 4]
+        );
+    }
+
     /// Java: `colliders`, then put id 14 with hash 320, the hash of id 8.
     #[test]
     fn new_key_in_a_tree_bin_follows_its_tree_parent() {

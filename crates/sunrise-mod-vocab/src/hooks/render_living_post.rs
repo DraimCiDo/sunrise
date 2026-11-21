@@ -14,10 +14,11 @@ pub trait Hooks {
     /// with a mod's registered renderer (`register_entity_renderers`) has its own model's order,
     /// the renderer in the model's place, so it changes with #3915 and not before. For a player,
     /// its `render_player_post` follows. In the ordered body pass, each entity's hooks finish
-    /// before the next entity's hooks begin, in level join order including this window's player.
+    /// before the next entity's submission begins, including any general entity renderer at its
+    /// own level join slot.
     #[hook(
         side = "client",
-        version = 3,
+        version = 4,
         contract = "listen",
         neoforge = "RenderLivingEvent.Post",
         cancellable = false

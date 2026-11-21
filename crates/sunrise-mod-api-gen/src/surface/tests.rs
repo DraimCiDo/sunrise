@@ -329,10 +329,22 @@ const MOVE: &str = "<move>";
 
 /// The export of the fixture with `edits` (file, from, to) applied.
 fn export_fixture(edits: &[(&str, &str, &str)], hooks: &str) -> Export {
-    try_export_fixture(edits, hooks).unwrap()
+    try_export_fixture(edits, hooks, &[]).unwrap()
 }
 
-fn try_export_fixture(edits: &[(&str, &str, &str)], hooks: &str) -> Result<Export, String> {
+fn export_fixture_with_includes(
+    edits: &[(&str, &str, &str)],
+    hooks: &str,
+    included: &[(&str, &str)],
+) -> Export {
+    try_export_fixture(edits, hooks, included).unwrap()
+}
+
+fn try_export_fixture(
+    edits: &[(&str, &str, &str)],
+    hooks: &str,
+    included: &[(&str, &str)],
+) -> Result<Export, String> {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     for (path, text) in FILES {
@@ -354,7 +366,7 @@ fn try_export_fixture(edits: &[(&str, &str, &str)], hooks: &str) -> Result<Expor
         std::fs::write(path, text).unwrap();
     }
     let catalog = Catalog::parse(&[("hooks/ping.rs".into(), hooks.into())]).unwrap();
-    let mut index = crate::index::game(root, &[]);
+    let mut index = crate::index::game(root, included);
     build(root, &mut index, &catalog.hooks, &boundary())
 }
 
@@ -363,7 +375,7 @@ const LIB: &str = "crates/sunrise-mod-vocab/src/lib.rs";
 #[test]
 fn a_signature_cannot_hide_a_workspace_type_behind_an_import() {
     let edited = "use engine_library::Secret as Imported;\npub fn leak() -> Imported { unimplemented!() }\n/// A colour.";
-    let error = try_export_fixture(&[(LIB, "/// A colour.", edited)], HOOKS)
+    let error = try_export_fixture(&[(LIB, "/// A colour.", edited)], HOOKS, &[])
         .err()
         .expect("the leak must fail the export");
     assert!(error.contains("mod_api::leak"), "{error}");
@@ -373,7 +385,7 @@ fn a_signature_cannot_hide_a_workspace_type_behind_an_import() {
 #[test]
 fn a_public_reexport_cannot_name_a_workspace_type_outside_the_seam() {
     let edited = "pub use engine_library::Secret as Leaked;\n/// A colour.";
-    let error = try_export_fixture(&[(LIB, "/// A colour.", edited)], HOOKS)
+    let error = try_export_fixture(&[(LIB, "/// A colour.", edited)], HOOKS, &[])
         .err()
         .expect("the re-export must fail the export");
     assert!(error.contains("mod_api::Leaked"), "{error}");
@@ -383,7 +395,7 @@ fn a_public_reexport_cannot_name_a_workspace_type_outside_the_seam() {
 #[test]
 fn a_wire_layout_cannot_hide_a_workspace_type_behind_private_storage() {
     let edited = "#[derive(Wire)] struct Private(engine_library::Secret);\n#[derive(Wire)] pub struct Leaked(Private);\n/// A colour.";
-    let error = try_export_fixture(&[(LIB, "/// A colour.", edited)], HOOKS)
+    let error = try_export_fixture(&[(LIB, "/// A colour.", edited)], HOOKS, &[])
         .err()
         .expect("the embedded type must fail the export");
     assert!(error.contains("mod_api::Private"), "{error}");
@@ -484,6 +496,44 @@ fn macro_calls_are_expanded_or_noted_and_ids_ignore_routes() {
         .unwrap();
     assert_eq!(thing.id, "type:shared::Thing");
     assert!(thing.paths.contains(&"s1::Thing".to_owned()));
+}
+
+#[test]
+fn a_generated_impl_on_a_glob_reexported_handle_is_recorded() {
+    let export = export_fixture_with_includes(
+        &[(
+            LIB,
+            "pub mod entity;",
+            r#"
+pub mod entity;
+pub use loan_views::*;
+pub use loan_handles::*;
+mod loan_views {
+    use crate::LoanRef;
+    pub fn loan_exists(_: LoanRef) -> bool { true }
+}
+mod loan_handles {
+    pub struct LoanRef(u32);
+}
+mod generated_handles {
+    use super::*;
+    include!(concat!(env!("OUT_DIR"), "/fixture_generated_handles.rs"));
+}
+"#,
+        )],
+        HOOKS,
+        &[(
+            "fixture_generated_handles.rs",
+            "impl LoanRef { pub fn serial(self) -> u32 { 23 } }",
+        )],
+    );
+    let exported = export
+        .surface
+        .handles
+        .iter()
+        .find(|handle| handle.id == "handle:LoanRef::serial")
+        .map(|handle| handle.contract.signature.as_str());
+    assert_eq!(exported, Some("fn serial(self) -> u32"));
 }
 
 #[test]

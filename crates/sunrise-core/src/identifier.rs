@@ -159,6 +159,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn java_key_hashes_namespaces_and_orders_paths_first() {
+        let id = |name| Identifier::parse(name).unwrap();
+        let later_namespace = id("z:a");
+        let earlier_namespace = id("a:z");
+        assert_eq!(later_namespace.java_hash(), 3_879); // 31 * 'z' + 'a'
+        assert_eq!(
+            later_namespace.comparable_compare(&earlier_namespace),
+            Some(Ordering::Less)
+        );
+        assert_eq!(
+            later_namespace.tie_break(&earlier_namespace),
+            Ordering::Less
+        );
+        assert_eq!(later_namespace.tie_break(&id("a:a")), Ordering::Greater);
+    }
+
     /// A character outside `[a-z0-9_.-]` is refused in the namespace; `/` only in the path.
     #[test]
     fn invalid_characters_are_still_refused() {

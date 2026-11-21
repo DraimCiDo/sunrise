@@ -1583,6 +1583,48 @@ impl Def {
                     s,
                     S::Villager | S::WanderingTrader | S::IronGolem | S::SnowGolem | S::CopperGolem
                 ),
+            // `EntityType.Builder.notInPeaceful` on the vanilla type.
+            not_in_peaceful: matches!(
+                s,
+                S::Blaze
+                    | S::Bogged
+                    | S::Breeze
+                    | S::CaveSpider
+                    | S::Creaking
+                    | S::Creeper
+                    | S::Drowned
+                    | S::ElderGuardian
+                    | S::Enderman
+                    | S::Endermite
+                    | S::Evoker
+                    | S::Ghast
+                    | S::Giant
+                    | S::Guardian
+                    | S::Hoglin
+                    | S::Husk
+                    | S::Illusioner
+                    | S::MagmaCube
+                    | S::Parched
+                    | S::Phantom
+                    | S::PiglinBrute
+                    | S::Pillager
+                    | S::Ravager
+                    | S::Silverfish
+                    | S::Skeleton
+                    | S::Slime
+                    | S::Spider
+                    | S::Stray
+                    | S::Vex
+                    | S::Vindicator
+                    | S::Warden
+                    | S::Witch
+                    | S::Wither
+                    | S::WitherSkeleton
+                    | S::Zoglin
+                    | S::Zombie
+                    | S::ZombieVillager
+                    | S::ZombifiedPiglin
+            ),
             tick_alone: false,
         }
     }

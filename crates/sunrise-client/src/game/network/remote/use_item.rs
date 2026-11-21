@@ -68,7 +68,9 @@ impl Game<'_> {
         // SpawnEggItem.use on the client succeeds after a SOURCE_ONLY block
         // hit; the server alone tests LiquidBlock and the placement permission.
         if held.item.ends_with("_spawn_egg") {
-            let succeeded = self.spawn_egg_allowed(&held.item) && self.bucket_hit().is_some();
+            let succeeded = self.bucket_hit().is_some()
+                && sunrise_client::block_entity_item::item_entity_data(&held, self.res.items())
+                    .is_some_and(|data| self.spawn_egg_allowed(&data.kind));
             if succeeded {
                 self.with_hand(hand, Game::swing_arm);
             }

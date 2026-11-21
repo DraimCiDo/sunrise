@@ -1134,50 +1134,6 @@ fn skeleton(s: Species) -> bool {
 fn raider(s: Species) -> bool {
     super::raider::is_raider(s)
 }
-/// `EntityType.isAllowedInPeaceful`: the types built with `notInPeaceful`.
-pub fn allowed_in_peaceful(kind: &str) -> bool {
-    !matches!(
-        kind.strip_prefix("minecraft:").unwrap_or(kind),
-        "blaze"
-            | "bogged"
-            | "breeze"
-            | "cave_spider"
-            | "creaking"
-            | "creeper"
-            | "drowned"
-            | "elder_guardian"
-            | "enderman"
-            | "endermite"
-            | "evoker"
-            | "ghast"
-            | "giant"
-            | "guardian"
-            | "hoglin"
-            | "husk"
-            | "illusioner"
-            | "magma_cube"
-            | "parched"
-            | "phantom"
-            | "piglin_brute"
-            | "pillager"
-            | "ravager"
-            | "silverfish"
-            | "skeleton"
-            | "slime"
-            | "spider"
-            | "stray"
-            | "vex"
-            | "vindicator"
-            | "warden"
-            | "witch"
-            | "wither"
-            | "wither_skeleton"
-            | "zoglin"
-            | "zombie"
-            | "zombie_villager"
-            | "zombified_piglin"
-    )
-}
 /// `AgeableMob.getBabyStartAge` (a sniffer's is -48000).
 pub fn baby_start_age(s: Species) -> i32 {
     if s == Species::Sniffer {
@@ -1231,11 +1187,6 @@ pub fn goat_spawn(m: &mut Mob, r: &mut impl RandomSource) {
         let left = r.next_boolean();
         m.extra.lost_horns[usize::from(!left)] = true;
     }
-}
-/// `SpawnEggItem.spawnsEntity`: the spawn egg is for the mob's own kind, so
-/// it is used on it (`Mob.checkAndHandleImportantInteractions`).
-pub fn spawn_egg_is_for(egg: &str, kind: &str) -> bool {
-    egg.strip_suffix("_spawn_egg") == Some(kind)
 }
 
 /// `SpawnEggItem.spawnOffspringFromSpawnEgg`: the offspring of a spawn egg
@@ -2866,13 +2817,6 @@ mod tests {
         assert!(child.is_baby());
         // It keeps the parent's variant.
         assert_eq!(child.extra.variant, 3);
-        // The egg is for the mob's own kind.
-        assert!(spawn_egg_is_for("minecraft:cow_spawn_egg", "minecraft:cow"));
-        assert!(!spawn_egg_is_for(
-            "minecraft:pig_spawn_egg",
-            "minecraft:cow"
-        ));
-        assert!(!spawn_egg_is_for("minecraft:stick", "minecraft:cow"));
     }
     /// #7877: `/attribute <mob> <attr> modifier add` hands `add_modifier` an
     /// id typed at run time; it lands in the value, reads back, and goes.

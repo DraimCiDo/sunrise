@@ -198,10 +198,11 @@ impl Game<'_> {
     /// the server's echo doesn't hand back a bare item.
     pub(super) fn to_network(&self, s: &Option<ItemStack>) -> Option<Stack> {
         let r = self.remote.as_ref()?;
+        let source = s.as_ref()?;
         // A stack as the server sent it, only its count changed: its own
         // components go back, as a vanilla client keeps them.
-        if let Some((stack, patch)) = s.as_ref().and_then(|s| Some((s, s.wire_patch()?))) {
-            let mut out = Stack::new(self.item_id(&stack.item), stack.count as i32);
+        if let Some(patch) = source.wire_patch() {
+            let mut out = Stack::new(self.item_id(&source.item), source.count as i32);
             let safe = r.registries.custom_components
                 || sunrise_protocol::item::custom::entries().next().is_none()
                 || sunrise_protocol::item::WirePatch::decode(&patch)
@@ -220,7 +221,7 @@ impl Game<'_> {
             }
             log::warn!("Cannot send cached custom components to this peer");
         }
-        sunrise_client::lan::guest::stack_to_network(
+        let mut wire = sunrise_client::lan::guest::stack_to_network(
             |name| self.item_id(name),
             // Built-in first, as a hub's `SyncData::id` does: potions are one.
             |registry, name| {
@@ -236,7 +237,14 @@ impl Game<'_> {
                     })
             },
             s,
-        )
+        )?;
+        sunrise_client::lan::guest::canonicalize_stack_patch(
+            &mut wire,
+            source,
+            self.items(),
+            &r.builtin,
+        );
+        Some(wire)
     }
     // handle_command_suggestions: remote/commands.rs
     pub(in crate::game) fn set_registries(&mut self, registries: Arc<Dynamic>) {

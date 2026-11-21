@@ -11,11 +11,12 @@ pub trait Hooks {
     /// server and other players see, stays. Asked each frame for every mob,
     /// player (yourself in third person when you hold the camera), dropped item and projectile
     /// drawn. In the ordered body pass, these queries for mobs, players and dropped items follow
-    /// level join order; projectile queries run in a later pass.
+    /// level join order, interleaved with general entity renderer submissions. Projectile queries
+    /// run in a later pass. General entities, the dragon and end crystals add no outline queries.
     /// API @API:entity_outline@.
     #[hook(
         side = "client",
-        version = 2,
+        version = 3,
         contract = "listen",
         neoforge = "none (NeoForge 26.3 has no glowing or team colour override)"
     )]

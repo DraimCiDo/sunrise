@@ -309,6 +309,63 @@ fn opening_an_owned_menu_with_a_result_keeps_the_old_window() {
 
 #[test]
 #[ignore = "daily"]
+fn a_cursor_cleared_outside_a_click_is_sent_once_on_the_next_broadcast() {
+    with_owned_menu(false, |game, rx, key| {
+        game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+            guest.carried = Some(ItemStack::new("minecraft:stick", 2));
+        });
+        let (window, menu) = open(game, key);
+        sent(&rx);
+        let cursor = menu.cursor();
+        let stick = ItemStack::new("minecraft:stick", 1).try_into_api().unwrap();
+        let resource = ItemResource::of(&stick);
+        game.transaction(|host, tx| {
+            assert_eq!(cursor.insert(host, tx, &resource, 3), 3);
+            Ok::<_, ()>(())
+        })
+        .unwrap();
+
+        // Establish what the client sees through a full menu sync, not a click prediction.
+        let hub = &mut game.lan.as_mut().unwrap().hub;
+        hub.resend_menu(1, window, &game.world);
+        assert!(sent(&rx).iter().any(|p| matches!(p,
+            C::ContainerSetContent(content) if content.container == window
+                && content.carried.as_ref().map(|item| item.count) == Some(3)
+        )));
+        hub.sync_containers(&game.world);
+        assert!(
+            sent(&rx).is_empty(),
+            "the full sync already sent the cursor"
+        );
+
+        game.transaction(|host, tx| {
+            assert_eq!(cursor.extract(host, tx, &resource, 3), 3);
+            Ok::<_, ()>(())
+        })
+        .unwrap();
+        assert!(sent(&rx).is_empty(), "nothing before the broadcast");
+
+        let hub = &mut game.lan.as_mut().unwrap().hub;
+        // A repair of window 0 does not tell the open window about the clear.
+        hub.send_inventory(0);
+        assert!(matches!(&sent(&rx)[..], [C::ContainerSetContent(content)]
+            if content.container == 0 && content.carried.as_ref().map(|item| item.count) == Some(2)));
+        hub.sync_containers(&game.world);
+        let packets = sent(&rx);
+        assert!(
+            matches!(
+                &packets[..],
+                [C::SetCursorItem(SetCursorItem { item: None })]
+            ),
+            "{packets:?}"
+        );
+        hub.sync_containers(&game.world);
+        assert!(sent(&rx).is_empty(), "the empty cursor was already sent");
+    });
+}
+
+#[test]
+#[ignore = "daily"]
 fn owned_click_prediction_applies_caps_and_the_server_corrects_an_override() {
     use crate::game::execution_role::ExecutionRole;
     use sunrise_client::menu::Input;
@@ -432,10 +489,36 @@ fn owned_click_prediction_applies_caps_and_the_server_corrects_an_override() {
             }),
         );
         let component_correction = sent(&rx);
-        assert!(component_correction.iter().any(|p| matches!(p,
-            C::ContainerSetContent(p) if p.container == window && p.items[1] == named_one_net
-                && p.carried == named_seven_net
-        )));
+        let state = component_correction
+            .iter()
+            .find_map(|p| match p {
+                C::ContainerSetContent(p) if p.container == window => {
+                    assert_eq!(p.items[1], named_one_net);
+                    assert_eq!(p.carried, named_seven_net);
+                    Some(p.state)
+                }
+                _ => None,
+            })
+            .unwrap();
+
+        // No player slots means this quick move does nothing. The prediction has the correct
+        // cursor, but claims the slot kept a named stick instead of an ordinary one.
+        game.lan_guest_packet(
+            1,
+            S::ContainerClick(ContainerClick {
+                container: window,
+                state,
+                slot: 0,
+                button: 0,
+                input: sunrise_client::lan::menu::input::QUICK_MOVE,
+                changed: vec![(0, named_one_net.as_ref().map(|s| Hashed::of(s).unwrap()))],
+                carried: named_seven_net.as_ref().map(|s| Hashed::of(s).unwrap()),
+            }),
+        );
+        let slot_correction = sent(&rx);
+        assert!(matches!(&slot_correction[..], [C::ContainerSetSlot(p)]
+            if p.container == window && p.slot == 0 && p.item.as_ref() == Some(one)
+        ));
 
         // Run the real client click path and apply those authoritative packets. Both sides
         // know the declared caps; only the server executes the part's override.

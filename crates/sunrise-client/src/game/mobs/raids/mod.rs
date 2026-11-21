@@ -1379,15 +1379,13 @@ impl Game<'_> {
                 centers: self.village_centers(),
                 can_spawn: &biome_ok,
             };
-            let mut spawn = |l: &PatrolCx, m: Member, _: &mut sunrise_core::random::LevelRandom| {
-                // EntityType.create makes no monsters in peaceful.
-                if l.level.game.difficulty_id() == 0 {
-                    return false;
-                }
+            let mut spawn = |_: &PatrolCx, m: Member, _: &mut sunrise_core::random::LevelRandom| {
                 members.push(m);
                 true
             };
-            spawner.tick(&level, enemies, &mut random, &mut spawn);
+            if let Some(pillager) = self.res.mob_types().get("minecraft:pillager") {
+                spawner.tick(&level, enemies, pillager, &mut random, &mut spawn);
+            }
         }
         self.raiding.patrol = spawner;
         self.world.random = random;
@@ -1444,22 +1442,18 @@ impl SiegeLevel for Game<'_> {
     fn check_spawn_rules(
         &mut self,
         kind: &str,
-        species: Species,
         reason: spawn_rules::Reason,
         pos: [i32; 3],
     ) -> bool {
+        let Some(kind) = self.res.mob_types().get(kind) else {
+            return false;
+        };
         let mut random = std::mem::replace(
             &mut self.world.random,
             LevelRandom::for_level(LegacyRandom::new(0)),
         );
-        let ok = spawn_rules::check_spawn_rules(
-            kind,
-            species,
-            &self.natural_level(),
-            reason,
-            &mut random,
-            pos,
-        );
+        let ok =
+            spawn_rules::check_spawn_rules(kind, &self.natural_level(), reason, &mut random, pos);
         self.world.random = random;
         ok
     }

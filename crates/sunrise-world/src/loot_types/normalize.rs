@@ -34,15 +34,6 @@ impl super::super::LootData {
         Ok(())
     }
     pub(in crate::loot) fn prepare_types(&mut self) -> io::Result<()> {
-        let mut active = HashSet::new();
-        let mut done = HashSet::new();
-        for (registry, id) in self
-            .tags
-            .keys()
-            .filter(|(registry, _)| matches!(registry.as_str(), "predicate" | "item_modifier"))
-        {
-            check_tag(&self.tags, registry, id, &mut active, &mut done)?;
-        }
         let tags = &self.tags;
         let types = &self.types;
         let mut tables = HashMap::new();
@@ -63,34 +54,7 @@ impl super::super::LootData {
         Ok(())
     }
 }
-type Tags = HashMap<(String, String), crate::tag_layers::TagLayers>;
-fn check_tag(
-    tags: &Tags,
-    registry: &str,
-    id: &str,
-    active: &mut HashSet<(String, String)>,
-    done: &mut HashSet<(String, String)>,
-) -> io::Result<()> {
-    let key = (registry.to_owned(), id.to_owned());
-    if done.contains(&key) {
-        return Ok(());
-    }
-    if !active.insert(key.clone()) {
-        return Err(invalid(
-            &format!("tags/{registry} {id}"),
-            id,
-            "reference cycle",
-        ));
-    }
-    if let Some(layers) = tags.get(&key) {
-        for tag in layers.tags() {
-            check_tag(tags, registry, tag, active, done)?;
-        }
-    }
-    active.remove(&key);
-    done.insert(key);
-    Ok(())
-}
+use super::super::loot_tags::BoundTags as Tags;
 fn table_fields(value: &mut Value, tags: &Tags, types: &Types) {
     fields(value, tags, types);
     for pool in value
@@ -186,8 +150,16 @@ fn set(value: &mut Value, function: bool, tags: &Tags, types: &Types) {
         } else {
             "predicate"
         };
-        let ids = super::super::loot_tags::members(tags, registry, &tag.to_string());
-        *value = Value::Array(ids.into_iter().map(Value::String).collect());
+        let ids = tags
+            .get(registry)
+            .and_then(|tags| tags.get(tag.to_string().as_str()));
+        *value = Value::Array(
+            ids.into_iter()
+                .flatten()
+                .cloned()
+                .map(Value::String)
+                .collect(),
+        );
     } else if !value.is_array() {
         *value = Value::Array(vec![std::mem::take(value)]);
     }

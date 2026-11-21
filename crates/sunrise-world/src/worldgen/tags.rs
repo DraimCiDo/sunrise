@@ -1,9 +1,8 @@
 //! Version-pinned tag codecs, resource-stack merging and dependency resolution.
 use super::{DecodeError, Object, optional, required};
+use crate::tag_layers::dependency_order;
 use serde_json::value::RawValue;
 use std::collections::{BTreeMap, BTreeSet};
-use sunrise_core::java_hash_map::{JavaHashMap, JavaKey};
-use sunrise_core::random::java_string_hash;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TagEntry {
@@ -194,73 +193,12 @@ impl TagDefinitions {
         &self,
         mut lookup: impl FnMut(&str, bool) -> Option<T>,
     ) -> BuiltTags<T> {
-        // TagLoader inserts builders with computeIfAbsent; DependencySorter
-        // copies them into a fresh map with put. Both iterations matter when
-        // competing edges could close a cycle.
-        let mut builders = JavaHashMap::default();
-        for name in &self.insertion_order {
-            builders.compute_if_absent(TagId(name), || ());
-        }
-        let mut contents = JavaHashMap::default();
-        for (name, ()) in builders {
-            contents.put(name, ());
-        }
-        let mut edges: BTreeMap<&str, JavaHashMap<TagId<'_>, ()>> = BTreeMap::new();
-        let mut work = Vec::new();
-        let mut seen = BTreeSet::new();
-        for mandatory in [true, false] {
-            for (&TagId(name), ()) in contents.entries() {
-                for entry in &self.entries[name] {
-                    let e = &entry.entry;
-                    if !e.tag || e.required != mandatory {
-                        continue;
-                    }
-                    // Iterative reachability bounds stack usage for deep tags
-                    // and avoids revisiting shared subgraphs for this edge.
-                    work.clear();
-                    seen.clear();
-                    work.push(e.id.as_str());
-                    let mut closes_cycle = false;
-                    while let Some(node) = work.pop() {
-                        if node == name {
-                            closes_cycle = true;
-                            break;
-                        }
-                        if seen.insert(node)
-                            && let Some(children) = edges.get(node)
-                        {
-                            work.extend(children.entries().map(|(&TagId(child), ())| child));
-                        }
-                    }
-                    if !closes_cycle {
-                        // Guava HashMultimap creates each value set with room
-                        // for two entries (four buckets).
-                        edges
-                            .entry(name)
-                            .or_insert_with(|| JavaHashMap::with_expected_entries(2))
-                            .put(TagId(&e.id), ());
-                    }
-                }
-            }
-        }
-        let mut visited = BTreeSet::new();
-        let mut sorted = Vec::new();
-        let mut stack = Vec::new();
-        for (TagId(name), ()) in contents {
-            stack.push((name, false));
-            while let Some((node, ready)) = stack.pop() {
-                if ready {
-                    sorted.push(node);
-                } else if visited.insert(node) {
-                    stack.push((node, true));
-                    if let Some(children) = edges.get(node) {
-                        let start = stack.len();
-                        stack.extend(children.entries().map(|(&TagId(child), ())| (child, false)));
-                        stack[start..].reverse();
-                    }
-                }
-            }
-        }
+        let sorted = dependency_order(self.insertion_order.iter().map(String::as_str), |name| {
+            self.entries[name].iter().filter_map(|entry| {
+                let entry = &entry.entry;
+                entry.tag.then_some((entry.id.as_str(), entry.required))
+            })
+        });
         let mut result: BuiltTags<T> = BuiltTags {
             tags: BTreeMap::new(),
             missing: BTreeMap::new(),
@@ -306,26 +244,6 @@ fn apply<T: Clone + Ord>(values: &mut Vec<T>, seen: &mut BTreeSet<T>, value: &T,
         }
     } else if seen.remove(value) {
         values.retain(|v| v != value);
-    }
-}
-// The strings here were canonicalized at the file boundary. Java uses
-// Identifier's namespace/path hash and path-first ordering for tree bins.
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct TagId<'a>(&'a str);
-impl JavaKey for TagId<'_> {
-    fn java_hash(&self) -> i32 {
-        let (namespace, path) = self.0.split_once(':').expect("canonical tag identifier");
-        java_string_hash(namespace.encode_utf16())
-            .wrapping_mul(31)
-            .wrapping_add(java_string_hash(path.encode_utf16()))
-    }
-    fn comparable_compare(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.tie_break(other))
-    }
-    fn tie_break(&self, other: &Self) -> std::cmp::Ordering {
-        let (ns, path) = self.0.split_once(':').expect("canonical tag identifier");
-        let (other_ns, other_path) = other.0.split_once(':').expect("canonical tag identifier");
-        (path, ns).cmp(&(other_path, other_ns))
     }
 }
 

@@ -1022,6 +1022,9 @@ fn a_code_opened_menus_button_reaches_a_blocks_menu_button_only_for_its_menu_typ
 #[test]
 #[ignore = "daily"]
 fn a_block_menu_click_commits_only_the_replacement_or_a_fresh_default() {
+    use sunrise_client::lan::{Out, PlayerSender, menu::input::SWAP};
+    use sunrise_protocol::{buf::Reader, packets::play::Clientbound};
+
     sunrise_client::containers::with_mod_menu_types(
         [(
             DEPOT_MENU.into(),
@@ -1064,6 +1067,56 @@ fn a_block_menu_click_commits_only_the_replacement_or_a_fresh_default() {
                     assert_eq!(content(game, POS, 0), 10);
                     assert_eq!(content(game, SECOND, 0), 2);
                     assert!(game.lan.as_ref().unwrap().hub.guests[0].carried.is_none());
+
+                    // A visible player inventory still does not include the offhand.
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    let offhand = Some(ItemStack::new("minecraft:iron_ingot", 1));
+                    let hub = &mut game.lan.as_mut().unwrap().hub;
+                    hub.guests.update(0, |g| {
+                        g.sender = PlayerSender::new(tx, Arc::default());
+                        g.offhand = offhand.clone();
+                    });
+                    let menu = hub.guests[0].menu.as_ref().unwrap();
+                    assert_eq!(menu.player_slots(), 36);
+                    let state = menu.state;
+                    let expected = hub.stack(&offhand);
+                    assert!(expected.is_some());
+                    script(Script {
+                        clicked: Some(Flow::Cancel),
+                        ..Script::default()
+                    });
+                    game.lan_guest_packet(
+                        12,
+                        Serverbound::ContainerClick(ContainerClick {
+                            container: window,
+                            state,
+                            slot: 0,
+                            button: 40,
+                            input: SWAP,
+                            changed: Vec::new(),
+                            carried: None,
+                        }),
+                    );
+                    assert_eq!(decided(), 1, "the swap reached the click decision");
+                    assert_eq!(content(game, POS, 0), 10);
+                    assert_eq!(game.lan.as_ref().unwrap().hub.guests[0].offhand, offhand);
+                    let corrections: Vec<_> = rx
+                        .try_iter()
+                        .flat_map(|out| match out {
+                            Out::Packet(body) => vec![body],
+                            Out::Packets(bodies) => bodies,
+                            Out::Disconnect(_) => Vec::new(),
+                        })
+                        .filter_map(|body| {
+                            let mut reader = Reader::new(&body);
+                            let id = reader.varint().unwrap();
+                            match Clientbound::decode(id, reader.rest()).unwrap() {
+                                Clientbound::SetPlayerInventory(p) if p.slot == 40 => Some(p.item),
+                                _ => None,
+                            }
+                        })
+                        .collect();
+                    assert_eq!(corrections, [expected]);
 
                     script(Script {
                         clicked: Some(Flow::Continue),

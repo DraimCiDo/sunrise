@@ -1071,10 +1071,6 @@ mod tests {
             // A menu: closing it returns the carried stack and leaves no menu behind.
             let stone = ItemStack::new("minecraft:stone", 4);
             let host = game.lan.as_mut().unwrap();
-            {
-                let value = Some(stone.clone());
-                host.hub.guests.update(0, |guest| guest.carried = value);
-            }
             host.hub
                 .open_native_menu(
                     1,
@@ -1083,6 +1079,9 @@ mod tests {
                     vec![Some(stone.clone())],
                 )
                 .unwrap();
+            host.hub
+                .guests
+                .update(0, |guest| guest.carried = Some(stone.clone()));
             let menu = game.player_container_menu(player).unwrap();
             assert_ne!(menu.container_id(game), Some(0));
             game.lan

@@ -8,9 +8,8 @@ slot or a consumed stack is `None`; it is never a zero-count `ItemStack`.
 Every loaded item, vanilla or modded, has an `ItemKey`. Resolve identifiers through
 `Host::item_key` once when loading data and retain the key. Forward references requested during
 registration keep their slots when the load completes; unresolved references refuse the load.
-Keys are process-local identities, not persistent names. Tags likewise have retained `TagKey`
-identities, while their item and fluid membership is read through `Host::tags` and changes on
-reload. Unknown tags are empty; unavailable authoritative mappings return `None`.
+Keys are process-local identities, not persistent names. See [Item values and tag names](../../concepts/registry-keys.md#item-values-and-tag-names)
+for retaining a `TagKey` and reading the current membership through `Host::tags`.
 
 ## Stored values and effective components
 

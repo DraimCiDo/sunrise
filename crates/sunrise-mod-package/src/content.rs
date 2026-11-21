@@ -1710,13 +1710,7 @@ impl Content {
                 self.entity_types.push(EntityType { id: kind, ..file });
                 continue;
             }
-            if !file.attributes.is_empty() {
-                return Err(format!(
-                    "{name}: only a living type has attributes (its template is {})",
-                    file.template
-                ));
-            }
-            file.validate_thrown_attachments_and_sounds(&name)?;
+            file.validate_thrown_overrides(&name)?;
             let Some(item) = &file.item else {
                 return Err(format!(
                     "{name}: a thrown type names the item that throws it"

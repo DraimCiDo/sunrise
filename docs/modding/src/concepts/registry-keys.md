@@ -350,13 +350,23 @@ A bare name uses the `minecraft` namespace; an invalid name refuses the mod at l
 `tags.key(&identifier)` resolves the same key from a validated identifier. Naming a tag does
 not require it to have any members. Item, block and fluid tags share one name table; the
 membership method chooses the registry. Reload replaces membership, not key identity.
-`tags.is_in_tag(item_key, tag_key)` tests merged item membership. `tags.items(tag_key)`,
-`tags.blocks(tag_key)` and `tags.fluids(tag_key)` return registered keys in vanilla's member order. Unknown tags
-return false or empty lists. Clients read the tags sent by their server. Membership reads return `None` before
-authoritative tags are applied or if the relevant registry mapping is unavailable. Key resolution itself can be
-refused if the runtime cannot allocate a name slot. No lookup stringifies a retained key.
-Block enumeration returns `BlockKey` values, including blocks no mod requested. An unresolved
-member returns `None` for the entire list, not a partial result.
+`tags.is_in_tag(item_key, tag_key)` tests merged item membership. It returns `Some(false)`
+for either an absent tag or a loaded empty tag. Use `tags.items(tag_key)`,
+`tags.blocks(tag_key)` or `tags.fluids(tag_key)` to tell them apart. Each returns a
+`TagMembers<K>` for the registry's key type:
+
+- `Missing`: no tag with this name was bound. An unresolved required entry, including a
+  required reference to another unbound tag, keeps the whole tag out of the table.
+- `Members(keys)`: the bound tag's keys in vanilla's order. Absent optional entries are
+  skipped, so a declared tag can be present with no members.
+- `Unavailable`: that registry's authoritative tag table has not been applied, or a member
+  key cannot be resolved. The query never returns partial membership.
+
+Include a fallback arm when matching `TagMembers`: the enum is non-exhaustive.
+
+Clients read only the tags their server sent. Item and block enumeration includes keys no
+mod requested. Key resolution itself can be refused if the runtime cannot allocate a name
+slot. No lookup stringifies a retained key.
 The engine `TagRegistry`, `StackData`, `StackView` and `DisplayContext` are not API types.
 
 ## Scoped Parts

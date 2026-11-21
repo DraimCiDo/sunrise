@@ -313,6 +313,21 @@ impl Game<'_> {
         let Some(internal) = Self::inventory_screen_slot(&menu, slot) else {
             return;
         };
+        if container == 0
+            && let Some(r) = self.remote.as_mut().filter(|r| r.menu.as_ref().is_some())
+        {
+            match internal {
+                100..=103 => {
+                    r.inventory_craft_grid[internal - 100] = item;
+                    return;
+                }
+                200 => {
+                    r.inventory_craft_result = item;
+                    return;
+                }
+                _ => {}
+            }
+        }
         if internal == 200 {
             // ClientboundContainerSetSlotPacket for the open menu's slot 0: the
             // server's result of its own recipes (a world's data packs' too).

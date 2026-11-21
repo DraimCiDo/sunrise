@@ -319,8 +319,12 @@ impl Game<'_> {
             };
         // Visit independently readable registries before consuming any result.
         // One rejected winner must not hide the other entries' diagnostics.
-        let loot =
-            sunrise_world::loot::LootData::load(root, &overlay, self.res.core.item_data.defaults());
+        let loot = sunrise_world::loot::LootData::load_with_damage(
+            root,
+            &overlay,
+            self.res.core.item_data.defaults(),
+            &health.damage,
+        );
         let advancements = Arc::new(sunrise_client::advancements::Tree::load_with(
             &root.join("data"),
             &overlay,
@@ -749,10 +753,11 @@ impl Game<'_> {
         }
         self.server_items = None;
         let overlay = pack_files(&self.world_tables);
-        let loot = match sunrise_world::loot::LootData::load(
+        let loot = match sunrise_world::loot::LootData::load_with_damage(
             &self.options.resources,
             &overlay,
             self.res.item_defaults(),
+            &self.health_resources.damage,
         ) {
             Ok(mut loot) => {
                 if !mod_api::__private::mods().is_empty() {

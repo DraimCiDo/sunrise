@@ -33,3 +33,25 @@ frame
 add 7 minecraft:item
 item 7
 frame
+remove 91 40 3 8 9 7
+add 23 minecraft:end_crystal
+add 82 minecraft:zombie
+add 110 minecraft:ender_dragon
+add 20 minecraft:end_crystal
+frame
+passengers 82 23 110 20
+beams 20
+frame
+passengers 82
+add 23 minecraft:end_crystal
+frame
+remove 110 20
+add 110 minecraft:ender_dragon
+add 20 minecraft:end_crystal
+frame
+respawn minecraft:the_end
+position
+frame
+add 110 minecraft:ender_dragon
+add 23 minecraft:end_crystal
+frame

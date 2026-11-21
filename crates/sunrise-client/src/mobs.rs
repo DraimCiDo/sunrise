@@ -262,6 +262,11 @@ pub struct MobType {
     pub passenger_attachments: Vec<[f32; 3]>,
 }
 impl MobType {
+    /// `EntityType.isAllowedInPeaceful`, including a living mod type's override.
+    pub fn allowed_in_peaceful(&self) -> bool {
+        !self.flags.not_in_peaceful
+    }
+
     pub fn inventory_stack_limit(&self, stack: &crate::items::ItemStack) -> u32 {
         stack
             .data()
@@ -490,6 +495,9 @@ impl MobTypes {
             }
             let category = t["category"].as_str().unwrap_or("creature").to_owned();
             let mut flags = def.flags(t["fire_immune"].as_bool().unwrap_or(false));
+            if let Some(allowed) = t["allowed_in_peaceful"].as_bool() {
+                flags.not_in_peaceful = !allowed;
+            }
             flags.powder_snow_walkable = entity_type_tags
                 .get("minecraft:powder_snow_walkable_mobs")
                 .is_some_and(|members| members.contains(&id));

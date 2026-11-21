@@ -1705,30 +1705,47 @@ pub fn encode_extra_components(stack: &ItemStack) -> Option<Tag> {
     encode_stack_components(stack, false, &raw_template_tag)
 }
 
-/// The saved `DataComponentPatch.CODEC`, compared against the loaded prototype.
-/// Nested templates retain their raw patches, including redundant entries and removals.
-pub fn encode_components(stack: &ItemStack, items: &crate::items::Items) -> Option<Tag> {
-    let mut components = encode_stack_components(stack, true, &raw_template_tag)?;
-    let Some(prototype) = items.component_defaults.get(stack.item.as_ref()) else {
-        return Some(components);
-    };
-    let Some(info) = items.get(&stack.item) else {
-        return Some(components);
-    };
-    // Equality belongs to the component codec, not its saved NBT numeric width.
-    if let Tag::Compound(entries) = &mut components {
-        entries.retain(|id, _| {
-            // PatchedDataComponentMap: a removal stays in the patch only where
-            // the prototype has the component; elsewhere nothing is removed.
-            if let Some(removed) = id.0.strip_prefix(&[u16::from(b'!')]) {
-                return prototype.contains_key(&JavaString(removed.to_vec()));
-            }
-            !prototype.contains_key(id)
+/// `PatchedDataComponentMap`: retain sets that differ from the item's prototype and
+/// removals of components the prototype actually has. Unknown prototypes leave the patch intact.
+pub fn component_patch_filter<'a>(
+    stack: &'a ItemStack,
+    items: &'a crate::items::Items,
+) -> impl Fn(&JavaString, bool) -> bool + 'a {
+    let prototype = items
+        .component_defaults
+        .get(stack.item.as_ref())
+        .zip(items.get(&stack.item));
+    move |id, removed| {
+        let Some((keys, info)) = prototype else {
+            return true;
+        };
+        let present = keys.contains_key(id);
+        if removed {
+            present
+        } else {
+            // Equality belongs to the component codec, not its saved NBT numeric width.
+            !present
                 || !ingredient_components::component_equal(
                     &id.to_string_lossy(),
                     stack,
                     &info.component_prototype,
                 )
+        }
+    }
+}
+
+/// The saved `DataComponentPatch.CODEC`, compared against the loaded prototype.
+/// Nested templates retain their raw patches, including redundant entries and removals.
+pub fn encode_components(stack: &ItemStack, items: &crate::items::Items) -> Option<Tag> {
+    let mut components = encode_stack_components(stack, true, &raw_template_tag)?;
+    if let Tag::Compound(entries) = &mut components {
+        let keep = component_patch_filter(stack, items);
+        entries.retain(|id, _| {
+            if let Some(removed) = id.0.strip_prefix(&[u16::from(b'!')]) {
+                keep(&JavaString(removed.to_vec()), true)
+            } else {
+                keep(id, false)
+            }
         });
         if entries.is_empty() {
             return None;

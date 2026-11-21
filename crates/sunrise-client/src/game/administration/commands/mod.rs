@@ -2370,7 +2370,8 @@ impl Game<'_> {
         {
             return Err(err("commands.summon.invalidPosition", &[]));
         }
-        if self.ui.difficulty == 0 && !sunrise_client::mobs::finalize::allowed_in_peaceful(&kind) {
+        let mob_type = self.res.mob_types().get(&kind);
+        if self.difficulty_id() == 0 && mob_type.is_some_and(|t| !t.allowed_in_peaceful()) {
             return Err(err("commands.summon.failed.peaceful", &[]));
         }
         let short = kind.trim_start_matches("minecraft:").to_owned();
@@ -2388,7 +2389,7 @@ impl Game<'_> {
             return Ok(1);
         }
         let name;
-        if kind == "minecraft:ender_dragon" || self.res.mob_types().contains_key(&kind) {
+        if kind == "minecraft:ender_dragon" || mob_type.is_some() {
             let id = self
                 .spawn_mob_spawned(
                     &short,
@@ -4257,6 +4258,188 @@ mod difficulty_tests {
 #[cfg(test)]
 #[path = "summon_item_orb_tests.rs"]
 mod summon_item_orb_tests;
+
+#[cfg(test)]
+pub(in crate::game) mod peaceful_tests {
+    use super::{Arg, Context, Game};
+    use crate::game::{execution_role::ExecutionRole, native_entity_refs::tests as fixture};
+    use std::sync::{Arc, OnceLock};
+    use sunrise_client::{
+        chunk::Chunk,
+        items::ItemStack,
+        mod_content::{self, ContentMod},
+    };
+    use sunrise_command::ParsedArg;
+    use sunrise_core::nbt::Tag;
+    use sunrise_mod_package::{Content, Package, enabled::EnabledMods};
+
+    pub(in crate::game) const TRADER: &str = "peaceful_test:trader";
+
+    pub(in crate::game) fn trader_egg() -> ItemStack {
+        let mut stack = ItemStack::new("minecraft:cow_spawn_egg", 1);
+        stack.data_mut().set_other(
+            "minecraft:entity_data",
+            Some(Tag::compound([("id", Tag::String(TRADER.into()))])),
+        );
+        stack
+    }
+
+    pub(in crate::game) fn with_types(role: ExecutionRole, test: impl FnOnce(&mut Game<'_>)) {
+        // All cases use the same data-only fixture. Build its overlay once; never edit the base.
+        static PACKAGE: OnceLock<(tempfile::TempDir, std::path::PathBuf)> = OnceLock::new();
+        let (_, root) = PACKAGE.get_or_init(|| {
+            let scratch = tempfile::tempdir().unwrap();
+            let path = scratch.path().join("peaceful.smod");
+            let manifest = r#"id = "peaceful_test"
+name = "Peaceful test"
+version = "1.0"
+api = "0.2"
+side = "both"
+capabilities = ["registries"]
+"#;
+            let rows: [(&str, &[u8]); 3] = [
+                (
+                    "data/peaceful_test/sunrise/entity_type/trader.json",
+                    br#"{"template":"minecraft:wandering_trader","allowed_in_peaceful":false}"#,
+                ),
+                (
+                    "data/peaceful_test/sunrise/entity_type/zombie.json",
+                    br#"{"template":"minecraft:zombie","allowed_in_peaceful":true}"#,
+                ),
+                (
+                    "data/peaceful_test/sunrise/entity_type/inherited_zombie.json",
+                    br#"{"template":"minecraft:zombie"}"#,
+                ),
+            ];
+            std::fs::write(&path, Package::write_files(manifest, &rows).unwrap()).unwrap();
+            let package = Package::read(&path).unwrap();
+            let mods = [ContentMod {
+                id: "peaceful_test".into(),
+                content: Content::read(&path, &package.manifest).unwrap(),
+                jars: Vec::new(),
+            }];
+            let inventory = EnabledMods::new([("peaceful_test".into(), mod_api::Side::Both)]);
+            let root = mod_content::resource_root(
+                &fixture::fixture_root(),
+                scratch.path(),
+                &mods,
+                scratch.path(),
+                &inventory,
+            )
+            .unwrap();
+            (scratch, root)
+        });
+        mod_platform::testing::with_mods(Arc::from([]), || {
+            fixture::with_game_role(root.clone(), role, |game| {
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                game.build_registries();
+                game.set_difficulty_forced(0);
+                test(game);
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn a_persisted_mod_type_despawns_when_difficulty_switches_to_peaceful() {
+        with_types(ExecutionRole::IntegratedServer, |game| {
+            // Restoring a saved entity still works in Peaceful. Its own
+            // despawn check, not the save loader, enforces the type's rule.
+            let saved = Tag::compound([
+                ("id", Tag::String(TRADER.into())),
+                (
+                    "Pos",
+                    Tag::List(
+                        [4.5_f64, 64.0, 4.5]
+                            .map(|v| Tag::Double(v.to_bits()))
+                            .to_vec(),
+                    ),
+                ),
+                ("PersistenceRequired", Tag::Byte(1)),
+                ("NoAI", Tag::Byte(1)),
+            ]);
+            let id = game.load_mob(saved, None).unwrap();
+            let trader = game.mobs.iter().find(|mob| mob.id == id).unwrap();
+            assert!(trader.persistent && trader.no_ai);
+            game.tickets
+                .update(Some(sunrise_client::ticket_levels::Sources {
+                    forced: vec![(0, 0)],
+                    ..Default::default()
+                }));
+
+            game.set_difficulty_forced(2);
+            game.tick_creature_entities().unwrap();
+            assert!(game.mobs.iter().any(|mob| mob.id == id));
+            game.set_difficulty_forced(0);
+            game.tick_creature_entities().unwrap();
+            assert!(!game.mobs.iter().any(|mob| mob.id == id));
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn summon_checks_the_mod_type_instead_of_its_template() {
+        with_types(ExecutionRole::IntegratedServer, |game| {
+            let context = |id: &str, nbt: Option<&str>| {
+                let arg = |name: &str, value| ParsedArg {
+                    name: name.into(),
+                    value,
+                    range: (0, 0),
+                };
+                let mut args = vec![arg("entity", Arg::Resource(id.into()))];
+                if let Some(nbt) = nbt {
+                    args.push(arg("nbt", Arg::Str(nbt.into())));
+                }
+                Context {
+                    root: 0,
+                    nodes: vec![],
+                    args,
+                    command: None,
+                    range: (0, 0),
+                    child: None,
+                    literals: vec![],
+                }
+            };
+            for id in [TRADER, "peaceful_test:inherited_zombie", "minecraft:zombie"] {
+                for nbt in [None, Some("{NoAI:1b}")] {
+                    let error = game.cmd_summon(&context(id, nbt)).unwrap_err();
+                    assert_eq!(
+                        error.key, "commands.summon.failed.peaceful",
+                        "{id}, NBT {nbt:?}"
+                    );
+                }
+            }
+            assert!(game.mobs.is_empty());
+            assert_eq!(
+                game.cmd_summon(&context("peaceful_test:zombie", Some("{UUID:[I;1,2,3,4]}"))),
+                Ok(1)
+            );
+            assert!(
+                game.mobs
+                    .iter()
+                    .any(|mob| mob.kind.id == "peaceful_test:zombie")
+            );
+            for uuid in ["", ",UUID:[I;1,2,3,4]"] {
+                // The already loaded zombie owns the second rider's UUID.
+                // The skipped rider's own permitted rider must not spawn either.
+                let nbt = format!(
+                    "{{Passengers:[{{id:\"{TRADER}\"{uuid},Passengers:[{{id:\"minecraft:pig\"}}]}}]}}"
+                );
+                let before = game.mobs.len();
+                assert_eq!(
+                    game.cmd_summon(&context("minecraft:cow", Some(&nbt))),
+                    Ok(1)
+                );
+                assert_eq!(game.mobs.len(), before + 1);
+                let cow = &game.mobs[before];
+                assert_eq!(cow.kind.id, "minecraft:cow");
+                assert!(cow.extra.rider.is_none());
+            }
+        });
+    }
+}
 
 #[cfg(test)]
 mod summon_tests {

@@ -253,9 +253,11 @@ impl Menu {
     }
 }
 
-/// A native menu notice for the game once it has the hub back.
+/// A menu notice for the game once it has the hub back.
 #[derive(Clone, Debug, PartialEq)]
 pub enum NativeMenuEvent {
+    /// The cursor of a menu the hub closed itself, to be returned to its player.
+    ReturnCarried { conn: u32, item: ItemStack },
     /// The menu closed: by the player, by the server, another opened, or
     /// the player left.
     Closed {

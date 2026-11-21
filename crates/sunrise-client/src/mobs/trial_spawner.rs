@@ -1091,13 +1091,14 @@ impl TrialSpawnerExt for TrialSpawner {
             }
         };
         // Entity types Sunrise cannot create spawn nothing.
-        let (species, width, height, _) = l.mob_type(&id)?;
+        let kind = l.mob_type(&id)?;
+        let (species, width, height) = (kind.species, kind.width as f32, kind.height as f32);
         let spawn_box = spawn_selection::spawn_aabb(species, at[0], at[1], at[2], width, height);
         if !l.no_collision(spawn_box) || !in_line_of_sight(l, center(pos), at) {
             return None;
         }
         let block = at.map(|v| v.floor() as i32);
-        if !spawn_rules::check_spawn_rules(&id, species, l, Reason::TrialSpawner, random, block) {
+        if !spawn_rules::check_spawn_rules(kind, l, Reason::TrialSpawner, random, block) {
             return None;
         }
         if let Some(rules) = data.custom_spawn_rules

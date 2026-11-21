@@ -228,15 +228,27 @@ impl Game<'_> {
         self.apply_remote_abilities();
     }
 
-    /// `C::ContainerSetContent`: its arms of `apply_packet`, guard and order kept.
+    /// `ClientPacketListener.handleContainerContent` initializes only the addressed menu.
     pub(super) fn apply_container_set_content_packet(&mut self, p: play::ContainerSetContent) {
-        self.remote_menu_state(p.container, p.state);
-        for (slot, item) in p.items.iter().enumerate() {
-            let stack = self.to_stack(item);
-            self.set_menu_slot(p.container, slot as i32, stack);
+        let open = self
+            .remote
+            .as_ref()
+            .and_then(|r| r.menu.as_ref())
+            .map_or(0, |m| m.0);
+        if p.container == 0 || p.container == open {
+            self.remote_menu_state(p.container, p.state);
+            for (slot, item) in p.items.iter().enumerate() {
+                let stack = self.to_stack(item);
+                self.set_menu_slot(p.container, slot as i32, stack);
+            }
+            let carried = self.to_stack(&p.carried);
+            if p.container == open {
+                self.carried = carried;
+            } else if let Some(r) = self.remote.as_mut() {
+                r.inventory_carried = carried;
+            }
+            self.remote_synced();
         }
-        self.carried = self.to_stack(&p.carried);
-        self.remote_synced();
     }
 
     /// `C::ContainerSetSlot`: its arms of `apply_packet`, guard and order kept.

@@ -715,10 +715,11 @@ impl Game<'_> {
         let (end_portal, gateway) = self.inside_end_portals(at, WIDTH, HEIGHT);
         if end_portal && !riding {
             // EndPortalBlock.entityInside: the first exit from the End shows the credits.
-            let Some(host) = self.lan.as_mut() else {
-                return;
-            };
             if self.dim == Dim::End && !host.hub.guest(conn).is_some_and(|g| g.seen_credits) {
+                let _ = self.guest_close_menus_for_travel(conn);
+                let Some(host) = self.lan.as_mut() else {
+                    return;
+                };
                 let _ = host
                     .hub
                     .guests
@@ -911,13 +912,12 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        let Some(i) = host.hub.guests.iter().position(|g| g.conn == conn) else {
-            return;
-        };
         if target != self.dim {
             drop_hook(host, conn);
         }
-        let g = &host.hub.guests[i];
+        let Some(g) = host.hub.guest(conn) else {
+            return;
+        };
         let from = Vec3::new(g.position[0], g.position[1], g.position[2]);
         let yaw = g.yaw;
         // The vehicle the player rides travels with it: the player is its
@@ -957,10 +957,20 @@ impl Game<'_> {
             .or_else(|| self.end_destination(entering, target))
             .unwrap_or(Vec3::new(from.x * scale, from.y, from.z * scale));
         self.end_portal_travel = false;
-        if let Err(e) = self.enter_level(target) {
-            log::error!("could not open {}: {e}", target.id());
+        let retired_window = if source != target {
+            self.guest_close_menus_for_travel(conn)
+        } else {
+            None
+        };
+        if !self.enter_travel_destination(conn, target, retired_window) {
             return;
         }
+        let Some(i) = self.guest_index(conn) else {
+            if let Err(e) = self.enter_level(source) {
+                log::error!("could not reopen {}: {e}", source.id());
+            }
+            return;
+        };
         let destination = match plan {
             Some(plan) => self.arrival_centre(&plan),
             None => scaled,
@@ -1019,6 +1029,29 @@ impl Game<'_> {
         if let Err(e) = self.enter_level(source) {
             log::error!("could not reopen {}: {e}", source.id());
         }
+    }
+
+    /// Menu removal is silent on a successful trip: the respawn closes the
+    /// old screen. On failure, close it explicitly unless a listener opened
+    /// a replacement during removal.
+    fn enter_travel_destination(
+        &mut self,
+        conn: u32,
+        dim: Dim,
+        retired_window: Option<i32>,
+    ) -> bool {
+        let Err(e) = self.enter_level(dim) else {
+            return true;
+        };
+        log::error!("could not open {}: {e}", dim.id());
+        if let Some(container) = retired_window
+            && let Some(host) = self.lan.as_mut()
+            && super::native_menus::open_menu_of(host, conn).is_none()
+        {
+            host.hub
+                .send_to(conn, &C::ContainerClose(play::ContainerClose { container }));
+        }
+        false
     }
 
     /// A respawned player waits at its point outside the Overworld for the
@@ -1521,20 +1554,37 @@ impl Game<'_> {
             return;
         }
         for t in std::mem::take(&mut self.level_teleports) {
-            let Some(host) = self.lan.as_mut() else {
-                return;
-            };
-            let Some(i) = host.hub.guests.iter().position(|g| g.conn == t.conn) else {
+            let Some(guest) = self.lan.as_ref().and_then(|host| host.hub.guest(t.conn)) else {
                 continue;
             };
-            let source = self.dim;
-            if t.dim != source {
-                drop_hook(host, t.conn);
-            }
-            if let Err(e) = self.enter_level(t.dim) {
-                log::error!("could not open {}: {e}", t.dim.id());
+            let back = self.dim;
+            let source = Dim::from_id(&guest.dimension);
+            let retired_window = if t.dim != source {
+                if let Err(e) = self.enter_level(source) {
+                    log::error!("could not open {}: {e}", source.id());
+                    continue;
+                }
+                let window = self.guest_close_menus_for_travel(t.conn);
+                if let Some(host) = self.lan.as_mut() {
+                    drop_hook(host, t.conn);
+                }
+                window
+            } else {
+                None
+            };
+            // Cursor overflow and opening a level can run listeners that
+            // change the guest list. Look up the index only after both.
+            let index = if self.enter_travel_destination(t.conn, t.dim, retired_window) {
+                self.guest_index(t.conn)
+            } else {
+                None
+            };
+            let Some(i) = index else {
+                if let Err(e) = self.enter_level(back) {
+                    log::error!("could not reopen {}: {e}", back.id());
+                }
                 continue;
-            }
+            };
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
@@ -1596,8 +1646,8 @@ impl Game<'_> {
                 hold: true,
                 left: Some(source),
             });
-            if let Err(e) = self.enter_level(source) {
-                log::error!("could not reopen {}: {e}", source.id());
+            if let Err(e) = self.enter_level(back) {
+                log::error!("could not reopen {}: {e}", back.id());
             }
         }
     }

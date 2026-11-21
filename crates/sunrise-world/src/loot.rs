@@ -296,8 +296,8 @@ pub struct LootData {
     /// the items engine's selection table, never with another world's answers.
     primary_answers: crate::enchantment_answers::AnswerTable,
     support_answers: crate::enchantment_answers::AnswerTable,
-    /// Tag files' layers by (registry, tag id).
-    tags: HashMap<(String, String), crate::tag_layers::TagLayers>,
+    /// Bound tags by registry and tag ID.
+    tags: loot_tags::BoundTags,
     /// Smelting recipes in recipe id order: (ingredient, result, result count).
     smelting: Vec<(Value, String, i32)>,
 }
@@ -724,7 +724,33 @@ impl LootData {
         defaults: &crate::item_defaults::ItemDefaults,
         types: types::Types,
     ) -> io::Result<Self> {
-        let mut loaded = Self::load_table_candidate(root, overlay, defaults, types)?;
+        Self::load_generation(root, overlay, defaults, types, None)
+    }
+
+    /// Load server loot with the damage catalog already bound for this generation.
+    pub fn load_with_damage(
+        root: &Path,
+        overlay: &PackOverlay,
+        defaults: &crate::item_defaults::ItemDefaults,
+        damage: &crate::damage_source::Catalog,
+    ) -> io::Result<Self> {
+        Self::load_generation(
+            root,
+            overlay,
+            defaults,
+            types::Types::capture(),
+            Some(damage),
+        )
+    }
+
+    fn load_generation(
+        root: &Path,
+        overlay: &PackOverlay,
+        defaults: &crate::item_defaults::ItemDefaults,
+        types: types::Types,
+        damage: Option<&crate::damage_source::Catalog>,
+    ) -> io::Result<Self> {
+        let mut loaded = Self::load_table_candidate(root, overlay, defaults, types, damage)?;
         let mut recipes = HashMap::new();
         load_kind(&root.join("data"), "recipe", &mut recipes)?;
         overlay_map(overlay, "recipe", &mut recipes);
@@ -770,7 +796,7 @@ impl LootData {
         defaults: &crate::item_defaults::ItemDefaults,
     ) -> io::Result<Self> {
         let mut loaded =
-            Self::load_table_candidate(root, overlay, defaults, types::Types::capture())?;
+            Self::load_table_candidate(root, overlay, defaults, types::Types::capture(), None)?;
         loaded.prepare_types()?;
         Ok(loaded)
     }
@@ -780,6 +806,7 @@ impl LootData {
         overlay: &PackOverlay,
         defaults: &crate::item_defaults::ItemDefaults,
         types: types::Types,
+        damage: Option<&crate::damage_source::Catalog>,
     ) -> io::Result<Self> {
         let all = root.join("data");
         let tables = shared_tables(root, overlay)?;
@@ -836,7 +863,34 @@ impl LootData {
                 }
             })
             .collect();
-        let mut tags = HashMap::new();
+        let binding = holder_sets::Binding::load(root, overlay, &items, &enchantments)?;
+        let builtin = crate::tag_layers::builtin_ids(root)?;
+        let standalone_damage;
+        let damage = match damage {
+            Some(damage) => damage,
+            None => {
+                // Standalone loot fixtures may omit the prepared export, but
+                // their pack damage types still enter through the same loader.
+                standalone_damage = if root.join("damage-catalog.json").try_exists()? {
+                    crate::damage_source::Catalog::load(root, overlay)?
+                } else {
+                    crate::damage_source::Catalog::default().with_packs(root, overlay)?
+                };
+                &standalone_damage
+            }
+        };
+        let mut tags = HashMap::from([(
+            "damage_type".to_owned(),
+            damage
+                .tags()
+                .map(|tag| {
+                    (
+                        tag.to_owned(),
+                        damage.tag_members(tag).map(str::to_owned).collect(),
+                    )
+                })
+                .collect(),
+        )]);
         for registry in [
             "item",
             "block",
@@ -844,32 +898,34 @@ impl LootData {
             "enchantment",
             "instrument",
             "entity_type",
-            "damage_type",
             "predicate",
             "item_modifier",
             // What `location_check`'s `biomes` names.
             "worldgen/biome",
         ] {
-            let mut raw = HashMap::new();
-            load_kind(&all, &format!("tags/{registry}"), &mut raw)?;
-            for (name, value) in raw {
-                let layers = crate::tag_layers::TagLayers::from_file(&value);
-                tags.insert((registry.to_owned(), name), layers);
+            let raw = crate::tag_layers::layers(root, registry, overlay)?;
+            if matches!(registry, "predicate" | "item_modifier") {
+                loot_tags::check_cycles(registry, &raw)?;
             }
-            // The packs' entries join the game's own, in pack order; a
-            // `replace` file drops what the lower sources put in and `remove`
-            // takes entries out (`TagLoader.load` walks the stack the same way).
-            for (id, files) in overlay.tag_kind(registry) {
-                for bytes in files {
-                    let Ok(v) = serde_json::from_slice::<Value>(bytes) else {
-                        continue;
-                    };
-                    let slot = tags.entry((registry.to_owned(), id.clone())).or_default();
-                    slot.push(&v);
-                }
-            }
+            let contains = |id: &str| match registry {
+                "item" => items.contains_key(id),
+                "block" => builtin.get(registry).is_some_and(|ids| ids.contains(id)),
+                "fluid" => builtin.get(registry).map_or_else(
+                    || crate::fluid::FluidKind::from_name(id).is_some(),
+                    |ids| ids.contains(id),
+                ),
+                "predicate" => predicates.contains_key(id),
+                "item_modifier" => modifiers.contains_key(id),
+                _ => binding.ids(registry).map_or_else(
+                    || builtin.get(registry).is_none_or(|ids| ids.contains(id)),
+                    |ids| ids.iter().any(|entry| entry == id),
+                ),
+            };
+            tags.insert(
+                registry.to_owned(),
+                crate::tag_layers::TagLayers::bind(registry, &raw, contains),
+            );
         }
-        let binding = holder_sets::Binding::load(root, overlay, &items, &enchantments)?;
         let mut loaded = Self {
             holder_sets: Default::default(),
             copies_entity_nbt: false,
@@ -1020,7 +1076,7 @@ impl LootData {
     /// Tag members in tag order (nested tags expanded in place, duplicates
     /// dropped).
     fn tag(&self, registry: &str, name: &str) -> Vec<String> {
-        loot_tags::members(&self.tags, registry, name)
+        self.members(registry, name).unwrap_or_default()
     }
     /// A published HolderSet: "#tag", "id" or resolved IDs. Objects bind at load.
     fn holder_set(&self, registry: &str, v: &Value) -> Vec<String> {
@@ -2296,18 +2352,80 @@ mod namespace_tests {
         assert!(present.contains_key("demo:replaced"));
         assert!(!present.contains_key("demo:unknown"));
         assert!(Arc::ptr_eq(&absent, &shared_tables(&root, &off).unwrap()));
-        fs::write(root.join("items.json"), "{}").unwrap();
+        fs::write(root.join("items.json"), r#"{"minecraft:stone":{}}"#).unwrap();
         let defaults = crate::item_defaults::read(&root).unwrap();
         let loot = LootData::load(&root, &off, &defaults).unwrap();
+        assert_eq!(loot.tags["item"]["demo:food"], ["minecraft:stone"]);
+        assert!(loot.tags["item"].contains_key("demo:absent"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn damage_predicate_reads_only_bound_tags_of_the_frozen_registry() {
+        let root = std::env::temp_dir().join(format!("sunrise-loot-damage-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("items.json"),
+            r#"{"minecraft:stick":{},"minecraft:paper":{}}"#,
+        )
+        .unwrap();
+        let defaults = crate::item_defaults::read(&root).unwrap();
+        let initial = vec![(
+            "damage_type/test:hit".into(),
+            vec![br#"{"message_id":"hit","scaling":"never","exhaustion":0}"#.to_vec()],
+        )];
+        let damage = crate::damage_source::Catalog::default()
+            .with_packs(&root, &PackOverlay::new(&initial))
+            .unwrap();
+        let pool = |tag, item| {
+            serde_json::json!({
+                "rolls": 1,
+                "condition": {"type":"minecraft:damage_source_properties", "predicate":{
+                    "tags":[{"id":tag,"expected":true}]
+                }},
+                "entries": [{"type":"minecraft:item","name":item}]
+            })
+        };
+        let files = vec![
+            (
+                "tags/test:damage_type/good".into(),
+                vec![br#"{"values":["test:hit"]}"#.to_vec()],
+            ),
+            (
+                "tags/test:damage_type/broken".into(),
+                vec![br#"{"values":["test:hit","test:absent"]}"#.to_vec()],
+            ),
+            (
+                "loot_table/test:drop".into(),
+                vec![
+                    serde_json::to_vec(&serde_json::json!({"pools":[
+                        pool("#test:good", "minecraft:stick"),
+                        pool("#test:broken", "minecraft:paper"),
+                    ]}))
+                    .unwrap(),
+                ],
+            ),
+        ];
+        // The original pack no longer supplies the definition, but reload
+        // retains the damage registry and binds only these new tag files.
+        let overlay = PackOverlay::new(&files);
+        let damage = damage.reload_tags(&root, &overlay).unwrap();
+        let loot = LootData::load_with_damage(&root, &overlay, &defaults, &damage).unwrap();
+        let params = EntityLootParams {
+            damage: Some(LootDamage {
+                kind: "test:hit".into(),
+                ..LootDamage::default()
+            }),
+            ..EntityLootParams::default()
+        };
+        let mut random = sunrise_core::random::LegacyRandom::new(1);
+        let drops = loot.roll_entity("test:drop", &mut random, &params);
         assert_eq!(
-            loot.tags[&("item".into(), "demo:food".into())],
-            crate::tag_layers::TagLayers::from_file(
-                &serde_json::json!({"values": ["minecraft:stone"]})
-            )
-        );
-        assert!(
-            loot.tags
-                .contains_key(&("item".into(), "demo:absent".into()))
+            drops
+                .iter()
+                .map(|stack| stack.item.as_str())
+                .collect::<Vec<_>>(),
+            ["minecraft:stick"]
         );
         fs::remove_dir_all(root).unwrap();
     }
@@ -3004,7 +3122,7 @@ mod namespace_tests {
         let root = std::env::temp_dir().join(format!("sunrise-loot-tag-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("data/minecraft/tags/item")).unwrap();
-        fs::write(root.join("items.json"), "{}").unwrap();
+        fs::write(root.join("items.json"), r#"{"minecraft:apple":{},"minecraft:bread":{},"minecraft:cookie":{},"minecraft:kelp":{}}"#).unwrap();
         fs::write(
             root.join("data/minecraft/tags/item/food.json"),
             r#"{"values": ["minecraft:bread", "minecraft:cookie"]}"#,

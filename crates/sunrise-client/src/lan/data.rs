@@ -123,7 +123,7 @@ const PACK_REGISTRIES: &[&str] = &[
 #[path = "data_pack_registries.rs"]
 mod pack_registries;
 pub use pack_registries::PackRegistryDefinitions;
-use pack_registries::bind_registry_tags;
+use pack_registries::bind_dialog_tags;
 
 /// World overlays key definition files by `registry/id`.
 pub fn is_pack_registry_file(key: &str) -> bool {
@@ -210,8 +210,6 @@ pub struct SyncData {
     /// The registry ids of the particle types effects show, looked up once (`effect_meta`).
     effect_particle_ids: std::sync::Mutex<super::effect_meta::ParticleTypeIds>,
 }
-
-use crate::crafting::qualified;
 
 /// Every `*.json` under `dir`, as (path without extension relative to dir, value), sorted;
 /// a file that can't be read or doesn't parse is left out. Through `json_folder`: from the
@@ -756,8 +754,7 @@ impl SyncData {
         // Merge the world's tag files against the admitted registry IDs above.
         drop(registries_step);
         let tags_step = startup::step("sync.tags");
-        let mut tags = Self::load_tags(&root, &builtin, &dynamic, overlay.conditions);
-        Self::merge_pack_tags(&mut tags, &root, overlay, &builtin, &dynamic);
+        let mut tags = Self::load_tags(resources, overlay, &builtin, &dynamic)?;
         Self::merge_damage_tags(&mut tags, resources, overlay, &builtin, &dynamic)?;
         if let Some(kept) = kept.filter(|_| mode == SyncLoad::Reload) {
             // TagLoader.loadPendingTags does not rebind a registry when
@@ -1021,69 +1018,6 @@ impl SyncData {
         Ok(())
     }
 
-    /// The tags the server sends (`TagNetworkSerialization.serializeTagsToNetwork`
-    /// reads the registries' tags as `TagLoader` loaded them from the whole
-    /// pack stack): every synchronized registry the world's packs have tag
-    /// files for is merged again over the resource root's, and
-    /// `minecraft:dialog` always (its tags name the packs' dialogs too).
-    /// Without packs, the root's tags stand.
-    fn merge_pack_tags(
-        tags: &mut UpdateTags,
-        root: &Path,
-        overlay: &sunrise_world::loot::PackOverlay,
-        builtin: &Builtin,
-        dynamic: &Dynamic,
-    ) {
-        let mut keys: Vec<&String> = builtin
-            .registries
-            .keys()
-            .chain(dynamic.registries.keys())
-            .collect();
-        keys.sort();
-        keys.dedup();
-        for key in keys {
-            // Registries.tagsDirPath: `tags/<path>`, a mod's registry under
-            // `tags/<namespace>/<path>`.
-            let kind = match key.split_once(':') {
-                Some(("minecraft", path)) => path.to_owned(),
-                Some((ns, path)) => format!("{ns}/{path}"),
-                None => key.clone(),
-            };
-            if key != "minecraft:dialog" && overlay.tag_kind(&kind).next().is_none() {
-                continue;
-            }
-            Self::merge_registry_tags(tags, root, overlay, builtin, dynamic, key, &kind);
-        }
-    }
-    /// One registry's tags of the pack stack: the resource root's files, then
-    /// each world pack's in order (`TagLoader`: a file adds its values, or
-    /// replaces the earlier ones with `"replace": true`), nested tags expanded
-    /// to the registry's ids.
-    fn merge_registry_tags(
-        tags: &mut UpdateTags,
-        root: &Path,
-        overlay: &sunrise_world::loot::PackOverlay,
-        builtin: &Builtin,
-        dynamic: &Dynamic,
-        key: &str,
-        kind: &str,
-    ) {
-        let Some(names) = Self::registry_names(builtin, dynamic, key) else {
-            return;
-        };
-        let bound = bind_registry_tags(root, overlay, kind, |id, _| names.get(id).copied());
-        tags.registries.retain(|r| r.registry != key);
-        if !bound.is_empty() {
-            tags.registries.push(RegistryTags {
-                registry: key.into(),
-                tags: bound
-                    .into_iter()
-                    .map(|(name, ids)| TagEntry { name, ids })
-                    .collect(),
-            });
-        }
-    }
-
     fn registry_names<'a>(
         builtin: &'a Builtin,
         dynamic: &'a Dynamic,
@@ -1106,92 +1040,57 @@ impl SyncData {
         })
     }
 
-    /// TagNetworkSerialization.serializeTagsToNetwork from the tag files.
+    /// Bind the complete resource/pack stack before translating it to wire IDs.
     fn load_tags(
-        root: &Path,
+        resources: &Path,
+        overlay: &sunrise_world::loot::PackOverlay,
         builtin: &Builtin,
         dynamic: &Dynamic,
-        _conditions: &sunrise_world::conditions::LoadConditions,
-    ) -> UpdateTags {
-        let tag_root = root.join("tags");
-        let mut registries = Vec::new();
-        let mut keys: Vec<String> = builtin
+    ) -> Result<UpdateTags, String> {
+        let mut keys: Vec<_> = builtin
             .registries
             .keys()
             .chain(dynamic.registries.keys())
-            .cloned()
             .collect();
-        keys.sort();
+        keys.sort_unstable();
+        keys.dedup();
+        let mut registries = Vec::new();
         for key in keys {
-            let dir = tag_root.join(key.trim_start_matches("minecraft:"));
-            if !dir.is_dir() {
-                continue;
-            }
-            let mut files = BTreeMap::new();
-            walk(&dir, &mut files, false);
-            if files.is_empty() {
-                continue;
-            }
-            let Some(names) = Self::registry_names(builtin, dynamic, &key) else {
+            let Some(names) = Self::registry_names(builtin, dynamic, key) else {
                 continue;
             };
-            let mut tags = Vec::new();
-            for name in files.keys() {
-                let mut ids = Vec::new();
-                let mut seen = HashSet::new();
-                Self::expand(&files, name, &names, &mut ids, &mut seen);
-                tags.push(TagEntry {
-                    name: format!("minecraft:{name}"),
-                    ids,
-                });
-            }
-            registries.push(RegistryTags {
-                registry: key,
-                tags,
-            });
-        }
-        UpdateTags { registries }
-    }
-
-    fn expand(
-        files: &BTreeMap<String, Value>,
-        tag: &str,
-        names: &HashMap<&str, i32>,
-        out: &mut Vec<i32>,
-        seen: &mut HashSet<String>,
-    ) {
-        if !seen.insert(tag.to_owned()) {
-            return;
-        }
-        if let Some(file) = files.get(tag) {
-            let members =
-                sunrise_world::tag_layers::TagLayers::from_file(file).build(|reference| {
-                    let mut ids = Vec::new();
-                    Self::expand(
-                        files,
-                        reference.trim_start_matches("minecraft:"),
-                        names,
-                        &mut ids,
-                        seen,
-                    );
-                    ids.into_iter()
-                        .filter_map(|id| {
-                            names
-                                .iter()
-                                .find(|(_, n)| **n == id)
-                                .map(|(name, _)| (*name).to_owned())
+            let kind = match key.split_once(':') {
+                Some(("minecraft", path)) => path.to_owned(),
+                Some((ns, path)) => format!("{ns}/{path}"),
+                None => key.clone(),
+            };
+            let contains = |id: &str| names.contains_key(id);
+            let bound: BTreeMap<_, _> = if key == "minecraft:dialog" {
+                // Dialog registry admission also tracks missing writable holders.
+                bind_dialog_tags(&resources.join("data/minecraft"), overlay, contains).0
+            } else if key == "minecraft:damage_type" {
+                // `merge_damage_tags` binds this world-owned registry below.
+                continue;
+            } else {
+                sunrise_world::tag_layers::load(resources, &kind, overlay, contains)
+                    .map_err(|e| e.to_string())?
+                    .into_iter()
+                    .collect()
+            };
+            if !bound.is_empty() {
+                registries.push(RegistryTags {
+                    registry: key.clone(),
+                    tags: bound
+                        .into_iter()
+                        .map(|(name, members)| TagEntry {
+                            name,
+                            ids: members.iter().map(|id| names[id.as_str()]).collect(),
                         })
-                        .collect()
+                        .collect(),
                 });
-            for member in members {
-                if let Some(&id) = names.get(qualified(&member).as_str())
-                    && !out.contains(&id)
-                {
-                    out.push(id);
-                }
             }
         }
-        seen.remove(tag);
+        Ok(UpdateTags { registries })
     }
 }
 
@@ -1374,9 +1273,10 @@ mod tests {
     #[test]
     fn false_conditions_do_not_suppress_lan_tag_operations() {
         let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(root.path().join("tags/dialog")).unwrap();
+        std::fs::create_dir_all(root.path().join("data/minecraft/tags/dialog")).unwrap();
         std::fs::write(
-            root.path().join("tags/dialog/conditional.json"),
+            root.path()
+                .join("data/minecraft/tags/dialog/conditional.json"),
             r#"{"neoforge:conditions":[{"type":"neoforge:never"}],"values":["minecraft:a"]}"#,
         )
         .unwrap();
@@ -1388,30 +1288,17 @@ mod tests {
             )]),
             ..Default::default()
         };
-        let mut tags = UpdateTags {
-            registries: Vec::new(),
+        let read_tags = |overlay: &sunrise_world::loot::PackOverlay| {
+            SyncData::load_tags(root.path(), overlay, &Builtin::default(), &dynamic).unwrap()
         };
-        SyncData::merge_registry_tags(
-            &mut tags,
-            root.path(),
-            &sunrise_world::loot::PackOverlay::NONE,
-            &Builtin::default(),
-            &dynamic,
-            "minecraft:dialog",
-            "dialog",
+        assert_eq!(
+            read_tags(&sunrise_world::loot::PackOverlay::NONE).registries[0].tags[0].ids,
+            [0]
         );
-        assert_eq!(tags.registries[0].tags[0].ids, [0]);
-        tags.registries.clear();
-        SyncData::merge_registry_tags(
-            &mut tags,
-            root.path(),
-            &sunrise_world::loot::PackOverlay::new(&files),
-            &Builtin::default(),
-            &dynamic,
-            "minecraft:dialog",
-            "dialog",
+        assert_eq!(
+            read_tags(&sunrise_world::loot::PackOverlay::new(&files)).registries[0].tags[0].ids,
+            [1]
         );
-        assert_eq!(tags.registries[0].tags[0].ids, [1]);
     }
 
     #[test]
@@ -1433,19 +1320,14 @@ mod tests {
             ("remove_child", r##"{"values":["#test:optional_id"],"remove":["#test:optional_id","#test:unknown"]}"##),
         ]
         .map(|(name, json)| (format!("tags/test:mob_effect/{name}"), vec![json.as_bytes().to_vec()]));
-        let mut tags = UpdateTags {
-            registries: Vec::new(),
-        };
         for count in [files.len(), 1] {
-            SyncData::merge_registry_tags(
-                &mut tags,
+            let tags = SyncData::load_tags(
                 root.path(),
                 &sunrise_world::loot::PackOverlay::new(&files[..count]),
                 &builtin,
                 &Dynamic::default(),
-                registry,
-                "mob_effect",
-            );
+            )
+            .unwrap();
             let mut received = Dynamic::default();
             received.add_tags(&tags);
             for missing in ["test:rejected", "test:dependent", "test:missing_tag"] {
@@ -1491,18 +1373,13 @@ mod tests {
                 vec![br##"{"values":[{"id":"#a","required":false},"slowness"]}"##.to_vec()],
             ),
         ];
-        let mut tags = UpdateTags {
-            registries: Vec::new(),
-        };
-        SyncData::merge_registry_tags(
-            &mut tags,
+        let tags = SyncData::load_tags(
             root.path(),
             &sunrise_world::loot::PackOverlay::new(&files),
             &builtin,
             &Dynamic::default(),
-            registry,
-            "mob_effect",
-        );
+        )
+        .unwrap();
         let mut client = Dynamic::default();
         client.add_tags(&tags);
         assert_eq!(client.tag(registry, "minecraft:a"), Some(&[0][..]));
@@ -1562,21 +1439,6 @@ mod tests {
                 .iter()
                 .any(|r| r.registry == registry)
         );
-    }
-
-    #[test]
-    fn included_child_can_be_removed_again() {
-        let names = HashMap::from([("test:one", 1)]);
-        let mut out = Vec::new();
-        let files = BTreeMap::from([
-            (
-                "parent".into(),
-                serde_json::json!({"values":["#child"], "remove":["#child"]}),
-            ),
-            ("child".into(), serde_json::json!({"values":["test:one"]})),
-        ]);
-        SyncData::expand(&files, "parent", &names, &mut out, &mut HashSet::new());
-        assert!(out.is_empty());
     }
 
     #[test]
@@ -1885,16 +1747,13 @@ mod tests {
             )]),
             ..Default::default()
         };
-        let mut tags = UpdateTags {
-            registries: Vec::new(),
-        };
-        SyncData::merge_pack_tags(
-            &mut tags,
+        let tags = SyncData::load_tags(
             Path::new("a-resource-root-without-tags"),
             &overlay,
             &Builtin::default(),
             &dynamic,
-        );
+        )
+        .unwrap();
         let dialog = tags
             .registries
             .iter()
@@ -2211,7 +2070,7 @@ mod tests {
     #[test]
     fn world_packs_tags_reach_every_synchronized_registry() {
         let root = std::env::temp_dir().join(format!("sunrise-pack-tags-{}", std::process::id()));
-        let block_tags = root.join("tags/block");
+        let block_tags = root.join("data/minecraft/tags/block");
         std::fs::create_dir_all(block_tags.join("mineable")).unwrap();
         std::fs::write(
             block_tags.join("climbable.json"),
@@ -2238,20 +2097,13 @@ mod tests {
             ]),
         };
         let dynamic = Dynamic::default();
-        let mut tags = SyncData::load_tags(
-            &root,
-            &builtin,
-            &dynamic,
-            &sunrise_world::conditions::LoadConditions::vanilla(),
-        );
-        let item_tags = RegistryTags {
-            registry: "minecraft:item".into(),
-            tags: vec![TagEntry {
-                name: "minecraft:sticks".into(),
-                ids: vec![0],
-            }],
-        };
-        tags.registries.push(item_tags.clone());
+        let item_dir = root.join("data/minecraft/tags/item");
+        std::fs::create_dir_all(&item_dir).unwrap();
+        std::fs::write(
+            item_dir.join("sticks.json"),
+            r#"{"values":["minecraft:stick"]}"#,
+        )
+        .unwrap();
         let files = vec![
             (
                 "tags/minecraft:block/climbable".to_owned(),
@@ -2270,7 +2122,7 @@ mod tests {
             ),
         ];
         let overlay = sunrise_world::loot::PackOverlay::new(&files);
-        SyncData::merge_pack_tags(&mut tags, &root, &overlay, &builtin, &dynamic);
+        let tags = SyncData::load_tags(&root, &overlay, &builtin, &dynamic).unwrap();
         let _ = std::fs::remove_dir_all(&root);
         let sent = |registry: &str, tag: &str| -> Vec<i32> {
             tags.registries
@@ -2292,7 +2144,7 @@ mod tests {
             .find(|r| r.registry == "minecraft:item")
             .unwrap();
         assert_eq!(items.tags.len(), 1);
-        assert_eq!(items.tags[0].ids, item_tags.tags[0].ids);
+        assert_eq!(items.tags[0].ids, [0]);
         assert_eq!(
             tags.registries
                 .iter()

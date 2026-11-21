@@ -254,7 +254,7 @@ fn a_higher_mod_adds_back_what_a_lower_one_removed() {
     // sand back in, y.
     let layers = sunrise_world::tag_layers::TagLayers::from_file(&merged);
     assert_eq!(
-        layers.build(|_| Vec::new()),
+        layers.build(|_| true, |_| None).unwrap(),
         ["a:x", "minecraft:sand", "b:y"]
     );
 }

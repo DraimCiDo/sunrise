@@ -1170,10 +1170,7 @@ impl Game<'_> {
         ) {
             return false;
         }
-        if let Some(r) = self.remote.as_mut() {
-            r.menu.set(None);
-            r.set_menu_title(None);
-        }
+        self.remote_set_menu(None, None);
         self.book = None;
         self.capture(true);
         true

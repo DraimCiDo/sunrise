@@ -25,7 +25,9 @@ import java.util.UUID;
 import java.util.zip.Deflater;
 import java.util.zip.Inflater;
 import net.minecraft.SharedConstants;
+import net.minecraft.commands.arguments.item.ItemParser;
 import net.minecraft.core.UUIDUtil;
+import net.minecraft.network.HashedStack;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.ProtocolInfo;
 import net.minecraft.network.RegistryFriendlyByteBuf;
@@ -51,6 +53,7 @@ import net.minecraft.network.protocol.game.GameProtocols;
 import net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket;
 import net.minecraft.network.protocol.game.ServerboundChatCommandPacket;
 import net.minecraft.network.protocol.game.ServerboundChunkBatchReceivedPacket;
+import net.minecraft.network.protocol.game.ServerboundContainerClickPacket;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerInputPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerLoadedPacket;
@@ -64,8 +67,10 @@ import net.minecraft.network.protocol.login.LoginProtocols;
 import net.minecraft.network.protocol.login.ServerboundHelloPacket;
 import net.minecraft.network.protocol.login.ServerboundLoginAcknowledgedPacket;
 import net.minecraft.server.level.ClientInformation;
+import net.minecraft.util.HashOps;
 import net.minecraft.world.entity.PositionMoveRotation;
 import net.minecraft.world.entity.player.Input;
+import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -92,7 +97,8 @@ import net.minecraft.world.phys.Vec3;
  * LocalPlayer sends them, each in the server's next tick, with a STAB ahead of
  * the position of TICK, or none when negative), {@code sprint NAME} (START_SPRINTING,
  * ServerboundPlayerCommandPacket), {@code pickup NAME SLOT} (a left click on that
- * slot of the player's inventory menu, claiming nothing), {@code quit NAME},
+ * slot of the player's inventory menu, claiming nothing), {@code click-predicted NAME WINDOW SLOT PLACED CARRIED}
+ * (left click with the last received state and two count-one item specs, or {@code -} for empty), {@code quit NAME},
  * {@code
  * players on|off} (whether each player also records the other players added
  * to and removed from its level, and its own respawns into a dimension),
@@ -222,9 +228,13 @@ public final class LocatorBarClient {
                     case "stab" -> players.get(w[1]).stab();
                     case "arc" -> players.get(w[1]).arc(Integer.parseInt(w[2]));
                     case "sprint" -> players.get(w[1]).sprint();
-                    case "pickup" -> players.get(w[1]).send(new net.minecraft.network.protocol.game.ServerboundContainerClickPacket(
-                        0, 0, Short.parseShort(w[2]), (byte) 0, net.minecraft.world.inventory.ContainerInput.PICKUP,
-                        new it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<>(), net.minecraft.network.HashedStack.EMPTY));
+                    case "pickup" -> players.get(w[1]).send(new ServerboundContainerClickPacket(
+                        0, 0, Short.parseShort(w[2]), (byte) 0, ContainerInput.PICKUP,
+                        new it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<>(), HashedStack.EMPTY));
+                    case "click-predicted" -> {
+                        String[] a = w[2].split(" ");
+                        players.get(w[1]).clickPredicted(Integer.parseInt(a[0]), Short.parseShort(a[1]), a[2], a[3]);
+                    }
                     // A stale state requests the server's complete authoritative post-click snapshot.
                     case "click" -> {
                         String[] a = w[2].split(" ");
@@ -741,6 +751,23 @@ public final class LocatorBarClient {
                     }
                 }
             }
+        }
+
+        private void clickPredicted(int window, short slot, String placed, String carried) throws Exception {
+            Integer state = menuStates.get(window);
+            if (state == null) throw new IllegalStateException("No slot or content packet received for window " + window);
+            var changed = new it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<HashedStack>();
+            changed.put(slot, hashPrediction(placed));
+            record("menu-click " + window + " " + state);
+            send(new ServerboundContainerClickPacket(window, state, slot, (byte) 0, ContainerInput.PICKUP,
+                changed, hashPrediction(carried)));
+        }
+
+        private static HashedStack hashPrediction(String spec) throws Exception {
+            if (spec.equals("-")) return HashedStack.EMPTY;
+            var item = new ItemParser(ParityData.access).parse(new com.mojang.brigadier.StringReader(spec));
+            var ops = ParityData.access.createSerializationContext(HashOps.CRC32C_INSTANCE);
+            return HashedStack.create(item.createItemStack(1), component -> component.encodeValue(ops).getOrThrow().asInt());
         }
 
         private void recordMenu(Packet<?> p, byte[] payload) throws Exception {

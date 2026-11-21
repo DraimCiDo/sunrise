@@ -4,10 +4,53 @@ impl Game<'_> {
     /// `AbstractContainerMenu.setItem`/`initializeContents`: the state id a
     /// click answers with is the open menu's, not another window's.
     pub(in crate::game) fn remote_menu_state(&mut self, container: i32, state: i32) {
-        let open = self.remote_menu().0;
-        if let Some(r) = self.remote.as_mut().filter(|_| container == open) {
-            r.state_id = state;
+        if let Some(r) = self.remote.as_mut() {
+            let open = r.menu.as_ref().map_or(0, |m| m.0);
+            if container == open {
+                r.state_id = state;
+            } else if container == 0 {
+                r.inventory_state_id = state;
+            }
         }
+    }
+
+    /// Change the active menu without losing window 0's cursor or state counter.
+    pub(in crate::game) fn remote_set_menu(
+        &mut self,
+        menu: Option<(i32, String)>,
+        title: Option<sunrise_client::text::Text>,
+    ) {
+        let Some(r) = self.remote.as_mut() else {
+            return;
+        };
+        match (r.menu.as_ref().is_some(), menu.is_some()) {
+            (false, true) => {
+                r.inventory_carried = self.carried.take();
+                r.inventory_state_id = std::mem::take(&mut r.state_id);
+                for (saved, active) in r.inventory_craft_grid.iter_mut().zip(&mut self.craft_grid) {
+                    *saved = active.take();
+                }
+                r.inventory_craft_result = r.craft_result.take();
+            }
+            (true, false) => {
+                self.carried = r.inventory_carried.take();
+                r.state_id = std::mem::take(&mut r.inventory_state_id);
+                self.craft_grid.fill(None);
+                for (saved, active) in r.inventory_craft_grid.iter_mut().zip(&mut self.craft_grid) {
+                    *active = saved.take();
+                }
+                r.craft_result = r.inventory_craft_result.take();
+            }
+            (true, true) => {
+                self.carried = None;
+                r.state_id = 0;
+                self.craft_grid.fill(None);
+                r.craft_result = None;
+            }
+            (false, false) => {}
+        }
+        r.menu.set(menu);
+        r.set_menu_title(title);
     }
     /// The server's open menu: its window id and menu type (0, "inventory"
     /// when none is open).
@@ -311,19 +354,10 @@ impl Game<'_> {
         self.pad_clear_focus();
         self.recipe_ui.reset_screen();
         self.mod_screen = None;
-        if let Some(r) = self.remote.as_mut() {
-            r.menu.set(None);
-            r.set_menu_title(None);
-            r.craft_result = None;
-        }
+        self.remote_set_menu(None, None);
         self.mount_menu_reset();
         // The client's menu has no level access: what it holds is the server's.
         self.station = None;
-        // AbstractContainerMenu.removed: the server gives the grid and the
-        // carried stack back to the inventory and syncs it; the copies here
-        // are stale the moment the window closes.
-        self.craft_grid.fill(None);
-        self.carried = None;
         self.craft_size = 2;
         if let Some(key) = self.container.take() {
             // Server containers stay renderable but lose their copied slots.
@@ -341,11 +375,10 @@ impl Game<'_> {
         title: String,
         text: sunrise_client::text::Text,
     ) {
-        if let Some(r) = self.remote.as_mut() {
-            r.menu
-                .set(Some((container, "minecraft:merchant".to_owned())));
-            r.set_menu_title(Some(text.clone()));
-        }
+        self.remote_set_menu(
+            Some((container, "minecraft:merchant".to_owned())),
+            Some(text.clone()),
+        );
         let mut session = sunrise_client::merchant::Session::new(Vec::new(), true);
         session.client_side = true;
         self.open_remote_merchant(session, (!title.is_empty()).then_some(text));
@@ -430,10 +463,7 @@ impl Game<'_> {
             .map_or(target, |e| e.pos.map(|p| (p[0], p[1], p[2])));
         if menu == "minecraft:lectern" {
             // LecternScreen: the book and page come in the menu's content and data.
-            if let Some(r) = self.remote.as_mut() {
-                r.menu.set(Some((p.container, menu)));
-                r.set_menu_title(None);
-            }
+            self.remote_set_menu(Some((p.container, menu)), None);
             self.remote_open_lectern(target.unwrap_or_default());
             return;
         }
@@ -517,10 +547,7 @@ impl Game<'_> {
             }
         };
         let title = menu_title(&p.title);
-        if let Some(r) = self.remote.as_mut() {
-            r.menu.set(Some((p.container, menu.clone())));
-            r.set_menu_title(Some(title));
-        }
+        self.remote_set_menu(Some((p.container, menu.clone())), Some(title));
         self.craft_size = if menu == "minecraft:crafting" { 3 } else { 2 };
         self.container = None;
         if let Some(entity) = entity {
@@ -542,10 +569,7 @@ impl Game<'_> {
             if self.mod_screen.is_none() && mod_type.is_some() {
                 self.world.block_entities.remove(&key);
                 self.container = None;
-                if let Some(r) = self.remote.as_mut() {
-                    r.menu.set(None);
-                    r.set_menu_title(None);
-                }
+                self.remote_set_menu(None, None);
                 self.send(S::ContainerClose(play::ContainerClose {
                     container: p.container,
                 }));
@@ -561,11 +585,7 @@ impl Game<'_> {
         self.mod_screen = None;
         let columns = usize::try_from(p.columns).unwrap_or(0).min(5);
         let record = |game: &mut Self| {
-            if let Some(r) = game.remote.as_mut() {
-                r.menu
-                    .set(Some((p.container, format!("{MOUNT_MENU}{columns}"))));
-                r.set_menu_title(None);
-            }
+            game.remote_set_menu(Some((p.container, format!("{MOUNT_MENU}{columns}"))), None);
         };
         // With a screen hook listening, the window is recorded before the
         // screen opens, so a mod's answer that replaces it closes this window

@@ -1934,15 +1934,17 @@ impl Game<'_> {
             push(&mut lines, text, gray);
         }
         details.start("minecraft:entity_data", lines.len());
-        // TypedEntityData.addToTooltip: a spawn egg of a monster in Peaceful.
+        // TypedEntityData.addToTooltip: a type disallowed in Peaceful.
+        let entity_data = block_entity_item::item_entity_data(stack, self.items());
         if let Some(text) = sunrise_client::item_tooltip::spawn_egg_peaceful_line(
-            stack,
+            entity_data.as_ref().map(|data| data.kind.as_str()),
             self.ui.difficulty == 0,
             &display,
             &|id| {
-                self.res.mob_types().get(id).is_none_or(|t| {
-                    sunrise_client::mobs::spawn_rules::allowed_in_peaceful(t.species)
-                })
+                self.res
+                    .mob_types()
+                    .get(id)
+                    .is_none_or(|t| t.allowed_in_peaceful())
             },
             &translate,
         ) {
@@ -2038,7 +2040,8 @@ impl Game<'_> {
             && self.ui.registries.permission >= 2
             && (item_info.is_some_and(|i| i.block.is_some())
                 && block_entity_item::op_warning(stack)
-                || block_entity_item::spawn_egg_op_warning(stack))
+                || stack.item.ends_with("_spawn_egg")
+                    && entity_data.is_some_and(|data| data.op_only()))
         {
             for (i, (key, fallback)) in [
                 ("item.op_warning.line1", "Warning:"),
@@ -2554,6 +2557,32 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "daily"]
+    fn spawn_egg_tooltip_warns_for_the_mod_type_in_peaceful() {
+        use crate::game::{commands::peaceful_tests, execution_role::ExecutionRole};
+        use sunrise_client::hud::rgba;
+
+        peaceful_tests::with_types(ExecutionRole::Client, |game| {
+            let egg = peaceful_tests::trader_egg();
+            let message = game
+                .pack
+                .names
+                .display_get("item.spawn_egg.peaceful")
+                .unwrap_or_else(|| "item.spawn_egg.peaceful".into());
+            let warns = |game: &super::Game<'_>| {
+                game.stack_tooltip_lines(&egg, false, false)
+                    .iter()
+                    .any(|(text, color)| {
+                        text.plain() == message && *color == rgba(255, 85, 85, 255)
+                    })
+            };
+            assert!(warns(game));
+            game.set_difficulty_forced(2);
+            assert!(!warns(game));
+        });
+    }
+
     #[test]
     #[ignore = "daily"]
     fn anvil_subscriber_probe_and_answer_cache() {

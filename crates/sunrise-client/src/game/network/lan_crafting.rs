@@ -1454,7 +1454,7 @@ impl Game<'_> {
         let Some(play) = host.menus.get_mut(&conn) else {
             return false;
         };
-        let Some((window, state, mut menu, pos)) = play
+        let Some((window, mut state, mut menu, pos)) = play
             .crafting
             .table
             .take_if(|(window, ..)| *window == p.container)
@@ -1462,10 +1462,8 @@ impl Game<'_> {
             return false;
         };
         let owner = play.crafting.table.stamp();
-        // handleContainerClick: broadcastFullState only for a click on an old
-        // state, else only what the client got wrong. The whole menu after every
-        // click would undo the clicks it has predicted since.
-        let mut agreed = false;
+        // A full snapshot on the current state would undo clicks the client has since predicted.
+        let mut full = true;
         // A table that is no longer valid takes no clicks (handleContainerClick).
         let gi = host.hub.guests.iter().position(|g| g.conn == conn);
         let Some(host) = self.lan.as_ref() else {
@@ -1514,19 +1512,26 @@ impl Game<'_> {
             let Some(host) = self.lan.as_mut() else {
                 return true;
             };
-            agreed = p.state == state
-                && host.hub.click_agreed(
-                    gi,
-                    p,
-                    menu.slot_count(),
-                    &|s| menu.slot(s).cloned(),
-                    &changed,
-                );
-            if agreed {
-                // The inventory menu's sync isn't to send what the click settled.
+            full = p.state != state;
+            if !full {
+                let slots: Vec<_> = (0..menu.slot_count())
+                    .map(|s| menu.slot(s).cloned())
+                    .collect();
+                let corrected = host
+                    .hub
+                    .sync_click_prediction(gi, p, &mut state, &slots, |slot| {
+                        changed.contains(&slot)
+                    });
+                // The inventory menu's broadcast shouldn't repeat what the click settled.
                 host.hub.guests.update(gi, |g| {
-                    for &s in changed.iter().filter(|&&s| s >= 10) {
-                        g.menu_sent[s - 1] = menu.slot(s).cloned();
+                    let settled = p
+                        .changed
+                        .iter()
+                        .map(|(s, _)| *s as usize)
+                        .chain(changed)
+                        .chain(corrected);
+                    for s in settled.filter(|s| (10..slots.len()).contains(s)) {
+                        g.menu_sent[s - 1] = slots[s].clone();
                     }
                 });
             }
@@ -1535,7 +1540,7 @@ impl Game<'_> {
             return true;
         };
         *host.menus.entry(conn).or_default().crafting.table = Some((window, state, menu, pos));
-        if !agreed {
+        if full {
             self.lan_send_table_content(conn);
         }
         true
@@ -1855,9 +1860,6 @@ impl Game<'_> {
                 conn,
                 &C::ContainerClose(play::ContainerClose { container: window }),
             );
-            if let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) {
-                self.guest_carried_back(gi);
-            }
         }
     }
 
@@ -1881,18 +1883,7 @@ impl Game<'_> {
         let mut items: Vec<Option<ItemStack>> = (0..10).map(|s| menu.slot(s).cloned()).collect();
         let g = &host.hub.guests[gi];
         items.extend((9..36).chain(0..9).map(|i| g.inventory[i].clone()));
-        let carried = g.carried.clone();
-        let items = items.iter().map(|s| host.hub.stack(s)).collect();
-        let carried = host.hub.stack(&carried);
-        host.hub.send_to(
-            conn,
-            &C::ContainerSetContent(play::ContainerSetContent {
-                container: window,
-                state,
-                items,
-                carried,
-            }),
-        );
+        host.hub.send_menu_snapshot(gi, window, state, &items);
         host.hub.guests.update(gi, |g| g.inventory_told());
     }
 
@@ -1917,19 +1908,20 @@ impl Game<'_> {
     pub(super) fn lan_crafting_closed(&mut self, conn: u32, window: Option<i32>) -> bool {
         let closed = self.lan_crafting_removed(conn, window, MenuRemoval::Live);
         if closed && window != Some(0) {
-            if let Some(gi) = self
-                .lan
-                .as_ref()
-                .and_then(|host| host.hub.guests.iter().position(|g| g.conn == conn))
-            {
-                self.guest_carried_back(gi);
-            }
             self.player_menu_closing(conn);
         }
         closed
     }
 
-    /// Remove only input slots; disconnected players drop their inputs.
+    /// Retire a game-owned menu on the guest record, even when their active
+    /// cursor is temporarily in `Game` during a guest turn.
+    pub(super) fn close_guest_menu_cursor(&mut self, gi: usize, window: i32) -> Option<ItemStack> {
+        self.with_own_record(gi, |host, _| {
+            host.hub.guests.update(gi, |g| g.close_menu_cursor(window))
+        })
+    }
+
+    /// Return the cursor and inputs, or drop them if the player disconnected.
     pub(super) fn lan_crafting_removed(
         &mut self,
         conn: u32,
@@ -1945,16 +1937,28 @@ impl Game<'_> {
         let crafting = &mut host.menus.entry(conn).or_default().crafting;
         let grid: Vec<ItemStack> = if window == Some(0) {
             *crafting.inventory = None;
-            host.hub.guests.update(gi, |g| {
-                g.craft_result = None;
-                g.craft_grid.iter_mut().filter_map(Option::take).collect()
+            self.with_own_record(gi, |host, _| {
+                Some(host.hub.guests.update(gi, |g| {
+                    g.craft_result = None;
+                    g.take_inventory_carried()
+                        .into_iter()
+                        .chain(g.craft_grid.iter_mut().filter_map(Option::take))
+                        .collect()
+                }))
             })
+            .unwrap_or_default()
         } else {
             match crafting
                 .table
                 .take_if(|(w, ..)| window.is_none_or(|window| *w == window))
             {
-                Some((_, _, menu, _)) => (1..10).filter_map(|s| menu.slot(s).cloned()).collect(),
+                Some((window, _, menu, _)) => {
+                    let carried = self.close_guest_menu_cursor(gi, window);
+                    carried
+                        .into_iter()
+                        .chain((1..10).filter_map(|s| menu.slot(s).cloned()))
+                        .collect()
+                }
                 None => return false,
             }
         };
@@ -1967,50 +1971,24 @@ impl Game<'_> {
         true
     }
 
-    /// `AbstractContainerMenu.removed`: return the cursor, then any menu inputs, to
-    /// the closing player's inventory. Drop overflow after restoring the active turn,
-    /// since spawning an item can call mods synchronously.
-    pub(super) fn return_guest_menu_items(
-        &mut self,
-        gi: usize,
-        inputs: Vec<ItemStack>,
-        return_cursor: bool,
-    ) {
+    /// `Inventory.placeItemBackInInventory` for the stacks a closing menu returned.
+    /// Drop overflow after restoring the active turn, since spawning an item can call mods.
+    pub(super) fn lan_place_back(&mut self, gi: usize, inputs: Vec<ItemStack>) {
+        if inputs.is_empty() {
+            return;
+        }
         let overflow = self.with_own_record(gi, |lan, items| {
-            let (overflow, cursor_cleared) = lan.hub.guests.update(gi, |guest| {
-                let carried = if return_cursor {
-                    guest.carried.take()
-                } else {
-                    None
-                };
-                let cursor_cleared = carried.is_some();
-                if !cursor_cleared && inputs.is_empty() {
-                    return None;
-                }
+            Some(lan.hub.guests.update(gi, |guest| {
                 let mut menu = Menu::new(Kind::Inventory);
                 load_player(&mut menu, guest);
-                place_back(&mut menu, items, carried.into_iter().chain(inputs));
+                place_back(&mut menu, items, inputs);
                 store_player(&mut menu, guest);
-                Some((std::mem::take(&mut menu.dropped), cursor_cleared))
-            })?;
-            if cursor_cleared {
-                lan.hub.send_inventory(gi);
-            }
-            Some(overflow)
+                std::mem::take(&mut menu.dropped)
+            }))
         });
         if let Some(overflow) = overflow.filter(|stacks| !stacks.is_empty()) {
             self.drop_guest_items(gi, overflow);
         }
-    }
-
-    /// `clearContainer`: return the inputs without taking the cursor.
-    pub(super) fn lan_place_back(&mut self, gi: usize, inputs: Vec<ItemStack>) {
-        self.return_guest_menu_items(gi, inputs, false);
-    }
-
-    /// Return the closing player's cursor when the menu holds no inputs.
-    pub(super) fn guest_carried_back(&mut self, gi: usize) {
-        self.return_guest_menu_items(gi, Vec::new(), true);
     }
 
     /// A guest left: what their crafting grids and workstation held goes back into their
@@ -2021,8 +1999,12 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
+        // If the leaving level could not be opened for normal removal, put
+        // its remaining cursors in the same fallback as the remaining inputs.
+        let mut grid: Vec<_> = host.hub.take_closed_menu_cursors(g.conn).collect();
+        grid.extend(g.take_menu_cursors());
+        grid.extend(g.craft_grid.iter_mut().filter_map(Option::take));
         let play = host.menus.get_mut(&g.conn);
-        let mut grid: Vec<ItemStack> = g.craft_grid.iter_mut().filter_map(Option::take).collect();
         g.craft_result = None;
         if let Some(play) = play {
             if let Some((_, _, menu, _)) = play.crafting.table.take() {

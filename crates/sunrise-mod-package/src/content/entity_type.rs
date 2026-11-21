@@ -15,6 +15,9 @@ pub struct EntityType {
     pub id: String,
     /// one of [`super::ENTITY_TEMPLATES`].
     pub template: String,
+    /// Whether a living type may spawn and remain in Peaceful. Omitted inherits the template.
+    #[serde(default, deserialize_with = "deserialize_peaceful_setting")]
+    pub allowed_in_peaceful: Option<bool>,
     /// Renderer shadow overrides; omitted values inherit the template.
     #[serde(default, deserialize_with = "deserialize_shadow")]
     pub shadow_radius: Option<f32>,
@@ -92,7 +95,19 @@ impl EntityType {
 }
 
 impl EntityType {
-    pub(super) fn validate_thrown_attachments_and_sounds(&self, name: &str) -> Result<(), String> {
+    pub(super) fn validate_thrown_overrides(&self, name: &str) -> Result<(), String> {
+        if !self.attributes.is_empty() {
+            return Err(format!(
+                "{name}: only a living type has attributes (its template is {})",
+                self.template
+            ));
+        }
+        if self.allowed_in_peaceful.is_some() {
+            return Err(format!(
+                "{name}: only a living type may set allowed_in_peaceful (its template is {})",
+                self.template
+            ));
+        }
         if self.shadow_radius.is_some() || self.shadow_strength.is_some() {
             return Err(format!(
                 "{name}: only a living type has renderer shadow overrides"
@@ -112,6 +127,12 @@ impl EntityType {
         }
         Ok(())
     }
+}
+
+fn deserialize_peaceful_setting<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<bool>, D::Error> {
+    bool::deserialize(d).map(Some)
 }
 
 fn deserialize_shadow<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f32>, D::Error> {

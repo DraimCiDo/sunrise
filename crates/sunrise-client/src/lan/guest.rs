@@ -400,7 +400,9 @@ pub struct Guest {
     /// Converted tracking stacks, invalidated when their full source stack changes.
     pub equipment_cache: super::equipment_cache::EquipmentCache,
     pub selected: usize,
+    /// The active menu's cursor. The inventory menu keeps its own while another menu is open.
     pub carried: Option<ItemStack>,
+    pub(super) inactive_inventory_carried: Option<ItemStack>,
     /// The inventory menu's crafting grid (2x2) and its result
     /// (`InventoryMenu.craftSlots`, `resultSlots`), which the game computes.
     pub craft_grid: [Option<ItemStack>; 4],
@@ -431,6 +433,10 @@ pub struct Guest {
     pub sent_effects: Vec<SentEffect>,
     /// What the client believes the inventory menu holds (for change detection).
     pub menu_sent: Vec<Option<ItemStack>>,
+    /// `AbstractContainerMenu.remoteCarried` for the always-present inventory menu.
+    pub(super) inventory_carried_sent: Option<ItemStack>,
+    /// `remoteCarried` for the open window, including menus run by Game rather than Hub.
+    pub(super) open_carried_sent: Option<(i32, Option<ItemStack>)>,
     pub menu_state: i32,
     /// `lastSentHealth`, `lastSentFood` and `lastFoodSaturationZero`.
     pub sent_health: Option<(f32, i32, bool)>,
@@ -566,7 +572,40 @@ impl Guest {
     pub fn next_menu_window(&mut self) -> i32 {
         self.next_window = self.next_window % 100 + 1;
         self.menu_generation = menu_generation();
+        self.inactive_inventory_carried = self.carried.take();
+        self.open_carried_sent = Some((self.next_window, None));
         self.next_window
+    }
+
+    /// Retire an open menu, returning its carried stack for `AbstractContainerMenu.removed`.
+    pub fn close_menu_cursor(&mut self, window: i32) -> Option<ItemStack> {
+        self.open_carried_sent.take_if(|(id, _)| *id == window)?;
+        std::mem::replace(&mut self.carried, self.inactive_inventory_carried.take())
+    }
+
+    pub fn take_inventory_carried(&mut self) -> Option<ItemStack> {
+        if self.open_carried_sent.is_some() {
+            self.inactive_inventory_carried.take()
+        } else {
+            self.carried.take()
+        }
+    }
+
+    /// `Player.remove` removes both menus, dropping both cursors.
+    pub fn take_menu_cursors(&mut self) -> impl Iterator<Item = ItemStack> {
+        [self.inactive_inventory_carried.take(), self.carried.take()]
+            .into_iter()
+            .flatten()
+    }
+
+    pub(super) fn acknowledge_menu_cursor(&mut self, window: i32, carried: Option<ItemStack>) {
+        if window == 0 {
+            self.inventory_carried_sent = carried;
+        } else if let Some((id, sent)) = &mut self.open_carried_sent
+            && *id == window
+        {
+            *sent = carried;
+        }
     }
 
     pub fn new(j: Joined, entity_id: i32, position: [f64; 3], view_distance: i32) -> Self {
@@ -803,6 +842,7 @@ impl Guest {
             equipment_cache: Default::default(),
             selected: 0,
             carried: None,
+            inactive_inventory_carried: None,
             craft_grid: Default::default(),
             craft_result: None,
             ender_items: vec![None; 27],
@@ -819,6 +859,8 @@ impl Guest {
             modified_effect_particles: None,
             sent_effects: Vec::new(),
             menu_sent: vec![None; 46],
+            inventory_carried_sent: None,
+            open_carried_sent: None,
             menu_state: 0,
             sent_health: None,
             sent_health_data: false,
@@ -1662,6 +1704,29 @@ fn trim_component(
         (material, pattern) => Component::TrimDirect { material, pattern },
     })
 }
+/// Drop prototype-equivalent entries from an encoded live stack. Nested templates
+/// keep their own patches, even when an entry equals the item's prototype.
+pub fn canonicalize_stack_patch(
+    wire: &mut Stack,
+    source: &ItemStack,
+    items: &crate::items::Items,
+    builtin: &sunrise_protocol::registry::Builtin,
+) {
+    if wire.added.is_empty() && wire.removed.is_empty() {
+        return;
+    }
+    let keep = crate::item_data::component_patch_filter(source, items);
+    let component_types = builtin.get("minecraft:data_component_type");
+    let retain = |id, removed| {
+        component_types
+            .and_then(|types| types.name(id))
+            .or_else(|| sunrise_protocol::item::custom::name(id))
+            .is_none_or(|name| keep(&name.into(), removed))
+    };
+    wire.added.retain(|(id, _)| retain(*id, false));
+    wire.removed.retain(|id| retain(*id, true));
+}
+
 /// Convert a borrowed item template with the same component codecs as inventory slots.
 pub(super) fn network_stack(
     item_id: &dyn Fn(&str) -> i32,

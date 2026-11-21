@@ -1,7 +1,7 @@
 //! The Rust items a set of crates' signatures name, found as rustc finds them: through each
 //! module's items, `use`s and glob imports, into the crates `sunrise-mod-api` builds on.
 use std::{collections::HashMap, fs, path::Path};
-use syn::{Item, UseTree};
+use syn::{Item, UseTree, Visibility};
 
 /// One module: its crate, its path below the crate root, and its items.
 pub struct Module {
@@ -222,7 +222,7 @@ impl<'a> Index<'a> {
                 m.path.join("::")
             ));
         }
-        let found = self.lookup(module, name, &mut Vec::new());
+        let found = self.lookup(module, name, &mut vec![module], &mut Vec::new());
         self.depth = self.depth.saturating_sub(1);
         found?.ok_or_else(|| {
             let m = &self.modules[module];
@@ -230,10 +230,15 @@ impl<'a> Index<'a> {
         })
     }
 
+    /// `name` as bound in `module`, seen from every module in `holders`: the module the lookup
+    /// started in, then each module whose glob led here. A glob imports only what is visible
+    /// from the module holding it, and a module's own definition or named import of `name`
+    /// shadows its globs even where that binding is not visible.
     fn lookup(
         &mut self,
         module: usize,
         name: &str,
+        holders: &mut Vec<usize>,
         seen: &mut Vec<usize>,
     ) -> Result<Option<Found>, String> {
         if seen.contains(&module) {
@@ -241,36 +246,78 @@ impl<'a> Index<'a> {
         }
         seen.push(module);
         let items = &self.modules[module].items;
-        if let Some(item) = items.iter().position(|item| defines(item, name)) {
-            return Ok(Some(Found::Item(ItemId { module, item })));
+        let reachable = |vis: &Visibility| holders.iter().all(|&h| self.visible(module, h, vis));
+        let mut shadowed = false;
+        for (item, definition) in items.iter().enumerate() {
+            if let Some(vis) = definition_visibility(definition, name) {
+                if reachable(vis) {
+                    return Ok(Some(Found::Item(ItemId { module, item })));
+                }
+                shadowed = true;
+            }
         }
         let mut named = None;
         let mut globs = Vec::new();
         for item in items {
             if let Item::Use(item) = item {
+                let open = reachable(&item.vis);
                 uses(
                     &item.tree,
                     &mut Vec::new(),
                     &mut |path, alias| match alias {
-                        Some(alias) if alias == name && named.is_none() => named = Some(path),
-                        None => globs.push(path),
+                        Some(alias) if alias == name && named.is_none() => {
+                            named = Some((path, open));
+                        }
+                        None if open => globs.push(path),
                         _ => {}
                     },
                 );
             }
         }
-        if let Some(path) = named {
-            return self.resolve_path(module, &path).map(Some);
+        match named {
+            Some((path, true)) => return self.resolve_path(module, &path).map(Some),
+            Some((_, false)) => return Ok(None),
+            None if shadowed => return Ok(None),
+            None => {}
         }
         for glob in globs {
             if let Some((krate, path)) = self.absolute(module, &glob)
                 && let Ok(target) = self.module(krate, &path)
-                && let Some(found) = self.lookup(target, name, seen)?
             {
-                return Ok(Some(found));
+                holders.push(module);
+                let found = self.lookup(target, name, holders, seen);
+                holders.pop();
+                if let Some(found) = found? {
+                    return Ok(Some(found));
+                }
             }
         }
         Ok(None)
+    }
+
+    /// A glob does not import a sibling's private definitions or local `use` bindings.
+    fn visible(&self, module: usize, from: usize, vis: &Visibility) -> bool {
+        if module == from {
+            return true;
+        }
+        let module_path = &self.modules[module];
+        let from = &self.modules[from];
+        match vis {
+            Visibility::Public(_) => true,
+            _ if module_path.krate != from.krate => false,
+            Visibility::Inherited => from.path.starts_with(&module_path.path),
+            Visibility::Restricted(vis) => {
+                let path: Vec<_> = vis
+                    .path
+                    .segments
+                    .iter()
+                    .map(|seg| seg.ident.to_string())
+                    .collect();
+                self.absolute(module, &path).is_some_and(|(krate, scope)| {
+                    from.krate == krate && from.path.starts_with(&scope)
+                })
+            }
+        }
     }
 
     /// What the path `path`, written in `module`, names.
@@ -329,17 +376,18 @@ impl<'a> Index<'a> {
     }
 }
 
-/// Whether `item` defines the type or trait `name`.
-fn defines(item: &Item, name: &str) -> bool {
-    match item {
-        Item::Struct(item) => item.ident == name,
-        Item::Enum(item) => item.ident == name,
-        Item::Type(item) => item.ident == name,
-        Item::Trait(item) => item.ident == name,
-        Item::Union(item) => item.ident == name,
-        Item::Const(item) => item.ident == name,
-        _ => false,
-    }
+/// The visibility of an indexed definition named `name`, if this item defines it.
+fn definition_visibility<'a>(item: &'a Item, name: &str) -> Option<&'a Visibility> {
+    let (ident, vis) = match item {
+        Item::Struct(item) => (&item.ident, &item.vis),
+        Item::Enum(item) => (&item.ident, &item.vis),
+        Item::Type(item) => (&item.ident, &item.vis),
+        Item::Trait(item) => (&item.ident, &item.vis),
+        Item::Union(item) => (&item.ident, &item.vis),
+        Item::Const(item) => (&item.ident, &item.vis),
+        _ => return None,
+    };
+    (ident == name).then_some(vis)
 }
 
 /// Each path `tree` imports, with the name it binds (`None` for a glob).
@@ -375,5 +423,52 @@ pub fn uses(
                 uses(tree, prefix, f);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What `name` resolves to in `module` of a one-crate index built from `lib`.
+    fn resolves(lib: &str, module: &[&str], name: &str) -> Option<Vec<String>> {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("k/src")).unwrap();
+        fs::write(dir.path().join("k/src/lib.rs"), lib).unwrap();
+        let mut index = Index::new(dir.path(), &[], &[("k", "k/src")]);
+        let path: Vec<String> = module.iter().map(|m| (*m).to_owned()).collect();
+        let module = index.module("k", &path).unwrap();
+        match index.resolve(module, name) {
+            Ok(Found::Item(id)) => Some(index.modules[id.module].path.clone()),
+            Ok(Found::External(path)) => panic!("{name} left the crate: {path:?}"),
+            Err(_) => None,
+        }
+    }
+
+    #[test]
+    fn a_glob_of_a_glob_imports_only_what_every_glob_holder_can_see() {
+        let lib = "
+            pub mod z {
+                pub mod y { pub(super) struct Hidden; pub struct Shown; }
+                pub mod w { use crate::*; }
+            }
+            pub use z::y::*;
+        ";
+        assert_eq!(
+            resolves(lib, &["z", "w"], "Shown"),
+            Some(vec!["z".into(), "y".into()])
+        );
+        assert_eq!(resolves(lib, &["z", "w"], "Hidden"), None);
+    }
+
+    #[test]
+    fn a_definition_hidden_from_the_importer_still_shadows_its_modules_globs() {
+        let lib = "
+            pub mod a { struct Thing; pub use crate::b::*; }
+            pub mod b { pub struct Thing; pub struct Other; }
+            pub mod c { use crate::a::*; }
+        ";
+        assert_eq!(resolves(lib, &["c"], "Other"), Some(vec!["b".into()]));
+        assert_eq!(resolves(lib, &["c"], "Thing"), None);
     }
 }

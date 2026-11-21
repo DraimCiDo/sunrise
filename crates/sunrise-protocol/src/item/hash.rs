@@ -477,6 +477,22 @@ impl Component {
 }
 
 impl Hashed {
+    /// `HashedStack.matches`: compare the entire effective patch as a map and set,
+    /// independent of wire order. A value we cannot hash cannot confirm a claim.
+    pub fn matches(&self, stack: &Stack, names: &dyn Names) -> bool {
+        self.item == stack.item
+            && self.count == stack.count
+            && Self::create(stack, names).is_ok_and(|expected| {
+                self.added.len() == expected.added.len()
+                    && self.removed.len() == expected.removed.len()
+                    && expected
+                        .added
+                        .iter()
+                        .all(|entry| self.added.contains(entry))
+                    && expected.removed.iter().all(|id| self.removed.contains(id))
+            })
+    }
+
     /// Hash all effective sets on a nonempty stack, or refuse the whole patch.
     /// An absent slot is represented by the caller, separately from failure.
     pub fn create(stack: &Stack, names: &dyn Names) -> Result<Self, StackHashError> {
@@ -866,6 +882,50 @@ mod tests {
             rest: vec![1, 0, 0],
         };
         assert_eq!(custom_effects.hash(k::POTION_CONTENTS, &Table), None);
+    }
+
+    #[test]
+    fn a_prediction_must_match_the_whole_patch() {
+        let mut stack = Stack::new(1, 2);
+        stack.added.push((k::DAMAGE, C::Int(5)));
+        stack.removed.push(k::RARITY);
+        // `TypedDataComponent.encodeValue` with vanilla 26.3's CRC32C HashOps.
+        let correct = Hashed {
+            item: 1,
+            count: 2,
+            added: vec![(k::DAMAGE, 645064431)],
+            removed: vec![k::RARITY],
+        };
+        assert!(correct.matches(&stack, &Table));
+        let wrong_hash = Hashed {
+            added: vec![(k::DAMAGE, 0)],
+            ..correct.clone()
+        };
+        assert!(!wrong_hash.matches(&stack, &Table));
+        let missing_removal = Hashed {
+            removed: vec![],
+            ..correct.clone()
+        };
+        assert!(!missing_removal.matches(&stack, &Table));
+        let wrong_removed_key = Hashed {
+            removed: vec![k::TOOL],
+            ..correct.clone()
+        };
+        assert!(!wrong_removed_key.matches(&stack, &Table));
+        let wrong_added_key = Hashed {
+            added: vec![(k::MAP_ID, 645064431)],
+            ..correct.clone()
+        };
+        assert!(!wrong_added_key.matches(&stack, &Table));
+
+        stack.added.push((k::MAP_POST_PROCESSING, C::Int(0)));
+        assert!(!correct.matches(&stack, &Table), "missing unhashable key");
+        let mut unprovable = correct;
+        unprovable.added.push((k::MAP_POST_PROCESSING, 0));
+        assert!(
+            !unprovable.matches(&stack, &Table),
+            "unavailable value hash"
+        );
     }
 
     #[test]

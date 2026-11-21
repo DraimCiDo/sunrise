@@ -478,6 +478,11 @@ impl Game<'_> {
                 return;
             }
             match host.hub.native_menu_events.remove(0) {
+                NativeMenuEvent::ReturnCarried { conn, item } => {
+                    if let Some(gi) = self.guest_index(conn) {
+                        self.lan_place_back(gi, vec![item]);
+                    }
+                }
                 NativeMenuEvent::Closed {
                     uuid,
                     window,
@@ -1049,6 +1054,7 @@ mod tests {
     fn a_menu_opened_in_a_nested_turn_sends_the_openers_own_inventory_and_cursor() {
         with_game(|game| {
             let rx = watched_guest(game);
+            open(game, 1, "old", MenuReplace::CloseFirst);
             let mut outer = guest(2);
             outer.inventory[3] = Some(ItemStack::new("minecraft:diamond", 7));
             outer.carried = Some(ItemStack::new("minecraft:dirt", 9));
@@ -1072,9 +1078,9 @@ mod tests {
                     _ => None,
                 })
                 .collect();
-            // The cursor's stone back in the inventory, then the menu's first contents.
+            // The previous cursor's stone is back in the inventory of the new menu.
             let windows: Vec<_> = contents.iter().map(|c| c.container).collect();
-            assert_eq!(windows, [0, window]);
+            assert_eq!(windows, [window]);
             for content in &contents {
                 let mut counts: Vec<_> = content.items.iter().flatten().map(|s| s.count).collect();
                 counts.sort_unstable();
@@ -1093,6 +1099,134 @@ mod tests {
                 Some(ItemStack::new("minecraft:dirt", 9)),
                 "the outer player's cursor stays theirs"
             );
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn a_block_entity_menu_parks_only_the_active_guests_cursor() {
+        use mod_api::BlockUpdateFlags;
+        use sunrise_client::chunk::Chunk;
+
+        with_game(|game| {
+            let rx = watched_guest(game);
+            let opener_cursor = ItemStack::new("minecraft:stone", 4);
+            let outer_cursor = ItemStack::new("minecraft:diamond", 7);
+            let opener_slot = ItemStack::new("minecraft:gold_ingot", 2);
+            let mut outer = guest(2);
+            outer.carried = Some(outer_cursor.clone());
+            outer.inventory[0] = Some(ItemStack::new("minecraft:dirt", 9));
+            let hub = &mut game.lan.as_mut().unwrap().hub;
+            hub.guests.push(outer);
+            hub.guests.update(0, |g| {
+                g.carried = Some(opener_cursor.clone());
+                g.inventory[0] = Some(opener_slot.clone());
+            });
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.level("minecraft:overworld").unwrap();
+            let chest = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:chest")
+                .unwrap();
+            assert_eq!(
+                game.level_set_block(level, [0, 64, 0], chest, BlockUpdateFlags::NEIGHBORS),
+                Ok(true)
+            );
+            let entity = game.block_entity(level, [0, 64, 0]).unwrap();
+            let opener = game.player(123).unwrap();
+            sent(&rx);
+            game.as_guest(2, |game| {
+                game.as_guest(1, |game| {
+                    let host: &mut dyn ServerHost = game;
+                    assert_eq!(opener.open_menu(host, entity), Ok(true));
+                    assert_eq!(
+                        game.carried, None,
+                        "the new menu starts with an empty cursor"
+                    );
+                })
+                .unwrap();
+                assert_eq!(game.carried, Some(outer_cursor.clone()));
+            })
+            .unwrap();
+            let hub = &game.lan.as_ref().unwrap().hub;
+            let window = hub.guests[0].menu.as_ref().unwrap().window;
+            let contents = sent(&rx)
+                .into_iter()
+                .find_map(|p| match p {
+                    C::ContainerSetContent(content) if content.container == window => Some(content),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(contents.carried.is_none());
+            let shown: Vec<_> = contents
+                .items
+                .iter()
+                .flatten()
+                .map(|item| hub.stack_from_network(item))
+                .collect();
+            assert_eq!(shown, [opener_slot]);
+            game.lan_guest_packet(
+                1,
+                S::ContainerClose(play::ContainerClose { container: window }),
+            );
+            let hub = &game.lan.as_ref().unwrap().hub;
+            assert_eq!(hub.guests[0].carried, Some(opener_cursor));
+            assert_eq!(hub.guests[1].carried, Some(outer_cursor));
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn shutdown_saves_current_and_parked_inventory_cursors() {
+        with_game(|game| {
+            let world = tempfile::tempdir().unwrap();
+            game.world_root = world.path().to_owned();
+            let _rx = watched_guest(game);
+            let current = ItemStack::new("minecraft:lapis_lazuli", 3);
+            let parked = ItemStack::new("minecraft:iron_ingot", 4);
+            let open_cursor = ItemStack::new("minecraft:quartz", 5);
+            let pending = ItemStack::new("minecraft:gold_ingot", 6);
+            let mut other = guest(2);
+            other.carried = Some(current.clone());
+            let hub = &mut game.lan.as_mut().unwrap().hub;
+            hub.guests.push(other);
+            hub.guests.update(0, |g| g.carried = Some(parked.clone()));
+            open(game, 1, "open", MenuReplace::CloseFirst);
+            let hub = &mut game.lan.as_mut().unwrap().hub;
+            assert!(hub.guests[0].inventory.iter().all(Option::is_none));
+            hub.guests
+                .update(0, |g| g.carried = Some(open_cursor.clone()));
+            hub.guests.push(guest(3));
+            hub.open_native_menu(
+                3,
+                1,
+                component_nbt(&Text::literal("retired").component()),
+                Vec::new(),
+            )
+            .unwrap();
+            hub.guests.update(2, |g| g.carried = Some(pending.clone()));
+            hub.close_container(3); // Shutdown wins the race with the queued return.
+
+            game.save_leaving_guests();
+            for (conn, expected) in [
+                (1, vec![open_cursor, parked]),
+                (2, vec![current]),
+                (3, vec![pending]),
+            ] {
+                let mut reloaded = guest(conn);
+                assert!(sunrise_client::lan::playerdata::load(
+                    &mut reloaded,
+                    world.path()
+                ));
+                assert_eq!(
+                    reloaded.inventory.into_iter().flatten().collect::<Vec<_>>(),
+                    expected
+                );
+            }
         });
     }
 
@@ -1481,7 +1615,8 @@ mod tests {
                     format!("open {MOD_MENU}")
                 ]
             );
-            let packets: Vec<String> = sent(&rx)
+            let sent_packets = sent(&rx);
+            let packets: Vec<String> = sent_packets
                 .iter()
                 .map(|p| match p {
                     C::ContainerClose(close) => format!("close {}", close.container),
@@ -1496,11 +1631,9 @@ mod tests {
                     other => format!("{other:?}"),
                 })
                 .collect();
-            // The client's close of the old window for `CloseFirst` only (queued before the
-            // removal, as `closeContainer` does), the inventory with the cursor stack back in
-            // it, then the new menu's extra data, screen and contents.
+            // Only CloseFirst sends the old window's close. The returned cursor
+            // is in the player slots of the new window's first contents.
             let mut expected = vec![
-                "content 0 state 1 slots 46",
                 "payload sunrise:menu_extra",
                 "open 2",
                 "content 2 state 1 slots 45",
@@ -1509,7 +1642,17 @@ mod tests {
                 expected.insert(0, "close 1");
             }
             assert_eq!(packets, expected);
-            let g = &game.lan.as_ref().unwrap().hub.guests[0];
+            let Some(C::ContainerSetContent(content)) = sent_packets.last() else {
+                panic!("expected the new window's contents");
+            };
+            let hub = &game.lan.as_ref().unwrap().hub;
+            let returned: Vec<_> = content.items[9..]
+                .iter()
+                .flatten()
+                .map(|item| hub.stack_from_network(item))
+                .collect();
+            assert_eq!(returned.as_slice(), std::slice::from_ref(&stone));
+            let g = &hub.guests[0];
             assert_eq!(g.carried, None, "the cursor stack went back");
             assert_eq!(
                 g.inventory.iter().flatten().cloned().collect::<Vec<_>>(),

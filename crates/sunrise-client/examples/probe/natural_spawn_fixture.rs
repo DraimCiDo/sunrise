@@ -36,7 +36,7 @@ use sunrise_client::{
     collisions::{self, LookupCollisions, no_collision_empty},
     items::{ItemStack, Items},
     mobs::{
-        MobTypes, Species,
+        MobType, MobTypes, Species,
         data::MobData,
         spawn_rules::SpawnLevel,
         spawn_selection::{
@@ -261,14 +261,8 @@ impl NaturalLevel for World<'_> {
     fn has_ceiling(&self) -> bool {
         self.dimension.id == "minecraft:the_nether"
     }
-    fn mob_type(&self, entity: &str) -> Option<(Species, f32, f32, Category)> {
-        let t = self.s.types.types.get(entity)?;
-        Some((
-            t.species,
-            t.width as f32,
-            t.height as f32,
-            Category::from_name(&t.category),
-        ))
+    fn mob_type(&self, entity: &str) -> Option<&MobType> {
+        self.s.types.types.get(entity)
     }
     fn biome_spawns(&self, x: i32, y: i32, z: i32) -> Option<&HashMap<String, Vec<SpawnEntry>>> {
         self.biome_info(x, y, z).map(|b| &b.spawns)
@@ -714,9 +708,10 @@ pub fn main() -> sunrise_client::Result<()> {
                 .collect();
             // EntityType.create makes no monsters in peaceful.
             if get("difficulty", "normal") == "peaceful"
-                && types.types.get(parts[0]).is_some_and(|t| {
-                    !sunrise_client::mobs::spawn_rules::allowed_in_peaceful(t.species)
-                })
+                && types
+                    .types
+                    .get(parts[0])
+                    .is_some_and(|t| !t.allowed_in_peaceful())
             {
                 continue;
             }

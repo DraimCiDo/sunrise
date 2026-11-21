@@ -1875,6 +1875,9 @@ impl Game<'_> {
             });
             set_key(&mut tag, "home_pos", Tag::IntArray(home.to_vec()));
         }
+        if self.difficulty_id() == 0 {
+            self.prune_peaceful_summon_passengers(&mut tag);
+        }
         place_summoned(&mut tag, pos);
         // ServerLevel.tryAddFreshEntityWithPassengers: a UUID of the tree that
         // an entity in the level holds refuses the whole tree, before any of
@@ -1896,6 +1899,28 @@ impl Game<'_> {
             return Err(err("commands.summon.failed.uuid", &[]));
         }
         Ok(target)
+    }
+
+    /// Checked `EntityType.loadEntityRecursive` drops an ineligible passenger
+    /// and its entire subtree before UUID admission. Filter only the summon
+    /// input; the shared loader must still restore those entities from saves.
+    fn prune_peaceful_summon_passengers(&self, tag: &mut Tag) {
+        let Tag::Compound(compound) = tag else { return };
+        if let Some(Tag::List(riders)) = compound.get_mut(&"Passengers".into()) {
+            riders.retain_mut(|rider| {
+                if let Some(kind) = entity_nbt::kind(rider)
+                    && self
+                        .res
+                        .mob_types()
+                        .get(&kind)
+                        .is_some_and(|t| !t.allowed_in_peaceful())
+                {
+                    return false;
+                }
+                self.prune_peaceful_summon_passengers(rider);
+                true
+            });
+        }
     }
 }
 

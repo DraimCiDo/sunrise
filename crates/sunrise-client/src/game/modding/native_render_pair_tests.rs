@@ -136,7 +136,7 @@ fn two_entities_are_asked_in_the_draw_queues_order() {
         game.mobs.push(mob(game, "minecraft:zombie", 91, 0.0));
         admit_own_player(game, false);
         game.mobs.push(mob(game, "minecraft:cow", 92, 2.0));
-        let (out, ..) = game.entity_geometry(CAMERA, 1.0, None, Vec::new());
+        let (out, ..) = game.entity_geometry(CAMERA, 1.0, None, Vec::new(), &mut Vec::new());
         assert_eq!(
             events(&heard),
             [
@@ -190,7 +190,7 @@ fn a_spectator_following_an_entity_submits_no_local_body() {
         ] {
             game.camera_type = camera;
             game.occlusion.shadow_casters.1 = player_shadow;
-            game.entity_geometry(CAMERA, 1.0, None, Vec::new());
+            game.entity_geometry(CAMERA, 1.0, None, Vec::new(), &mut Vec::new());
             assert!(
                 !game
                     .entity_runs
@@ -205,6 +205,61 @@ fn a_spectator_following_an_entity_submits_no_local_body() {
     });
 }
 
+pub(super) struct BodyWitness {
+    pub(super) id: u32,
+    pub(super) vertices: std::ops::Range<usize>,
+}
+
+thread_local! {
+    // The new body families do not need motion-history buffers. Observe them only in tests,
+    // after the mesh is emitted, keyed by the same vertex offsets as existing body marks.
+    static BODY_WITNESSES: std::cell::RefCell<Option<Vec<BodyWitness>>> = const { std::cell::RefCell::new(None) };
+}
+
+pub(super) fn witness_body(id: u32, start: usize, end: usize) {
+    if start < end {
+        BODY_WITNESSES.with_borrow_mut(|witnesses| {
+            if let Some(witnesses) = witnesses {
+                witnesses.push(BodyWitness {
+                    id,
+                    vertices: start..end,
+                });
+            }
+        });
+    }
+}
+
+pub(super) fn capture_body_witnesses<T>(draw: impl FnOnce() -> T) -> (T, Vec<BodyWitness>) {
+    BODY_WITNESSES.with_borrow_mut(|witnesses| *witnesses = Some(Vec::new()));
+    let output = draw();
+    let witnesses = BODY_WITNESSES.with_borrow_mut(|witnesses| witnesses.take().unwrap());
+    (output, witnesses)
+}
+
+pub(super) fn submitted_bodies<T>(
+    game: &mut Game<'_>,
+    draw: impl FnOnce(&mut Game<'_>) -> T,
+) -> (T, Vec<u32>) {
+    let (output, witnesses) = capture_body_witnesses(|| draw(game));
+    let mut bodies: Vec<_> = witnesses
+        .into_iter()
+        .map(|w| (w.vertices.start as u32, w.id))
+        .collect();
+    bodies.extend(game.entity_motion.borrow().windows(2).filter_map(|marks| {
+        let (start, id) = marks[0];
+        (id != 0 && start < marks[1].0).then(|| {
+            let id = if id == Game::MOTION_OWN_PLAYER {
+                game.own_entity_id() as u32
+            } else {
+                id as u32
+            };
+            (start, id)
+        })
+    }));
+    bodies.sort_unstable_by_key(|&(start, _)| start);
+    (output, bodies.into_iter().map(|(_, id)| id).collect())
+}
+
 /// Exercise the real packet and draw paths; the parity harness reads the same scene
 /// and compares these submitted body IDs with the vanilla renderer's dispatch order.
 #[test]
@@ -212,7 +267,10 @@ fn a_spectator_following_an_entity_submits_no_local_body() {
 fn entity_draw_order_after_client_packets() {
     use sunrise_client::camera::CameraType;
     use sunrise_protocol::{
-        entity_data::{ITEM_ENTITY_ITEM, Value, serializer::ITEM_STACK},
+        entity_data::{
+            ITEM_ENTITY_ITEM, Value,
+            serializer::{ITEM_STACK, OPTIONAL_BLOCK_POS},
+        },
         item::Stack,
         packets::play::{self, Clientbound as C},
     };
@@ -239,7 +297,12 @@ fn entity_draw_order_after_client_packets() {
             portal_cooldown: 0,
             sea_level: 63,
         };
+        game.pack_ids = Some(super::shader_packs::PackIds::with_entity_ids([
+            ("minecraft:ender_dragon", 101),
+            ("minecraft:end_crystal", 102),
+        ]));
         let mut snapshots = Vec::new();
+        let mut check_beams = false;
         for line in include_str!("entity-draw-order.txt").lines() {
             let words: Vec<_> = line.split_whitespace().collect();
             let packet = match words.as_slice() {
@@ -257,10 +320,28 @@ fn entity_draw_order_after_client_packets() {
                     online_mode: false,
                     enforces_secure_chat: false,
                 }),
-                ["respawn"] => C::Respawn(play::Respawn {
-                    spawn: spawn.clone(),
+                ["respawn", dimension @ ..] => C::Respawn(play::Respawn {
+                    spawn: play::SpawnInfo {
+                        dimension: dimension
+                            .first()
+                            .map_or_else(|| spawn.dimension.clone(), |key| (*key).into()),
+                        ..spawn.clone()
+                    },
                     keep: 0,
                 }),
+                ["beams", crystal] => {
+                    let id: u32 = crystal.parse().unwrap();
+                    let index = game.crystals.iter().position(|c| c.id == id).unwrap();
+                    game.dragon
+                        .as_mut()
+                        .unwrap()
+                        .set_render_test_crystal(Some(index));
+                    check_beams = true;
+                    C::SetEntityData(play::SetEntityData {
+                        id: id as i32,
+                        values: vec![(8, OPTIONAL_BLOCK_POS, Value::OptPos(Some([3, 325, 3])))],
+                    })
+                }
                 ["add", id, kind] => {
                     let id: i32 = id.parse().unwrap();
                     C::AddEntity(play::AddEntity {
@@ -319,22 +400,37 @@ fn entity_draw_order_after_client_packets() {
                 ["frame"] => {
                     game.camera_type = CameraType::ThirdPersonBack;
                     game.tick_player_model();
-                    game.entity_geometry(glam::DVec3::new(0.5, 321.0, -4.5), 1.0, None, Vec::new());
-                    // The render pass marks every submitted body for frame generation. Read
-                    // nonempty spans, not the planner's list, so a changed submit loop fails too.
-                    let ids: Vec<_> = game
-                        .entity_motion
-                        .borrow()
-                        .windows(2)
-                        .filter(|w| w[0].1 != 0 && w[0].0 < w[1].0)
-                        .map(|w| {
-                            if w[0].1 == Game::MOTION_OWN_PLAYER {
-                                game.own_entity_id() as u32
-                            } else {
-                                w[0].1 as u32
-                            }
-                        })
-                        .collect();
+                    let ((vertices, ..), ids) = submitted_bodies(game, |game| {
+                        game.entity_geometry(
+                            glam::DVec3::new(0.5, 321.0, -4.5),
+                            1.0,
+                            None,
+                            Vec::new(),
+                            &mut Vec::new(),
+                        )
+                    });
+                    if std::mem::take(&mut check_beams) {
+                        let spans = game.entity_spans.borrow();
+                        let entities = sunrise_shaders::render_stage("ENTITIES");
+                        let none = sunrise_shaders::render_stage("NONE");
+                        let beams: Vec<_> = spans
+                            .windows(3)
+                            .filter_map(|w| {
+                                let [body, beam, next] = w else {
+                                    unreachable!()
+                                };
+                                let mesh = &vertices[beam.start as usize..next.start as usize];
+                                (!mesh.is_empty() && mesh.iter().all(|v| v.layer & 0xffff == 6))
+                                    .then_some((body, beam))
+                            })
+                            .collect();
+                        assert_eq!(beams.len(), 2);
+                        for ((body, beam), pack_id) in beams.into_iter().zip([101, 102]) {
+                            assert_eq!((body.stage, body.id), (entities, pack_id));
+                            assert!(body.start < beam.start);
+                            assert_eq!(beam.stage, none);
+                        }
+                    }
                     println!("entity-draw-order: {ids:?}");
                     snapshots.push(ids);
                     continue;
@@ -358,6 +454,12 @@ fn entity_draw_order_after_client_packets() {
                 vec![4321, 91, 40, 3],
                 vec![4321, 91, 40, 3, 7, 8, 9],
                 vec![4321, 91, 40, 3, 8, 9, 7],
+                vec![4321, 23, 82, 110, 20],
+                vec![4321, 23, 82, 110, 20],
+                vec![4321, 82, 110, 20, 23],
+                vec![4321, 82, 23, 110, 20],
+                vec![4321],
+                vec![4321, 110, 23],
             ]
         );
     });

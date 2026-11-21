@@ -3047,6 +3047,14 @@ mod tests {
                 "data/test/tags/worldgen/biome/hot.json",
                 serde_json::json!({"values": ["minecraft:desert"]}),
             ),
+            (
+                "data/minecraft/worldgen/biome/plains.json",
+                serde_json::json!({}),
+            ),
+            (
+                "data/minecraft/worldgen/biome/desert.json",
+                serde_json::json!({}),
+            ),
         ]);
         let scene = scene(blocks);
         let level = ParticleLevel {
