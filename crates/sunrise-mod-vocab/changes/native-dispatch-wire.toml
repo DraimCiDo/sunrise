@@ -68,7 +68,6 @@ ids = [
   "type:EntityTickListenedEvent",
   "type:ExpBottleEvent",
   "type:ExplosionPrimeEvent",
-  "type:ExtractBlockScreenEffectEvent",
   "type:FallingTickEvent",
   "type:FarmlandTrampleEvent",
   "type:FenceGateInWallEvent",

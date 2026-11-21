@@ -1,5 +1,5 @@
 pub mod __private {
-    #[derive(Clone, Copy)]
+    #[derive(Clone)]
     pub struct SelectedBlockScreenEffectRenderer;
     pub use super::ConfigurationTaskRegistration;
 }

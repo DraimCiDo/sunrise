@@ -12,6 +12,8 @@
 //! parameters in vocabulary types, before they become event fields, a reply, or a cancellation.
 //! Do not repeat the receiver or a phase context in the parameter list. Only a parameter used by
 //! the engine but not by the listener is marked `#[engine]`, such as a level hook's tick queue.
+//! Mark a dispatch parameter `#[event_private]` to keep its generated event field accessible
+//! inside the vocabulary crate, but not to mods. Dispatch still handles it normally.
 //! Separate files hold draw contexts and general notes. The declaration traits are:
 //!
 //! - `Hooks`: `#[hook(side = "...", contract = "...", ...)]`, one per moment the game tells mods about.

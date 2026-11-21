@@ -1,4 +1,4 @@
-//! Selected block overlay renderers in a real game: what they submit and where those quads land.
+//! Block overlays in a real game: renderer selection, submission and quad placement.
 use super::native_entity_refs::tests::{fixture_root, run_fresh_cases, with_client_game};
 use super::{Game, PackResources, Screen};
 use BlockScreenEffect::{Block, Fire, Water};
@@ -66,7 +66,7 @@ fn marker(effect: BlockScreenEffect) -> u32 {
         Fire => 0xFF030000,
     }
 }
-struct Planned;
+struct Planned(Arc<PlannedRenderer>);
 #[mod_api::__subscriptions]
 impl Hooks for Planned {
     fn extract_block_screen_effect(
@@ -80,7 +80,7 @@ impl Hooks for Planned {
             .unwrap()
             .push((event.effect, event.partial_tick));
         if plan.custom.contains(&event.effect) {
-            event.set_custom_renderer(&PlannedRenderer);
+            event.set_custom_renderer(self.0.clone());
         }
         if plan.cancel.contains(&event.effect) {
             Flow::Cancel
@@ -207,7 +207,11 @@ fn a_mod_draws_prepends_replaces_and_cancels_overlays() {
             let vertices: Vec<_> = vertices.collect();
             bytemuck::cast_slice::<_, u8>(&vertices).to_vec()
         };
-        let mods: Mods = vec![ModEntry::new("screen-effect", Box::new(Planned))].into();
+        let mods: Mods = vec![ModEntry::new(
+            "screen-effect",
+            Box::new(Planned(Arc::new(PlannedRenderer))),
+        )]
+        .into();
         mod_platform::testing::with_mods(mods, || {
             let frame = |game: &Game<'_>, plan: Plan| {
                 *PLAN.lock().unwrap() = plan;
@@ -347,20 +351,21 @@ fn a_refused_renderer_discards_partial_quads_and_runs_again() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     static SUBMISSIONS: AtomicUsize = AtomicUsize::new(0);
-    struct ReadsLevel;
+    struct Extract(Arc<ReadsLevel>);
     #[mod_api::__subscriptions]
-    impl Hooks for ReadsLevel {
+    impl Hooks for Extract {
         fn extract_block_screen_effect(
             &self,
             _: &dyn ClientHost,
             event: &mut ExtractBlockScreenEffectEvent<'_>,
         ) -> Flow {
             if event.effect == Fire {
-                event.set_custom_renderer(&ReadsLevel);
+                event.set_custom_renderer(self.0.clone());
             }
             Flow::Continue
         }
     }
+    struct ReadsLevel;
     impl BlockScreenEffectRenderer for ReadsLevel {
         fn submit(&self, host: &dyn ClientHost, render: BlockScreenEffectRender<'_>) -> bool {
             assert!(render.draw.quad(QUAD, marker(Fire)));
@@ -381,7 +386,10 @@ fn a_refused_renderer_discards_partial_quads_and_runs_again() {
             .unwrap();
         game.world.set(0, 65, 0, water).unwrap();
         assert!(sample_eye_in_water(game));
-        let mods = vec![ModEntry::new("reads-level", Box::new(ReadsLevel))];
+        let mods = vec![ModEntry::new(
+            "reads-level",
+            Box::new(Extract(Arc::new(ReadsLevel))),
+        )];
         mod_platform::testing::with_mods(mods.into(), || {
             for phase in [ModPhase::Setup, ModPhase::Setup, ModPhase::World] {
                 let _phase = PhaseOwner::scope(phase);
@@ -403,7 +411,10 @@ fn a_panicking_extractor_preserves_the_previous_selection_and_other_listeners() 
     use mod_api::__private::{HookPanicReport, take_hook_panics};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    struct Panics(Arc<AtomicUsize>);
+    struct Panics {
+        attempts: Arc<AtomicUsize>,
+        renderer: Arc<Choice>,
+    }
     #[mod_api::__subscriptions]
     impl Hooks for Panics {
         #[listener(priority = -5)]
@@ -413,8 +424,8 @@ fn a_panicking_extractor_preserves_the_previous_selection_and_other_listeners() 
             event: &mut ExtractBlockScreenEffectEvent<'_>,
         ) -> Flow {
             if event.effect == Water {
-                self.0.fetch_add(1, Ordering::Relaxed);
-                event.set_custom_renderer(&Choice(RED));
+                self.attempts.fetch_add(1, Ordering::Relaxed);
+                event.set_custom_renderer(self.renderer.clone());
                 event.cancelled = true;
                 panic!("extractor failed after replacing the selection");
             }
@@ -451,8 +462,21 @@ fn a_panicking_extractor_preserves_the_previous_selection_and_other_listeners() 
         let attempts = Arc::new(AtomicUsize::new(0));
         let later_calls = Arc::new(AtomicUsize::new(0));
         let mods = vec![
-            ModEntry::new("first", Box::new(ObserveOverlay(Water, Arc::default()))),
-            ModEntry::new("broken-extractor", Box::new(Panics(attempts.clone()))),
+            ModEntry::new(
+                "first",
+                Box::new(ObserveOverlay {
+                    effect: Water,
+                    seen: Arc::default(),
+                    water: Arc::new(Choice(marker(Water))),
+                }),
+            ),
+            ModEntry::new(
+                "broken-extractor",
+                Box::new(Panics {
+                    attempts: attempts.clone(),
+                    renderer: Arc::new(Choice(RED)),
+                }),
+            ),
             ModEntry::new("after", Box::new(After(later_calls.clone()))),
         ];
         mod_platform::testing::with_mods(mods.into(), || {
@@ -494,7 +518,11 @@ fn a_panicking_renderer_discards_its_quads_and_is_skipped_on_later_frames() {
         }
     }
 
-    struct Select(Arc<AtomicUsize>);
+    struct Select {
+        extractions: Arc<AtomicUsize>,
+        fire: Arc<BrokenFire>,
+        water: Arc<Choice>,
+    }
     #[mod_api::__subscriptions]
     impl Hooks for Select {
         fn extract_block_screen_effect(
@@ -504,10 +532,10 @@ fn a_panicking_renderer_discards_its_quads_and_is_skipped_on_later_frames() {
         ) -> Flow {
             match event.effect {
                 Fire => {
-                    self.0.fetch_add(1, Ordering::Relaxed);
-                    event.set_custom_renderer(&BrokenFire);
+                    self.extractions.fetch_add(1, Ordering::Relaxed);
+                    event.set_custom_renderer(self.fire.clone());
                 }
-                Water => event.set_custom_renderer(&Choice(0xFF020000)),
+                Water => event.set_custom_renderer(self.water.clone()),
                 Block => {}
             }
             Flow::Continue
@@ -527,7 +555,11 @@ fn a_panicking_renderer_discards_its_quads_and_is_skipped_on_later_frames() {
         let extractions = Arc::new(AtomicUsize::new(0));
         let mods = vec![ModEntry::new(
             "broken-fire",
-            Box::new(Select(extractions.clone())),
+            Box::new(Select {
+                extractions: extractions.clone(),
+                fire: Arc::new(BrokenFire),
+                water: Arc::new(Choice(marker(Water))),
+            }),
         )];
         mod_platform::testing::with_mods(mods.into(), || {
             let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
@@ -569,7 +601,11 @@ struct OverlayInput {
     player_partial_tick: f32,
 }
 
-struct ObserveOverlay(BlockScreenEffect, Arc<Mutex<Option<OverlayInput>>>);
+struct ObserveOverlay {
+    effect: BlockScreenEffect,
+    seen: Arc<Mutex<Option<OverlayInput>>>,
+    water: Arc<Choice>,
+}
 #[mod_api::__subscriptions]
 impl Hooks for ObserveOverlay {
     fn extract_block_screen_effect(
@@ -577,15 +613,15 @@ impl Hooks for ObserveOverlay {
         _: &dyn ClientHost,
         event: &mut ExtractBlockScreenEffectEvent<'_>,
     ) -> Flow {
-        if event.effect == self.0 {
-            *self.1.lock().unwrap() = Some(OverlayInput {
+        if event.effect == self.effect {
+            *self.seen.lock().unwrap() = Some(OverlayInput {
                 state: event.state,
                 pos: event.pos,
                 partial_tick: event.partial_tick,
                 player_partial_tick: event.player_partial_tick,
             });
             if event.effect == Water {
-                event.set_custom_renderer(&Choice(0xFF020000));
+                event.set_custom_renderer(self.water.clone());
             }
         }
         Flow::Continue
@@ -596,7 +632,11 @@ fn observe_overlay(effect: BlockScreenEffect, run: impl FnOnce()) -> Option<Over
     let seen = Arc::new(Mutex::new(None));
     let mods = vec![ModEntry::new(
         "observe-overlay",
-        Box::new(ObserveOverlay(effect, seen.clone())),
+        Box::new(ObserveOverlay {
+            effect,
+            seen: seen.clone(),
+            water: Arc::new(Choice(marker(Water))),
+        }),
     )];
     mod_platform::testing::with_mods(mods.into(), run);
     seen.lock().unwrap().take()
@@ -874,7 +914,10 @@ fn extraction_keeps_player_interpolation_when_world_interpolation_is_frozen() {
     });
 }
 
-struct FirstChoice(bool);
+struct FirstChoice {
+    cancel: bool,
+    renderer: Arc<Choice>,
+}
 #[mod_api::__subscriptions]
 impl Hooks for FirstChoice {
     #[listener(priority = 10)]
@@ -884,8 +927,8 @@ impl Hooks for FirstChoice {
         event: &mut ExtractBlockScreenEffectEvent<'_>,
     ) -> Flow {
         if event.effect == Block {
-            event.set_custom_renderer(&Choice(RED));
-            if self.0 {
+            event.set_custom_renderer(self.renderer.clone());
+            if self.cancel {
                 return Flow::Cancel;
             }
         }
@@ -893,7 +936,7 @@ impl Hooks for FirstChoice {
     }
 }
 
-struct ReceiveCancelled;
+struct ReceiveCancelled(Arc<Choice>);
 #[mod_api::__subscriptions]
 impl Hooks for ReceiveCancelled {
     #[listener(receive_cancelled)]
@@ -903,13 +946,13 @@ impl Hooks for ReceiveCancelled {
         event: &mut ExtractBlockScreenEffectEvent<'_>,
     ) -> Flow {
         if event.effect == Block && event.cancelled {
-            event.set_custom_renderer(&Choice(0xFF0000FF));
+            event.set_custom_renderer(self.0.clone());
         }
         Flow::Continue
     }
 }
 
-struct LastChoice;
+struct LastChoice(Arc<Choice>);
 #[mod_api::__subscriptions]
 impl Hooks for LastChoice {
     #[listener(priority = -10)]
@@ -919,7 +962,7 @@ impl Hooks for LastChoice {
         event: &mut ExtractBlockScreenEffectEvent<'_>,
     ) -> Flow {
         if event.effect == Block {
-            event.set_custom_renderer(&Choice(0xFF00FF00));
+            event.set_custom_renderer(self.0.clone());
         }
         Flow::Continue
     }
@@ -940,9 +983,18 @@ fn only_the_last_eligible_renderer_submits() {
         let frame = |cancel| {
             // Supply entries out of listener-priority order.
             let mods: Mods = vec![
-                ModEntry::new("last", Box::new(LastChoice)),
-                ModEntry::new("receive", Box::new(ReceiveCancelled)),
-                ModEntry::new("first", Box::new(FirstChoice(cancel))),
+                ModEntry::new("last", Box::new(LastChoice(Arc::new(Choice(0xFF00FF00))))),
+                ModEntry::new(
+                    "receive",
+                    Box::new(ReceiveCancelled(Arc::new(Choice(0xFF0000FF)))),
+                ),
+                ModEntry::new(
+                    "first",
+                    Box::new(FirstChoice {
+                        cancel,
+                        renderer: Arc::new(Choice(RED)),
+                    }),
+                ),
             ]
             .into();
             mod_platform::testing::with_mods(mods, || quads(game))
@@ -965,6 +1017,108 @@ fn only_the_last_eligible_renderer_submits() {
     });
 }
 
+#[test]
+#[ignore = "daily"]
+fn a_later_listener_can_inspect_and_clear_the_renderer_without_uncancelling() {
+    struct ClearsChoice(Arc<Mutex<Vec<[bool; 3]>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for ClearsChoice {
+        #[listener(priority = -10, receive_cancelled)]
+        fn extract_block_screen_effect(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut ExtractBlockScreenEffectEvent<'_>,
+        ) -> Flow {
+            if event.effect == Block {
+                let before = event.has_custom_renderer();
+                event.clear_custom_renderer();
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push([before, event.has_custom_renderer(), event.cancelled]);
+            }
+            Flow::Continue
+        }
+    }
+
+    with_client_game(|game| {
+        burning_player(game);
+        let stone = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:stone")
+            .unwrap();
+        game.world.set(0, 65, 0, stone).unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let renderer = Arc::new(Choice(marker(Block)));
+        for (select, cancel, expected) in [
+            (false, false, &["block", "fire", "fire"][..]),
+            (true, false, &["block", "fire", "fire"][..]),
+            (true, true, &["fire", "fire"][..]),
+        ] {
+            let mut mods = vec![ModEntry::new("clear", Box::new(ClearsChoice(seen.clone())))];
+            if select {
+                mods.push(ModEntry::new(
+                    "first",
+                    Box::new(FirstChoice {
+                        cancel,
+                        renderer: renderer.clone(),
+                    }),
+                ));
+            }
+            let frame = mod_platform::testing::with_mods(mods.into(), || quads(game));
+            assert_eq!(names(&frame), expected);
+            assert_eq!(seen.lock().unwrap().as_slice(), [[select, false, cancel]]);
+            seen.lock().unwrap().clear();
+        }
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn submit_runs_as_the_mod_that_selected_the_renderer() {
+    use mod_api::content::crash::current_native_mod;
+
+    #[derive(Default)]
+    struct FireRenderer(Mutex<Option<&'static str>>);
+    impl BlockScreenEffectRenderer for FireRenderer {
+        fn submit(&self, _: &dyn ClientHost, _: BlockScreenEffectRender<'_>) -> bool {
+            *self.0.lock().unwrap() = current_native_mod();
+            true
+        }
+    }
+
+    struct PicksFire(Arc<FireRenderer>);
+    #[mod_api::__subscriptions]
+    impl Hooks for PicksFire {
+        fn extract_block_screen_effect(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut ExtractBlockScreenEffectEvent<'_>,
+        ) -> Flow {
+            if event.effect == Fire {
+                event.set_custom_renderer(self.0.clone());
+            }
+            Flow::Continue
+        }
+    }
+
+    with_client_game(|game| {
+        burning_player(game);
+        let renderer = Arc::new(FireRenderer::default());
+        let mods = vec![ModEntry::new(
+            "fire-selector",
+            Box::new(PicksFire(renderer.clone())),
+        )];
+        mod_platform::testing::with_mods(mods.into(), || {
+            assert!(names(&quads(game)).is_empty());
+            assert_eq!(*renderer.0.lock().unwrap(), Some("fire-selector"));
+            assert_eq!(current_native_mod(), None);
+        });
+    });
+}
+
 /// A frame's pixels, RGBA.
 fn drawn_frame(game: &mut Game<'_>) -> (Vec<u8>, usize) {
     game.renderer.as_mut().unwrap().screenshot = Some(ScreenshotRequest {
@@ -983,16 +1137,16 @@ fn drawn_frame(game: &mut Game<'_>) -> (Vec<u8>, usize) {
 
 /// Whether the frame's mod draws: off for the frame to compare with.
 static DRAWING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-struct Painter;
+struct PaintOverlay(Arc<Painter>);
 #[mod_api::__subscriptions]
-impl Hooks for Painter {
+impl Hooks for PaintOverlay {
     fn extract_block_screen_effect(
         &self,
         _: &dyn ClientHost,
         event: &mut ExtractBlockScreenEffectEvent<'_>,
     ) -> Flow {
         if event.effect == Fire {
-            event.set_custom_renderer(&Painter);
+            event.set_custom_renderer(self.0.clone());
         }
         Flow::Continue
     }
@@ -1006,6 +1160,7 @@ impl Hooks for Painter {
     }
 }
 
+struct Painter;
 impl BlockScreenEffectRenderer for Painter {
     fn submit(&self, _: &dyn ClientHost, render: BlockScreenEffectRender<'_>) -> bool {
         // Leaning away to the right: the right edge is twice as deep, so half as far out.
@@ -1038,7 +1193,11 @@ fn screen_effect_quads_draw_over_the_level_and_under_the_gui() {
     if run_fresh_cases(name, "SUNRISE_SCREEN_EFFECT_PASS_CHILD", &["pixels"]) {
         return;
     }
-    let mods: Mods = vec![ModEntry::new("painter", Box::new(Painter))].into();
+    let mods: Mods = vec![ModEntry::new(
+        "painter",
+        Box::new(PaintOverlay(Arc::new(Painter))),
+    )]
+    .into();
     mod_platform::testing::with_mods(mods, || {
         with_client_game(|game| {
             let mut builder = winit::event_loop::EventLoop::builder();

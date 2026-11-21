@@ -1,4 +1,5 @@
 use crate::{BlockPos, BlockState, CameraDrawContext, ClientHost, ExtractBlockScreenEffectEvent};
+use std::sync::Arc;
 
 /// Which of `ScreenEffectRenderer`'s overlays a block puts over the first-person view
 /// (NeoForge's `ExtractBlockScreenEffectEvent.OverlayType`).
@@ -20,10 +21,10 @@ impl BlockScreenEffect {
 
 // no wire: the renderer is an in-process callback.
 /// A renderer selected for one block overlay by [`ExtractBlockScreenEffectEvent::set_custom_renderer`].
-/// Reuse a static renderer rather than allocating one at every extraction.
-pub trait BlockScreenEffectRenderer: Sync {
-    /// Submit this overlay with read-only access to the client. Return `true` to suppress
-    /// its vanilla quads, or `false` to leave them after yours. For block and water,
+/// Keep it in an [`Arc`] and clone that reference at extraction rather than allocating per frame.
+pub trait BlockScreenEffectRenderer: Send + Sync {
+    /// Submit this overlay as the selecting mod, with read-only access to the client. Return
+    /// `true` to suppress its vanilla quads or `false` to leave them after yours. For block and water,
     /// cancellation at extraction still suppresses vanilla quads. For fire, only this
     /// return value decides once a renderer was selected. A failed submission contributes
     /// no quads and leaves extraction's vanilla drawing decision unchanged. A panic disables
@@ -72,13 +73,19 @@ pub fn block_screen_effect_render(
 }
 
 impl ExtractBlockScreenEffectEvent<'_> {
-    /// Select a renderer for this overlay. The last eligible listener to select one wins;
-    /// listeners that do not select one leave the previous choice in place. Cancellation
-    /// skips subsequent listeners unless they opt into `#[listener(receive_cancelled)]`.
+    /// Whether a custom renderer is currently selected for this overlay, including a choice
+    /// made by an earlier listener. Cancellation by itself is not a custom renderer choice.
+    pub fn has_custom_renderer(&self) -> bool {
+        self.renderer.is_some()
+    }
+
+    /// Select or replace the renderer for this overlay. Clone a renderer you already own so
+    /// extraction does not allocate. The last eligible listener to set or clear the choice wins.
+    /// Cancellation skips subsequent listeners unless they opt into `#[listener(receive_cancelled)]`.
     /// The selected renderer still submits even if the overlay is canceled. In particular,
     /// it replaces the no-op that would otherwise suppress canceled fire. A failed listener
     /// leaves the preceding selection and cancellation in place.
-    pub fn set_custom_renderer(&mut self, renderer: &'static dyn BlockScreenEffectRenderer) {
+    pub fn set_custom_renderer(&mut self, renderer: Arc<dyn BlockScreenEffectRenderer>) {
         // The event can only borrow the selection slot inside a subscribed listener.
         let owners = crate::runtime::installed().and_then(|installed| {
             let id = crate::content::crash::current_native_mod()?;
@@ -90,23 +97,29 @@ impl ExtractBlockScreenEffectEvent<'_> {
             log::error!("extract_block_screen_effect: renderer selection has no listener owner");
         }
     }
+
+    /// Clear the current choice without changing cancellation. With no new selection, only the
+    /// vanilla effect can draw, and it draws only if the overlay is not canceled.
+    pub fn clear_custom_renderer(&mut self) {
+        *self.renderer = None;
+    }
 }
 
 // no wire: a selected callback and its attribution belong to this process.
 /// Engine-owned selection, carrying the listener's attribution to submission.
 // hidden: only the game may submit a selected callback.
 #[doc(hidden)]
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 // exhaustive: only the extraction event can construct this private-field selection.
 pub struct SelectedBlockScreenEffectRenderer {
     owners: &'static [crate::callback_owner::CallbackOwner; BlockScreenEffect::COUNT],
-    renderer: &'static dyn BlockScreenEffectRenderer,
+    renderer: Arc<dyn BlockScreenEffectRenderer>,
 }
 
 impl SelectedBlockScreenEffectRenderer {
     /// Submit under the selecting listener's mod scope, returning no answer on failure.
     pub fn submit(
-        self,
+        &self,
         host: &dyn ClientHost,
         render: BlockScreenEffectRender<'_>,
     ) -> Option<bool> {

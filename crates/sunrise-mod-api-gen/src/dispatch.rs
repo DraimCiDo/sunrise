@@ -568,12 +568,9 @@ pub(super) fn emit<'a>(
             let visibility = match append {
                 Some((RegistrationAppend::Register, _)) => "",
                 Some((RegistrationAppend::Custom, _)) => "pub(super)",
-                None if task_registration
-                    || matches!(
-                        (event_type.as_str(), name.as_str()),
-                        ("ApplyEffectTickEvent", "changes")
-                            | ("ExtractBlockScreenEffectEvent", "renderer")
-                    ) =>
+                None if hook.event_private.contains(name)
+                    || task_registration
+                    || (event_type == "ApplyEffectTickEvent" && name == "changes") =>
                 {
                     "pub(super)"
                 }

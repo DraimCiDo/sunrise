@@ -196,6 +196,8 @@ pub struct Hook {
     pub cancellable: Option<bool>,
     /// Dispatch parameters (name and vocabulary type in order), apart from the Host/phase context.
     pub call: Vec<(String, String)>,
+    /// Parameters that become crate-internal event fields, not public fields.
+    pub event_private: Vec<String>,
     pub receiver: Receiver,
     pub dispatch: DispatchStyle,
     /// The engine passes its tick queue to the level host, not to the listener.
@@ -328,6 +330,8 @@ struct HookEntry {
     context: Option<PhaseContext>,
     #[serde(default)]
     call: Vec<(String, String)>,
+    #[serde(default)]
+    event_private: Vec<String>,
     #[serde(default)]
     receiver: Receiver,
     #[serde(default)]
@@ -572,6 +576,7 @@ impl Hook {
             version: entry.version.unwrap_or(1),
             cancellable: entry.cancellable,
             call: entry.call,
+            event_private: entry.event_private,
             receiver: entry.receiver,
             dispatch: entry.dispatch,
             engine_ticks,
@@ -799,6 +804,7 @@ impl Declared {
                         entry.insert("name".into(), name.clone().into());
                         let mut call = Vec::new();
                         let mut engine = Vec::new();
+                        let mut event_private = Vec::new();
                         let mut names = HashSet::new();
                         for input in &function.sig.inputs {
                             let syn::FnArg::Typed(input) = input else {
@@ -823,9 +829,14 @@ impl Declared {
                                 [attr] if matches!(&attr.meta, syn::Meta::Path(path) if path.is_ident("engine")) => {
                                     &mut engine
                                 }
+                                [attr] if matches!(&attr.meta, syn::Meta::Path(path) if path.is_ident("event_private")) =>
+                                {
+                                    event_private.push(pat.ident.to_string());
+                                    &mut call
+                                }
                                 _ => {
                                     return Err(invalid(format!(
-                                        "{name}: only #[engine] is allowed on parameters"
+                                        "{name}: a parameter can have only #[engine] or #[event_private]"
                                     )));
                                 }
                             };
@@ -836,6 +847,7 @@ impl Declared {
                         }
                         entry.insert("call".into(), call.into());
                         entry.insert("engine".into(), engine.into());
+                        entry.insert("event_private".into(), event_private.into());
                         if let Some(doc) = doc(&function.attrs) {
                             entry.insert("doc".into(), doc.into());
                         }
@@ -1037,6 +1049,7 @@ impl Hook {
             version: 1,
             cancellable: None,
             call: Vec::new(),
+            event_private: Vec::new(),
             receiver: Receiver::default(),
             dispatch: DispatchStyle::default(),
             engine_ticks: false,

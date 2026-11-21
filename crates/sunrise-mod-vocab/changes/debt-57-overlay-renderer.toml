@@ -28,9 +28,9 @@ skipping the hook if it is absent. NeoForge's `ExtractBlockScreenEffectEvent.set
 """
 migrate = """
 - In `Hooks::extract_block_screen_effect`, change the event parameter to `&mut ExtractBlockScreenEffectEvent<'_>`.
-  Replace `event.custom_draw = true` with `event.set_custom_renderer(&MY_RENDERER)`, passing a static renderer.
-  Replace `event.custom_draw = false` with `event.set_custom_renderer(&VANILLA_ONLY)`, where `VANILLA_ONLY` implements
-  `BlockScreenEffectRenderer::submit` by drawing nothing and returning `false`.
+  Replace `event.custom_draw = true` with `event.set_custom_renderer(self.renderer.clone())`. Store your renderer in
+  an `Arc` on the hook implementation and construct it before extraction. Replace `event.custom_draw = false`
+  with `event.clear_custom_renderer()`, which resets the choice without changing cancellation.
 - Remove `Hooks::block_screen_effect_draw` and move its drawing into
   `BlockScreenEffectRenderer::submit(&self, host: &dyn ClientHost, render: BlockScreenEffectRender<'_>) -> bool`.
   Use `render.effect`, `render.state`, `render.pos`, `render.partial_tick`, `render.hide_gui` and `render.draw` in place
