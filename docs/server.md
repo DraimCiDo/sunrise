@@ -466,7 +466,7 @@ comes out of the headless-engine work.
 **One-command install** (`packaging/server/`):
 
 - Linux and macOS:
-  `curl -fsSL https://raw.githubusercontent.com/horizon-rust/horizon/main/packaging/server/install.sh | sh`
+  `curl -fsSL https://raw.githubusercontent.com/sunrise-org/sunrise/main/packaging/server/install.sh | sh`
   The script picks the release archive for the OS and architecture (on Linux x86_64 the server archive,
   on macOS arm64 the game's), downloads it from GitHub Releases, and checks it against the release's signed
   `SHA256SUMS` when OpenSSL 3 is installed, else against the SHA-256 GitHub publishes for each asset
@@ -479,7 +479,7 @@ comes out of the headless-engine work.
   any that are missing, `init` warns, and `run` stops at once with what to install, rather than restarting
   a game that can't load.
 - Windows:
-  `irm https://raw.githubusercontent.com/horizon-rust/horizon/main/packaging/server/install.ps1 | iex`
+  `irm https://raw.githubusercontent.com/sunrise-org/sunrise/main/packaging/server/install.ps1 | iex`
   The script does the same into `%LOCALAPPDATA%\Sunrise` (`-Version`, `-Dir`), with junctions instead of
   links (no admin rights), and adds `bin` to the user's PATH. It finds OpenSSL 3 on the PATH or in Git for
   Windows to check the signature.
