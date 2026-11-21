@@ -232,7 +232,7 @@ fn a_compressed_size_rejection_does_not_skip_healthy_records_in_either_region() 
             0,
             &records,
             prepared,
-            &fs::File::sync_data,
+            &std::fs::File::sync_data,
         );
         assert!(outcome.sync_error.is_none());
         let failed = outcome.failed_records;
