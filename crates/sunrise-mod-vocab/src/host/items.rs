@@ -121,14 +121,14 @@ pub trait ItemsServerHost {
     #[access(WorldOnly)]
     fn scratch_stack(
         &mut self,
-        tx: &Transaction,
+        tx: &TransactionContext,
         stack: ItemStack,
     ) -> Result<Option<ItemPlace>, StackWriteError>;
     /// Side: server.
     /// Takes the stack out of scratch place `place`, in `tx`, ending the place: none where it
     /// is empty, no longer held, or not a scratch place.
     #[access(WorldOnly)]
-    fn scratch_take(&mut self, tx: &Transaction, place: &ItemPlace) -> Option<ItemStack>;
+    fn scratch_take(&mut self, tx: &TransactionContext, place: &ItemPlace) -> Option<ItemStack>;
     /// Side: server.
     /// Holds `stack` outside the world in a two-slot copy whose item may change, in the open
     /// transaction `tx`: the [`ItemPlace::ScratchSlots`] a dispensed fluid container runs in
@@ -137,7 +137,7 @@ pub trait ItemsServerHost {
     #[access(WorldOnly)]
     fn scratch_slots(
         &mut self,
-        tx: &Transaction,
+        tx: &TransactionContext,
         stack: ItemStack,
     ) -> Result<Option<ItemPlace>, StackWriteError>;
     /// Side: server.
@@ -147,7 +147,7 @@ pub trait ItemsServerHost {
     #[access(WorldOnly)]
     fn scratch_take_slots(
         &mut self,
-        tx: &Transaction,
+        tx: &TransactionContext,
         place: &ItemPlace,
     ) -> Option<(Option<ItemStack>, Option<ItemStack>)>;
     /// Side: server.
@@ -454,7 +454,12 @@ pub trait ItemsBackend {
 pub trait ItemsBackendMut {
     /// Side: server. Set a persisted container limit in 1..=99 under the transaction.
     #[access(WorldOnly)]
-    fn container_set_stack_limit(&mut self, at: BlockSide, limit: u32, tx: &Transaction) -> bool;
+    fn container_set_stack_limit(
+        &mut self,
+        at: BlockSide,
+        limit: u32,
+        tx: &TransactionContext,
+    ) -> bool;
 
     /// Side: server. Roll an enchantment result with the named level's random source.
     #[access(WorldOnly)]
@@ -476,7 +481,7 @@ pub trait ItemsBackendMut {
         slot: usize,
         resource: &ItemResource,
         amount: u32,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> Result<Option<ItemStack>, StackWriteError>;
     /// Side: server.
     /// Takes up to `max` out of slot `slot` of those `at`'s side reaches, in transaction `tx`;
@@ -487,7 +492,7 @@ pub trait ItemsBackendMut {
         at: BlockSide,
         slot: usize,
         max: u32,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> Option<ItemStack>;
     /// Side: server.
     /// Puts up to `amount` of `resource` into the slots `at`'s side reaches, as hoppers fill
@@ -499,7 +504,7 @@ pub trait ItemsBackendMut {
         at: BlockSide,
         resource: &ItemResource,
         amount: u64,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> u64;
     /// Side: server.
     /// Takes up to `amount` of `resource` out of the slots `at`'s side reaches and may take
@@ -510,7 +515,7 @@ pub trait ItemsBackendMut {
         at: BlockSide,
         resource: &ItemResource,
         amount: u64,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> u64;
     /// Side: server.
     /// The stack at a player's or an item entity's place; none for an empty one, a player who
@@ -527,7 +532,7 @@ pub trait ItemsBackendMut {
         place: &ItemPlace,
         stack: ItemStack,
         changed: &[String],
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> Result<(), ItemPlaceEditError>;
     /// Side: server. Runs `ItemStack.onCraftedBy` for a stack held by a menu slot or its cursor,
     /// including the item's post-processing and the player's crafted statistic, in transaction
@@ -536,7 +541,7 @@ pub trait ItemsBackendMut {
     fn game_on_crafted_by(
         &mut self,
         place: &ItemPlace,
-        tx: &Transaction,
+        tx: &TransactionContext,
         amount: i32,
     ) -> Result<(), CraftedByError>;
     /// Side: server.
@@ -555,7 +560,7 @@ pub trait ItemsBackendMut {
         place: &ItemPlace,
         resource: &ItemResource,
         amount: u32,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> Result<u32, StackWriteError>;
     /// Side: server.
     /// `ItemAccess.extract` at those places: up to `amount` of `resource`, how many came out. An item entity emptied stays, empty, until the root commit
@@ -566,7 +571,7 @@ pub trait ItemsBackendMut {
         place: &ItemPlace,
         resource: &ItemResource,
         amount: u32,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> Result<u32, StackWriteError>;
     /// Side: server.
     /// Drops `stack` at the middle of the block at `pos`, as a block entity's handler gives up

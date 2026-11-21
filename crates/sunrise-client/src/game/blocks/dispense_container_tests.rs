@@ -81,7 +81,7 @@ impl ResourceHandler<FluidResource> for Jug {
     fn insert_at(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         _: usize,
         _: &FluidResource,
         amount: u32,
@@ -100,7 +100,7 @@ impl ResourceHandler<FluidResource> for Jug {
     fn extract_at(
         &self,
         _: &mut dyn ServerHost,
-        _: &Transaction,
+        _: &TransactionContext,
         _: usize,
         _: &FluidResource,
         _: u32,

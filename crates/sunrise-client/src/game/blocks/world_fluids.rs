@@ -6,7 +6,7 @@
 //! world as it was, which the reference doesn't promise.
 use super::{Game, spill::Spill, transactions::After};
 use mod_api::{
-    FluidKey, FluidStack, GameEventContext, LevelRef, PlayerRef, SoundSource, Transaction,
+    FluidKey, FluidStack, GameEventContext, LevelRef, PlayerRef, SoundSource, TransactionContext,
 };
 use sunrise_core::position::BlockPos;
 use sunrise_world::{
@@ -91,7 +91,7 @@ impl Game<'_> {
         level: LevelRef,
         pos: [i32; 3],
         player: Option<PlayerRef>,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> Option<FluidStack> {
         if !self.fluid_write_allowed(level, pos, tx) {
             return None;
@@ -116,7 +116,7 @@ impl Game<'_> {
         fluid: FluidKey,
         player: Option<PlayerRef>,
         validate: bool,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> bool {
         if !self.fluid_write_allowed(level, pos, tx) {
             return false;
@@ -153,7 +153,7 @@ impl Game<'_> {
         self.journal_fluid_write(level, write, false, player);
         true
     }
-    fn fluid_write_allowed(&self, level: LevelRef, pos: [i32; 3], tx: &Transaction) -> bool {
+    fn fluid_write_allowed(&self, level: LevelRef, pos: [i32; 3], tx: &TransactionContext) -> bool {
         self.transaction_holds(tx)
             && self.level_in_place(level)
             && self.native_level_write_allowed(level, pos)
@@ -215,7 +215,7 @@ impl Game<'_> {
         fluid: FluidKey,
         pickup: bool,
         player: Option<PlayerRef>,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> bool {
         if !self.transaction_holds(tx) || !self.level_in_place(level) {
             return false;

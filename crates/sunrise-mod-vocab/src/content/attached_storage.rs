@@ -7,7 +7,7 @@ use crate::content::registry_keys::{fluid_id, fluid_key, item_id, item_key_by_id
 use crate::{
     AttachmentCodec, AttachmentError, AttachmentType, Components, Compound, EnergyHandler,
     FluidIdentity, FluidResource, FluidStack, Holder, Identifier, ItemResource, ItemStack,
-    ResourceHandler, ServerHost, Tag, Transaction,
+    ResourceHandler, ServerHost, Tag, TransactionContext,
 };
 use sunrise_core::nbt::JavaString;
 
@@ -159,7 +159,7 @@ impl<R: StackedResource> ResourceHandler<R> for AttachedStacks<R> {
     fn insert_at(
         &self,
         host: &mut dyn ServerHost,
-        _: &Transaction,
+        _: &TransactionContext,
         index: usize,
         resource: &R,
         amount: u32,
@@ -182,7 +182,7 @@ impl<R: StackedResource> ResourceHandler<R> for AttachedStacks<R> {
     fn extract_at(
         &self,
         host: &mut dyn ServerHost,
-        _: &Transaction,
+        _: &TransactionContext,
         index: usize,
         resource: &R,
         amount: u32,
@@ -248,7 +248,7 @@ impl EnergyHandler for AttachedEnergy {
     fn capacity(&self, _: &mut dyn ServerHost) -> u32 {
         self.capacity
     }
-    fn insert(&self, host: &mut dyn ServerHost, _: &Transaction, amount: u32) -> u32 {
+    fn insert(&self, host: &mut dyn ServerHost, _: &TransactionContext, amount: u32) -> u32 {
         let held = self.amount(host);
         match amount
             .min(self.max_insert)
@@ -258,7 +258,7 @@ impl EnergyHandler for AttachedEnergy {
             went => self.write(host, held + went, went),
         }
     }
-    fn extract(&self, host: &mut dyn ServerHost, _: &Transaction, amount: u32) -> u32 {
+    fn extract(&self, host: &mut dyn ServerHost, _: &TransactionContext, amount: u32) -> u32 {
         let held = self.amount(host);
         match amount.min(self.max_extract).min(held) {
             0 => 0,

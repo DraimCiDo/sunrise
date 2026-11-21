@@ -83,7 +83,7 @@ impl ResourceHandler<ItemResource> for Storage {
     fn insert_at(
         &self,
         _: &mut dyn ServerHost,
-        _: &Transaction,
+        _: &TransactionContext,
         _: usize,
         _: &ItemResource,
         _: u32,
@@ -93,7 +93,7 @@ impl ResourceHandler<ItemResource> for Storage {
     fn insert(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         resource: &ItemResource,
         amount: u32,
     ) -> Result<u32, Overanswered> {
@@ -141,7 +141,7 @@ impl ResourceHandler<ItemResource> for Storage {
     fn extract_at(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         slot: usize,
         resource: &ItemResource,
         amount: u32,

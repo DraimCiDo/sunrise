@@ -2,14 +2,14 @@ use super::api_values::{StackReadError, TryIntoApi};
 use super::native_live_holder_tests::{mod_holder, with_mod_parts};
 use mod_api::{
     BlockEntityItemError as Error, Host, HostTransaction, ITEMS, ItemResource, ServerHost,
-    Transaction,
+    TransactionContext,
 };
 use std::{ops::ControlFlow, sync::Arc};
 use sunrise_client::containers::{BlockEntity, ModBlockEntity, ModContainer};
 use sunrise_client::items::ItemStack;
 use sunrise_core::nbt::Tag;
 
-fn commit(host: &mut dyn ServerHost, test: impl FnOnce(&mut dyn ServerHost, &Transaction)) {
+fn commit(host: &mut dyn ServerHost, test: impl FnOnce(&mut dyn ServerHost, &TransactionContext)) {
     host.transaction(|host, tx| {
         test(host, tx);
         Ok::<_, ()>(())
@@ -25,7 +25,7 @@ fn internal_slots_preserve_automation_limits_and_nested_transactions() {
         super::native_entity_refs::tests::with_game_at(root, |game| {
             let entity = mod_holder(game);
             let get = |host: &dyn Host, slot| entity.item_slot(host, slot);
-            let set = |host: &mut dyn ServerHost, tx: &Transaction, slot, stack| {
+            let set = |host: &mut dyn ServerHost, tx: &TransactionContext, slot, stack| {
                 entity.set_item_slot(host, tx, slot, stack)
             };
             let pos = (1, 64, 1);
@@ -225,7 +225,7 @@ fn internal_slots_preserve_automation_limits_and_nested_transactions() {
             let replacement = game.block_entity(level, [1, 64, 1]).unwrap();
             assert_ne!(entity, replacement);
             let get = |host: &dyn Host, slot| replacement.item_slot(host, slot);
-            let set = |host: &mut dyn ServerHost, tx: &Transaction, slot, stack| {
+            let set = |host: &mut dyn ServerHost, tx: &TransactionContext, slot, stack| {
                 replacement.set_item_slot(host, tx, slot, stack)
             };
             commit(game, |host, tx| {

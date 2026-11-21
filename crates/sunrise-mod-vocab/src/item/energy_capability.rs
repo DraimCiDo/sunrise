@@ -3,7 +3,8 @@
 //! written only inside a transaction.
 use crate::content::resource::{Ends, move_once};
 use crate::{
-    BlockSide, Capability, CapabilityKey, ItemCapabilityKey, Overanswered, ServerHost, Transaction,
+    BlockSide, Capability, CapabilityKey, ItemCapabilityKey, Overanswered, ServerHost,
+    TransactionContext,
 };
 use std::marker::PhantomData;
 
@@ -15,9 +16,9 @@ pub trait EnergyHandler: Send + Sync {
     /// How much it holds when full.
     fn capacity(&self, host: &mut dyn ServerHost) -> u32;
     /// Puts up to `amount` in, in transaction `tx`: how much went. Never more than `amount`.
-    fn insert(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32;
+    fn insert(&self, host: &mut dyn ServerHost, tx: &TransactionContext, amount: u32) -> u32;
     /// Takes up to `amount` out, in transaction `tx`: how much came. Never more than `amount`.
-    fn extract(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32;
+    fn extract(&self, host: &mut dyn ServerHost, tx: &TransactionContext, amount: u32) -> u32;
 }
 
 /// Energy, as NeoForge 26.3's `Capabilities.Energy.BLOCK`: a block entity's energy as one side
@@ -53,12 +54,12 @@ impl EnergyHandler for GameEnergy {
     fn capacity(&self, host: &mut dyn ServerHost) -> u32 {
         crate::backend_of(host).map_or(0, |backend| backend.energy_capacity(self.0))
     }
-    fn insert(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32 {
+    fn insert(&self, host: &mut dyn ServerHost, tx: &TransactionContext, amount: u32) -> u32 {
         crate::backend_mut_of(host)
             .map_or(0, |backend| backend.energy_insert(self.0, amount, tx))
             .min(amount)
     }
-    fn extract(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32 {
+    fn extract(&self, host: &mut dyn ServerHost, tx: &TransactionContext, amount: u32) -> u32 {
         crate::backend_mut_of(host)
             .map_or(0, |backend| backend.energy_extract(self.0, amount, tx))
             .min(amount)
@@ -74,7 +75,7 @@ pub fn move_energy(
     from: &Capability<dyn EnergyHandler>,
     to: &Capability<dyn EnergyHandler>,
     max: u32,
-    tx: &Transaction,
+    tx: &TransactionContext,
 ) -> Result<u32, Overanswered> {
     let _ = tx;
     let want = max.min(from.amount(host));
@@ -126,10 +127,10 @@ impl EnergyHandler for EmptyEnergyHandler {
     fn capacity(&self, _: &mut dyn ServerHost) -> u32 {
         0
     }
-    fn insert(&self, _: &mut dyn ServerHost, _: &Transaction, _: u32) -> u32 {
+    fn insert(&self, _: &mut dyn ServerHost, _: &TransactionContext, _: u32) -> u32 {
         0
     }
-    fn extract(&self, _: &mut dyn ServerHost, _: &Transaction, _: u32) -> u32 {
+    fn extract(&self, _: &mut dyn ServerHost, _: &TransactionContext, _: u32) -> u32 {
         0
     }
 }
@@ -147,10 +148,10 @@ impl EnergyHandler for InfiniteEnergyHandler {
     fn capacity(&self, _: &mut dyn ServerHost) -> u32 {
         u32::MAX
     }
-    fn insert(&self, _: &mut dyn ServerHost, _: &Transaction, _: u32) -> u32 {
+    fn insert(&self, _: &mut dyn ServerHost, _: &TransactionContext, _: u32) -> u32 {
         0
     }
-    fn extract(&self, _: &mut dyn ServerHost, _: &Transaction, amount: u32) -> u32 {
+    fn extract(&self, _: &mut dyn ServerHost, _: &TransactionContext, amount: u32) -> u32 {
         amount
     }
 }
@@ -167,10 +168,10 @@ impl EnergyHandler for VoidingEnergyHandler {
     fn capacity(&self, _: &mut dyn ServerHost) -> u32 {
         u32::MAX
     }
-    fn insert(&self, _: &mut dyn ServerHost, _: &Transaction, amount: u32) -> u32 {
+    fn insert(&self, _: &mut dyn ServerHost, _: &TransactionContext, amount: u32) -> u32 {
         amount
     }
-    fn extract(&self, _: &mut dyn ServerHost, _: &Transaction, _: u32) -> u32 {
+    fn extract(&self, _: &mut dyn ServerHost, _: &TransactionContext, _: u32) -> u32 {
         0
     }
 }
@@ -202,10 +203,10 @@ impl EnergyHandler for LimitingEnergyHandler {
     fn capacity(&self, host: &mut dyn ServerHost) -> u32 {
         self.inner.capacity(host)
     }
-    fn insert(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32 {
+    fn insert(&self, host: &mut dyn ServerHost, tx: &TransactionContext, amount: u32) -> u32 {
         self.inner.insert(host, tx, amount.min(self.max_insert))
     }
-    fn extract(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32 {
+    fn extract(&self, host: &mut dyn ServerHost, tx: &TransactionContext, amount: u32) -> u32 {
         self.inner.extract(host, tx, amount.min(self.max_extract))
     }
 }

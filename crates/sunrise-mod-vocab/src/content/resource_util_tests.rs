@@ -41,7 +41,7 @@ impl ResourceHandler<Chemical> for Tanks {
     fn insert_at(
         &self,
         _: &mut dyn ServerHost,
-        _: &Transaction,
+        _: &TransactionContext,
         index: usize,
         chemical: &Chemical,
         amount: u32,
@@ -64,7 +64,7 @@ impl ResourceHandler<Chemical> for Tanks {
     fn extract_at(
         &self,
         _: &mut dyn ServerHost,
-        _: &Transaction,
+        _: &TransactionContext,
         index: usize,
         chemical: &Chemical,
         amount: u32,
@@ -222,7 +222,7 @@ impl ResourceHandler<Chemical> for Oversized {
     fn insert_at(
         &self,
         _: &mut dyn ServerHost,
-        _: &Transaction,
+        _: &TransactionContext,
         _: usize,
         _: &Chemical,
         _: u32,
@@ -232,7 +232,7 @@ impl ResourceHandler<Chemical> for Oversized {
     fn extract_at(
         &self,
         _: &mut dyn ServerHost,
-        _: &Transaction,
+        _: &TransactionContext,
         _: usize,
         _: &Chemical,
         _: u32,
@@ -276,14 +276,21 @@ impl<R> ResourceHandler<R> for Liar {
     fn insert_at(
         &self,
         _: &mut dyn ServerHost,
-        _: &Transaction,
+        _: &TransactionContext,
         _: usize,
         _: &R,
         amount: u32,
     ) -> u32 {
         amount.saturating_add(1)
     }
-    fn extract_at(&self, _: &mut dyn ServerHost, _: &Transaction, _: usize, _: &R, _: u32) -> u32 {
+    fn extract_at(
+        &self,
+        _: &mut dyn ServerHost,
+        _: &TransactionContext,
+        _: usize,
+        _: &R,
+        _: u32,
+    ) -> u32 {
         0
     }
 }
@@ -457,7 +464,7 @@ fn find_extractable_probes_the_whole_int_amount_and_rolls_back() {
         fn insert_at(
             &self,
             host: &mut dyn ServerHost,
-            tx: &Transaction,
+            tx: &TransactionContext,
             index: usize,
             item: &ItemResource,
             amount: u32,
@@ -467,7 +474,7 @@ fn find_extractable_probes_the_whole_int_amount_and_rolls_back() {
         fn extract_at(
             &self,
             host: &mut dyn ServerHost,
-            tx: &Transaction,
+            tx: &TransactionContext,
             index: usize,
             item: &ItemResource,
             amount: u32,
@@ -537,7 +544,7 @@ fn each_extractability_probe_starts_with_unchanged_storage() {
         fn insert_at(
             &self,
             _: &mut dyn ServerHost,
-            _: &Transaction,
+            _: &TransactionContext,
             _: usize,
             _: &ItemResource,
             _: u32,
@@ -547,7 +554,7 @@ fn each_extractability_probe_starts_with_unchanged_storage() {
         fn extract_at(
             &self,
             host: &mut dyn ServerHost,
-            tx: &Transaction,
+            tx: &TransactionContext,
             slot: usize,
             r: &ItemResource,
             amount: u32,
@@ -596,7 +603,7 @@ fn optional_tokens_must_name_the_current_transaction() {
     let stone = &r[0];
     chest(&mut fake, A, &[Some((stone, 5))]);
     let items = items_at(&mut fake, A);
-    let assert_refused = |host: &mut dyn ServerHost, token: Option<&Transaction>| {
+    let assert_refused = |host: &mut dyn ServerHost, token: Option<&TransactionContext>| {
         assert_eq!(insert_stacking(host, &items, stone, 1, token), Ok(0));
         assert_eq!(extract_first(host, &items, |_| true, 1, token), None);
         assert_eq!(
@@ -686,7 +693,7 @@ fn a_caught_bulk_error_does_not_commit_earlier_moves_and_the_sink_sees_the_sourc
         fn insert_at(
             &self,
             host: &mut dyn ServerHost,
-            tx: &Transaction,
+            tx: &TransactionContext,
             index: usize,
             item: &ItemResource,
             amount: u32,
@@ -704,7 +711,7 @@ fn a_caught_bulk_error_does_not_commit_earlier_moves_and_the_sink_sees_the_sourc
         fn extract_at(
             &self,
             _: &mut dyn ServerHost,
-            _: &Transaction,
+            _: &TransactionContext,
             _: usize,
             _: &ItemResource,
             _: u32,
@@ -817,7 +824,7 @@ fn maximum_batch_moves_without_splitting_a_quantized_handler() {
         fn insert_at(
             &self,
             _: &mut dyn ServerHost,
-            _: &Transaction,
+            _: &TransactionContext,
             _: usize,
             _: &Chemical,
             amount: u32,
@@ -831,7 +838,7 @@ fn maximum_batch_moves_without_splitting_a_quantized_handler() {
         fn extract_at(
             &self,
             _: &mut dyn ServerHost,
-            _: &Transaction,
+            _: &TransactionContext,
             _: usize,
             _: &Chemical,
             amount: u32,

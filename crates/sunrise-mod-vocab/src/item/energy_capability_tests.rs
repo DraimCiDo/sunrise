@@ -23,12 +23,12 @@ impl EnergyHandler for Buffer {
     fn capacity(&self, _: &mut dyn ServerHost) -> u32 {
         self.1
     }
-    fn insert(&self, _: &mut dyn ServerHost, _: &Transaction, amount: u32) -> u32 {
+    fn insert(&self, _: &mut dyn ServerHost, _: &TransactionContext, amount: u32) -> u32 {
         let went = amount.min(self.1 - self.held());
         self.0.fetch_add(went, Ordering::Relaxed);
         went
     }
-    fn extract(&self, _: &mut dyn ServerHost, _: &Transaction, amount: u32) -> u32 {
+    fn extract(&self, _: &mut dyn ServerHost, _: &TransactionContext, amount: u32) -> u32 {
         let came = amount.min(self.held());
         self.0.fetch_sub(came, Ordering::Relaxed);
         came

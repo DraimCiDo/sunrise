@@ -14,13 +14,13 @@ use crate::ServerHost;
 /// past its closure cannot write outside the journal.
 // exhaustive: its field is private, so mods cannot build or destructure it
 #[derive(Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
-pub struct Transaction(pub(crate) u64);
+pub struct TransactionContext(pub(crate) u64);
 
 /// What ends a transaction:
 /// [`transaction_open`](crate::prelude::ModStateServerHost::transaction_open) gives it to whoever opened
 /// the transaction (`host.transaction`'s guard), and
 /// [`transaction_close`](crate::prelude::ModStateServerHost::transaction_close) takes it. A
-/// write handler lent only the [`Transaction`] cannot end the transaction around it, the game's
+/// write handler lent only the [`TransactionContext`] cannot end the transaction around it, the game's
 /// own (a hopper's move) or another mod's.
 ///
 /// It carries the transaction's write token and a second token, as unguessable, that only
@@ -38,13 +38,13 @@ pub struct Transaction(pub(crate) u64);
 // exhaustive: its fields are private, so mods cannot build or destructure it
 #[derive(Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
 pub struct TransactionSeal {
-    pub(crate) tx: Transaction,
+    pub(crate) tx: TransactionContext,
     pub(crate) close: u64,
 }
 
 impl TransactionSeal {
     /// The transaction this seal ends, to write in it.
-    pub fn transaction(&self) -> &Transaction {
+    pub fn transaction(&self) -> &TransactionContext {
         &self.tx
     }
 }
@@ -55,7 +55,7 @@ impl TransactionSeal {
 #[doc(hidden)]
 pub fn transaction_seal(token: u64, close: u64) -> TransactionSeal {
     TransactionSeal {
-        tx: Transaction(token),
+        tx: TransactionContext(token),
         close,
     }
 }
@@ -64,8 +64,8 @@ pub fn transaction_seal(token: u64, close: u64) -> TransactionSeal {
 /// `transaction_current` answer: a write token alone, never a seal.
 // hidden: the game's side of the seal, re-exported through `__private`.
 #[doc(hidden)]
-pub fn transaction_of(token: u64) -> Transaction {
-    Transaction(token)
+pub fn transaction_of(token: u64) -> TransactionContext {
+    TransactionContext(token)
 }
 
 /// Where the transaction system is (`Transaction.Lifecycle`), as
@@ -89,7 +89,7 @@ pub enum TransactionLifecycle {
 /// The write token `tx` names, for the game's checks.
 // hidden: the game's side of the seal, re-exported through `__private`.
 #[doc(hidden)]
-pub fn transaction_token(tx: &Transaction) -> u64 {
+pub fn transaction_token(tx: &TransactionContext) -> u64 {
     tx.0
 }
 
@@ -135,7 +135,7 @@ pub trait HostTransaction: ServerHost {
     /// nothing `f` changed, and the transaction around it stays open. A transaction `f` opened
     /// itself and left open is aborted first, when this one closes.
     ///
-    /// `f` gets the [`Transaction`] to write in, never its [`TransactionSeal`]: only this
+    /// `f` gets the [`TransactionContext`] to write in, never its [`TransactionSeal`]: only this
     /// guard ends the transaction.
     ///
     /// Covered: block entities (item slots, saved compound, custom name and attachments), cauldrons,
@@ -143,14 +143,14 @@ pub trait HostTransaction: ServerHost {
     /// ([`ItemPlace::EntitySlot`](crate::ItemPlace::EntitySlot)) and item entities' stacks.
     fn transaction<T, E>(
         &mut self,
-        f: impl FnOnce(&mut Self, &Transaction) -> Result<T, E>,
+        f: impl FnOnce(&mut Self, &TransactionContext) -> Result<T, E>,
     ) -> Result<T, E>;
 }
 
 impl<H: ServerHost + ?Sized> HostTransaction for H {
     fn transaction<T, E>(
         &mut self,
-        f: impl FnOnce(&mut Self, &Transaction) -> Result<T, E>,
+        f: impl FnOnce(&mut Self, &TransactionContext) -> Result<T, E>,
     ) -> Result<T, E> {
         run_transaction(self, f)
     }
@@ -160,7 +160,7 @@ impl<H: ServerHost + ?Sized> HostTransaction for H {
 /// hopper's) run in one through this.
 pub fn run_transaction<H: ServerHost + ?Sized, T, E>(
     host: &mut H,
-    f: impl FnOnce(&mut H, &Transaction) -> Result<T, E>,
+    f: impl FnOnce(&mut H, &TransactionContext) -> Result<T, E>,
 ) -> Result<T, E> {
     /// Closes its transaction when dropped: committed when `f` gave `Ok`, else aborted, as on
     /// a panic unwinding past it.

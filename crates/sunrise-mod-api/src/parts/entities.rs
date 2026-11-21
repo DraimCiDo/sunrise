@@ -80,7 +80,7 @@ pub mod tests {
         fn capacity(&self, _: &mut dyn ServerHost) -> u32 {
             1000
         }
-        fn insert(&self, host: &mut dyn ServerHost, _: &Transaction, amount: u32) -> u32 {
+        fn insert(&self, host: &mut dyn ServerHost, _: &TransactionContext, amount: u32) -> u32 {
             let held = self.amount(host);
             let moved = amount.min(1000 - held);
             ROBOT_ENERGY
@@ -88,7 +88,7 @@ pub mod tests {
                 .unwrap();
             moved
         }
-        fn extract(&self, host: &mut dyn ServerHost, _: &Transaction, amount: u32) -> u32 {
+        fn extract(&self, host: &mut dyn ServerHost, _: &TransactionContext, amount: u32) -> u32 {
             let held = self.amount(host);
             let moved = amount.min(held);
             ROBOT_ENERGY
@@ -140,7 +140,7 @@ pub mod tests {
         fn insert_at(
             &self,
             host: &mut dyn ServerHost,
-            _: &Transaction,
+            _: &TransactionContext,
             index: usize,
             resource: &FluidResource,
             amount: u32,
@@ -158,7 +158,7 @@ pub mod tests {
         fn extract_at(
             &self,
             host: &mut dyn ServerHost,
-            _: &Transaction,
+            _: &TransactionContext,
             index: usize,
             resource: &FluidResource,
             amount: u32,

@@ -7,7 +7,7 @@
 use crate::content::registry_keys::{fluid_id, fluid_key};
 use crate::{
     ComponentId, Components, Compound, EnergyHandler, FluidIdentity, FluidResource, FluidStack,
-    ItemPlace, ResourceHandler, ServerHost, Tag, Transaction,
+    ItemPlace, ResourceHandler, ServerHost, Tag, TransactionContext,
 };
 
 /// One component of the item at a place, read and rewritten through the place
@@ -37,7 +37,12 @@ impl ItemComponentHandler {
     }
     /// Rewrites one item at the place with the component set to `value`, or removed for none, in
     /// `tx`: whether that went through.
-    pub fn write(&self, host: &mut dyn ServerHost, tx: &Transaction, value: Option<Tag>) -> bool {
+    pub fn write(
+        &self,
+        host: &mut dyn ServerHost,
+        tx: &TransactionContext,
+        value: Option<Tag>,
+    ) -> bool {
         let Some(held) = self.place.resource(host) else {
             return false;
         };
@@ -81,7 +86,13 @@ impl ItemComponentEnergy {
         }
     }
     /// Rewrites the item as holding `energy`: `moved` when that goes through, else 0.
-    fn rewrite(&self, host: &mut dyn ServerHost, tx: &Transaction, energy: u32, moved: u32) -> u32 {
+    fn rewrite(
+        &self,
+        host: &mut dyn ServerHost,
+        tx: &TransactionContext,
+        energy: u32,
+        moved: u32,
+    ) -> u32 {
         // `energy` is at most the capacity, which fits an int.
         let value = Tag::Int(i32::try_from(energy).unwrap_or(i32::MAX));
         if self.item.write(host, tx, Some(value)) {
@@ -102,7 +113,7 @@ impl EnergyHandler for ItemComponentEnergy {
     fn capacity(&self, _: &mut dyn ServerHost) -> u32 {
         self.capacity
     }
-    fn insert(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32 {
+    fn insert(&self, host: &mut dyn ServerHost, tx: &TransactionContext, amount: u32) -> u32 {
         let held = self.amount(host);
         let room = self.capacity.saturating_sub(held);
         match amount.min(self.max_insert).min(room) {
@@ -110,7 +121,7 @@ impl EnergyHandler for ItemComponentEnergy {
             went => self.rewrite(host, tx, held + went, went),
         }
     }
-    fn extract(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32 {
+    fn extract(&self, host: &mut dyn ServerHost, tx: &TransactionContext, amount: u32) -> u32 {
         let held = self.amount(host);
         match amount.min(self.max_extract).min(held) {
             0 => 0,
@@ -185,7 +196,7 @@ impl ItemComponentFluidTank {
     fn rewrite(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         stack: Option<FluidStack>,
         moved: u32,
     ) -> u32 {
@@ -235,7 +246,7 @@ impl ResourceHandler<FluidResource> for ItemComponentFluidTank {
     fn insert_at(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         index: usize,
         resource: &FluidResource,
         amount: u32,
@@ -260,7 +271,7 @@ impl ResourceHandler<FluidResource> for ItemComponentFluidTank {
     fn extract_at(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         index: usize,
         resource: &FluidResource,
         amount: u32,

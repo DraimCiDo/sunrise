@@ -4,7 +4,7 @@
 //! a client's copy, and only on the level in place.
 use super::{Game, Insertion, Kind, MoveIn, PlacementAttempt, Pos, Slots, View};
 use crate::game::transactions::After;
-use mod_api::{BlockSide, ItemResource, LevelReadError, LevelRef, Transaction};
+use mod_api::{BlockSide, ItemResource, LevelReadError, LevelRef, TransactionContext};
 use sunrise_client::items::ItemStack;
 use sunrise_core::geometry::Direction;
 
@@ -170,7 +170,7 @@ impl Game<'_> {
         &mut self,
         at: BlockSide,
         limit: u32,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> bool {
         if !self.transaction_holds(tx) {
             return false;
@@ -246,7 +246,7 @@ impl Game<'_> {
         slot: usize,
         resource: &ItemStack,
         amount: u32,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> Option<ItemStack> {
         let stack = ItemStack {
             count: amount,
@@ -352,7 +352,7 @@ impl Game<'_> {
         at: BlockSide,
         resource: &ItemStack,
         amount: u64,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> u64 {
         if amount == 0 || !self.transaction_holds(tx) {
             return 0;
@@ -405,7 +405,7 @@ impl Game<'_> {
         at: BlockSide,
         resource: &ItemStack,
         amount: u64,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> u64 {
         if amount == 0 || !self.transaction_holds(tx) {
             return 0;
@@ -469,7 +469,7 @@ impl Game<'_> {
         at: BlockSide,
         slot: usize,
         max: u32,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> Option<ItemStack> {
         if !self.transaction_holds(tx) {
             return None;

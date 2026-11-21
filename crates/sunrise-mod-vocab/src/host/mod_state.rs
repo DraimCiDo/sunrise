@@ -54,12 +54,12 @@ pub trait ModStateServerHost {
     /// none when none is open. It names the transaction only: ending it still takes the seal its
     /// opener holds.
     #[access(WorldOnly)]
-    fn transaction_current(&self) -> Option<Transaction>;
+    fn transaction_current(&self) -> Option<TransactionContext>;
     /// Side: server.
     /// How deeply `tx` is nested (`TransactionContext.depth`): 0 for the outermost, none for a
     /// transaction that is not open.
     #[access(WorldOnly)]
-    fn transaction_depth(&self, tx: &Transaction) -> Option<u32>;
+    fn transaction_depth(&self, tx: &TransactionContext) -> Option<u32>;
     /// Side: server.
     /// Runs the calling mod's `task` once after `delay_ticks` server ticks, after the due tick's
     /// start hook. Both 0 and 1 mean the next tick; a paused server does not advance the delay.

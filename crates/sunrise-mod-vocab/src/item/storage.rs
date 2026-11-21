@@ -22,7 +22,7 @@
 use crate::content::resource::{Ends, move_once};
 use crate::{
     BlockSide, Capability, CapabilityKey, ITEMS, ItemResource, ResourceHandler, ServerHost,
-    Transaction,
+    TransactionContext,
 };
 use std::{marker::PhantomData, ops::ControlFlow};
 
@@ -85,7 +85,7 @@ pub trait ItemStorage {
     fn insert(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         resource: &ItemResource,
         amount: u64,
     ) -> u64;
@@ -94,7 +94,7 @@ pub trait ItemStorage {
     fn extract(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         resource: &ItemResource,
         amount: u64,
     ) -> u64;
@@ -189,7 +189,7 @@ impl ItemStorage for GameStorage {
     fn insert(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         resource: &ItemResource,
         amount: u64,
     ) -> u64 {
@@ -200,7 +200,7 @@ impl ItemStorage for GameStorage {
     fn extract(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         resource: &ItemResource,
         amount: u64,
     ) -> u64 {
@@ -237,7 +237,7 @@ impl Slots {
     fn fill(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         resource: &ItemResource,
         left: &mut u64,
         pick: impl Fn(&mut dyn ServerHost, usize) -> bool,
@@ -297,7 +297,7 @@ impl ItemStorage for Slots {
     fn insert(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         resource: &ItemResource,
         amount: u64,
     ) -> u64 {
@@ -313,7 +313,7 @@ impl ItemStorage for Slots {
     fn extract(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         resource: &ItemResource,
         amount: u64,
     ) -> u64 {
@@ -357,7 +357,7 @@ pub fn transfer(
     to: &Capability<dyn ItemStorage>,
     resource: &ItemResource,
     max: u64,
-    tx: &Transaction,
+    tx: &TransactionContext,
 ) -> Result<u64, StorageError> {
     let _ = tx;
     let want = max
@@ -394,7 +394,7 @@ pub fn transfer_matching(
     to: &Capability<dyn ItemStorage>,
     filter: impl Fn(&ItemResource) -> bool,
     max: u64,
-    tx: &Transaction,
+    tx: &TransactionContext,
 ) -> Result<u64, StorageError> {
     let mut moved = 0;
     let mut tried_prefix = 0;
@@ -484,7 +484,13 @@ mod tests {
             self.0.calls.set(self.0.calls.get() + 1);
             Ok(self.0.room - self.0.held.borrow().values().sum::<u64>())
         }
-        fn insert(&self, h: &mut dyn ServerHost, _: &Transaction, r: &ItemResource, n: u64) -> u64 {
+        fn insert(
+            &self,
+            h: &mut dyn ServerHost,
+            _: &TransactionContext,
+            r: &ItemResource,
+            n: u64,
+        ) -> u64 {
             let went = n.min(self.space_for(h, r).unwrap());
             *self.0.held.borrow_mut().entry(r.clone()).or_default() += went;
             went
@@ -492,7 +498,7 @@ mod tests {
         fn extract(
             &self,
             h: &mut dyn ServerHost,
-            _: &Transaction,
+            _: &TransactionContext,
             r: &ItemResource,
             n: u64,
         ) -> u64 {
@@ -633,7 +639,7 @@ mod tests {
             fn insert_at(
                 &self,
                 _: &mut dyn ServerHost,
-                _: &Transaction,
+                _: &TransactionContext,
                 _: usize,
                 _: &ItemResource,
                 _: u32,
@@ -643,7 +649,7 @@ mod tests {
             fn extract_at(
                 &self,
                 _: &mut dyn ServerHost,
-                _: &Transaction,
+                _: &TransactionContext,
                 _: usize,
                 _: &ItemResource,
                 _: u32,
@@ -761,7 +767,7 @@ mod tests {
             fn insert(
                 &self,
                 host: &mut dyn ServerHost,
-                tx: &Transaction,
+                tx: &TransactionContext,
                 kind: &ItemResource,
                 amount: u64,
             ) -> u64 {
@@ -775,7 +781,7 @@ mod tests {
             fn extract(
                 &self,
                 host: &mut dyn ServerHost,
-                tx: &Transaction,
+                tx: &TransactionContext,
                 kind: &ItemResource,
                 amount: u64,
             ) -> u64 {

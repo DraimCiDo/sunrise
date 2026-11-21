@@ -28,7 +28,7 @@
 //! An entity added inside one goes at an abort, one removed is only marked until the root
 //! commit, and mods hear of joins and leaves at the root commit (`transactions/entities.rs`).
 use super::{BlockEntity, BlockStateId, Game, machines::HopperState, maps::MapData};
-use mod_api::{LevelRef, Transaction, TransactionLifecycle, TransactionSeal};
+use mod_api::{LevelRef, TransactionContext, TransactionLifecycle, TransactionSeal};
 use std::collections::{BTreeMap, HashMap};
 use sunrise_client::{
     effects::EffectInstance,
@@ -571,7 +571,7 @@ impl Game<'_> {
     }
     /// Whether `tx` names an open transaction: a write given any other changes nothing, so none
     /// happens outside the journal.
-    pub(in crate::game) fn transaction_holds(&self, tx: &Transaction) -> bool {
+    pub(in crate::game) fn transaction_holds(&self, tx: &TransactionContext) -> bool {
         let named = mod_api::__private::transaction_token(tx);
         self.transactions.iter().any(|level| level.token == named)
     }
@@ -584,12 +584,12 @@ impl Game<'_> {
         }
     }
     /// `transaction_current`: the innermost open transaction's write token, never its seal.
-    pub(in crate::game) fn transaction_current(&self) -> Option<Transaction> {
+    pub(in crate::game) fn transaction_current(&self) -> Option<TransactionContext> {
         let level = self.transactions.last()?;
         Some(mod_api::__private::transaction_of(level.token))
     }
     /// `transaction_depth`: how deeply `tx` is nested, 0 for the outermost.
-    pub(in crate::game) fn transaction_depth(&self, tx: &Transaction) -> Option<u32> {
+    pub(in crate::game) fn transaction_depth(&self, tx: &TransactionContext) -> Option<u32> {
         let named = mod_api::__private::transaction_token(tx);
         let at = self
             .transactions
@@ -1944,7 +1944,7 @@ mod tests {
     use mod_api::ServerHost;
     use mod_api::{
         Authority, BlockSide, BlockUpdateFlags, FLUIDS, FluidStack, ITEMS, ItemResource,
-        Transaction,
+        TransactionContext,
     };
     use std::{sync::Arc, time::Instant};
     use sunrise_client::{chunk::Chunk, items::ItemStack};
@@ -2267,7 +2267,7 @@ mod tests {
         at: BlockSide,
         slot: usize,
         stack: ItemStack,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> Option<ItemStack> {
         let handler = at
             .level
@@ -2291,7 +2291,7 @@ mod tests {
         at: BlockSide,
         slot: usize,
         amount: u32,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> Option<mod_api::ItemStack> {
         let handler = at
             .level
@@ -2307,7 +2307,7 @@ mod tests {
         at: BlockSide,
         tank: usize,
         amount: u32,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> Option<FluidStack> {
         let handler = at
             .level
@@ -2657,7 +2657,7 @@ mod tests {
         // A transaction decoded from bytes, which the game never handed out, names no open
         // transaction (#2424): a write given it changes nothing, and a close given it ends
         // nothing, so the game's own transaction still puts back everything at its abort.
-        let forged: mod_api::Transaction =
+        let forged: mod_api::TransactionContext =
             mod_api::wire::Reader::decode(&0u64.to_le_bytes()).unwrap();
         let host: &mut dyn ServerHost = &mut game;
         assert!(insert(host, on([0, 64, 0], None), 0, sticks(1), &forged).is_some());
@@ -2668,7 +2668,7 @@ mod tests {
         // `put_into_part`): it writes in it and tries every seal it can build from what it
         // knows, the write token and guesses, then the move fails after it. Its writes all go
         // back with the game's abort, which no close of the handler's got ahead of.
-        let handler = |host: &mut dyn ServerHost, tx: &Transaction| {
+        let handler = |host: &mut dyn ServerHost, tx: &TransactionContext| {
             assert!(insert(host, on([0, 64, 0], None), 0, sticks(1), tx).is_none());
             let token = mod_api::__private::transaction_token(tx);
             for close in [0, 1, token, !token, u64::MAX] {

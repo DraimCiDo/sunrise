@@ -4,7 +4,7 @@
 //! `SimpleEnergyHandler`. They act where the world is simulated, never on a client's copy, and
 //! only on the level in place; their writes are kept by the transaction they are given.
 use super::Game;
-use mod_api::{BlockSide, Transaction};
+use mod_api::{BlockSide, TransactionContext};
 use std::sync::Arc;
 use sunrise_client::containers::{BlockEntity, ModEnergyBuffer};
 use sunrise_core::nbt::{Compound, JavaString, Tag};
@@ -111,7 +111,7 @@ impl Game<'_> {
         &mut self,
         at: BlockSide,
         amount: u32,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> u32 {
         if !self.transaction_holds(tx) {
             return 0;
@@ -125,7 +125,7 @@ impl Game<'_> {
         &mut self,
         at: BlockSide,
         amount: u32,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> u32 {
         if !self.transaction_holds(tx) {
             return 0;

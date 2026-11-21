@@ -40,7 +40,7 @@ pub mod tests {
         fn capacity(&self, host: &mut dyn ServerHost) -> u32 {
             crate::backend_of(host).map_or(0, |backend| backend.energy_capacity(self.at))
         }
-        fn insert(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32 {
+        fn insert(&self, host: &mut dyn ServerHost, tx: &TransactionContext, amount: u32) -> u32 {
             let went = crate::backend_mut_of(host)
                 .map_or(0, |backend| backend.energy_insert(self.at, amount, tx));
             match self.lie {
@@ -48,7 +48,7 @@ pub mod tests {
                 Lie::GivesMore => went,
             }
         }
-        fn extract(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32 {
+        fn extract(&self, host: &mut dyn ServerHost, tx: &TransactionContext, amount: u32) -> u32 {
             let more = match self.lie {
                 Lie::GivesMore => 100,
                 Lie::TakesMore => 0,

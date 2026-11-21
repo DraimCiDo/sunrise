@@ -4,7 +4,7 @@
 use super::Dim;
 use mod_api::{
     BlockCapabilityCache, CapabilityKey, Hooks, HostTransaction, ITEMS, ItemResource, Registrar,
-    ResourceHandler, ServerHost, Transaction,
+    ResourceHandler, ServerHost, TransactionContext,
 };
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -40,7 +40,7 @@ impl ResourceHandler<ItemResource> for Empty {
     fn insert_at(
         &self,
         _: &mut dyn ServerHost,
-        _: &Transaction,
+        _: &TransactionContext,
         _: usize,
         _: &ItemResource,
         _: u32,
@@ -50,7 +50,7 @@ impl ResourceHandler<ItemResource> for Empty {
     fn extract_at(
         &self,
         _: &mut dyn ServerHost,
-        _: &Transaction,
+        _: &TransactionContext,
         _: usize,
         _: &ItemResource,
         _: u32,

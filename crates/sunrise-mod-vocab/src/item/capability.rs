@@ -6,7 +6,7 @@
 //! attachments).
 use crate::{
     Direction, Host, ItemResource, LevelRef, Overanswered, ResourceHandler, ServerHost,
-    Transaction, backend_mut_of, backend_of,
+    TransactionContext, backend_mut_of, backend_of,
 };
 use std::{fmt::Debug, marker::PhantomData, ops::Deref};
 
@@ -70,7 +70,12 @@ impl<T: ?Sized> Capability<T> {
 
 // Keep a provider's specialised slot-less operations and queries when it is used as a handler.
 impl<R> ResourceHandler<R> for Capability<dyn ResourceHandler<R>> {
-    fn set_max_stack_size(&self, host: &mut dyn ServerHost, tx: &Transaction, limit: u32) -> bool {
+    fn set_max_stack_size(
+        &self,
+        host: &mut dyn ServerHost,
+        tx: &TransactionContext,
+        limit: u32,
+    ) -> bool {
         self.handler.set_max_stack_size(host, tx, limit)
     }
 
@@ -105,7 +110,7 @@ impl<R> ResourceHandler<R> for Capability<dyn ResourceHandler<R>> {
     fn insert_at(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         index: usize,
         resource: &R,
         amount: u32,
@@ -119,7 +124,7 @@ impl<R> ResourceHandler<R> for Capability<dyn ResourceHandler<R>> {
     fn extract_at(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         index: usize,
         resource: &R,
         amount: u32,
@@ -132,7 +137,7 @@ impl<R> ResourceHandler<R> for Capability<dyn ResourceHandler<R>> {
     fn insert(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         resource: &R,
         amount: u32,
     ) -> Result<u32, Overanswered> {
@@ -146,7 +151,7 @@ impl<R> ResourceHandler<R> for Capability<dyn ResourceHandler<R>> {
     fn extract(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         resource: &R,
         amount: u32,
     ) -> Result<u32, Overanswered> {
@@ -216,7 +221,12 @@ pub const ITEMS: CapabilityKey<dyn ResourceHandler<ItemResource>> = CapabilityKe
 /// rules hoppers follow.
 struct GameItems(BlockSide);
 impl ResourceHandler<ItemResource> for GameItems {
-    fn set_max_stack_size(&self, host: &mut dyn ServerHost, tx: &Transaction, limit: u32) -> bool {
+    fn set_max_stack_size(
+        &self,
+        host: &mut dyn ServerHost,
+        tx: &TransactionContext,
+        limit: u32,
+    ) -> bool {
         backend_mut_of(host)
             .is_some_and(|backend| backend.container_set_stack_limit(self.0, limit, tx))
     }
@@ -248,7 +258,7 @@ impl ResourceHandler<ItemResource> for GameItems {
     fn insert_at(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         index: usize,
         resource: &ItemResource,
         amount: u32,
@@ -267,7 +277,7 @@ impl ResourceHandler<ItemResource> for GameItems {
     fn extract_at(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         index: usize,
         resource: &ItemResource,
         amount: u32,

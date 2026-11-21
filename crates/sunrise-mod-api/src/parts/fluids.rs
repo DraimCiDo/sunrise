@@ -167,7 +167,7 @@ pub mod tests {
         fn insert_at(
             &self,
             host: &mut dyn ServerHost,
-            tx: &Transaction,
+            tx: &TransactionContext,
             index: usize,
             resource: &FluidResource,
             amount: u32,
@@ -185,7 +185,7 @@ pub mod tests {
         fn extract_at(
             &self,
             host: &mut dyn ServerHost,
-            tx: &Transaction,
+            tx: &TransactionContext,
             index: usize,
             resource: &FluidResource,
             amount: u32,
@@ -326,7 +326,7 @@ pub mod tests {
             BlockSide { pos, .. }: BlockSide,
             _: usize,
             fluid: FluidStack,
-            _: &Transaction,
+            _: &TransactionContext,
         ) -> Option<FluidStack> {
             let Some(tank) = self.tanks.get_mut(&pos).filter(|tank| tank.fills) else {
                 return Some(fluid);
@@ -363,7 +363,7 @@ pub mod tests {
             BlockSide { pos, .. }: BlockSide,
             _: usize,
             max: u32,
-            _: &Transaction,
+            _: &TransactionContext,
         ) -> Option<FluidStack> {
             let tank = self.tanks.get_mut(&pos).filter(|tank| tank.drains)?;
             let held = tank.held.clone()?;
@@ -421,10 +421,10 @@ pub mod tests {
                 self.tanks = tanks;
             }
         }
-        fn transaction_current(&self) -> Option<Transaction> {
+        fn transaction_current(&self) -> Option<TransactionContext> {
             self.journal.current()
         }
-        fn transaction_depth(&self, tx: &Transaction) -> Option<u32> {
+        fn transaction_depth(&self, tx: &TransactionContext) -> Option<u32> {
             self.journal.depth_of(tx)
         }
     }

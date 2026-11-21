@@ -1,5 +1,5 @@
 pub use item::transaction::{
-    HostTransaction, Transaction, TransactionLifecycle, TransactionSeal, run_transaction,
+    HostTransaction, TransactionContext, TransactionLifecycle, TransactionSeal, run_transaction,
 };
 mod __private {
     /// A transaction's write and close tokens, built and read by the game's raw helpers.

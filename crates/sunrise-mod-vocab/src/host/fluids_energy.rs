@@ -46,13 +46,13 @@ pub trait FluidsEnergyBackendMut {
     /// (`native_energy_amount`) through its side, no more than its room and its limit per call,
     /// kept by transaction `tx`. How much went in.
     #[access(WorldOnly)]
-    fn energy_insert(&mut self, at: BlockSide, amount: u32, tx: &Transaction) -> u32;
+    fn energy_insert(&mut self, at: BlockSide, amount: u32, tx: &TransactionContext) -> u32;
     /// Side: server.
     /// `SimpleEnergyHandler.extract`: takes up to `amount` out of the buffer at `at`
     /// (`native_energy_amount`) by its side, no more than it holds and its limit per call, kept
     /// by transaction `tx`. How much came out.
     #[access(WorldOnly)]
-    fn energy_extract(&mut self, at: BlockSide, amount: u32, tx: &Transaction) -> u32;
+    fn energy_extract(&mut self, at: BlockSide, amount: u32, tx: &TransactionContext) -> u32;
     /// Side: server.
     /// Puts as much of `fluid` as tank `tank` of those `at`'s side reaches takes: a mod
     /// block's fillable tank, empty or holding that fluid, up to its capacity; a cauldron by
@@ -65,7 +65,7 @@ pub trait FluidsEnergyBackendMut {
         at: BlockSide,
         tank: usize,
         fluid: FluidStack,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> Option<FluidStack>;
     /// Side: server.
     /// Takes up to `max` out of tank `tank` of those `at`'s side reaches: a mod block's
@@ -77,7 +77,7 @@ pub trait FluidsEnergyBackendMut {
         at: BlockSide,
         tank: usize,
         max: u32,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> Option<FluidStack>;
     /// Side: server.
     /// `BucketPickup.pickupBlock` for a mod's fluid container (NeoForge's
@@ -99,7 +99,7 @@ pub trait FluidsEnergyBackendMut {
         level: LevelRef,
         pos: [i32; 3],
         player: Option<PlayerRef>,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> Option<FluidStack>;
     /// Side: server.
     /// `BucketItem.emptyContents` of a bucket of `fluid` for a mod's fluid container (NeoForge's
@@ -124,7 +124,7 @@ pub trait FluidsEnergyBackendMut {
         fluid: FluidKey,
         player: Option<PlayerRef>,
         validate: bool,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> bool;
     /// Side: server.
     /// The bucket's sound and game event for `fluid` at the centre of `pos` in the level in
@@ -141,6 +141,6 @@ pub trait FluidsEnergyBackendMut {
         fluid: FluidKey,
         pickup: bool,
         player: Option<PlayerRef>,
-        tx: &Transaction,
+        tx: &TransactionContext,
     ) -> bool;
 }

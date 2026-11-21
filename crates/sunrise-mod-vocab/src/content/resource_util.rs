@@ -3,7 +3,9 @@
 //! They refuse without calling handlers if the token does not name the current transaction,
 //! or if a transaction is open but no token was supplied. Probes always roll back.
 use crate::content::resource::{checked_transfer, in_turn, try_in_turn};
-use crate::{Capability, HostTransaction, Overanswered, ResourceHandler, ServerHost, Transaction};
+use crate::{
+    Capability, HostTransaction, Overanswered, ResourceHandler, ServerHost, TransactionContext,
+};
 use std::ops::Range;
 
 /// Several handlers as one (`CombinedResourceHandler`): their indices one after another, the
@@ -71,7 +73,7 @@ impl<R> ResourceHandler<R> for CombinedResourceHandler<R> {
     fn insert_at(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         index: usize,
         resource: &R,
         amount: u32,
@@ -83,7 +85,7 @@ impl<R> ResourceHandler<R> for CombinedResourceHandler<R> {
     fn extract_at(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         index: usize,
         resource: &R,
         amount: u32,
@@ -95,7 +97,7 @@ impl<R> ResourceHandler<R> for CombinedResourceHandler<R> {
     fn insert(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         resource: &R,
         amount: u32,
     ) -> Result<u32, Overanswered> {
@@ -110,7 +112,7 @@ impl<R> ResourceHandler<R> for CombinedResourceHandler<R> {
     fn extract(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         resource: &R,
         amount: u32,
     ) -> Result<u32, Overanswered> {
@@ -129,7 +131,7 @@ impl<R> ResourceHandler<R> for CombinedResourceHandler<R> {
 /// [`ResourceHandler`] on a struct holding the handler and forward to it:
 ///
 /// ```
-/// use mod_api::{Overanswered, ResourceHandler, ServerHost, Transaction};
+/// use mod_api::{Overanswered, ResourceHandler, ServerHost, TransactionContext};
 ///
 /// struct Delegating<R>(Box<dyn ResourceHandler<R>>);
 ///
@@ -152,7 +154,7 @@ impl<R> ResourceHandler<R> for CombinedResourceHandler<R> {
 ///     fn insert_at(
 ///         &self,
 ///         host: &mut dyn ServerHost,
-///         tx: &Transaction,
+///         tx: &TransactionContext,
 ///         index: usize,
 ///         resource: &R,
 ///         amount: u32,
@@ -162,17 +164,17 @@ impl<R> ResourceHandler<R> for CombinedResourceHandler<R> {
 ///     fn extract_at(
 ///         &self,
 ///         host: &mut dyn ServerHost,
-///         tx: &Transaction,
+///         tx: &TransactionContext,
 ///         index: usize,
 ///         resource: &R,
 ///         amount: u32,
 ///     ) -> u32 {
 ///         self.0.extract_at(host, tx, index, resource, amount)
 ///     }
-///     fn insert(&self, host: &mut dyn ServerHost, tx: &Transaction, r: &R, n: u32) -> Result<u32, Overanswered> {
+///     fn insert(&self, host: &mut dyn ServerHost, tx: &TransactionContext, r: &R, n: u32) -> Result<u32, Overanswered> {
 ///         self.0.insert(host, tx, r, n)
 ///     }
-///     fn extract(&self, host: &mut dyn ServerHost, tx: &Transaction, r: &R, n: u32) -> Result<u32, Overanswered> {
+///     fn extract(&self, host: &mut dyn ServerHost, tx: &TransactionContext, r: &R, n: u32) -> Result<u32, Overanswered> {
 ///         self.0.extract(host, tx, r, n)
 ///     }
 /// }
@@ -233,7 +235,7 @@ impl<R> ResourceHandler<R> for RangedResourceHandler<R> {
     fn insert_at(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         index: usize,
         resource: &R,
         amount: u32,
@@ -245,7 +247,7 @@ impl<R> ResourceHandler<R> for RangedResourceHandler<R> {
     fn extract_at(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         index: usize,
         resource: &R,
         amount: u32,
@@ -276,10 +278,24 @@ impl<R> ResourceHandler<R> for EmptyResourceHandler {
     fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: Option<&R>) -> u32 {
         0
     }
-    fn insert_at(&self, _: &mut dyn ServerHost, _: &Transaction, _: usize, _: &R, _: u32) -> u32 {
+    fn insert_at(
+        &self,
+        _: &mut dyn ServerHost,
+        _: &TransactionContext,
+        _: usize,
+        _: &R,
+        _: u32,
+    ) -> u32 {
         0
     }
-    fn extract_at(&self, _: &mut dyn ServerHost, _: &Transaction, _: usize, _: &R, _: u32) -> u32 {
+    fn extract_at(
+        &self,
+        _: &mut dyn ServerHost,
+        _: &TransactionContext,
+        _: usize,
+        _: &R,
+        _: u32,
+    ) -> u32 {
         0
     }
 }
@@ -318,7 +334,7 @@ impl<R: Clone + PartialEq> ResourceHandler<R> for InfiniteResourceHandler<R> {
     fn insert_at(
         &self,
         host: &mut dyn ServerHost,
-        _: &Transaction,
+        _: &TransactionContext,
         index: usize,
         resource: &R,
         amount: u32,
@@ -332,7 +348,7 @@ impl<R: Clone + PartialEq> ResourceHandler<R> for InfiniteResourceHandler<R> {
     fn extract_at(
         &self,
         host: &mut dyn ServerHost,
-        _: &Transaction,
+        _: &TransactionContext,
         index: usize,
         resource: &R,
         amount: u32,
@@ -368,14 +384,21 @@ impl<R> ResourceHandler<R> for VoidingResourceHandler {
     fn insert_at(
         &self,
         _: &mut dyn ServerHost,
-        _: &Transaction,
+        _: &TransactionContext,
         index: usize,
         _: &R,
         amount: u32,
     ) -> u32 {
         if index == 0 { amount } else { 0 }
     }
-    fn extract_at(&self, _: &mut dyn ServerHost, _: &Transaction, _: usize, _: &R, _: u32) -> u32 {
+    fn extract_at(
+        &self,
+        _: &mut dyn ServerHost,
+        _: &TransactionContext,
+        _: usize,
+        _: &R,
+        _: u32,
+    ) -> u32 {
         0
     }
 }
@@ -456,7 +479,7 @@ pub fn insert_stacking<R: PartialEq>(
     handler: &dyn ResourceHandler<R>,
     resource: &R,
     amount: u32,
-    tx: Option<&Transaction>,
+    tx: Option<&TransactionContext>,
 ) -> Result<u32, Overanswered> {
     if !can_open(host, tx) || amount == 0 {
         return Ok(0);
@@ -469,7 +492,7 @@ fn try_insert_stacking<R: PartialEq>(
     endpoint: &Attributed<'_, R>,
     resource: &R,
     amount: u32,
-    tx: &Transaction,
+    tx: &TransactionContext,
 ) -> Result<u32, Overanswered> {
     let handler = endpoint.handler;
     let size = handler.size(host);
@@ -507,7 +530,7 @@ pub fn extract_first<R>(
     handler: &dyn ResourceHandler<R>,
     filter: impl Fn(&R) -> bool,
     amount: u32,
-    tx: Option<&Transaction>,
+    tx: Option<&TransactionContext>,
 ) -> Option<(R, u32)> {
     if !can_open(host, tx) || amount == 0 {
         return None;
@@ -535,7 +558,7 @@ pub fn find_extractable_resource<R>(
     host: &mut dyn ServerHost,
     handler: &dyn ResourceHandler<R>,
     filter: impl Fn(&R) -> bool,
-    tx: Option<&Transaction>,
+    tx: Option<&TransactionContext>,
 ) -> Option<R> {
     if !can_open(host, tx) {
         return None;
@@ -561,7 +584,7 @@ fn probe_extractable<R>(
 }
 
 /// Validates an optional enclosing transaction before opening any new journal.
-fn can_open(host: &dyn ServerHost, tx: Option<&Transaction>) -> bool {
+fn can_open(host: &dyn ServerHost, tx: Option<&TransactionContext>) -> bool {
     host.transaction_current().as_ref() == tx
 }
 
@@ -603,7 +626,7 @@ impl<R> Attributed<'_, R> {
     fn insert(
         &self,
         host: &mut dyn ServerHost,
-        tx: &Transaction,
+        tx: &TransactionContext,
         resource: &R,
         asked: u32,
     ) -> Result<u32, Overanswered> {
@@ -629,7 +652,7 @@ pub fn move_resources<'a, R: 'a>(
     to: impl Into<Attributed<'a, R>>,
     filter: impl Fn(&R) -> bool,
     max: u32,
-    tx: Option<&Transaction>,
+    tx: Option<&TransactionContext>,
 ) -> Result<u32, Overanswered> {
     let (from, to) = (from.into(), to.into());
     move_resources_by(host, from, filter, max, tx, |host, tx, resource, out| {
@@ -644,7 +667,7 @@ pub fn move_resources_stacking<'a, R: PartialEq + 'a>(
     to: impl Into<Attributed<'a, R>>,
     filter: impl Fn(&R) -> bool,
     max: u32,
-    tx: Option<&Transaction>,
+    tx: Option<&TransactionContext>,
 ) -> Result<u32, Overanswered> {
     let (from, to) = (from.into(), to.into());
     move_resources_by(host, from, filter, max, tx, |host, tx, resource, out| {
@@ -657,8 +680,8 @@ fn move_resources_by<R>(
     from: Attributed<'_, R>,
     filter: impl Fn(&R) -> bool,
     max: u32,
-    tx: Option<&Transaction>,
-    insert: impl Fn(&mut dyn ServerHost, &Transaction, &R, u32) -> Result<u32, Overanswered>,
+    tx: Option<&TransactionContext>,
+    insert: impl Fn(&mut dyn ServerHost, &TransactionContext, &R, u32) -> Result<u32, Overanswered>,
 ) -> Result<u32, Overanswered> {
     with_move_transaction(host, tx, |host| {
         let mut moved = 0;
@@ -690,7 +713,7 @@ pub fn move_first<'a, R: PartialEq + 'a>(
     to: impl Into<Attributed<'a, R>>,
     filter: impl Fn(&R) -> bool,
     max: u32,
-    tx: Option<&Transaction>,
+    tx: Option<&TransactionContext>,
 ) -> Result<Option<(R, u32)>, Overanswered> {
     let (from, to) = (from.into(), to.into());
     move_first_by(host, from, filter, max, tx, |host, tx, resource, out| {
@@ -705,7 +728,7 @@ pub fn move_first_stacking<'a, R: PartialEq + 'a>(
     to: impl Into<Attributed<'a, R>>,
     filter: impl Fn(&R) -> bool,
     max: u32,
-    tx: Option<&Transaction>,
+    tx: Option<&TransactionContext>,
 ) -> Result<Option<(R, u32)>, Overanswered> {
     let (from, to) = (from.into(), to.into());
     move_first_by(host, from, filter, max, tx, |host, tx, resource, out| {
@@ -718,8 +741,8 @@ fn move_first_by<R: PartialEq>(
     from: Attributed<'_, R>,
     filter: impl Fn(&R) -> bool,
     max: u32,
-    tx: Option<&Transaction>,
-    insert: impl Fn(&mut dyn ServerHost, &Transaction, &R, u32) -> Result<u32, Overanswered>,
+    tx: Option<&TransactionContext>,
+    insert: impl Fn(&mut dyn ServerHost, &TransactionContext, &R, u32) -> Result<u32, Overanswered>,
 ) -> Result<Option<(R, u32)>, Overanswered> {
     with_move_transaction(host, tx, |host| {
         let mut selected = None;
@@ -750,7 +773,7 @@ fn move_first_by<R: PartialEq>(
 
 fn with_move_transaction<T: Default>(
     host: &mut dyn ServerHost,
-    tx: Option<&Transaction>,
+    tx: Option<&TransactionContext>,
     run: impl FnOnce(&mut dyn ServerHost) -> Result<T, Overanswered>,
 ) -> Result<T, Overanswered> {
     if !can_open(host, tx) {
@@ -765,7 +788,7 @@ fn move_slot<R>(
     index: usize,
     resource: &R,
     max: u32,
-    insert: &impl Fn(&mut dyn ServerHost, &Transaction, &R, u32) -> Result<u32, Overanswered>,
+    insert: &impl Fn(&mut dyn ServerHost, &TransactionContext, &R, u32) -> Result<u32, Overanswered>,
 ) -> Result<u32, Overanswered> {
     let want = max.min(from.handler.amount(host, index));
     if want == 0 {
