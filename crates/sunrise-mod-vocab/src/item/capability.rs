@@ -341,6 +341,6 @@ impl BlockSide {
     /// providers are registered by.
     pub(crate) fn kind(self, host: &dyn Host) -> Option<crate::BlockEntityTypeKey> {
         let entity = host.block_entity(self.level, self.pos)?;
-        entity.kind(host)
+        entity.with_view(host, |view| view.kind()).flatten()
     }
 }

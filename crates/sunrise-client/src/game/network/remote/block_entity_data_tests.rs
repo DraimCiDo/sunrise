@@ -26,7 +26,10 @@ impl BlockEntityPart for Observer {
     ) {
         self.0.lock().unwrap().push((
             event.source,
-            event.entity.position(host).unwrap(),
+            event
+                .entity
+                .with_view(host, |view| view.position())
+                .unwrap(),
             event.tag.clone(),
             event.entity.data(host).unwrap(),
         ));

@@ -229,7 +229,7 @@ fn keyed_observers_route_source_data_without_global_or_self_duplicates() {
                     .collect::<Vec<_>>(),
                 [None, None, Some(observer), Some(observer)]
             );
-            assert_eq!(other.level(game), Some(level));
+            assert_eq!(other.with_view(game, |view| view.level()), Some(level));
         },
     );
 }

@@ -3555,7 +3555,13 @@ mod tests {
                         }
                         let handle = game.block_entity(level, [x, 64, 0]).unwrap();
                         if block == "minecraft:chest" {
-                            assert_eq!(handle.kind(game).as_ref(), keys.vanilla.get());
+                            assert_eq!(
+                                handle
+                                    .with_view(game, |view| view.kind())
+                                    .flatten()
+                                    .as_ref(),
+                                keys.vanilla.get()
+                            );
                             let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
                             assert_eq!((probe.value(), probe.owner()), (26, "be_user".into()));
                             continue;
@@ -3571,7 +3577,13 @@ mod tests {
                         }
                         assert_eq!(entity.id(), "be_test:shared");
                         assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(6300)));
-                        assert_eq!(handle.kind(game).as_ref(), keys.shared.get());
+                        assert_eq!(
+                            handle
+                                .with_view(game, |view| view.kind())
+                                .flatten()
+                                .as_ref(),
+                            keys.shared.get()
+                        );
                         let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
                         assert_eq!((probe.value(), probe.owner()), (6300, "be_user".into()));
                         game.tick_mod_block_entity(pos);

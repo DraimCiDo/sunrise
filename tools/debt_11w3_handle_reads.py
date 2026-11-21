@@ -864,6 +864,10 @@ EDITS = {
             swap("        let pos = `event.entity.position(host)`.unwrap();",
                  "event.entity.with_view(host, |view| view.position())", 1),
         ),
+        GAME / "native_hooks/block_entity_on_load_tests.rs": (
+            swap("                    `event.entity.position(h)`.unwrap(),",
+                 "event.entity.with_view(h, |view| view.position())", 2),
+        ),
         REMOTE / "block_entity_data_tests.rs": (
             swap("            `event.entity.position(host)`.unwrap(),",
                  "event.entity.with_view(host, |view| view.position())", 1),
@@ -897,6 +901,18 @@ EDITS = {
                  "let before = entity.with_view(game, |view| view.data_slots().unwrap().to_vec()).unwrap();", 1),
             swap("            `assert_eq!(entity.data_slots(game), Some(before));`",
                  "assert_eq!(entity.with_view(game, |view| view.data_slots().map(|slots| slots == before.as_slice())).flatten(), Some(true));", 1),
+            Edit("                entity.data_slots(game),\n"
+                 "                None,\n"
+                 "                \"old identity stays stale after load\"",
+                 "                entity.with_view(game, |_| ()),\n"
+                 "                None,\n"
+                 "                \"old identity stays stale after load\"", 1),
+            Edit("                entity.data_slots(game),\n"
+                 "                Some(vec![]),\n"
+                 "                \"menu data is transient, not saved NBT\"",
+                 "                entity.with_view(game, |view| view.data_slots().map(|slots| slots.is_empty())).flatten(),\n"
+                 "                Some(true),\n"
+                 "                \"menu data is transient, not saved NBT\"", 1),
         ),
         MODDING / "block_entity_tick_reply_tests/fixture.rs": (
             swap("            let value = `sink.data_slots(host).unwrap()[1]`;",

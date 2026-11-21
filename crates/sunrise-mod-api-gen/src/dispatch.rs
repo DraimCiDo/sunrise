@@ -432,7 +432,7 @@ pub(super) fn emit<'a>(
                     "BlockEntityRef" if table == "block_entity" => {
                         let host = &host.as_ref().ok_or("block entity handle needs a Host")?.0;
                         format!(
-                            "block_entity_kind(|| {key}.kind({host}).and_then(super::content::registry_keys::block_entity_type_name))"
+                            "block_entity_kind(|| {key}.with_view({host}, |view| view.kind()).flatten().and_then(super::content::registry_keys::block_entity_type_name))"
                         )
                     }
                     // An entity's type id need not be its block's: its own table.

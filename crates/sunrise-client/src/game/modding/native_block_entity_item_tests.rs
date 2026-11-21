@@ -73,7 +73,7 @@ fn internal_slots_preserve_automation_limits_and_nested_transactions() {
             commit(game, |host, tx| {
                 assert_eq!(set(host, tx, 1, None), Ok(false));
                 assert_eq!(set(host, tx, 0, Some(dirt.clone())), Ok(true));
-                let level = entity.level(host).unwrap();
+                let level = entity.with_view(host, |view| view.level()).unwrap();
                 let external = level.capability(host, &ITEMS, [1, 64, 1], None).unwrap();
                 assert_eq!(
                     external.insert_at(host, tx, 1, &ItemResource::of(&diamond), 1),
@@ -203,7 +203,7 @@ fn internal_slots_preserve_automation_limits_and_nested_transactions() {
                 assert_eq!(set(host, tx, 1, None), Ok(true));
             });
             assert_eq!(get(game, 1), Ok(None));
-            let level = entity.level(game).unwrap();
+            let level = entity.with_view(game, |view| view.level()).unwrap();
             game.world.block_entities.remove(&pos);
             assert_eq!(get(game, 0), Err(Error::Stale));
             commit(game, |host, tx| {
@@ -280,7 +280,7 @@ fn container_moves_roll_back_slots_and_saved_data_in_any_order() {
     with_mod_parts(NAME, |root| {
         super::native_entity_refs::tests::with_game_at(root, |game| {
             let entity = container_holder(game, 3);
-            let level = entity.level(game).unwrap();
+            let level = entity.with_view(game, |view| view.level()).unwrap();
             let items = level.capability(game, &ITEMS, [1, 64, 1], None).unwrap();
             let dirt =
                 ItemResource::of(&ItemStack::new("minecraft:dirt", 1).try_into_api().unwrap());
@@ -371,7 +371,7 @@ fn a_container_move_keeps_one_slot_not_the_entity() {
     with_mod_parts(NAME, |root| {
         super::native_entity_refs::tests::with_game_at(root, |game| {
             let entity = container_holder(game, 100_000);
-            let level = entity.level(game).unwrap();
+            let level = entity.with_view(game, |view| view.level()).unwrap();
             let items = level.capability(game, &ITEMS, [1, 64, 1], None).unwrap();
             let before = holder_state(game);
             // Moves as `move_once` makes them: each in its own transaction, nested in a root.
@@ -430,7 +430,7 @@ fn a_child_whole_capture_keeps_its_older_slot_entries() {
     with_mod_parts(NAME, |root| {
         super::native_entity_refs::tests::with_game_at(root, |game| {
             let entity = container_holder(game, 3);
-            let level = entity.level(game).unwrap();
+            let level = entity.with_view(game, |view| view.level()).unwrap();
             let items = level.capability(game, &ITEMS, [1, 64, 1], None).unwrap();
             let insert = |host: &mut dyn ServerHost, slot: usize, n: u32| {
                 host.transaction(|host, tx| {
@@ -524,7 +524,7 @@ fn an_insert_past_a_short_mod_list_rolls_back_its_length() {
                 panic!()
             };
             holder.items.clear();
-            let level = entity.level(game).unwrap();
+            let level = entity.with_view(game, |view| view.level()).unwrap();
             let items = level.capability(game, &ITEMS, [1, 64, 1], None).unwrap();
             let before = holder_state(game);
             let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, tx| {
@@ -578,7 +578,7 @@ fn each_slot_journalled_container_aborts_to_its_exact_stacks() {
     with_mod_parts(NAME, |root| {
         super::native_entity_refs::tests::with_game_at(root, |game| {
             let entity = mod_holder(game);
-            let level = entity.level(game).unwrap();
+            let level = entity.with_view(game, |view| view.level()).unwrap();
             for block in [
                 "minecraft:chest",
                 "minecraft:barrel",
@@ -630,7 +630,7 @@ fn a_kept_slot_goes_back_only_into_the_block_entity_it_came_from() {
     with_mod_parts(NAME, |root| {
         super::native_entity_refs::tests::with_game_at(root, |game| {
             let entity = mod_holder(game);
-            let level = entity.level(game).unwrap();
+            let level = entity.with_view(game, |view| view.level()).unwrap();
             let at @ [x, y, z] = [3, 64, 1];
             let pos = (x, y, z);
             let [chest, barrel, air] = ["minecraft:chest", "minecraft:barrel", "minecraft:air"]
@@ -709,7 +709,7 @@ fn timing_container_moves_beside_saved_data() {
         super::native_entity_refs::tests::with_game_at(root, |game| {
             let time = |game: &mut super::Game<'_>, keys: usize| {
                 let entity = container_holder(game, keys);
-                let level = entity.level(game).unwrap();
+                let level = entity.with_view(game, |view| view.level()).unwrap();
                 let items = level.capability(game, &ITEMS, [1, 64, 1], None).unwrap();
                 let start = std::time::Instant::now();
                 commit(game, |host, _| {
@@ -743,7 +743,7 @@ fn storage_asks_a_game_container_by_kind_and_rolls_back_with_its_transaction() {
     with_mod_parts(NAME, |root| {
         super::native_entity_refs::tests::with_game_at(root, |game| {
             let entity = mod_holder(game);
-            let level = entity.level(game).unwrap();
+            let level = entity.with_view(game, |view| view.level()).unwrap();
             let chest = game
                 .pack
                 .assets
@@ -863,7 +863,7 @@ fn storage_writes_abort_to_the_exact_state_of_every_container_kind() {
     with_mod_parts(NAME, |root| {
         super::native_entity_refs::tests::with_game_at(root, |game| {
             let entity = mod_holder(game);
-            let level = entity.level(game).unwrap();
+            let level = entity.with_view(game, |view| view.level()).unwrap();
             let pos = (3, 64, 1);
             let of = |id: &str| ItemResource::of(&ItemStack::new(id, 1).try_into_api().unwrap());
             // Each kind with an item it takes through the side asked, and why it is here.
@@ -956,7 +956,7 @@ fn an_aborted_bulk_transfer_conserves_every_item() {
     with_mod_parts(NAME, |root| {
         super::native_entity_refs::tests::with_game_at(root, |game| {
             let entity = mod_holder(game);
-            let level = entity.level(game).unwrap();
+            let level = entity.with_view(game, |view| view.level()).unwrap();
             let (a, b) = ((3, 64, 1), (5, 64, 1));
             container_at(game, a, "minecraft:chest");
             container_at(game, b, "minecraft:barrel");
@@ -1021,7 +1021,7 @@ fn timing_storage_against_items_across_barrel_cells() {
     with_mod_parts(NAME, |root| {
         super::native_entity_refs::tests::with_game_at(root, |game| {
             let entity = mod_holder(game);
-            let level = entity.level(game).unwrap();
+            let level = entity.with_view(game, |view| view.level()).unwrap();
             let side = (cells as f64).sqrt().ceil() as i32;
             for cx in 0..=(side * 2) / 16 {
                 for cz in 0..=side / 16 {

@@ -19,7 +19,9 @@ impl BlockEntityPart for Ticker {
         if self.0 {
             let level = host.level("minecraft:overworld").unwrap();
             let sink = host.block_entity(level, [0, 63, 0]).unwrap();
-            let value = sink.data_slots(host).unwrap()[0];
+            let value = sink
+                .with_view(host, |view| view.data_slots().unwrap()[0])
+                .unwrap();
             let result: Result<(), ()> = host.transaction(|host, _| {
                 assert!(sink.set_data_slot(host, 0, value + 1).unwrap());
                 Ok(())
@@ -165,7 +167,12 @@ fn data_slot_sizing_after_creation_and_load_joins_the_existing_journal() {
         super::native_entity_refs::tests::with_game_at(root, |game| {
             let entity = mod_holder(game);
             let pos = (1, 64, 1);
-            assert_eq!(entity.data_slots(game), Some(vec![]));
+            assert_eq!(
+                entity
+                    .with_view(game, |view| view.data_slots().map(|slots| slots.is_empty()))
+                    .flatten(),
+                Some(true)
+            );
             assert!(
                 !entity.set_data_slot(game, 0, 1).unwrap(),
                 "scalar writes cannot declare slots"
@@ -187,7 +194,14 @@ fn data_slot_sizing_after_creation_and_load_joins_the_existing_journal() {
                 game.world.modified.is_empty(),
                 "no-op sends no Changed notice"
             );
-            assert_eq!(entity.data_slots(game), Some(vec![0]));
+            assert_eq!(
+                entity
+                    .with_view(game, |view| view
+                        .data_slots()
+                        .map(|slots| slots == [0].as_slice()))
+                    .flatten(),
+                Some(true)
+            );
             let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, _| {
                 assert_eq!(entity.set_data_slots(host, vec![30, 40]), Ok(true));
                 host.transaction(|host, _| {
@@ -197,11 +211,20 @@ fn data_slot_sizing_after_creation_and_load_joins_the_existing_journal() {
                 Err(())
             });
             assert_eq!(aborted, Err(()));
-            assert_eq!(entity.data_slots(game), Some(vec![0]));
+            assert_eq!(
+                entity
+                    .with_view(game, |view| view
+                        .data_slots()
+                        .map(|slots| slots == [0].as_slice()))
+                    .flatten(),
+                Some(true)
+            );
             assert!(game.transactions.is_empty());
             assert_eq!(entity.set_data_slots(game, vec![0; 256]), Ok(true));
             assert!(entity.set_data_slot(game, 255, 7).unwrap());
-            let before = entity.data_slots(game).unwrap();
+            let before = entity
+                .with_view(game, |view| view.data_slots().unwrap().to_vec())
+                .unwrap();
             let before_revision = revision(game);
             game.world.modified.clear();
             assert_eq!(
@@ -211,7 +234,14 @@ fn data_slot_sizing_after_creation_and_load_joins_the_existing_journal() {
                     limit: 256
                 })
             );
-            assert_eq!(entity.data_slots(game), Some(before));
+            assert_eq!(
+                entity
+                    .with_view(game, |view| view
+                        .data_slots()
+                        .map(|slots| slots == before.as_slice()))
+                    .flatten(),
+                Some(true)
+            );
             assert_eq!(revision(game), before_revision);
             assert!(
                 game.world.modified.is_empty(),
@@ -232,7 +262,7 @@ fn data_slot_sizing_after_creation_and_load_joins_the_existing_journal() {
             assert_eq!(loaded_pos, pos);
             game.world.block_entities.insert(loaded_pos, loaded);
             assert_eq!(
-                entity.data_slots(game),
+                entity.with_view(game, |_| ()),
                 None,
                 "old identity stays stale after load"
             );
@@ -240,13 +270,22 @@ fn data_slot_sizing_after_creation_and_load_joins_the_existing_journal() {
                 .block_entity(game.level("minecraft:overworld").unwrap(), [1, 64, 1])
                 .unwrap();
             assert_eq!(
-                entity.data_slots(game),
-                Some(vec![]),
+                entity
+                    .with_view(game, |view| view.data_slots().map(|slots| slots.is_empty()))
+                    .flatten(),
+                Some(true),
                 "menu data is transient, not saved NBT"
             );
             assert_eq!(entity.set_data_slots(game, vec![0]), Ok(true));
             assert!(entity.set_data_slot(game, 0, 1).unwrap());
-            assert_eq!(entity.data_slots(game), Some(vec![1]));
+            assert_eq!(
+                entity
+                    .with_view(game, |view| view
+                        .data_slots()
+                        .map(|slots| slots == [1].as_slice()))
+                    .flatten(),
+                Some(true)
+            );
         });
     });
 }

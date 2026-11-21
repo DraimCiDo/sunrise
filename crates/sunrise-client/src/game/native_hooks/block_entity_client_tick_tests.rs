@@ -58,7 +58,10 @@ fn rpm_of(nbt: &Compound) -> i32 {
 /// A client tick's event, once its handle is checked to read its position and its state to be
 /// its block's.
 fn record(host: &dyn ClientHost, event: &BlockEntityClientTickEvent<'_>) {
-    assert_eq!(event.block_entity.position(host), Some(event.pos));
+    assert_eq!(
+        event.block_entity.with_view(host, |view| view.position()),
+        Some(event.pos)
+    );
     // The block and its block entity type share the name here.
     assert_eq!(event.state.block().id(host), event.entity.id());
     TICK_PARTICLES
@@ -97,7 +100,10 @@ impl BlockEntityPart for Hum {
         host: &dyn ClientHost,
         event: &mut BlockEntityDataReceivedEvent<'_>,
     ) {
-        let pos = event.entity.position(host).unwrap();
+        let pos = event
+            .entity
+            .with_view(host, |view| view.position())
+            .unwrap();
         note(format!(
             "data {pos:?} {}",
             rpm_of(&event.entity.data(host).unwrap())

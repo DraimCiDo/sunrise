@@ -46,7 +46,9 @@ impl BlockEntityPart for Ticker {
         } else if mode == 3 {
             let level = host.level("minecraft:overworld").unwrap();
             let sink = host.block_entity(level, [2, 64, 1]).unwrap();
-            let value = sink.data_slots(host).unwrap()[1];
+            let value = sink
+                .with_view(host, |view| view.data_slots().unwrap()[1])
+                .unwrap();
             assert!(sink.set_data_slot(host, 1, value + 1).unwrap());
         } else if mode == 6 || mode == 7 {
             let entity = host.entity(event.entity.data[3] as u32).unwrap();

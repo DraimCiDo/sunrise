@@ -6,15 +6,11 @@
 advancements::advancement
 block_entities::block_entity
 block_entities::block_entity_data
-block_entities::block_entity_data_slots
 block_entities::block_entity_identity
 block_entities::block_entity_item_slot
-block_entities::block_entity_kind
-block_entities::block_entity_level
 block_entities::block_entity_lock
 block_entities::block_entity_merge_data
 block_entities::block_entity_name
-block_entities::block_entity_position
 block_entities::block_entity_replace_data
 block_entities::block_entity_set_changed
 block_entities::block_entity_set_data_slot
@@ -519,11 +515,7 @@ level_blocks::level_block_transform
 level_blocks::level_bone_meal
 level_blocks::level_destroy_block
 level_blocks::level_remove_block
-level_chunks::chunk_is_slime_chunk
-level_chunks::chunk_loaded
 level_chunks::chunk_resend
-level_chunks::chunk_sections_with_block
-level_chunks::chunk_status
 level_chunks::chunk_watchers
 level_chunks::level_chunk_ref
 level_chunks::level_is_loaded

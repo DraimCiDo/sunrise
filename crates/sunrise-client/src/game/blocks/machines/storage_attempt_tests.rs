@@ -844,7 +844,14 @@ fn dropper_commits_refused_insertion_and_its_storage_notifications() {
             assert_eq!((count(game, HOPPER, 0), count(game, BELOW, 0)), (2, 0));
             let level = game.level("minecraft:overworld").unwrap();
             let entity = game.block_entity(level, [8, 63, 8]).unwrap();
-            assert_eq!(entity.data_slots(game), Some(vec![1]));
+            assert_eq!(
+                entity
+                    .with_view(game, |view| view
+                        .data_slots()
+                        .map(|slots| slots == [1].as_slice()))
+                    .flatten(),
+                Some(true)
+            );
             probe.rules.lock().unwrap().accept = Some("minecraft:diamond");
             game.dispense_from(BlockPos::new(8, 64, 8), state).unwrap();
             assert_eq!(

@@ -78,12 +78,32 @@ mod tests {
                 .insert((3, 4), std::sync::Arc::new(column));
             let level = game.level("minecraft:overworld").unwrap();
             let chunk = level.chunk_ref(game, [3, 4]).unwrap();
-            assert_eq!(chunk.sections_with_block(game, ore), Some(vec![-2, 1]));
-            assert_eq!(chunk.sections_with_block(game, emerald), Some(vec![]));
+            assert_eq!(
+                chunk
+                    .with_view(game, |view| view.sections_with_block(ore))
+                    .flatten(),
+                Some(vec![-2, 1])
+            );
+            assert_eq!(
+                chunk
+                    .with_view(game, |view| view.sections_with_block(emerald))
+                    .flatten(),
+                Some(vec![])
+            );
             let unloaded = level.chunk_ref(game, [90_000, 90_000]).unwrap();
-            assert_eq!(unloaded.sections_with_block(game, ore), None);
+            assert_eq!(
+                unloaded
+                    .with_view(game, |view| view.sections_with_block(ore))
+                    .flatten(),
+                None
+            );
             game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
-            assert_eq!(chunk.sections_with_block(game, ore), None);
+            assert_eq!(
+                chunk
+                    .with_view(game, |view| view.sections_with_block(ore))
+                    .flatten(),
+                None
+            );
         });
     }
 
@@ -105,34 +125,52 @@ mod tests {
                 ([100_000, -100_000], true),
             ] {
                 let chunk = level.chunk_ref(game, pos).unwrap();
-                assert_eq!(chunk.is_slime_chunk(game), Some(expected));
-                assert_eq!(chunk.is_slime_chunk(game), Some(expected));
+                assert_eq!(
+                    chunk.with_view(game, |view| view.is_slime_chunk()),
+                    Some(expected)
+                );
+                assert_eq!(
+                    chunk.with_view(game, |view| view.is_slime_chunk()),
+                    Some(expected)
+                );
             }
             assert_eq!(game.world.chunks.len(), before);
             assert!(!game.world.chunks.contains_key(&far));
             let invalid = ChunkRef::new(level, [i32::MAX, 0]);
-            assert_eq!(invalid.is_slime_chunk(game), None);
+            assert_eq!(invalid.with_view(game, |view| view.is_slime_chunk()), None);
             let unopened = LevelRef::new(level.epoch(), DimensionKey::NETHER);
-            assert_eq!(ChunkRef::new(unopened, [0, 0]).is_slime_chunk(game), None);
+            assert_eq!(
+                ChunkRef::new(unopened, [0, 0]).with_view(game, |view| view.is_slime_chunk()),
+                None
+            );
             game.enter_level(crate::game::Dim::Nether).unwrap();
             let nether = game.level("minecraft:the_nether").unwrap();
             game.level.seed = 0;
             let parked = ChunkRef::new(level, [-17, 29]);
-            assert_eq!(parked.is_slime_chunk(game), Some(false));
+            assert_eq!(
+                parked.with_view(game, |view| view.is_slime_chunk()),
+                Some(false)
+            );
             let active = ChunkRef::new(nether, [100_000, -100_000]);
             assert!(!game.world.chunks.contains_key(&far));
-            assert_eq!(active.is_slime_chunk(game), Some(true));
+            assert_eq!(
+                active.with_view(game, |view| view.is_slime_chunk()),
+                Some(true)
+            );
             assert!(!game.world.chunks.contains_key(&far));
             // These handles are still current: refusal must be due to client role.
             game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
-            assert_eq!(active.is_slime_chunk(game), None);
-            assert_eq!(parked.is_slime_chunk(game), None);
+            assert_eq!(active.with_view(game, |view| view.is_slime_chunk()), None);
+            assert_eq!(parked.with_view(game, |view| view.is_slime_chunk()), None);
             game.options.execution_role =
                 crate::game::execution_role::ExecutionRole::IntegratedServer;
             game.native_lifecycle
                 .begin_open(Authority::IntegratedServer);
-            assert_eq!(ChunkRef::new(level, [0, 0]).is_slime_chunk(game), None);
-            assert_eq!(active.is_slime_chunk(game), None);
+            assert_eq!(
+                ChunkRef::new(level, [0, 0]).with_view(game, |view| view.is_slime_chunk()),
+                None
+            );
+            assert_eq!(active.with_view(game, |view| view.is_slime_chunk()), None);
         });
     }
 }

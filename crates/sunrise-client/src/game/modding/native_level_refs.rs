@@ -1798,7 +1798,7 @@ mod tests {
             let old = std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(-40, 40));
             game.world.chunks.insert((-40, 40), old.clone());
             game.world.modified.insert((-40, 40));
-            assert!(!game.chunk_loaded(far));
+            assert!(!far.with_view(game, |view| view.loaded()).unwrap_or(false));
             assert!(game.chunk_set_forced(far, true));
             for x in 39..=41 {
                 for z in -8..=-6 {
@@ -1823,11 +1823,23 @@ mod tests {
             // Unchanged adds and removals do not load a missing column.
             let pending = game.level_chunk_ref(level, [200, 200]).unwrap();
             assert!(game.streaming.set_forced(200, 200, true));
-            assert!(!game.chunk_loaded(pending));
+            assert!(
+                !pending
+                    .with_view(game, |view| view.loaded())
+                    .unwrap_or(false)
+            );
             assert!(!game.chunk_set_forced(pending, true));
-            assert!(!game.chunk_loaded(pending));
+            assert!(
+                !pending
+                    .with_view(game, |view| view.loaded())
+                    .unwrap_or(false)
+            );
             assert!(game.chunk_set_forced(pending, false));
-            assert!(!game.chunk_loaded(pending));
+            assert!(
+                !pending
+                    .with_view(game, |view| view.loaded())
+                    .unwrap_or(false)
+            );
             assert!(game.level_chunk_ref(level, [1_875_000, 0]).is_none());
             assert!(game.level_chunk_ref(level, [0, -1_875_001]).is_none());
             assert!(!game.chunk_set_forced(ChunkRef::new(level, [i32::MAX, 0]), true));
@@ -1877,11 +1889,20 @@ mod tests {
 
             let level = game.level(game.dim.id()).unwrap();
             let queued = game.level_chunk_ref(level, [40, -7]).unwrap();
-            assert!(!game.chunk_loaded(queued));
+            assert!(
+                !queued
+                    .with_view(game, |view| view.loaded())
+                    .unwrap_or(false)
+            );
             assert!(game.chunk_set_forced(queued, true));
             assert!(!game.chunk_set_forced(queued, true));
             assert_eq!(game.level_forced_chunks(level), Some(vec![[40, -7]]));
-            assert!(!game.chunk_loaded(queued), "paused streaming does no work");
+            assert!(
+                !queued
+                    .with_view(game, |view| view.loaded())
+                    .unwrap_or(false),
+                "paused streaming does no work"
+            );
 
             game.streaming.paused = false;
             game.prepare_levels().unwrap();
@@ -1945,10 +1966,10 @@ mod tests {
             game.enter_level(other).unwrap();
             game.enter_level(back).unwrap();
             assert_eq!(game.chunk_forced(chunk), Some(false));
-            assert!(!game.chunk_loaded(chunk));
+            assert!(!chunk.with_view(game, |view| view.loaded()).unwrap_or(false));
             assert!(game.chunk_set_forced(chunk, true));
             assert!(
-                game.chunk_loaded(chunk),
+                chunk.with_view(game, |view| view.loaded()).unwrap_or(false),
                 "parked level loaded before returning"
             );
             assert_eq!(game.dim, back, "forcing must not switch the acting level");

@@ -390,7 +390,14 @@ fn item_slot_writes_save_but_menu_data_is_transient() {
 
         assert_eq!(entity.set_data_slots(game, vec![23]), Ok(true));
         assert_eq!(entity.set_data_slot(game, 0, 42), Ok(true));
-        assert_eq!(entity.data_slots(game), Some(vec![42]));
+        assert_eq!(
+            entity
+                .with_view(game, |view| view
+                    .data_slots()
+                    .map(|slots| slots == [42].as_slice()))
+                .flatten(),
+            Some(true)
+        );
         assert!(game.world.modified.is_empty(), "menu data is not saved");
 
         // Both growing a lazy slot list and editing an existing slot must save

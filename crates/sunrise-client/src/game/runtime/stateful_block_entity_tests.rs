@@ -113,7 +113,13 @@ fn stateful_creation_uses_actual_state_and_preserves_existing_entity() {
         let handle = game
             .block_entity(level, [1, 64, 0])
             .expect("factory entity");
-        assert_eq!(handle.kind(game).as_ref(), observed.kind.get());
+        assert_eq!(
+            handle
+                .with_view(game, |view| view.kind())
+                .flatten()
+                .as_ref(),
+            observed.kind.get()
+        );
         let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get_mut(&(1, 64, 0)) else {
             panic!("registered type must override its vanilla banner template");
         };
@@ -128,7 +134,13 @@ fn stateful_creation_uses_actual_state_and_preserves_existing_entity() {
             Ok(true)
         );
         assert_eq!(*observed.calls.lock().unwrap(), [populated_api]);
-        assert_eq!(handle.kind(game).as_ref(), observed.kind.get());
+        assert_eq!(
+            handle
+                .with_view(game, |view| view.kind())
+                .flatten()
+                .as_ref(),
+            observed.kind.get()
+        );
         let saved = game
             .block_entity_data(handle)
             .expect("original handle remains live");
@@ -162,7 +174,13 @@ fn stateful_creation_uses_actual_state_and_preserves_existing_entity() {
         let second = game
             .block_entity(level, [3, 64, 0])
             .expect("level write entity");
-        assert_eq!(second.kind(game).as_ref(), observed.kind.get());
+        assert_eq!(
+            second
+                .with_view(game, |view| view.kind())
+                .flatten()
+                .as_ref(),
+            observed.kind.get()
+        );
         assert_eq!(
             game.block_entity_data(second)
                 .unwrap()

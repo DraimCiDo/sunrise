@@ -34,11 +34,11 @@ mod tests {
         fn block_entity_on_load(&self, host: HostSide, event: &mut BlockEntityOnLoadEvent) {
             let (pos, data) = match host {
                 HostSide::Server(h) => (
-                    event.entity.position(h).unwrap(),
+                    event.entity.with_view(h, |view| view.position()).unwrap(),
                     event.entity.data(h).unwrap(),
                 ),
                 HostSide::Client(h) => (
-                    event.entity.position(h).unwrap(),
+                    event.entity.with_view(h, |view| view.position()).unwrap(),
                     event.entity.data(h).unwrap(),
                 ),
             };
