@@ -1,32 +1,6 @@
 //! The `player_food` area: food level, saturation and exhaustion. Host method declarations; access defaults and game forwarders are generated.
 #![allow(unused_variables)]
 use crate::*;
-/// The handles' reads of the `player_food` area, implemented by the game and reached through [`Backend`].
-// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
-#[doc(hidden)]
-#[sunrise_mod_api_macros::host_area]
-pub trait PlayerFoodBackend {
-    /// Side: both.
-    /// `FoodData.needsFood`: the food level is below 20.
-    #[access(WorldOnly)]
-    fn player_needs_food(&self, player: PlayerRef) -> Option<bool>;
-    /// Side: both.
-    /// `FoodData.hasEnoughFood`: the food level is above 6, enough to
-    /// sprint.
-    #[access(WorldOnly)]
-    fn player_has_enough_food(&self, player: PlayerRef) -> Option<bool>;
-    /// Side: both.
-    /// `Player.canEat(always)`: an invulnerable player (creative), `always`
-    /// (food that can always be eaten) or a food level below 20.
-    #[access(WorldOnly)]
-    fn player_can_eat(&self, player: PlayerRef, always: bool) -> Option<bool>;
-    /// Side: both.
-    /// `FoodData.getFoodLevel/getSaturationLevel/getExhaustionLevel`; Paper
-    /// `HumanEntity#getFoodLevel/getSaturation/getExhaustion`. None until the
-    /// guest's body exists, as well as for stale or unavailable players.
-    #[access(WorldOnly)]
-    fn player_food(&self, player: PlayerRef) -> Option<PlayerFood>;
-}
 /// The handles' writes of the `player_food` area, implemented by the game and reached through [`BackendMut`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]

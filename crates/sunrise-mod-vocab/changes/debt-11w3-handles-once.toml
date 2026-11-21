@@ -14,7 +14,32 @@ ids = [
     "handle:MenuRef::with_client_view",
     "trait:MenuView",
     "trait:ClientMenuView",
+    "handle:PlayerRef::game_mode",
+    "handle:PlayerRef::is_creative",
+    "handle:PlayerRef::is_spectator",
+    "handle:PlayerRef::may_build",
+    "handle:PlayerRef::abilities",
+    "handle:PlayerRef::food",
+    "handle:PlayerRef::needs_food",
+    "handle:PlayerRef::has_enough_food",
+    "handle:PlayerRef::can_eat",
+    "handle:PlayerRef::experience",
+    "handle:PlayerRef::xp_needed_for_next_level",
+    "handle:PlayerRef::with_view",
+    "trait:PlayerView",
+    "method:PlayerView::game_mode",
+    "method:PlayerView::is_creative",
+    "method:PlayerView::is_spectator",
+    "method:PlayerView::may_build",
+    "method:PlayerView::abilities",
+    "method:PlayerView::food",
+    "method:PlayerView::needs_food",
+    "method:PlayerView::has_enough_food",
+    "method:PlayerView::can_eat",
+    "method:PlayerView::experience",
+    "method:PlayerView::xp_needed_for_next_level",
 ]
-why = "Related menu reads now use one resolved window instead of reopening the handle for each getter. A stale handle never lends the window that replaces it. Clients keep separate access to layout and synchronized merchant offers. Menu writes still resolve their own handle."
+why = "Resolve a menu or live player once for related reads instead of reopening its handle for each getter. A stale menu never lends the window that replaces it, and an offline or displaced player never lends live state. Clients keep separate access to layout and synchronized merchant offers, and can only borrow their own player's state. Writes still resolve their own handles."
 migrate = """Move `menu.container_id(host)`, `menu.kind(host)`, `menu.slot_count(host)`, `menu.slot(host, index)`, `menu.carried(host)`, `menu.slot_backing(host, index)`, `menu.slot_holds(host, index, &stack)`, and `menu.slot_gives(host, index)` into one `menu.with_view(host, |view| { ... })`. Invoke `view.container_id()`, `view.kind()`, `view.slot_count()`, `view.slot(index)`, `view.carried()`, `view.slot_backing(index)`, `view.slot_holds(index, &stack)` and `view.slot_gives(index)` without the host there. A single optional getter needs one `.flatten()` after `with_view` to combine its unavailable case with a stale or unavailable menu; do not flatten the inner empty stack. To retain the old owned kind, use `menu.with_view(host, |view| view.kind().map(|kind| kind.map(str::to_owned))).flatten()`. Copy any borrowed data in the closure and write only after it returns.
-Replace `menu.slot_boxes(host)` and `menu.slot_kinds(host)` with `menu.with_client_view(host, |view| view.slot_boxes()).ok().flatten().flatten()` and `menu.with_client_view(host, |view| view.slot_kinds()).ok().flatten().flatten()` to keep the previous Option behavior. Instead of `menu.merchant_offers(host)?`, use `menu.with_client_view(host, |view| view.merchant_offers())?.transpose()?.flatten()` to propagate phase/backend and offer-projection refusals while retaining an empty merchant as `Some(vec![])`. `with_client_view` also inherits the shared `MenuView` reads; its outer `Ok(None)` means the menu did not resolve."""
+Replace `menu.slot_boxes(host)` and `menu.slot_kinds(host)` with `menu.with_client_view(host, |view| view.slot_boxes()).ok().flatten().flatten()` and `menu.with_client_view(host, |view| view.slot_kinds()).ok().flatten().flatten()` to keep the previous Option behavior. Instead of `menu.merchant_offers(host)?`, use `menu.with_client_view(host, |view| view.merchant_offers())?.transpose()?.flatten()` to propagate phase/backend and offer-projection refusals while retaining an empty merchant as `Some(vec![])`. `with_client_view` also inherits the shared `MenuView` reads; its outer `Ok(None)` means the menu did not resolve.
+Group `player.game_mode(host)`, `player.is_creative(host)`, `player.is_spectator(host)`, `player.may_build(host)`, `player.abilities(host)`, `player.food(host)`, `player.needs_food(host)`, `player.has_enough_food(host)`, `player.can_eat(host, always)`, `player.experience(host)` and `player.xp_needed_for_next_level(host)` in `player.with_view(host, |view| { ... })`. Inside, call `view.game_mode()`, `view.is_creative()`, `view.is_spectator()`, `view.may_build()`, `view.abilities()`, `view.food()`, `view.needs_food()`, `view.has_enough_food()`, `view.can_eat(always)`, `view.experience()` and `view.xp_needed_for_next_level()` without a host. For a standalone flag or XP read, `player.with_view(host, |view| view.is_creative())` (or the corresponding getter) returns the old `Option`; those getters are plain values once the player resolves. Use one `.flatten()` outside the scope for a standalone `game_mode`, `abilities`, `food`, `needs_food`, `has_enough_food` or `can_eat` read to combine the unavailable-data and unavailable-player cases. `OriginalPlayerRef::experience`, the pickup cooldown, inventory, offline settings and all writes are unchanged."""

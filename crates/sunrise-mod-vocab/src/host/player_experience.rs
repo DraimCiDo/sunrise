@@ -11,15 +11,6 @@ pub trait PlayerExperienceBackend {
     /// experience orb.
     #[access(WorldOnly)]
     fn player_exp_cooldown(&self, player: PlayerRef) -> Option<u32>;
-    /// Side: both.
-    /// `Player.experienceLevel`, `experienceProgress` and `totalExperience`.
-    #[access(WorldOnly)]
-    fn player_experience(&self, player: PlayerRef) -> Option<PlayerExperience>;
-    /// Side: both.
-    /// `Player.getXpNeededForNextLevel`: the points the current level needs
-    /// to fill.
-    #[access(WorldOnly)]
-    fn player_xp_needed_for_next_level(&self, player: PlayerRef) -> Option<i32>;
 }
 /// The handles' writes of the `player_experience` area, implemented by the game and reached through [`BackendMut`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
@@ -43,7 +34,7 @@ pub trait PlayerExperienceBackendMut {
     #[access(WorldOnly)]
     fn player_set_experience_levels(&mut self, player: PlayerRef, levels: i32) -> bool;
     /// Side: server.
-    /// Sets `Player.totalExperience`, the `total` that `PlayerRef::experience`
+    /// Sets `Player.totalExperience`, the `total` that [`PlayerView::experience`]
     /// reports, keeping the level and the progress toward the next level.
     /// Generated as `PlayerRef::set_total_experience`. A mod that moves
     /// experience between a player and a block sets the level and progress

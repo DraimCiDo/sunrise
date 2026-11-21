@@ -31,32 +31,15 @@ pub trait PlayerModesBackend {
     #[access(WorldOnly)]
     fn player_is_secondary_use_active(&self, player: PlayerRef) -> Option<bool>;
     /// Side: both.
-    /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
-    /// None for stale, offline or unavailable players (including displaced outer players).
+    /// Lends a resolved live player once, or skips the callback if it is unavailable.
     #[access(WorldOnly)]
-    fn player_game_mode(&self, player: PlayerRef) -> Option<GameMode>;
-    /// Side: both.
-    /// `Player.isCreative`; Paper `HumanEntity#getGameMode`.
-    #[access(WorldOnly)]
-    fn player_is_creative(&self, player: PlayerRef) -> Option<bool>;
-    /// Side: both.
-    /// `Player.isSpectator`; Paper `HumanEntity#getGameMode`.
-    #[access(WorldOnly)]
-    fn player_is_spectator(&self, player: PlayerRef) -> Option<bool>;
-    /// Side: both.
-    /// `Player.mayBuild`; Paper `HumanEntity#getGameMode`.
-    #[access(WorldOnly)]
-    fn player_may_build(&self, player: PlayerRef) -> Option<bool>;
-    /// Side: both.
-    /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
-    /// On a client, flying is the local body's current prediction; the packet supplies
-    /// the other ability flags and speeds. None for any other player.
-    #[access(WorldOnly)]
-    fn player_abilities(&self, player: PlayerRef) -> Option<PlayerAbilities>;
+    #[decline_unavailable]
+    fn with_player_view(&self, player: PlayerRef, read: &mut dyn FnMut(&dyn PlayerView));
     /// Side: both.
     /// `IPlayerExtension.mayFly` (NeoForge): whether the player may start flying, by game mode
-    /// or ability. Read this rather than `player_abilities`' `may_fly`, which a creative-flight
-    /// attribute would not show; Sunrise has no such attribute yet, so today the two agree.
+    /// or ability. Read this rather than the `may_fly` field of [`PlayerView::abilities`],
+    /// which a creative-flight attribute would not show; Sunrise has no such attribute yet,
+    /// so today the two agree.
     /// None for a stale or unavailable player.
     #[access(WorldOnly)]
     fn player_may_fly(&self, player: PlayerRef) -> Option<bool>;

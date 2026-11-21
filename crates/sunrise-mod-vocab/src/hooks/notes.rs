@@ -635,12 +635,12 @@ handle, an entity the client doesn't track and a level it doesn't show:
   Another entity's equipment, effects and health stay server reads, and so does every write.
 - `player.last_death_location(host)`, for the local player: the position the login and respawn packets carried.
 - `player.inventory(host)` reads non-empty main inventory `ItemStack`s in slot order, with components. It returns `None` for a stale or unavailable player; on a client only the local player's inventory is available. Armor and offhand are separate equipment.
-- For the local player, its own state as the server sent it (`LocalPlayer`): `player.game_mode(host)`, `is_creative`,
-  `is_spectator` and `may_build` (the game mode of the login, respawn and `ClientboundGameEvent` packets); `food`
-  (level and saturation from `ClientboundSetHealth`; the client keeps no exhaustion, so it reads 0), `needs_food`,
-  `has_enough_food` and `can_eat`; `abilities` (what the game mode gives, then `ClientboundPlayerAbilities`' flags and
-  speeds); `selected_slot` (the hotbar slot held); `experience` (`ClientboundSetExperience`) and
-  `xp_needed_for_next_level`. Another player reads `None` there: the client is not sent their state.
+- `player.with_view(host, |view| …)` lends the local player's own state (`LocalPlayer`) for related reads:
+  `view.game_mode()`, `is_creative()`, `is_spectator()` and `may_build()` (login, respawn and `ClientboundGameEvent`);
+  `food()` (level and saturation from `ClientboundSetHealth`; exhaustion reads 0), `needs_food()`, `has_enough_food()`
+  and `can_eat(always)`; `abilities()` (mode plus `ClientboundPlayerAbilities`, with flying predicted locally);
+  `experience()` (`ClientboundSetExperience`) and `xp_needed_for_next_level()`. It skips the callback for
+  other players, whose state the client does not receive. `player.selected_slot(host)` stays a separate read.
 - The local player's open menu: `host.local_player()` then `player.container_menu(host)` makes a `MenuRef` for the menu
   the client has open (the player's own inventory when none is). Use `menu.with_view(host, |view| …)` to read its
   `slot_count()`, `slot(index)` and `carried()` together after server synchronization and local prediction. Indexes are
@@ -2285,7 +2285,7 @@ registration path.
   Answer only for your own blocks and leave the answer empty otherwise; the level is read-only. It is asked on both sides,
   including the client's placement prediction, with a typed `LevelSide`: answer from the state and level alone.
 
-- A server player's game mode about to change: `Hooks::player_game_mode_changed` receives a `PlayerGameModeChangedEvent` before the change (NeoForge's `PlayerChangeGameModeEvent`) for the `/gamemode` command, the F3+F4 switcher and a hardcore world's respawn into spectator, once for each change to a different mode, on a server; not for the default mode a player joins with. Its `from` and `to` are `GameMode` values, the same type used by command parsing and `PlayerRef::game_mode`, `set_game_mode` and `previous_game_mode`. Write `*event.to` to redirect the change, or return `Flow::Cancel` to keep the old mode; numeric ids are only for network and save boundaries.
+- A server player's game mode about to change: `Hooks::player_game_mode_changed` receives a `PlayerGameModeChangedEvent` before the change (NeoForge's `PlayerChangeGameModeEvent`) for the `/gamemode` command, the F3+F4 switcher and a hardcore world's respawn into spectator, once for each change to a different mode, on a server; not for the default mode a player joins with. Its `from` and `to` are `GameMode` values, the same type used by command parsing, `PlayerView::game_mode`, `PlayerRef::set_game_mode` and `PlayerRef::previous_game_mode`. Write `*event.to` to redirect the change, or return `Flow::Cancel` to keep the old mode; numeric ids are only for network and save boundaries.
 
 - The server's difficulty changed, from one of `peaceful`, `easy`, `normal`, `hard` to another, through `difficulty_changed` (NeoForge's `DifficultyChangeEvent`). It is vanilla's `MinecraftServer.setDifficulty`, which `/difficulty`, a dedicated server's management and a test environment's difficulty all go through, and it is told only when the difficulty is another one. It only hears: the change has already happened.
 

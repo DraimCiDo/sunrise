@@ -1263,7 +1263,10 @@ fn goal_view(
                     "{name}: the goal view cannot refuse its return type"
                 ));
             };
-            if args.is_empty() {
+            if refusal == "()" {
+                // A live loan has nothing to do when the tick only has a snapshot.
+                String::new()
+            } else if args.is_empty() {
                 refusal.to_string()
             } else if args.contains(',') {
                 format!("let _ = ({args}); {refusal}")
@@ -1307,12 +1310,13 @@ fn goal_view(
                 .map(|entity| format!("self.is_game_entity({entity})"))
                 .collect::<Vec<_>>()
                 .join(" && ");
-            let forward_and_return = if refusal == Some("()") {
-                format!("{forwarded} return;")
+            if body.is_empty() {
+                format!("if {all_available} {{ {forwarded} }}")
+            } else if refusal == Some("()") {
+                format!("if {all_available} {{ {forwarded} }} else {{ {body} }}")
             } else {
-                format!("return {forwarded};")
-            };
-            format!("if {all_available} {{ {forward_and_return} }} {body}")
+                format!("if {all_available} {{ return {forwarded}; }} {body}")
+            }
         } else {
             body
         };

@@ -1129,6 +1129,69 @@ impl PlayerRef {
     pub fn uuid(self) -> u128 {
         self.uuid
     }
+
+    /// Resolve one live player for related mode, ability, food and experience reads.
+    /// Calls `read` once if the host can lend the player, or returns `None` without calling it
+    /// for an unavailable host, a stale handle, an offline or displaced player, or a player
+    /// other than the local player on a client. The view cannot escape the callback.
+    pub fn with_view<R>(
+        self,
+        host: &dyn Host,
+        read: impl FnOnce(&dyn PlayerView) -> R,
+    ) -> Option<R> {
+        let backend = backend_of(host)?;
+        let mut read = Some(read);
+        let mut result = None;
+        backend.with_player_view(self, &mut |view| {
+            if let Some(read) = read.take() {
+                result = Some(read(view));
+            }
+        });
+        result
+    }
+}
+
+/// Read-only access to a resolved live player on the server, or the local player on the client.
+/// Use [`PlayerRef::with_view`] to read it while it is lent to your callback.
+// no wire: a borrowed view of a live player, not a transported value.
+pub trait PlayerView {
+    /// The current game mode (`ServerPlayerGameMode.getGameModeForPlayer` on the server).
+    /// `None` if the engine has no recognized mode for this player.
+    fn game_mode(&self) -> Option<GameMode>;
+
+    /// Whether the player is in creative mode (`Player.isCreative`).
+    fn is_creative(&self) -> bool;
+
+    /// Whether the player is in spectator mode (`Player.isSpectator`).
+    fn is_spectator(&self) -> bool;
+
+    /// Whether the player may build (`Player.mayBuild`).
+    fn may_build(&self) -> bool;
+
+    /// The player's abilities (`Player.getAbilities`), or `None` if unavailable.
+    /// On a client, flying follows the local body's prediction, while the server packet
+    /// supplies the other synchronized flags and speeds.
+    fn abilities(&self) -> Option<PlayerAbilities>;
+
+    /// The player's food level, saturation and exhaustion (`FoodData`). `None` without a body.
+    fn food(&self) -> Option<PlayerFood>;
+
+    /// Whether food level is below 20 (`FoodData.needsFood`). `None` without food data.
+    fn needs_food(&self) -> Option<bool>;
+
+    /// Whether food level is above 6, enough to sprint (`FoodData.hasEnoughFood`).
+    /// `None` without food data.
+    fn has_enough_food(&self) -> Option<bool>;
+
+    /// Whether the player can eat (`Player.canEat`). `None` without abilities. An invulnerable
+    /// player or an `always`-edible food needs no food data; otherwise, the answer is [`Self::needs_food`].
+    fn can_eat(&self, always: bool) -> Option<bool>;
+
+    /// The player's experience level, progress toward the next level and total experience.
+    fn experience(&self) -> PlayerExperience;
+
+    /// The number of points needed to fill the current level's bar (`Player.getXpNeededForNextLevel`).
+    fn xp_needed_for_next_level(&self) -> i32;
 }
 
 impl From<PlayerRef> for EntityRef {

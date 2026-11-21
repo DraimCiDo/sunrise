@@ -1,13 +1,10 @@
-//! A player's food and experience for native server mods, through a
-//! `PlayerRef` (docs/modding/src/how-to/native-mods.md): the `FoodData` and `Player` reads the
-//! handle's `food()` doesn't give, the writes, and the experience give an
-//! orb hands over (Mending first). Reads return None for a
-//! stale handle or a player who isn't online here, as `food()` does. Writes
-//! return false for those, for a dead player, and, inside another player's
-//! turn, for anyone but that player. What changes reaches the player's client as any
-//! change to their food or experience does.
+//! Writes to a player's food and experience through `PlayerRef`, including
+//! the experience an orb hands over (Mending first). They return false for a
+//! stale handle, a player who isn't online here, a dead player, and, inside
+//! another player's turn, for anyone but that player. Changes reach the player's
+//! client as any change to their food or experience does.
 use super::Game;
-use mod_api::{PlayerExperience, PlayerRef};
+use mod_api::PlayerRef;
 use sunrise_client::entities::Experience;
 
 impl Game<'_> {
@@ -25,21 +22,6 @@ impl Game<'_> {
         self.player.as_mut().map(|p| &mut p.health.food)
     }
 
-    /// `FoodData.needsFood`: the food level is below 20.
-    pub(super) fn player_needs_food(&self, player: PlayerRef) -> Option<bool> {
-        Some(self.player_food(player)?.level < 20)
-    }
-    /// `FoodData.hasEnoughFood`: the food level is above 6, enough to
-    /// sprint.
-    pub(super) fn player_has_enough_food(&self, player: PlayerRef) -> Option<bool> {
-        Some(self.player_food(player)?.level as f32 > 6.0)
-    }
-    /// `Player.canEat(always)`: an invulnerable player (creative), `always`
-    /// (food that can always be eaten) or a food level below 20.
-    pub(super) fn player_can_eat(&self, player: PlayerRef, always: bool) -> Option<bool> {
-        let invulnerable = self.player_abilities(player)?.invulnerable;
-        Some(invulnerable || always || self.player_needs_food(player)?)
-    }
     /// `FoodData.eat(nutrition, saturationModifier)`: adds `nutrition` to
     /// the food level (0 to 20) and `nutrition * modifier * 2` to the
     /// saturation, which stays at most the food level.
@@ -92,30 +74,6 @@ impl Game<'_> {
         })
     }
 
-    /// `Player.experienceLevel`, `experienceProgress` and `totalExperience`.
-    pub(super) fn player_experience(&self, player: PlayerRef) -> Option<PlayerExperience> {
-        Some(match self.player_read_both(player)? {
-            super::native_server::PlayerRead::Guest(g) => {
-                PlayerExperience::from(mod_api::__private::built::PlayerExperience {
-                    level: g.xp_level,
-                    progress: g.xp_progress,
-                    total: g.xp_total,
-                })
-            }
-            super::native_server::PlayerRead::Acting { .. } => {
-                PlayerExperience::from(mod_api::__private::built::PlayerExperience {
-                    level: self.experience.level,
-                    progress: self.experience.progress,
-                    total: self.experience.total,
-                })
-            }
-        })
-    }
-    /// `Player.getXpNeededForNextLevel`: the points the current level needs
-    /// to fill.
-    pub(super) fn player_xp_needed_for_next_level(&self, player: PlayerRef) -> Option<i32> {
-        Some(Experience::needed(self.player_experience(player)?.level))
-    }
     /// `ServerPlayer.setExperiencePoints`: sets the progress toward the next
     /// level to `points` of the points it needs, kept below a full bar. The
     /// level and the total are kept.
@@ -245,7 +203,10 @@ mod tests {
             game.experience.level = 5;
             game.experience.progress = 0.5;
             assert!(game.player_set_total_experience(player, 1234));
-            assert_eq!(game.player_experience(player).unwrap().total, 1234);
+            assert_eq!(
+                player.with_view(game, |view| view.experience().total),
+                Some(1234)
+            );
             assert_eq!(game.experience.level, 5, "the level is kept");
             assert_eq!(game.experience.progress, 0.5, "the progress is kept");
             assert!(!game.player_set_total_experience(player, -1));

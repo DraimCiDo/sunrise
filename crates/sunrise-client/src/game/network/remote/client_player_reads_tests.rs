@@ -1,7 +1,7 @@
 use super::*;
 
 /// The local player's own state reads answer on a client from what the
-/// server sent it (`LocalPlayer`); another player reads None there.
+/// server sent it (`LocalPlayer`); another player does not lend a view.
 #[test]
 #[ignore = "daily"]
 fn client_player_reads_answer_from_the_local_players_copy() {
@@ -39,18 +39,13 @@ fn client_player_reads_answer_from_the_local_players_copy() {
         let player = game.local_player().unwrap();
 
         // Survival, as the login packet left it: building allowed, no flight.
-        assert_eq!(
-            player.with_view(game, |view| view.game_mode()).flatten(),
-            Some(GameMode::Survival)
-        );
-        assert_eq!(player.with_view(game, |view| view.may_build()), Some(true));
-        assert_eq!(
-            player
-                .with_view(game, |view| view.abilities())
-                .flatten()
-                .map(|a| a.may_fly),
-            Some(false)
-        );
+        player
+            .with_view(game, |view| {
+                assert_eq!(view.game_mode(), Some(GameMode::Survival));
+                assert!(view.may_build());
+                assert!(!view.abilities().unwrap().may_fly);
+            })
+            .unwrap();
 
         // CHANGE_GAME_MODE to adventure: no building; then the abilities packet.
         game.handle_packet(C::GameEvent(play::GameEvent {
@@ -58,10 +53,10 @@ fn client_player_reads_answer_from_the_local_players_copy() {
             param: 2.0,
         }))
         .unwrap();
-        assert_eq!(player.game_mode(game), Some(GameMode::Adventure));
-        assert_eq!(player.is_creative(game), Some(false));
-        assert_eq!(player.is_spectator(game), Some(false));
-        assert_eq!(player.may_build(game), Some(false));
+        assert_eq!(
+            player.with_view(game, |view| view.game_mode()).flatten(),
+            Some(GameMode::Adventure)
+        );
         // The parameter rounds (Mth.floor(param + 0.5F)): 0.6 is creative, 1.6 adventure again.
         for (param, mode) in [(0.6, GameMode::Creative), (1.6, GameMode::Adventure)] {
             game.handle_packet(C::GameEvent(play::GameEvent { event: 3, param }))
@@ -78,10 +73,18 @@ fn client_player_reads_answer_from_the_local_players_copy() {
             walking_speed: 0.2,
         }))
         .unwrap();
-        let abilities = player.abilities(game).unwrap();
-        assert!(abilities.may_fly && abilities.flying && !abilities.invulnerable);
-        assert!(!abilities.may_build);
-        assert_eq!((abilities.fly_speed, abilities.walk_speed), (0.1, 0.2));
+        player
+            .with_view(game, |view| {
+                assert_eq!(view.game_mode(), Some(GameMode::Adventure));
+                assert!(!view.is_creative());
+                assert!(!view.is_spectator());
+                assert!(!view.may_build());
+                let abilities = view.abilities().unwrap();
+                assert!(abilities.may_fly && abilities.flying && !abilities.invulnerable);
+                assert!(!abilities.may_build);
+                assert_eq!((abilities.fly_speed, abilities.walk_speed), (0.1, 0.2));
+            })
+            .unwrap();
 
         // An invalid game mode falls back to Survival in the game and its remote snapshot.
         game.handle_packet(C::GameEvent(play::GameEvent {
@@ -103,24 +106,17 @@ fn client_player_reads_answer_from_the_local_players_copy() {
             saturation: 1.5,
         }))
         .unwrap();
-        let food = player
-            .with_view(game, |view| view.food())
-            .flatten()
+        player
+            .with_view(game, |view| {
+                let food = view.food().unwrap();
+                assert_eq!(
+                    (food.level, food.saturation, food.exhaustion),
+                    (5, 1.5, 0.0)
+                );
+                assert_eq!(view.needs_food(), Some(true));
+                assert_eq!(view.has_enough_food(), Some(false));
+            })
             .unwrap();
-        assert_eq!(
-            (food.level, food.saturation, food.exhaustion),
-            (5, 1.5, 0.0)
-        );
-        assert_eq!(
-            player.with_view(game, |view| view.needs_food()).flatten(),
-            Some(true)
-        );
-        assert_eq!(
-            player
-                .with_view(game, |view| view.has_enough_food())
-                .flatten(),
-            Some(false)
-        );
 
         // The hotbar slot and the experience the server set.
         game.handle_packet(C::SetHeldSlot(play::SetHeldSlot { slot: 4 }))
@@ -132,12 +128,13 @@ fn client_player_reads_answer_from_the_local_players_copy() {
             total: 30,
         }))
         .unwrap();
-        let xp = player.with_view(game, |view| view.experience()).unwrap();
-        assert_eq!((xp.level, xp.progress, xp.total), (3, 0.25, 30));
-        assert_eq!(
-            player.with_view(game, |view| view.xp_needed_for_next_level()),
-            Some(13)
-        );
+        player
+            .with_view(game, |view| {
+                let xp = view.experience();
+                assert_eq!((xp.level, xp.progress, xp.total), (3, 0.25, 30));
+                assert_eq!(view.xp_needed_for_next_level(), 13);
+            })
+            .unwrap();
 
         // The main inventory retains typed stacks and their damage, in slot order.
         let mut stack = sunrise_client::items::ItemStack::new("minecraft:diamond_pickaxe", 1);
@@ -160,11 +157,9 @@ fn client_player_reads_answer_from_the_local_players_copy() {
         // Another player: the client isn't sent their state.
         let epoch = player.entity().epoch();
         let other = mod_api::__private::game::player_ref(EntityRef::new(epoch, 8), 43);
-        assert_eq!(
-            other.with_view(game, |view| view.game_mode()).flatten(),
-            None
-        );
-        assert_eq!(other.with_view(game, |view| view.food()).flatten(), None);
+        let mut called = false;
+        assert_eq!(other.with_view(game, |_| called = true), None);
+        assert!(!called, "an untracked player must not lend a view");
         assert_eq!(other.selected_slot(game), None);
         assert_eq!(other.inventory(game), None);
     });

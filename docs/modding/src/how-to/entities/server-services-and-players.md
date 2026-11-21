@@ -104,6 +104,26 @@ this order: `Client`, `InPlayerHook` (a player's state is swapped in), `Stale` (
 handle), `NoConnection` (a fake player, or the world's own player in a single-player world, which respawns through its
 own screen) and `Alive` (health above 0 and the game not won: the case the button ignores; a player who has won the game and is watching the End poem is respawned even alive, on the next server tick, as the button does).
 
+## Reading a live player
+
+Group related mode, ability, food and experience reads in one `player.with_view(host, |view| …)`
+call. The handle resolves once; the view is read-only and only lives inside the callback.
+Return copies of the values you need before writing to the player.
+
+```rust,ignore
+let state = player.with_view(host, |view| (view.game_mode(), view.may_build(), view.experience()));
+```
+
+`with_view` returns `None` without calling the closure for a stale, offline or displaced player,
+or when the host cannot lend a live player. A goal host needs the live player behind the tick's
+view; seeing the player in the goal's snapshot alone is not enough. Inside the closure,
+`game_mode()` and `abilities()` can be unavailable, and `food()`, `needs_food()` and
+`has_enough_food()` require a body. `can_eat(always)` needs abilities but can answer without
+food data if the player is invulnerable or the food is always edible.
+
+Connection reads and settings, including offline visibility, are separate. So are inventory
+reads, the experience pickup cooldown and all writes.
+
 ## Player rules and sleep
 
 Reads accept `Host`; writes accept `ServerHost`.
@@ -260,8 +280,10 @@ kept body:
 Client reads are views, not server authority. Inventory access here is read-only;
 inventory and movement writes still require a server host.
 
-The local player's `abilities` read takes `flying` from current client prediction;
-the other flags and speeds stay as supplied by the last abilities packet.
+`player.with_view` lends only the local player on a client. Its `view.abilities()` takes
+`flying` from current client prediction; the other synchronized flags and speeds stay
+as supplied by the last abilities packet. The view's food and experience reflect the local
+copy of the server's updates, not another player's state.
 
 ## A panic in a player's turn
 

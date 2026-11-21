@@ -6,7 +6,8 @@
 //! world as it was, which the reference doesn't promise.
 use super::{Game, spill::Spill, transactions::After};
 use mod_api::{
-    FluidKey, FluidStack, GameEventContext, LevelRef, PlayerRef, SoundSource, Transaction,
+    FluidKey, FluidStack, GameEventContext, LevelRef, PlayerRef, PlayerView, SoundSource,
+    Transaction,
 };
 use sunrise_core::position::BlockPos;
 use sunrise_world::{
@@ -131,7 +132,7 @@ impl Game<'_> {
             .and_then(|player| {
                 Some(LiquidUser {
                     entity_id: Some(player.entity().id()),
-                    creative: self.player_is_creative(player)?,
+                    creative: self.player_view(player)?.is_creative(),
                 })
             })
             .unwrap_or_default();
@@ -159,7 +160,9 @@ impl Game<'_> {
             && self.native_level_write_allowed(level, pos)
     }
     fn creative(&self, player: Option<PlayerRef>) -> bool {
-        player.is_some_and(|player| self.player_is_creative(player) == Some(true))
+        player
+            .and_then(|player| self.player_view(player))
+            .is_some_and(|view| view.is_creative())
     }
     /// What `write` does at the call. The block entity a new block of another kind removes is
     /// kept whole by the journal before any mod code runs; then the broken block's drops are

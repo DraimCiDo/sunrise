@@ -6,7 +6,7 @@
 use super::Game;
 use super::native_entity_refs::block_face_direction;
 use super::native_server::PlayerRead;
-use mod_api::{BlockFace, GameMode, PlayerRef};
+use mod_api::{BlockFace, GameMode, PlayerRef, PlayerView};
 use sunrise_client::items::ItemStack;
 
 impl Game<'_> {
@@ -29,12 +29,12 @@ impl Game<'_> {
     /// `Player.hasInfiniteMaterials`: the `instabuild` ability, which
     /// creative mode gives.
     pub(super) fn player_has_infinite_materials(&self, player: PlayerRef) -> Option<bool> {
-        self.player_is_creative(player)
+        Some(self.player_view(player)?.is_creative())
     }
     /// `Player.canUseGameMasterBlocks`: creative and a permission level of
     /// at least 2, as command blocks, structure blocks and jigsaws ask.
     pub(super) fn player_can_use_game_master_blocks(&self, player: PlayerRef) -> Option<bool> {
-        let creative = self.player_is_creative(player)?;
+        let creative = self.player_view(player)?.is_creative();
         Some(creative && self.player_permission_level(player)? >= 2)
     }
     /// `ServerPlayerGameMode.getPreviousGameModeForPlayer`: the mode the
@@ -67,13 +67,16 @@ impl Game<'_> {
         face: BlockFace,
         stack: &ItemStack,
     ) -> Option<bool> {
-        if let PlayerRead::Guest(guest) = self.player_handle_read(player)?
+        if !self.is_logical_server() {
+            return None;
+        }
+        let view = self.player_view(player)?;
+        if let PlayerRead::Guest(guest) = &view.read
             && guest.dimension != self.dim.id()
         {
             return None;
         }
-        let may_build = self.player_may_build(player)?;
-        Some(self.may_use_item_at(may_build, pos, block_face_direction(face), stack))
+        Some(self.may_use_item_at(view.may_build(), pos, block_face_direction(face), stack))
     }
     /// `ServerPlayer.canHarmPlayer(other)`: the `pvp` rule and the two
     /// players' teams, as an attack, an arrow or a trident asks them

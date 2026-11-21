@@ -32,7 +32,8 @@ pub(super) use registered_commands::NativeCommandState;
 use mod_api::LevelRef;
 use mod_api::{
     ActionOutcome, ActionRefused, FakeEffect, GameMode, GlobalPos, Identifier, PlayerAction,
-    PlayerActionSetup, PlayerFood, PlayerRef, PlayerRespawnConfig, ScopedActionResult,
+    PlayerActionSetup, PlayerExperience, PlayerFood, PlayerRef, PlayerRespawnConfig, PlayerView,
+    ScopedActionResult,
 };
 use serde_json::{Map, Value, json};
 use std::sync::{
@@ -42,6 +43,7 @@ use std::sync::{
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use sunrise_client::{
     command::{Arg, ArgType, Context, Dispatcher},
+    entities::Experience,
     items::ItemStack,
     lan::{abilities::PlayerAbilities, data::component_nbt, guest::Guest},
     motion::PlayerMotion,
@@ -396,20 +398,6 @@ impl PlayerRead<'_> {
         }
     }
 
-    fn creative(&self) -> bool {
-        self.mode() == 1
-    }
-
-    fn may_build(&self) -> bool {
-        match self {
-            Self::Acting {
-                abilities: Some(a), ..
-            } => a.may_build,
-            Self::Guest(guest) => guest.abilities.may_build,
-            Self::Acting { mode, .. } => *mode < 2,
-        }
-    }
-
     fn body(&self) -> Option<&PlayerMotion> {
         match self {
             Self::Acting { body, .. } => *body,
@@ -460,6 +448,79 @@ impl PlayerRead<'_> {
                 walk_speed: a.walking_speed,
             },
         ))
+    }
+}
+
+/// The resolved live player and the acting state it can read without looking up the handle again.
+pub(super) struct PlayerReadView<'a, 'w> {
+    game: &'a Game<'w>,
+    pub(super) read: PlayerRead<'a>,
+}
+
+impl PlayerView for PlayerReadView<'_, '_> {
+    fn game_mode(&self) -> Option<GameMode> {
+        match &self.read {
+            PlayerRead::Acting { .. } => Some(self.game.mode),
+            PlayerRead::Guest(guest) => GameMode::from_id(guest.game_mode),
+        }
+    }
+
+    fn is_creative(&self) -> bool {
+        self.read.mode() == 1
+    }
+
+    fn is_spectator(&self) -> bool {
+        self.read.mode() == 3
+    }
+
+    fn may_build(&self) -> bool {
+        match &self.read {
+            PlayerRead::Acting {
+                abilities: Some(a), ..
+            } => a.may_build,
+            PlayerRead::Guest(guest) => guest.abilities.may_build,
+            PlayerRead::Acting { mode, .. } => *mode < 2,
+        }
+    }
+
+    fn abilities(&self) -> Option<mod_api::PlayerAbilities> {
+        self.read.abilities()
+    }
+
+    fn food(&self) -> Option<PlayerFood> {
+        self.read.food()
+    }
+
+    fn needs_food(&self) -> Option<bool> {
+        Some(self.food()?.level < 20)
+    }
+
+    fn has_enough_food(&self) -> Option<bool> {
+        Some(self.food()?.level as f32 > 6.0)
+    }
+
+    fn can_eat(&self, always: bool) -> Option<bool> {
+        let invulnerable = self.abilities()?.invulnerable;
+        Some(invulnerable || always || self.needs_food()?)
+    }
+
+    fn experience(&self) -> PlayerExperience {
+        let (level, progress, total) = match &self.read {
+            PlayerRead::Acting { .. } => {
+                let xp = &self.game.experience;
+                (xp.level, xp.progress, xp.total)
+            }
+            PlayerRead::Guest(guest) => (guest.xp_level, guest.xp_progress, guest.xp_total),
+        };
+        PlayerExperience::from(mod_api::__private::built::PlayerExperience {
+            level,
+            progress,
+            total,
+        })
+    }
+
+    fn xp_needed_for_next_level(&self) -> i32 {
+        Experience::needed(self.experience().level)
     }
 }
 
@@ -1009,12 +1070,21 @@ impl Game<'_> {
         Some(PlayerRead::Guest(guest))
     }
 
-    /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
-    /// None for stale, offline or unavailable players (including displaced outer players).
-    pub(super) fn player_game_mode(&self, player: PlayerRef) -> Option<GameMode> {
-        match self.player_read_both(player)? {
-            PlayerRead::Acting { .. } => Some(self.mode),
-            PlayerRead::Guest(guest) => GameMode::from_id(guest.game_mode),
+    /// Resolve the live player once for a group of related reads.
+    pub(super) fn player_view(&self, player: PlayerRef) -> Option<PlayerReadView<'_, '_>> {
+        Some(PlayerReadView {
+            game: self,
+            read: self.player_read_both(player)?,
+        })
+    }
+
+    pub(super) fn with_player_view(
+        &self,
+        player: PlayerRef,
+        read: &mut dyn FnMut(&dyn PlayerView),
+    ) {
+        if let Some(view) = self.player_view(player) {
+            read(&view);
         }
     }
 
@@ -1073,11 +1143,6 @@ impl Game<'_> {
             }
             stored_here = true;
         }) && stored_here
-    }
-
-    /// `Player.isCreative`; Paper `HumanEntity#getGameMode`.
-    pub(super) fn player_is_creative(&self, player: PlayerRef) -> Option<bool> {
-        Some(self.player_read_both(player)?.creative())
     }
 
     /// `Inventory.getSelectedSlot`: the hotbar slot the player holds, 0..9.
@@ -1164,28 +1229,6 @@ impl Game<'_> {
             }
         });
         (!(ran && dropped)).then_some(copy)
-    }
-
-    /// `Player.isSpectator`; Paper `HumanEntity#getGameMode`.
-    pub(super) fn player_is_spectator(&self, player: PlayerRef) -> Option<bool> {
-        Some(self.player_read_both(player)?.mode() == 3)
-    }
-
-    /// `Player.mayBuild`; Paper `HumanEntity#getGameMode`.
-    pub(super) fn player_may_build(&self, player: PlayerRef) -> Option<bool> {
-        Some(self.player_read_both(player)?.may_build())
-    }
-
-    /// `FoodData.getFoodLevel/getSaturationLevel/getExhaustionLevel`; Paper
-    /// `HumanEntity#getFoodLevel/getSaturation/getExhaustion`. None until the
-    /// guest's body exists, as well as for stale or unavailable players.
-    pub(super) fn player_food(&self, player: PlayerRef) -> Option<PlayerFood> {
-        self.player_read_both(player)?.food()
-    }
-
-    /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
-    pub(super) fn player_abilities(&self, player: PlayerRef) -> Option<mod_api::PlayerAbilities> {
-        self.player_read_both(player)?.abilities()
     }
 
     /// The real players on this server, in join order, including an integrated
