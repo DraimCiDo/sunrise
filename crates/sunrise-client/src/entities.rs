@@ -4970,7 +4970,7 @@ mod dropped_item_light_tests {
             previous: Vec3::new(0.5, 64.0, 0.5),
             ..item(64.0, 64.0)
         };
-        assert!((sliding.light_probe(0.5)[0] - 1.0).abs() < 1e-9);
+        assert_eq!(sliding.light_probe(0.5)[0], 1.0);
     }
 
     /// `EntityRenderer.getBlockLightLevel` is `isOnFire() ? 15 : the level's

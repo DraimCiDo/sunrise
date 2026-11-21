@@ -130,8 +130,7 @@ pub fn update_entity_fluids(
     (water_height, lava_height, eye_in_water)
 }
 impl ItemEntity {
-    /// `Entity.getEyeY` of an item, where
-    /// `updateFluidHeightAndDoFluidPushing` reads the fluid.
+    /// `Entity.getEyeY` of an item, sampled by `EntityFluidInteraction.update`.
     pub fn fluid_eye_y(&self) -> f64 {
         self.position.y + Self::EYE_HEIGHT
     }

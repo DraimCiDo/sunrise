@@ -200,6 +200,8 @@ def main():
     differ = []
     for case in CASES:
         want, got = vanilla.get(case, []), sunrise.get(case, [])
+        if not any(l.startswith('explode push') for l in want):
+            raise AssertionError(f'{case}: vanilla recorded no blast push: {want}')
         if not any('entity data' in l for l in want) or any(l.startswith(('error', 'disconnected')) for l in want):
             raise AssertionError(f'{case}: vanilla recorded no health or failed: {want}')
         if want != got:

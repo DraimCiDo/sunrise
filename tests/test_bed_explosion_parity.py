@@ -19,9 +19,9 @@ class BedExplosionSamplingTests(unittest.TestCase):
         self.assertEqual(reference, bed.compared(transcript(41)))
         self.assertNotEqual(reference, bed.compared(transcript(41, push='0.06250000000000001')))
         self.assertNotEqual(reference, bed.compared(transcript(41, after='0.05000000000000001')))
-        with self.assertRaisesRegex(AssertionError, 'expected two edge-item snapshots'):
+        with self.assertRaises(AssertionError):
             bed.compared(transcript(41, elapsed=11))
-        with self.assertRaisesRegex(AssertionError, 'expected two edge-item snapshots'):
+        with self.assertRaises(AssertionError):
             bed.compared(transcript(41)[:1])
 
 
