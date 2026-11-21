@@ -330,25 +330,6 @@ pub enum MotionEvent {
     /// `WitherRoseBlock.entityInside`: the player's box swept through a
     /// wither rose; the server adds its Wither unless peaceful.
     InsideWitherRose,
-    /// An `entity_inside` callback's `InsideEntityView::add_effect`: the server
-    /// adds the effect, unless peaceful.
-    InsideEffect {
-        id: &'static str,
-        duration: i32,
-        amplifier: u8,
-    },
-    /// An `entity_inside` callback's `InsideEntityView::set_block`: the server
-    /// applies `Level.setBlockAndUpdate` directly.
-    InsideSetBlock {
-        pos: [i32; 3],
-        state: BlockStateId,
-    },
-    /// An `entity_inside` callback's `InsideEntityView::destroy_block`: the
-    /// server applies `Level.destroyBlock` directly.
-    InsideDestroyBlock {
-        pos: [i32; 3],
-        drop: bool,
-    },
     /// `ServerPlayer.checkFallDamage` after a mace smash: block particles
     /// from the landing block, more the further the fall.
     SmashLanding {
@@ -653,6 +634,33 @@ impl PlayerMotion {
     }
     pub fn is_on_fire(&self) -> bool {
         !self.mod_fire_immune && self.fire_ticks > 0
+    }
+    /// `BaseFireBlock.fireIgnite` for a player: advances the fire delay or adds
+    /// 1..=2 ticks, ignites for 8s scaled by `burning_time`, clamps for
+    /// invulnerable players, and clears freeze when lit.
+    pub fn fire_ignite_contact(&mut self, random: &mut impl sunrise_core::random::RandomSource) {
+        if self.mod_fire_immune {
+            return;
+        }
+        if let Ok(multiplier) = self.attribute("minecraft:burning_time") {
+            let ticks = environment::ignite_contact(self.fire_ticks, true, random, multiplier);
+            self.set_remaining_fire_ticks(ticks);
+        } else {
+            let next = self.fire_ticks + 1;
+            self.set_remaining_fire_ticks(if next >= 0 { next.max(160) } else { next });
+        }
+        if self.fire_ticks >= 0 {
+            self.ticks_frozen = 0;
+        }
+    }
+    /// `Player.makeStuckInBlock`: slows non-flying players, resets fall distance,
+    /// and resets the tracked impulse.
+    pub fn apply_stuck_in_block(&mut self, multiplier: Vec3) {
+        if !self.flying {
+            self.fall_distance = 0.0;
+            self.stuck_multiplier = multiplier;
+        }
+        self.impulse.try_reset();
     }
     pub fn ignite_for_ticks(&mut self, ticks: i32) -> Result<()> {
         if self.mod_fire_immune {
@@ -1261,7 +1269,7 @@ impl MotionWorld<'_, '_, '_> {
         self.tick_environment_damage()?;
         let previous = self.player.position;
         self.player_movement_tick_with_fluids(direction, jumping)?;
-        self.apply_fire_contact()?;
+        self.reset_unlit_fire();
         self.player.refresh_attributes()?;
         self.update_player_pose()?;
         // The resident scene accepts the resolved local movement directly.
@@ -1537,11 +1545,23 @@ impl MotionWorld<'_, '_, '_> {
     /// snow's FREEZE, then `LivingEntity.aiStep`'s freezing and its damage.
     /// Its client moves it, so the slowing and the rest are the client's.
     pub fn server_block_damage(&mut self, from: Vec3) -> Result<()> {
+        let effects = self.collect_server_block_damage(from)?;
+        self.flush_inside_hostless(effects)?;
+        self.finish_server_block_damage_freezing()
+    }
+    /// Walk the server player's movement history and return the queued
+    /// `InsideEffects` collector so a game-owned turn can flush it with a
+    /// live `&mut Game` loan before [`Self::finish_server_block_damage_freezing`].
+    pub fn collect_server_block_damage(&mut self, from: Vec3) -> Result<mod_api::InsideEffects> {
         self.player.old_position = from;
         // Entity.baseTick
         self.player.was_in_powder_snow = self.player.in_powder_snow;
         self.player.in_powder_snow = false;
-        self.effects_from_blocks(BlockPass::ServerDamage)?;
+        self.collect_effects_from_blocks(BlockPass::ServerDamage)
+    }
+    /// `LivingEntity.aiStep`'s freezing countdown and damage after the
+    /// server player's inside-block collector has flushed.
+    pub fn finish_server_block_damage_freezing(&mut self) -> Result<()> {
         // LivingEntity.aiStep "freezing" (server).
         if !self.player.in_powder_snow || !self.player.can_freeze() {
             self.player.ticks_frozen = (self.player.ticks_frozen - 2).max(0);
@@ -1555,6 +1575,25 @@ impl MotionWorld<'_, '_, '_> {
         Ok(())
     }
     fn effects_from_blocks(&mut self, pass: BlockPass) -> Result<()> {
+        let effects = self.collect_effects_from_blocks(pass)?;
+        self.flush_inside_hostless(effects)
+    }
+    fn flush_inside_hostless(&mut self, mut effects: mod_api::InsideEffects) -> Result<()> {
+        if effects.is_empty() {
+            return Ok(());
+        }
+        let mut access = PlayerInsideAccess {
+            m: self,
+            error: None,
+        };
+        effects.apply_and_clear(&mut access);
+        if let Some(err) = access.error {
+            Err(err)
+        } else {
+            Ok(())
+        }
+    }
+    fn collect_effects_from_blocks(&mut self, pass: BlockPass) -> Result<mod_api::InsideEffects> {
         use sunrise_world::entity_move::MovementRecord;
         let damage_only = pass != BlockPass::Client;
         let mut movements: Vec<MovementRecord> =
@@ -1580,7 +1619,7 @@ impl MotionWorld<'_, '_, '_> {
         }
         // isAffectedByBlocks: no physics for spectators.
         if self.player.spectator {
-            return Ok(());
+            return Ok(mod_api::InsideEffects::default());
         }
         // Block.stepOn for the block under an entity on the ground:
         // MagmaBlock's hot floor hurts unless it steps carefully (sneaks).
@@ -1629,26 +1668,9 @@ impl MotionWorld<'_, '_, '_> {
         }
         let mut visited = crate::fast_hash::FxHashSet::default();
         let mut effects = mod_api::InsideEffects::default();
-        let mut inside = PlayerInside {
-            m: self,
-            pass,
-            melt_step: None,
-        };
+        let mut inside = PlayerInside { m: self, pass };
         crate::block_contact::sweep_movements(&mut inside, &movements, &mut visited, &mut effects)?;
-        // `applyAndClear`: the plan applies in order, in this tick, until the
-        // player dies. The engine's own effects (the powder snow's freeze and
-        // extinguish) and the parts' queued callbacks flush together.
-        let mut access = PlayerInsideAccess {
-            m: self,
-            pending_blocks: Vec::new(),
-            error: None,
-        };
-        effects.apply_and_clear(&mut access);
-        if let Some(err) = access.error {
-            Err(err)
-        } else {
-            Ok(())
-        }
+        Ok(effects)
     }
     /// The block effects and the frost of a window's own player while a vehicle carries it. Its
     /// own move is `rider_tick`'s; after it, `LivingEntity.aiStep` still applies the effects of
@@ -1780,11 +1802,7 @@ impl MotionWorld<'_, '_, '_> {
     /// (and the fall forgotten) unless flying; the impulse context resets
     /// either way.
     fn make_stuck_in_block(&mut self, multiplier: Vec3) {
-        if !self.player.flying {
-            self.player.fall_distance = 0.0;
-            self.player.stuck_multiplier = multiplier;
-        }
-        self.player.impulse.try_reset();
+        self.player.apply_stuck_in_block(multiplier);
     }
     /// `LavaCauldronBlock.entityInside`: CLEAR_FREEZE, LAVA_IGNITE
     /// (`Entity.lavaIgnite`, 15 seconds) and then `Entity.lavaHurt` (lava,
@@ -1792,18 +1810,6 @@ impl MotionWorld<'_, '_, '_> {
     fn lava_cauldron_inside(&mut self) -> Result<()> {
         self.player.ticks_frozen = 0;
         self.lava_ignite_and_hurt()
-    }
-    /// `LayeredCauldronBlock.entityInside`: on a server, a burning player
-    /// asks for the cauldron's `handleEntityOnFireInside` (runBefore
-    /// EXTINGUISH, so while still burning), then EXTINGUISH
-    /// (`Entity.clearFire`) puts the fire out.
-    fn layered_cauldron_inside(&mut self, pos: BlockPos) {
-        if self.player.is_on_fire() && !self.player.spectator {
-            self.player
-                .events
-                .push(MotionEvent::CauldronExtinguish { pos });
-        }
-        self.player.fire_ticks = self.player.fire_ticks.min(0);
     }
     /// `WebBlock.entityInside`: stuck at a quarter of the speed, half with
     /// the Weaving effect.
@@ -2822,10 +2828,6 @@ pub(crate) fn legacy_block_support_at(
 struct PlayerInside<'a, 'p, 'w, 'r> {
     m: &'a mut MotionWorld<'p, 'w, 'r>,
     pass: BlockPass,
-    /// The sweep step that first reached powder snow: its blocks are the melt
-    /// group, the ones a burning player melts (`PowderSnowBlock.entityInside`
-    /// destroys them while the entity is on fire, per contact).
-    melt_step: Option<i32>,
 }
 
 impl PlayerInside<'_, '_, '_, '_> {
@@ -2836,11 +2838,11 @@ impl PlayerInside<'_, '_, '_, '_> {
     }
 }
 
-/// Engine backing for [`mod_api::InsideEntityView`] while flushing a player's
-/// `InsideEffects` collector.
+/// Hostless backing for [`mod_api::InsideEntityView`] used only on client prediction
+/// and standalone motion tests without a live `Game`. Server turns flush through
+/// `Game::flush_player_inside` with a live level loan.
 struct PlayerInsideAccess<'a, 'p, 'w, 'r> {
     m: &'a mut MotionWorld<'p, 'w, 'r>,
-    pending_blocks: Vec<([i32; 3], BlockStateId)>,
     error: Option<Box<dyn std::error::Error>>,
 }
 
@@ -2859,9 +2861,6 @@ impl PlayerInsideAccess<'_, '_, '_, '_> {
     fn current_block(&self, pos: [i32; 3]) -> Option<BlockStateId> {
         if !self.in_loaded_world(pos) {
             return None;
-        }
-        if let Some((_, state)) = self.pending_blocks.iter().rev().find(|(p, _)| *p == pos) {
-            return Some(*state);
         }
         Some(self.m.scene.block(pos[0], pos[1], pos[2]))
     }
@@ -2898,6 +2897,10 @@ impl mod_api::InsideEntityAccess for PlayerInsideAccess<'_, '_, '_, '_> {
 
     fn fire_ticks(&self) -> i32 {
         self.m.player.fire_ticks
+    }
+
+    fn is_on_fire(&self) -> bool {
+        self.m.player.is_on_fire()
     }
 
     fn fall_distance(&self) -> f64 {
@@ -2946,29 +2949,21 @@ impl mod_api::InsideEntityAccess for PlayerInsideAccess<'_, '_, '_, '_> {
     }
 
     fn set_remaining_fire_ticks(&mut self, ticks: i32) {
-        self.m.player.fire_ticks = ticks;
+        self.m.player.set_remaining_fire_ticks(ticks);
     }
 
-    fn add_effect(&mut self, effect: mod_api::EffectKey, duration: i32, amplifier: u8) -> bool {
-        let Some(id) = mod_api::__private::effect_key_id(effect) else {
-            return false;
-        };
-        self.m.player.events.push(MotionEvent::InsideEffect {
-            id,
-            duration,
-            amplifier,
-        });
-        true
+    fn add_effect(&mut self, _effect: mod_api::EffectKey, _duration: i32, _amplifier: u8) -> bool {
+        false
     }
 
     fn hurt_with_source(
         &mut self,
         damage_type: &str,
         amount: f32,
-        _direct: Option<mod_api::EntityRef>,
-        _causing: Option<mod_api::EntityRef>,
+        direct: Option<mod_api::EntityRef>,
+        causing: Option<mod_api::EntityRef>,
     ) -> bool {
-        if !amount.is_finite() || amount < 0.0 {
+        if !amount.is_finite() || amount < 0.0 || direct.is_some() || causing.is_some() {
             return false;
         }
         if crate::health::resolve_damage_kind(Some(&self.m.health.damage), damage_type).is_none() {
@@ -3019,46 +3014,12 @@ impl mod_api::InsideEntityAccess for PlayerInsideAccess<'_, '_, '_, '_> {
         }
     }
 
-    fn set_block(&mut self, pos: [i32; 3], state: mod_api::BlockState) -> bool {
-        if self.m.player.client_side || !self.in_loaded_world(pos) {
-            return false;
-        }
-        let Some(state_id) = crate::block_contact::state_to_engine(state) else {
-            return false;
-        };
-        self.pending_blocks.push((pos, state_id));
-        self.m.player.events.push(MotionEvent::InsideSetBlock {
-            pos,
-            state: state_id,
-        });
-        true
+    fn set_block(&mut self, _pos: [i32; 3], _state: mod_api::BlockState) -> bool {
+        false
     }
 
-    fn destroy_block(&mut self, pos: [i32; 3], drop: bool) -> bool {
-        if self.m.player.client_side {
-            return false;
-        }
-        let Some(current) = self.current_block(pos) else {
-            return false;
-        };
-        let is_air = self.m.assets.registry.state(current).is_none_or(|d| {
-            matches!(
-                d.name.as_str(),
-                "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"
-            )
-        });
-        if is_air {
-            return false;
-        }
-        let Some(air) = self.m.assets.registry.default_state("minecraft:air") else {
-            return false;
-        };
-        self.pending_blocks.push((pos, air));
-        self.m
-            .player
-            .events
-            .push(MotionEvent::InsideDestroyBlock { pos, drop });
-        true
+    fn destroy_block(&mut self, _pos: [i32; 3], _drop: bool) -> bool {
+        false
     }
 
     fn apply_effect(&mut self, effect: mod_api::InsideEffect) {
@@ -3074,23 +3035,7 @@ impl mod_api::InsideEntityAccess for PlayerInsideAccess<'_, '_, '_, '_> {
                 self.m.player.ticks_frozen = 0;
             }
             mod_api::InsideEffect::FireIgnite => {
-                if !self.m.player.mod_fire_immune {
-                    if let Ok(multiplier) = self.m.player.attribute("minecraft:burning_time") {
-                        let ticks = environment::ignite_contact(
-                            self.m.player.fire_ticks,
-                            true,
-                            &mut self.m.scene.random,
-                            multiplier,
-                        );
-                        self.m.player.set_remaining_fire_ticks(ticks);
-                    } else {
-                        let next = self.m.player.fire_ticks + 1;
-                        self.m.player.fire_ticks = if next >= 0 { next.max(160) } else { next };
-                    }
-                    if self.m.player.fire_ticks >= 0 {
-                        self.m.player.ticks_frozen = 0;
-                    }
-                }
+                self.m.player.fire_ignite_contact(&mut self.m.scene.random);
             }
             mod_api::InsideEffect::LavaIgnite => {
                 if !self.m.player.mod_fire_immune
@@ -3102,6 +3047,32 @@ impl mod_api::InsideEntityAccess for PlayerInsideAccess<'_, '_, '_, '_> {
             }
             mod_api::InsideEffect::Extinguish => {
                 self.m.player.fire_ticks = self.m.player.fire_ticks.min(0);
+            }
+        }
+    }
+
+    fn apply_builtin(&mut self, action: mod_api::__private::BuiltinInsideAction) {
+        match action {
+            mod_api::__private::BuiltinInsideAction::PowderSnowMelt(pos) => {
+                if self.m.player.is_on_fire() && !self.m.player.spectator {
+                    self.m.player.events.push(MotionEvent::PowderSnowMelt {
+                        pos: BlockPos::new(pos[0], pos[1], pos[2]),
+                    });
+                }
+            }
+            mod_api::__private::BuiltinInsideAction::LayeredCauldronExtinguish(pos) => {
+                if self.m.player.is_on_fire() && !self.m.player.spectator {
+                    self.m.player.events.push(MotionEvent::CauldronExtinguish {
+                        pos: BlockPos::new(pos[0], pos[1], pos[2]),
+                    });
+                }
+            }
+            mod_api::__private::BuiltinInsideAction::FireHurt(damage) => {
+                if let Err(err) = self.m.environment_hurt("minecraft:in_fire", damage)
+                    && self.error.is_none()
+                {
+                    self.error = Some(err);
+                }
             }
         }
     }
@@ -3199,7 +3170,7 @@ impl crate::block_contact::InsideWalk for PlayerInside<'_, '_, '_, '_> {
         &mut self,
         p: BlockPos,
         state: BlockStateId,
-        step: i32,
+        _step: i32,
         precise: bool,
         effects: &mut mod_api::InsideEffects,
     ) -> std::result::Result<(), Self::Error> {
@@ -3224,14 +3195,29 @@ impl crate::block_contact::InsideWalk for PlayerInside<'_, '_, '_, '_> {
         // Client and ServerDamage only: those passes each consume the moves
         // they walk, so no pass pair tells the part twice.
         self.m.mod_block_inside(state, p, precise, effects);
-        // CactusBlock, CampfireBlock and the cauldrons' entityInside
+        // CactusBlock, CampfireBlock, BaseFireBlock and the cauldrons' entityInside
         // (`entity.hurt`, the fire and the fill level), and WitherRoseBlock's
         // server-side effect.
         match name {
+            "minecraft:fire" | "minecraft:soul_fire" => {
+                let damage = if name == "minecraft:fire" { 1.0 } else { 2.0 };
+                effects.apply(mod_api::InsideEffect::ClearFreeze);
+                effects.apply(mod_api::InsideEffect::FireIgnite);
+                effects.run_after_builtin(
+                    mod_api::InsideEffect::FireIgnite,
+                    mod_api::__private::BuiltinInsideAction::FireHurt(damage),
+                );
+            }
             "minecraft:cactus" => self.m.environment_hurt("minecraft:cactus", 1.0)?,
             "minecraft:lava_cauldron" => self.m.lava_cauldron_inside()?,
             "minecraft:water_cauldron" | "minecraft:powder_snow_cauldron" => {
-                self.m.layered_cauldron_inside(p);
+                effects.run_before_builtin(
+                    mod_api::InsideEffect::Extinguish,
+                    mod_api::__private::BuiltinInsideAction::LayeredCauldronExtinguish([
+                        p.x, p.y, p.z,
+                    ]),
+                );
+                effects.apply(mod_api::InsideEffect::Extinguish);
             }
             "minecraft:wither_rose" => {
                 self.m.player.events.push(MotionEvent::InsideWitherRose);
@@ -3259,28 +3245,20 @@ impl crate::block_contact::InsideWalk for PlayerInside<'_, '_, '_, '_> {
             // HoneyBlock.entityInside: a server's player slides too, so its
             // fall distance resets (its client moves it).
             "minecraft:honey_block" => self.m.honey_block_inside(p)?,
-            // PowderSnowBlock.entityInside's FREEZE and its server snowflake
-            // (`ServerLevel.sendParticles`); EXTINGUISH joins it, as the block's
-            // own burn-out does. The slowing is the client's
-            // (`makeStuckInBlock`).
+            // PowderSnowBlock.entityInside's FREEZE, EXTINGUISH and runBefore(EXTINGUISH)
+            // melt, queued into the shared collector so mod callbacks order against them.
             "minecraft:powder_snow" => {
                 if self.damage_only() {
                     self.m.powder_snow_snowflake(p);
                 } else {
                     self.m.powder_snow_inside(p)?;
                 }
+                effects.run_before_builtin(
+                    mod_api::InsideEffect::Extinguish,
+                    mod_api::__private::BuiltinInsideAction::PowderSnowMelt([p.x, p.y, p.z]),
+                );
                 effects.apply(mod_api::InsideEffect::Freeze);
                 effects.apply(mod_api::InsideEffect::Extinguish);
-                // The burning player melts the snow it is told about, at the
-                // contact, as vanilla destroys it there; the collector's
-                // extinguish applies at the flush, after every contact.
-                if self.m.player.is_on_fire() && self.melt_step.is_none_or(|s| s == step) {
-                    self.melt_step.get_or_insert(step);
-                    self.m
-                        .player
-                        .events
-                        .push(MotionEvent::PowderSnowMelt { pos: p });
-                }
             }
             _ => {}
         }

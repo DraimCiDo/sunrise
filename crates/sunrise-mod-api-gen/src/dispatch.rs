@@ -1237,7 +1237,7 @@ pub(super) fn emit<'a>(
                 } else if name == "entity_inside" {
                     let host_arg = &host.as_ref().unwrap().0;
                     format!(
-                        "for (__mod_id, {part_item}) in super::entered_parts_with_id({part_list}, HookId::{hook_id}, \"{name}\") {{ let mut __staged = InsideEffects::default(); let mut {event} = {event_type} {{ dimension, entity, kind, state, pos, precise, effects: &mut __staged }}; match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| super::runtime::refusable(contained, || {part_item}.{name}(&mut *{host_arg}, &mut {event})))) {{ Ok(Ok(())) => {{ effects.absorb_step(__staged); }} Ok(Err(refusal)) => {{ refusal.report(); }} Err(__unwound) => {{ super::runtime::record_callback_panic(HookId::{hook_id}, __mod_id, \"{name}\", super::runtime::panic_summary(__unwound.as_ref())); }} }} }}"
+                        "for (__mod_id, {part_item}) in super::entered_parts_with_id({part_list}, HookId::{hook_id}, \"{name}\") {{ let mut __staged = InsideEffects::staged_for(__mod_id); let mut {event} = {event_type} {{ dimension, entity, kind, state, pos, precise, effects: &mut __staged }}; match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| super::runtime::refusable(contained, || {part_item}.{name}(&mut *{host_arg}, &mut {event})))) {{ Ok(Ok(())) => {{ effects.absorb_step(__staged); }} Ok(Err(refusal)) => {{ refusal.report(); }} Err(__unwound) => {{ super::runtime::record_callback_panic(HookId::{hook_id}, __mod_id, \"{name}\", super::runtime::panic_summary(__unwound.as_ref())); }} }} }}"
                     )
                 } else {
                     format!(

@@ -122,6 +122,7 @@ mod sweep_tests {
     #[derive(Clone, Default)]
     struct InsidePart {
         contacts: std::sync::Arc<std::sync::Mutex<Vec<[i32; 3]>>>,
+        applied_order: std::sync::Arc<std::sync::Mutex<Vec<(&'static str, i32)>>>,
         wither: std::sync::Arc<std::sync::Mutex<Option<mod_api::EffectKey>>>,
         speed: std::sync::Arc<std::sync::Mutex<Option<mod_api::EffectKey>>>,
         kill_after: Option<usize>,
@@ -152,13 +153,19 @@ mod sweep_tests {
                 view.push([0.5, 0.0, 0.0]);
             });
             if let Some(wither) = *self.wither.lock().unwrap() {
+                let order = self.applied_order.clone();
                 event.run_after(mod_api::InsideEffect::Freeze, move |view| {
-                    view.add_effect(wither, 40, 0);
+                    if view.add_effect(wither, 40, 0) {
+                        order.lock().unwrap().push(("minecraft:wither", 40));
+                    }
                 });
             }
             if let Some(speed) = *self.speed.lock().unwrap() {
+                let order = self.applied_order.clone();
                 event.run_after(mod_api::InsideEffect::Extinguish, move |view| {
-                    view.add_effect(speed, 20, 0);
+                    if view.add_effect(speed, 20, 0) {
+                        order.lock().unwrap().push(("minecraft:speed", 20));
+                    }
                 });
             }
         }
@@ -188,6 +195,7 @@ mod sweep_tests {
     /// own world and assets, through the production `BLOCK_CONTACT_HOOKS` fire.
     /// Returns the player's velocity x before and after, and whether it died.
     fn sweep_game_player(game: &mut Game<'_>) -> (f64, f64, bool) {
+        game.options.dedicated = Some(Vec::new());
         let stone = game
             .pack
             .assets
@@ -219,58 +227,97 @@ mod sweep_tests {
                 to: sunrise_core::geometry::Vec3::new(2.5, 100.0, 0.5),
                 original: None,
             });
-        sweep_game_player_runs(game, |w| w.apply_effects_from_blocks().map(|_| ()))
+        sweep_game_player_live(
+            game,
+            sunrise_core::geometry::Vec3::new(0.5, 100.0, 0.5),
+            false,
+        )
     }
 
-    /// The same world and player setup, with the caller's passes run in the level
-    /// scope: what a server turn walks, or the client's own tick.
-    fn sweep_game_player_runs(
+    /// Runs the server-turn player inside-block sweep: collect (optionally after
+    /// `server_stuck_in_blocks`), flush live against `&mut Game`, and finish freezing.
+    fn sweep_game_player_live(
         game: &mut Game<'_>,
-        runs: impl FnOnce(&mut sunrise_client::motion::MotionWorld) -> crate::Result<()>,
+        from: sunrise_core::geometry::Vec3,
+        with_stuck_pass: bool,
     ) -> (f64, f64, bool) {
         use sunrise_client::motion::MotionWorld;
         let before = game.player.as_ref().unwrap().velocity.x;
-        let crate::game::Game {
-            world,
-            pack,
-            motion,
-            health_resources,
-            damage_hooks,
-            loop_context,
-            collision,
-            player,
-            ..
-        } = game;
-        let entities: [sunrise_core::geometry::Aabb; 0] = [];
-        sunrise_client::block_contact::in_level(
-            sunrise_client::parallel::TickThread::mint(),
-            Some("minecraft:overworld"),
-            || {
-                let mut w = MotionWorld {
-                    side: sunrise_client::motion::dry_side(),
-                    tag_items: None,
-                    block_registries: Some(&pack.block_registries),
-                    loop_context,
-                    damage_hooks,
-                    entities: &entities,
-                    player: player.as_mut().unwrap(),
-                    scene: world,
-                    assets: &pack.assets,
-                    collision_binding: collision,
-                    resources: motion,
-                    health: health_resources,
-                };
-                runs(&mut w).unwrap();
-            },
-        );
+        let effects = {
+            let crate::game::Game {
+                world,
+                pack,
+                motion,
+                health_resources,
+                damage_hooks,
+                loop_context,
+                collision,
+                player,
+                ..
+            } = game;
+            let entities: [sunrise_core::geometry::Aabb; 0] = [];
+            sunrise_client::block_contact::in_level(
+                sunrise_client::parallel::TickThread::mint(),
+                Some("minecraft:overworld"),
+                || {
+                    let mut w = MotionWorld {
+                        side: sunrise_client::motion::dry_side(),
+                        tag_items: None,
+                        block_registries: Some(&pack.block_registries),
+                        loop_context,
+                        damage_hooks,
+                        entities: &entities,
+                        player: player.as_mut().unwrap(),
+                        scene: world,
+                        assets: &pack.assets,
+                        collision_binding: collision,
+                        resources: motion,
+                        health: health_resources,
+                    };
+                    if with_stuck_pass {
+                        w.server_stuck_in_blocks(from).unwrap();
+                    }
+                    w.collect_server_block_damage(from).unwrap()
+                },
+            )
+        };
+        game.flush_player_inside(effects);
+        {
+            let crate::game::Game {
+                world,
+                pack,
+                motion,
+                health_resources,
+                damage_hooks,
+                loop_context,
+                collision,
+                player,
+                ..
+            } = game;
+            let entities: [sunrise_core::geometry::Aabb; 0] = [];
+            let mut w = MotionWorld {
+                side: sunrise_client::motion::dry_side(),
+                tag_items: None,
+                block_registries: Some(&pack.block_registries),
+                loop_context,
+                damage_hooks,
+                entities: &entities,
+                player: player.as_mut().unwrap(),
+                scene: world,
+                assets: &pack.assets,
+                collision_binding: collision,
+                resources: motion,
+                health: health_resources,
+            };
+            w.finish_server_block_damage_freezing();
+        }
         let player = game.player.as_ref().unwrap();
         (before, player.velocity.x, player.health.dead_or_dying())
     }
 
-    /// A listening part is told mid-walk, in walk order, and its typed writes reach
-    /// the player in this tick: both pushes add, and the wither effect event lands
-    /// for the server's `give_player_effect`, which runs before this tick's effect
-    /// tick.
+    /// A listening part is told mid-walk, in walk order, and its callbacks reach
+    /// the live player in this tick: both pushes add, and the wither effect lands
+    /// synchronously on `game.potions.effects`.
     #[test]
     #[ignore = "daily"]
     fn a_part_pushes_the_player_and_its_effect_lands() {
@@ -291,19 +338,11 @@ mod sweep_tests {
                     "both pushes reached the player: {after}"
                 );
                 let effect = game
-                    .player
-                    .as_ref()
-                    .unwrap()
-                    .events
-                    .iter()
-                    .find_map(|event| match event {
-                        sunrise_client::motion::MotionEvent::InsideEffect {
-                            id, duration, ..
-                        } => Some((*id, *duration)),
-                        _ => None,
-                    })
-                    .expect("the wither effect crossed to the server");
-                assert_eq!(effect, ("minecraft:wither", 40));
+                    .potions
+                    .effects
+                    .get("wither")
+                    .expect("the wither effect applied synchronously to the player");
+                assert_eq!(effect.duration, 40);
                 assert!(sunrise_client::block_contact::take_pending().is_empty());
             });
         });
@@ -421,10 +460,9 @@ mod sweep_tests {
         });
     }
 
-    /// A part's `AddEffect` keeps its collector position across the event channel:
-    /// one write asked after FREEZE and one after EXTINGUISH land in that order,
-    /// `applyAndClear`'s own, ready for the server's `give_player_effect` before
-    /// this tick's effect tick.
+    /// A part's `add_effect` callbacks keep their collector position:
+    /// one queued after FREEZE and one after EXTINGUISH run in `applyAndClear`'s order,
+    /// applying synchronously to `game.potions.effects`.
     #[test]
     #[ignore = "daily"]
     fn an_added_effect_keeps_its_collector_position() {
@@ -435,35 +473,19 @@ mod sweep_tests {
                 let _ = sunrise_client::block_contact::HOOKS.set(super::BLOCK_CONTACT_HOOKS);
                 let (_, _, dead) = sweep_game_player(game);
                 assert!(!dead);
-                let effects: Vec<_> = game
-                    .player
-                    .as_ref()
-                    .unwrap()
-                    .events
-                    .iter()
-                    .filter_map(|event| match event {
-                        sunrise_client::motion::MotionEvent::InsideEffect {
-                            id, duration, ..
-                        } => Some((*id, *duration)),
-                        _ => None,
-                    })
-                    .collect();
                 assert_eq!(
-                    effects,
-                    vec![
-                        ("minecraft:wither", 40),
-                        ("minecraft:speed", 20),
-                        ("minecraft:wither", 40),
-                        ("minecraft:speed", 20),
-                    ],
-                    "each contact's writes flush in InsideEffect order: the FREEZE slot before the EXTINGUISH slot"
+                    *part.applied_order.lock().unwrap(),
+                    vec![("minecraft:wither", 40), ("minecraft:speed", 20),],
+                    "each contact's callbacks flush in InsideEffect order: the FREEZE slot before the EXTINGUISH slot (second identical add_effect returns false)"
                 );
+                assert_eq!(game.potions.effects.get("wither").unwrap().duration, 40);
+                assert_eq!(game.potions.effects.get("speed").unwrap().duration, 20);
             });
         });
     }
 
     /// A server's player is told once a tick: the early `ServerStuck` pass keeps
-    /// the moves for `server_block_damage`, and only the damage pass tells the
+    /// the moves for `collect_server_block_damage`, and only the damage pass tells the
     /// part — two blocks, two contacts, not four, as vanilla's `entityInside`
     /// runs once a move.
     #[test]
@@ -473,6 +495,7 @@ mod sweep_tests {
         let mods = install_inside_mod("inside-once", &part);
         mod_platform::testing::with_mods(mods, || {
             crate::game::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
                 let _ = sunrise_client::block_contact::HOOKS.set(super::BLOCK_CONTACT_HOOKS);
                 let stone = game
                     .pack
@@ -506,11 +529,11 @@ mod sweep_tests {
                 // The server turn's own order (lan_actions/tick.rs): the stuck
                 // pass before the landing is checked, then the damage pass over
                 // the same moves.
-                sweep_game_player_runs(game, |w| {
-                    w.server_stuck_in_blocks(sunrise_core::geometry::Vec3::new(0.5, 100.0, 0.5))?;
-                    w.server_block_damage(sunrise_core::geometry::Vec3::new(0.5, 100.0, 0.5))
-                        .map(|_| ())
-                });
+                sweep_game_player_live(
+                    game,
+                    sunrise_core::geometry::Vec3::new(0.5, 100.0, 0.5),
+                    true,
+                );
                 assert_eq!(
                     *part.contacts.lock().unwrap(),
                     vec![[1, 100, 0], [2, 100, 0]],
@@ -526,6 +549,7 @@ mod sweep_tests {
     #[ignore = "daily"]
     fn the_server_passes_without_a_part_keep_vanilla_behavior() {
         crate::game::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
             let stone = game
                 .pack
                 .assets
@@ -559,11 +583,11 @@ mod sweep_tests {
                 });
             let _ = sunrise_client::block_contact::HOOKS.set(super::BLOCK_CONTACT_HOOKS);
             let velocity = game.player.as_ref().unwrap().velocity.x;
-            sweep_game_player_runs(game, |w| {
-                w.server_stuck_in_blocks(sunrise_core::geometry::Vec3::new(0.5, 100.0, 0.5))?;
-                w.server_block_damage(sunrise_core::geometry::Vec3::new(0.5, 100.0, 0.5))
-                    .map(|_| ())
-            });
+            sweep_game_player_live(
+                game,
+                sunrise_core::geometry::Vec3::new(0.5, 100.0, 0.5),
+                true,
+            );
             assert_eq!(
                 game.player.as_ref().unwrap().velocity.x,
                 velocity,
@@ -1237,8 +1261,9 @@ mod sweep_tests {
         });
     }
 
-    /// Calling `hurt_with_source` with a stale `EntityRef` applies damage without a `Taken`
-    /// refusal and leaves sibling `push` and `set_block` writes intact.
+    /// Calling `hurt_with_source` with a stale `EntityRef` refuses that hurt call
+    /// (returns `false` without applying damage) and leaves sibling `push` and
+    /// `set_block` writes intact without rolling them back.
     #[test]
     #[ignore = "daily"]
     fn callback_hurt_with_stale_source_does_not_refuse_or_rollback() {
@@ -1316,8 +1341,11 @@ mod sweep_tests {
                     },
                 );
 
-                assert_eq!(*part.outcomes.lock().unwrap(), Some([true, true, true]));
-                assert_eq!(item.health, health_before - 1);
+                assert_eq!(*part.outcomes.lock().unwrap(), Some([false, true, true]));
+                assert_eq!(
+                    item.health, health_before,
+                    "stale explicit source refuses that hurt call without applying damage"
+                );
                 assert!((item.velocity.x - velocity_before - 0.5).abs() < 1e-9);
                 assert_eq!(game.world.block(1, 100, 0), dirt);
             });
@@ -1462,6 +1490,414 @@ mod sweep_tests {
                         .iter()
                         .map(|toast| toast.title.plain())
                         .collect::<Vec<_>>()
+                );
+            });
+        });
+    }
+
+    /// Live player flush supports `set_block`/`destroy_block` with accurate `bool` returns
+    /// (same-state `false`, already-air `false`), live `block_state`, Peaceful `add_effect`,
+    /// Creative `set_remaining_fire_ticks` clamping, and fire-immune `is_on_fire` predicate.
+    #[test]
+    #[ignore = "daily"]
+    fn player_live_inside_flush_level_writes_peaceful_effect_and_fire_semantics() {
+        use crate::game::api_values::TryIntoApi;
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone, Default)]
+        struct LivePlayerPart {
+            dirt: Arc<Mutex<Option<mod_api::BlockState>>>,
+            speed: Arc<Mutex<Option<mod_api::EffectKey>>>,
+            results: Arc<Mutex<Option<(bool, bool, bool, bool, bool, bool, bool, i32)>>>,
+        }
+        #[mod_api::sunrise_part]
+        impl mod_api::BlockPart for LivePlayerPart {
+            fn entity_inside(
+                &self,
+                _: &mut dyn mod_api::LevelRandomHost,
+                event: &mut mod_api::EntityInsideEvent<'_>,
+            ) {
+                let dirt = self.dirt.lock().unwrap().unwrap();
+                let speed = self.speed.lock().unwrap().unwrap();
+                let pos = [event.pos.x, event.pos.y, event.pos.z];
+                let results = self.results.clone();
+                event.run_after(mod_api::InsideEffect::Freeze, move |view| {
+                    let set_changed = view.set_block(pos, dirt);
+                    let set_same = view.set_block(pos, dirt);
+                    let saw_dirt = view.block_state(pos) == Some(dirt);
+                    let destroy_first = view.destroy_block(pos, false);
+                    let destroy_air = view.destroy_block(pos, false);
+                    let effect_ok = view.add_effect(speed, 60, 0);
+                    view.set_remaining_fire_ticks(100);
+                    let on_fire = view.is_on_fire();
+                    let ticks = view.fire_ticks();
+                    *results.lock().unwrap() = Some((
+                        set_changed,
+                        set_same,
+                        saw_dirt,
+                        destroy_first,
+                        destroy_air,
+                        effect_ok,
+                        on_fire,
+                        ticks,
+                    ));
+                });
+            }
+        }
+        struct LivePlayerMod(LivePlayerPart);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for LivePlayerMod {
+            fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+                *self.0.speed.lock().unwrap() = Some(r.effect_key("minecraft:speed"));
+                let stone = r.block_key("minecraft:stone");
+                r.block_part(stone, self.0.clone());
+            }
+        }
+
+        let part = LivePlayerPart::default();
+        let entry =
+            || mod_api::ModEntry::new("inside-live-player", Box::new(LivePlayerMod(part.clone())));
+        crate::game::api_values::install_parts(&[entry()]).unwrap();
+        let mods: mod_api::Mods = vec![entry()].into();
+        mod_platform::testing::with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                game.ui.difficulty = 0; // Peaceful
+                let _ = sunrise_client::block_contact::HOOKS.set(super::BLOCK_CONTACT_HOOKS);
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                let dirt = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:dirt")
+                    .unwrap();
+                *part.dirt.lock().unwrap() = Some(dirt.try_into_api().unwrap());
+                game.world.chunks.insert(
+                    (0, 0),
+                    std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+                );
+                game.world.set(1, 100, 0, stone).unwrap();
+                let mut player = sunrise_client::motion::PlayerMotion::new(
+                    game.motion,
+                    sunrise_core::geometry::Vec3::new(0.5, 100.0, 0.5),
+                )
+                .unwrap();
+                player.creative = true;
+                player.mod_fire_immune = true;
+                player
+                    .history
+                    .add(sunrise_world::entity_move::MovementRecord {
+                        from: sunrise_core::geometry::Vec3::new(0.5, 100.0, 0.5),
+                        to: sunrise_core::geometry::Vec3::new(1.5, 100.0, 0.5),
+                        original: None,
+                    });
+                game.player = Some(player);
+
+                sweep_game_player_live(
+                    game,
+                    sunrise_core::geometry::Vec3::new(0.5, 100.0, 0.5),
+                    false,
+                );
+
+                assert_eq!(
+                    *part.results.lock().unwrap(),
+                    Some((true, false, true, true, false, true, false, 1)),
+                    "set/destroy returns, live read, Peaceful speed effect, fire-immune is_on_fire, and creative fire clamp (1)"
+                );
+                assert_eq!(game.potions.effects.get("speed").unwrap().duration, 60);
+            });
+        });
+    }
+
+    /// Item float-health subtraction before truncation, bundle drop on fatal hurt, and
+    /// projectile `mark_hurt` + `is_on_fire`.
+    #[test]
+    #[ignore = "daily"]
+    fn item_float_hurt_bundle_spill_and_projectile_mark_hurt() {
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone, Default)]
+        struct HurtEntityPart {
+            fatal_item: Arc<Mutex<bool>>,
+            proj_outcomes: Arc<Mutex<Option<(bool, bool)>>>,
+        }
+        #[mod_api::sunrise_part]
+        impl mod_api::BlockPart for HurtEntityPart {
+            fn entity_inside(
+                &self,
+                _: &mut dyn mod_api::LevelRandomHost,
+                event: &mut mod_api::EntityInsideEvent<'_>,
+            ) {
+                let fatal = *self.fatal_item.lock().unwrap();
+                let proj_outcomes = self.proj_outcomes.clone();
+                event.run_after(mod_api::InsideEffect::Freeze, move |view| {
+                    if view.kind() == "minecraft:item" {
+                        if fatal {
+                            view.hurt("minecraft:in_fire", 10.0);
+                        } else {
+                            view.hurt("minecraft:in_fire", 0.4);
+                            view.hurt("minecraft:in_fire", 0.6);
+                        }
+                    } else {
+                        let on_fire = view.is_on_fire();
+                        let hurt = view.hurt("minecraft:generic", 1.0);
+                        *proj_outcomes.lock().unwrap() = Some((on_fire, hurt));
+                    }
+                });
+            }
+        }
+        struct HurtEntityMod(HurtEntityPart);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for HurtEntityMod {
+            fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+                let stone = r.block_key("minecraft:stone");
+                r.block_part(stone, self.0.clone());
+            }
+        }
+
+        let part = HurtEntityPart::default();
+        let entry =
+            || mod_api::ModEntry::new("inside-item-proj", Box::new(HurtEntityMod(part.clone())));
+        crate::game::api_values::install_parts(&[entry()]).unwrap();
+        let mods: mod_api::Mods = vec![entry()].into();
+        mod_platform::testing::with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                let _ = sunrise_client::block_contact::HOOKS.set(super::BLOCK_CONTACT_HOOKS);
+
+                // Fractional damage: 5.0 - 0.4 = 4.6 -> 4, then 4.0 - 0.6 = 3.4 -> 3.
+                let mut item = single_stone_item(game);
+                sunrise_client::block_contact::in_level(
+                    sunrise_client::parallel::TickThread::mint(),
+                    Some("minecraft:overworld"),
+                    || game.sweep_item_inside(&mut item),
+                );
+                assert_eq!(item.health, 3, "float health subtraction before truncation");
+
+                // Fatal damage on a bundle spawns its contained items.
+                *part.fatal_item.lock().unwrap() = true;
+                let mut bundle = sunrise_client::items::ItemStack::new("minecraft:bundle", 1);
+                bundle
+                    .data_mut()
+                    .bundle_contents
+                    .push(sunrise_client::items::ItemStack::new("minecraft:stick", 2));
+                let mut bundle_item = sunrise_client::entities::ItemEntity::new(
+                    8,
+                    bundle,
+                    sunrise_core::geometry::Vec3::new(1.5, 100.0, 0.5),
+                    sunrise_core::geometry::Vec3::ZERO,
+                    0.0,
+                );
+                bundle_item.previous = sunrise_core::geometry::Vec3::new(1.2, 100.0, 0.5);
+                let dropped_before = game.dropped.len();
+                sunrise_client::block_contact::in_level(
+                    sunrise_client::parallel::TickThread::mint(),
+                    Some("minecraft:overworld"),
+                    || game.sweep_item_inside(&mut bundle_item),
+                );
+                assert!(bundle_item.health <= 0);
+                assert!(
+                    game.dropped.len() > dropped_before
+                        && game
+                            .dropped
+                            .iter()
+                            .any(|d| d.stack.item == "minecraft:stick" && d.stack.count == 2),
+                    "fatal item hurt spills bundle contents"
+                );
+
+                // Projectile `hurt` sets `sync_velocity` (`markHurt`) and `is_on_fire` matches `shot.on_fire()`.
+                let mut shot = arrow_shot(9, (1.2, 100.0, 0.5), (1.5, 100.0, 0.5));
+                shot.fire_ticks = 40;
+                sunrise_client::block_contact::in_level(
+                    sunrise_client::parallel::TickThread::mint(),
+                    Some("minecraft:overworld"),
+                    || game.sweep_projectile_inside(&mut shot),
+                );
+                assert_eq!(*part.proj_outcomes.lock().unwrap(), Some((true, false)));
+                assert!(
+                    shot.sync_velocity,
+                    "projectile hurt sets sync_velocity (markHurt)"
+                );
+            });
+        });
+    }
+
+    /// Vanilla powder-snow melt and fire ignition/hurt queue into `InsideEffects` so mod
+    /// callbacks order against them (`run_after(Freeze)` before `PowderSnowMelt` before
+    /// `Extinguish`; `run_after(FireIgnite)` sees post-ignition `fire_ticks`).
+    #[test]
+    #[ignore = "daily"]
+    fn player_powder_snow_and_fire_builtin_ordering() {
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone, Default)]
+        struct BuiltinOrderPart {
+            snow_key: Arc<Mutex<Option<mod_api::BlockKey>>>,
+            fire_key: Arc<Mutex<Option<mod_api::BlockKey>>>,
+            kill_in_snow: Arc<Mutex<bool>>,
+            fire_ticks_after_ignite: Arc<Mutex<Option<i32>>>,
+        }
+        #[mod_api::sunrise_part]
+        impl mod_api::BlockPart for BuiltinOrderPart {
+            fn entity_inside(
+                &self,
+                _: &mut dyn mod_api::LevelRandomHost,
+                event: &mut mod_api::EntityInsideEvent<'_>,
+            ) {
+                let kill = *self.kill_in_snow.lock().unwrap();
+                let saw_fire = self.fire_ticks_after_ignite.clone();
+                if Some(event.state.block()) == *self.snow_key.lock().unwrap() {
+                    event.run_after(mod_api::InsideEffect::Freeze, move |view| {
+                        view.set_remaining_fire_ticks(40);
+                        if kill {
+                            view.hurt("minecraft:generic", 1000.0);
+                        }
+                    });
+                } else if Some(event.state.block()) == *self.fire_key.lock().unwrap() {
+                    event.run_after(mod_api::InsideEffect::FireIgnite, move |view| {
+                        *saw_fire.lock().unwrap() = Some(view.fire_ticks());
+                    });
+                }
+            }
+        }
+        struct BuiltinOrderMod(BuiltinOrderPart);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for BuiltinOrderMod {
+            fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+                let snow = r.block_key("minecraft:powder_snow");
+                let fire = r.block_key("minecraft:fire");
+                *self.0.snow_key.lock().unwrap() = Some(snow);
+                *self.0.fire_key.lock().unwrap() = Some(fire);
+                r.block_part(snow, self.0.clone());
+                r.block_part(fire, self.0.clone());
+            }
+        }
+
+        let part = BuiltinOrderPart::default();
+        let entry = || {
+            mod_api::ModEntry::new(
+                "inside-builtin-order",
+                Box::new(BuiltinOrderMod(part.clone())),
+            )
+        };
+        crate::game::api_values::install_parts(&[entry()]).unwrap();
+        let mods: mod_api::Mods = vec![entry()].into();
+        mod_platform::testing::with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                let _ = sunrise_client::block_contact::HOOKS.set(super::BLOCK_CONTACT_HOOKS);
+                let snow = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:powder_snow")
+                    .unwrap();
+                let fire = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:fire")
+                    .unwrap();
+                let air = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:air")
+                    .unwrap();
+                game.world.chunks.insert(
+                    (0, 0),
+                    std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+                );
+
+                // 1) Igniting in `run_before(Extinguish)` melts powder snow before Extinguish runs.
+                game.world.set(1, 100, 0, snow).unwrap();
+                let mut player = sunrise_client::motion::PlayerMotion::new(
+                    game.motion,
+                    sunrise_core::geometry::Vec3::new(1.5, 100.0, 0.5),
+                )
+                .unwrap();
+                player
+                    .history
+                    .add(sunrise_world::entity_move::MovementRecord {
+                        from: sunrise_core::geometry::Vec3::new(1.2, 100.0, 0.5),
+                        to: sunrise_core::geometry::Vec3::new(1.5, 100.0, 0.5),
+                        original: None,
+                    });
+                game.player = Some(player);
+                sweep_game_player_live(
+                    game,
+                    sunrise_core::geometry::Vec3::new(1.2, 100.0, 0.5),
+                    false,
+                );
+                assert_eq!(
+                    game.world.block(1, 100, 0),
+                    air,
+                    "igniting before Extinguish triggers vanilla powder-snow melt"
+                );
+                assert!(
+                    !game.player.as_ref().unwrap().is_on_fire(),
+                    "Extinguish then puts out the player"
+                );
+
+                // 2) Killing in `run_before(Extinguish)` stops the flush before powder-snow melt.
+                *part.kill_in_snow.lock().unwrap() = true;
+                game.world.set(1, 100, 0, snow).unwrap();
+                let mut player = sunrise_client::motion::PlayerMotion::new(
+                    game.motion,
+                    sunrise_core::geometry::Vec3::new(1.5, 100.0, 0.5),
+                )
+                .unwrap();
+                player
+                    .history
+                    .add(sunrise_world::entity_move::MovementRecord {
+                        from: sunrise_core::geometry::Vec3::new(1.2, 100.0, 0.5),
+                        to: sunrise_core::geometry::Vec3::new(1.5, 100.0, 0.5),
+                        original: None,
+                    });
+                game.player = Some(player);
+                sweep_game_player_live(
+                    game,
+                    sunrise_core::geometry::Vec3::new(1.2, 100.0, 0.5),
+                    false,
+                );
+                assert_eq!(
+                    game.world.block(1, 100, 0),
+                    snow,
+                    "death before PowderSnowMelt stops the flush before melting the snow"
+                );
+
+                // 3) Standing in fire: `run_after(FireIgnite)` sees post-ignition fire_ticks.
+                game.world.set(1, 100, 0, fire).unwrap();
+                let mut player = sunrise_client::motion::PlayerMotion::new(
+                    game.motion,
+                    sunrise_core::geometry::Vec3::new(1.5, 100.0, 0.5),
+                )
+                .unwrap();
+                player.fire_ticks = 0;
+                player
+                    .history
+                    .add(sunrise_world::entity_move::MovementRecord {
+                        from: sunrise_core::geometry::Vec3::new(1.2, 100.0, 0.5),
+                        to: sunrise_core::geometry::Vec3::new(1.5, 100.0, 0.5),
+                        original: None,
+                    });
+                game.player = Some(player);
+                sweep_game_player_live(
+                    game,
+                    sunrise_core::geometry::Vec3::new(1.2, 100.0, 0.5),
+                    false,
+                );
+                assert!(
+                    part.fire_ticks_after_ignite
+                        .lock()
+                        .unwrap()
+                        .is_some_and(|t| t > 0),
+                    "run_after(FireIgnite) observes post-ignition fire_ticks"
                 );
             });
         });

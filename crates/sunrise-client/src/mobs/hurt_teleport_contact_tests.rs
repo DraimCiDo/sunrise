@@ -481,7 +481,6 @@ fn freezing_cramming_and_a_mod_hurt_each_teleport_inside_the_hurt() {
                         w,
                         level: &mut level,
                         events: &mut events,
-                        pending_blocks: Vec::new(),
                     };
                     effects.apply_and_clear(&mut access);
                 }
@@ -650,7 +649,6 @@ fn two_hurts_in_a_tick_each_teleport_inside_their_own_hurt() {
                         w,
                         level: &mut level_guard,
                         events: &mut events,
-                        pending_blocks: Vec::new(),
                     };
                     effects.apply_and_clear(&mut access);
                 }

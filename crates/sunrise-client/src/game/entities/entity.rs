@@ -682,6 +682,14 @@ impl mod_api::InsideEntityAccess for ItemInsideAccess<'_, '_> {
         self.item.fire_ticks
     }
 
+    fn is_on_fire(&self) -> bool {
+        self.item.fire_ticks > 0
+            && self
+                .game
+                .stack_can_be_hurt_by(&self.item.stack, "minecraft:in_fire")
+                != Some(false)
+    }
+
     fn fall_distance(&self) -> f64 {
         self.item.fall_distance
     }
@@ -756,10 +764,18 @@ impl mod_api::InsideEntityAccess for ItemInsideAccess<'_, '_> {
         {
             return false;
         }
-        let _direct = direct.and_then(|e| self.game.native_entity_target(e));
-        let _causing = causing.and_then(|e| self.game.native_entity_target(e));
-        let _ = self.item.hurt(amount as i32);
-        true
+        let subject_pos = self.position();
+        let Some((direct, causing, from)) = self.game.resolve_inside_damage_sources(
+            self.item.id,
+            crate::game::commands::Target::Item(self.item.id),
+            subject_pos,
+            direct,
+            causing,
+        ) else {
+            return false;
+        };
+        self.game
+            .hurt_lent_item_entity(self.item, amount, damage_type, direct, causing, from)
     }
 
     fn set_block(&mut self, pos: [i32; 3], state: mod_api::BlockState) -> bool {
@@ -846,6 +862,10 @@ impl mod_api::InsideEntityAccess for ProjectileInsideAccess<'_, '_> {
         self.shot.fire_ticks
     }
 
+    fn is_on_fire(&self) -> bool {
+        self.shot.on_fire()
+    }
+
     fn fall_distance(&self) -> f64 {
         self.shot.fall_distance
     }
@@ -904,12 +924,34 @@ impl mod_api::InsideEntityAccess for ProjectileInsideAccess<'_, '_> {
 
     fn hurt_with_source(
         &mut self,
-        _damage_type: &str,
-        _amount: f32,
-        _direct: Option<mod_api::EntityRef>,
-        _causing: Option<mod_api::EntityRef>,
+        damage_type: &str,
+        amount: f32,
+        direct: Option<mod_api::EntityRef>,
+        causing: Option<mod_api::EntityRef>,
     ) -> bool {
-        false
+        if !amount.is_finite() || amount < 0.0 {
+            return false;
+        }
+        if sunrise_client::health::resolve_damage_kind(
+            Some(&self.game.health_resources.damage),
+            damage_type,
+        )
+        .is_none()
+        {
+            return false;
+        }
+        let subject_pos = self.position();
+        let Some((direct, causing, from)) = self.game.resolve_inside_damage_sources(
+            self.shot.id,
+            crate::game::commands::Target::Projectile(self.shot.id),
+            subject_pos,
+            direct,
+            causing,
+        ) else {
+            return false;
+        };
+        self.game
+            .hurt_lent_projectile(self.shot, damage_type, direct, causing, from)
     }
 
     fn set_block(&mut self, pos: [i32; 3], state: mod_api::BlockState) -> bool {
@@ -1137,14 +1179,88 @@ impl Game<'_> {
 
     /// `Projectile.hurtServer` from lava's `lavaHurt` this tick: `markHurt`,
     /// unless the projectile is invulnerable to lava (`isInvulnerableToBase`).
+    /// Resolve optional direct/causing source handles against the live level during
+    /// an inside-block callback flush, including the currently swept subject (whose row
+    /// may be temporarily lent out of its table). Returns `None` if an explicitly
+    /// supplied handle is stale or unresolvable so the caller reports `false` without
+    /// dropping attribution or rolling back sibling operations.
+    pub(in crate::game) fn resolve_inside_damage_sources(
+        &self,
+        subject_id: u32,
+        subject_target: crate::game::commands::Target,
+        subject_pos: [f64; 3],
+        direct: Option<mod_api::EntityRef>,
+        causing: Option<mod_api::EntityRef>,
+    ) -> Option<(
+        Option<crate::game::commands::Target>,
+        Option<crate::game::commands::Target>,
+        Option<[f64; 3]>,
+    )> {
+        let resolve = |handle: mod_api::EntityRef| -> Option<crate::game::commands::Target> {
+            if !self.is_logical_server() || self.native_lifecycle.epoch() != Some(handle.epoch()) {
+                return None;
+            }
+            if handle.id() == subject_id {
+                return Some(subject_target);
+            }
+            self.native_entity_target(handle)
+        };
+        let direct_target = match direct {
+            Some(handle) => Some(resolve(handle)?),
+            None => None,
+        };
+        let causing_target = match causing {
+            Some(handle) => Some(resolve(handle)?),
+            None => None,
+        };
+        let from = direct_target.and_then(|t| {
+            if t == subject_target {
+                Some(subject_pos)
+            } else {
+                self.target_position(t)
+            }
+        });
+        Some((direct_target, causing_target, from))
+    }
+
+    /// `Projectile.hurtServer`: always returns `false`, marking non-immune
+    /// projectiles hurt (`sync_velocity = true`, `Entity.markHurt`).
+    pub(in crate::game) fn hurt_lent_projectile(
+        &mut self,
+        shot: &mut Projectile,
+        damage_type: &str,
+        direct: Option<crate::game::commands::Target>,
+        causing: Option<crate::game::commands::Target>,
+        position: Option<[f64; 3]>,
+    ) -> bool {
+        use crate::game::commands::Target;
+        let creative = self.creative_source_of(causing);
+        let vanilla = self.saved_refuses_damage(shot.id, damage_type, creative);
+        let entity_id = |target| match target {
+            Some(Target::Player) => self.own_entity_id(),
+            Some(Target::Guest(conn)) => self.command_guest(conn).map_or(0, |g| g.entity_id),
+            Some(target) => {
+                crate::game::native_entities::target_id(target).map_or(0, |id| id as i32)
+            }
+            None => 0,
+        };
+        let source = sunrise_client::health::HurtSource {
+            damage_type,
+            causing: entity_id(causing),
+            direct: entity_id(direct),
+            position,
+        };
+        if !self.native_nonliving_invulnerable(shot.id, shot.entity_type(), source, vanilla) {
+            shot.sync_velocity = true;
+        }
+        false
+    }
+
     pub(in crate::game) fn lava_mark_hurt(&mut self, shot: &mut Projectile) {
         if !shot.take_lava_marked() {
             return;
         }
-        let vanilla = self.saved_refuses_damage(shot.id, "minecraft:lava", false);
-        if !self.refuses_lava_hurt(shot.id, shot.entity_type(), vanilla) {
-            shot.sync_velocity = true;
-        }
+        let _ = self.hurt_lent_projectile(shot, "minecraft:lava", None, None, None);
     }
 
     /// An `entity_inside` part's contact for a kind the batch ticks, fired
@@ -1225,6 +1341,9 @@ impl Game<'_> {
         if !client {
             // `Entity.applyEffectsFromBlocks`' checkInsideBlocks, at the batch.
             self.sweep_item_inside(item);
+            if item.health <= 0 {
+                return (false, true);
+            }
         }
         if let Some(pos) = step.vertical_contact {
             let state = self.world.block(pos.x, pos.y, pos.z);

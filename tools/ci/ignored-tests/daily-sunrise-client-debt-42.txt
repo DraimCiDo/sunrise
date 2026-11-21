@@ -1,4 +1,7 @@
 # Callback-based entity_inside behavior tests (debt 42).
 sunrise-client game::native_hooks::entity_inside::sweep_tests::callback_hurt_with_stale_source_does_not_refuse_or_rollback lib daily resources
 sunrise-client game::native_hooks::entity_inside::sweep_tests::callback_level_writes_apply_after_block_state_changes_and_do_not_rollback_siblings lib daily resources
+sunrise-client game::native_hooks::entity_inside::sweep_tests::item_float_hurt_bundle_spill_and_projectile_mark_hurt lib daily resources
 sunrise-client game::native_hooks::entity_inside::sweep_tests::panicking_mod_callback_disables_only_that_mod_and_queues_error_toast lib daily resources
+sunrise-client game::native_hooks::entity_inside::sweep_tests::player_live_inside_flush_level_writes_peaceful_effect_and_fire_semantics lib daily resources
+sunrise-client game::native_hooks::entity_inside::sweep_tests::player_powder_snow_and_fire_builtin_ordering lib daily resources

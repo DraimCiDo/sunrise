@@ -3,22 +3,25 @@ use super::{Game, commands::Target};
 use sunrise_client::mobs::Who;
 
 impl Game<'_> {
-    /// `ItemEntity.hurtServer`: the item branch reached by `DamageCommand.damage`.
-    pub(in crate::game) fn hurt_item_entity(
+    /// `ItemEntity.hurtServer` over a caller-owned item row: runs invulnerability,
+    /// mob-griefing, fall/fire/stack-immunity checks, float health subtraction,
+    /// `entity_damage` game event, and container/bundle content drops on death.
+    pub(in crate::game) fn hurt_lent_item_entity(
         &mut self,
-        id: u32,
+        item: &mut sunrise_client::entities::ItemEntity,
         amount: f32,
         damage_type: &str,
         direct: Option<Target>,
         causing: Option<Target>,
         position: Option<[f64; 3]>,
     ) -> bool {
-        let Some(index) = self.dropped.iter().position(|item| item.id == id) else {
+        if item.health <= 0 || !amount.is_finite() || amount < 0.0 {
             return false;
-        };
+        }
         let Some(kind) = self.health_resources.damage.id(damage_type) else {
             return false;
         };
+        let id = item.id;
         let creative = self.creative_source_of(causing);
         let vanilla = self.saved_refuses_damage(id, damage_type, creative);
         let entity_id = |target| match target {
@@ -55,14 +58,12 @@ impl Game<'_> {
         {
             return false;
         }
-        if self.stack_can_be_hurt_by(&self.dropped[index].stack, damage_type) == Some(false)
+        if self.stack_can_be_hurt_by(&item.stack, damage_type) == Some(false)
             || registry.in_tag(kind, "minecraft:is_fire")
-                && self.stack_can_be_hurt_by(&self.dropped[index].stack, "minecraft:in_fire")
-                    == Some(false)
+                && self.stack_can_be_hurt_by(&item.stack, "minecraft:in_fire") == Some(false)
         {
             return false;
         }
-        let item = &mut self.dropped[index];
         // Java subtracts in float before truncating to int, including fractions
         // and accepted zero-damage hits.
         item.health = (item.health as f32 - amount) as i32;
@@ -76,11 +77,39 @@ impl Game<'_> {
         };
         let context = self.who_context(who, None);
         self.post_game_event("minecraft:entity_damage", [at.x, at.y, at.z], context);
-        if self.dropped[index].health <= 0 {
-            let contents = self.dropped[index].hurt(0).unwrap_or_default();
-            self.dropped.remove(index);
+        if item.health <= 0 {
+            let contents = item.hurt(0).unwrap_or_default();
             self.spawn_destroyed_contents(contents.into_iter().map(|stack| (stack, at)).collect());
         }
         true
+    }
+
+    /// `ItemEntity.hurtServer`: the item branch reached by `DamageCommand.damage`.
+    pub(in crate::game) fn hurt_item_entity(
+        &mut self,
+        id: u32,
+        amount: f32,
+        damage_type: &str,
+        direct: Option<Target>,
+        causing: Option<Target>,
+        position: Option<[f64; 3]>,
+    ) -> bool {
+        let Some(index) = self.dropped.iter().position(|item| item.id == id) else {
+            return false;
+        };
+        let mut items = self.dropped.lift();
+        let hurt = self.hurt_lent_item_entity(
+            &mut items[index],
+            amount,
+            damage_type,
+            direct,
+            causing,
+            position,
+        );
+        if items[index].health <= 0 {
+            items.remove(index);
+        }
+        self.put_back_dropped(items);
+        hurt
     }
 }

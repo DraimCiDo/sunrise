@@ -677,6 +677,23 @@ pub fn resume_after_trample(
     })
 }
 
+pub fn resume_after_inside_effects(
+    mobs: &mut JoinList<Mob>,
+    index: usize,
+    w: &MobWorld,
+    level: &mut super::DamageLevel<'_>,
+    paused: super::ai::InsidePause,
+    events: &mut Vec<super::MobEvent>,
+) -> super::ai::TickProgress {
+    tick_with(mobs, index, w, level, events, |m, w, level, events| {
+        let progress = super::ai::resume_after_inside_effects(m, w, level, events, paused);
+        if matches!(progress, super::ai::TickProgress::Complete(_)) {
+            super::neutral_anger::after_tick(m, w.game_time);
+        }
+        progress
+    })
+}
+
 fn tick_with<R>(
     mobs: &mut JoinList<Mob>,
     index: usize,

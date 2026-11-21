@@ -4900,12 +4900,21 @@ impl Mob {
         !(self.kind.flags.undead && matches!(effect, "minecraft:poison" | "minecraft:regeneration"))
     }
     pub fn add_effect(&mut self, effect: &'static str, ticks: i32, amplifier: i32) {
+        let _ = self.try_add_effect(effect, ticks, amplifier);
+    }
+    /// `LivingEntity.addEffect`: returns whether the effect was accepted and
+    /// changed the mob's active effect set (`false` for negative duration,
+    /// withers, or immune species).
+    pub fn try_add_effect(&mut self, effect: &'static str, ticks: i32, amplifier: i32) -> bool {
+        if ticks < -1 {
+            return false;
+        }
         let effect = sunrise_client_core::potions::namespaced(effect);
         // LivingEntity.addEffect: an effect the mob refuses is never added, so it
         // never joins the list the client draws or an effect tick reads.
         // WitherBoss.addEffect returns false for every effect.
         if self.species() == Species::Wither || !self.can_be_affected(effect) {
-            return;
+            return false;
         }
         let had = self
             .extra
@@ -4915,7 +4924,7 @@ impl Mob {
             .map(|e| e.show_icon);
         let ambient = self.extra.ambient_effects.contains(&effect);
         let hidden = self.extra.hidden_effects.contains(&effect);
-        self.add_effect_with(effect, ticks, amplifier, false, true);
+        let changed = self.add_effect_with(effect, ticks, amplifier, false, true);
         // The basic overload changes the chain, not the existing active flags.
         if let Some(show_icon) = had {
             if let Some(e) = self.extra.effects.iter_mut().find(|e| e.id == effect) {
@@ -4929,6 +4938,24 @@ impl Mob {
             if hidden {
                 self.extra.hidden_effects.push(effect);
             }
+        }
+        changed
+    }
+    /// `BaseFireBlock.fireIgnite` for a mob: advances the fire delay, ignites
+    /// for 8s scaled by `burning_time`, and clears freeze when lit.
+    pub fn fire_ignite_contact(&mut self) {
+        if self.fire_immune() {
+            return;
+        }
+        let multiplier = self.burning_time();
+        self.fire_ticks = crate::motion::environment::ignite_contact(
+            self.fire_ticks,
+            false,
+            &mut self.random,
+            multiplier,
+        );
+        if self.fire_ticks >= 0 {
+            self.ticks_frozen = 0;
         }
     }
     pub fn center(&self) -> [f64; 3] {

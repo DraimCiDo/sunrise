@@ -562,6 +562,16 @@ impl Game<'_> {
                             &mut trample,
                             &mut events,
                         ),
+                        Some(Pause::InsideEffects(paused)) => {
+                            sunrise_client::mobs::riders::resume_after_inside_effects(
+                                &mut mobs,
+                                i,
+                                &w,
+                                &mut level,
+                                *paused,
+                                &mut events,
+                            )
+                        }
                         Some(Pause::Consumption { was_on_fire, .. }) => {
                             sunrise_client::mobs::riders::resume_after_consumption(
                                 &mut mobs,
@@ -811,7 +821,7 @@ impl Game<'_> {
             }
             // The lift is a position write made by the owning game, not by
             // the borrowed mob. Give it the live section table as well.
-            let trampling = matches!(pause, Some(Pause::Trample));
+            let trampling = matches!(pause, Some(Pause::Trample | Pause::InsideEffects(_)));
             let trample_sections = section_table.as_ref().filter(|_| trampling);
             if let Some(sections) = trample_sections {
                 std::mem::swap(
@@ -828,7 +838,7 @@ impl Game<'_> {
                 }
                 if let Some(id) = retry_rider {
                     self.dismount_mob(id);
-                } else if let Some(paused) = pause.as_ref() {
+                } else if let Some(paused) = pause.as_mut() {
                     match paused {
                         Pause::Consumption { decision, .. } => {
                             self.apply_fox_consumption(decision);
@@ -839,6 +849,10 @@ impl Game<'_> {
                         Pause::Trample => {
                             let trample = trample.as_ref().expect("the trample pause was stored");
                             self.trample_farmland(trample.mob, false, trample.decision());
+                        }
+                        Pause::InsideEffects(inside) => {
+                            let effects = std::mem::take(&mut inside.effects);
+                            self.flush_mob_inside_live(inside.mob, inside.join, effects);
                         }
                     }
                 }
@@ -1039,6 +1053,51 @@ impl Game<'_> {
 }
 
 impl Game<'_> {
+    fn mob_can_freeze(&self, m: &Mob) -> bool {
+        if m.species() == Species::Skeleton {
+            return false;
+        }
+        if m.species() == Species::SulfurCube && sunrise_client::mobs::sulfur_cube::has_body(m) {
+            return false;
+        }
+        if self
+            .mob_data()
+            .entity_has("minecraft:freeze_immune_entity_types", &m.kind.id)
+        {
+            return false;
+        }
+        let immune = world_items!(self)
+            .item_tags
+            .get("minecraft:freeze_immune_wearables");
+        ![
+            m.extra.body_id(),
+            m.extra.head_id(),
+            m.extra.slot_id(sunrise_items::equipment::CHEST),
+            m.extra.slot_id(sunrise_items::equipment::LEGS),
+            m.extra.slot_id(sunrise_items::equipment::FEET),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|item| immune.is_some_and(|t| t.contains(item)))
+    }
+
+    pub(in crate::game) fn flush_mob_inside_live(
+        &mut self,
+        mob_id: u32,
+        join: sunrise_client::join_seq::JoinSeq,
+        mut effects: mod_api::InsideEffects,
+    ) {
+        if effects.is_empty() {
+            return;
+        }
+        let mut access = GameMobInsideAccess {
+            game: self,
+            mob_id,
+            join,
+        };
+        effects.apply_and_clear(&mut access);
+    }
+
     pub(super) fn retained_passenger_snapshot(&self, uuid: Option<[i32; 4]>) -> Vec<Seen> {
         if self.persist.off_level.is_empty() {
             Vec::new()
@@ -1049,6 +1108,307 @@ impl Game<'_> {
                 .filter_map(crate::game::persist::OffLevel::as_mob)
                 .map(|m| seen(m, uuid, self.items()))
                 .collect()
+        }
+    }
+}
+
+struct GameMobInsideAccess<'a, 'g> {
+    game: &'a mut Game<'g>,
+    mob_id: u32,
+    join: sunrise_client::join_seq::JoinSeq,
+}
+
+impl GameMobInsideAccess<'_, '_> {
+    fn mob(&self) -> Option<&Mob> {
+        self.game
+            .mobs
+            .iter()
+            .find(|m| m.id == self.mob_id && m.join == self.join && !m.removed)
+    }
+
+    fn mob_mut(&mut self) -> Option<&mut Mob> {
+        self.game
+            .mobs
+            .iter_mut()
+            .find(|m| m.id == self.mob_id && m.join == self.join && !m.removed)
+    }
+}
+
+impl mod_api::InsideEntityAccess for GameMobInsideAccess<'_, '_> {
+    fn id(&self) -> u32 {
+        self.mob_id
+    }
+
+    fn kind(&self) -> &str {
+        self.mob().map_or("", |m| m.kind.id.as_str())
+    }
+
+    fn is_alive(&self) -> bool {
+        self.mob().is_some_and(Mob::alive)
+    }
+
+    fn position(&self) -> [f64; 3] {
+        self.mob()
+            .map_or([0.0; 3], |m| [m.position.x, m.position.y, m.position.z])
+    }
+
+    fn velocity(&self) -> [f64; 3] {
+        self.mob()
+            .map_or([0.0; 3], |m| [m.velocity.x, m.velocity.y, m.velocity.z])
+    }
+
+    fn fire_ticks(&self) -> i32 {
+        self.mob().map_or(0, |m| m.fire_ticks)
+    }
+
+    fn is_on_fire(&self) -> bool {
+        self.mob().is_some_and(Mob::is_on_fire)
+    }
+
+    fn fall_distance(&self) -> f64 {
+        self.mob().map_or(0.0, |m| m.fall_distance)
+    }
+
+    fn block_state(&self, pos: [i32; 3]) -> Option<mod_api::BlockState> {
+        use crate::game::api_values::TryIntoApi as _;
+        let level = self.game.level(self.game.dim.id())?;
+        self.game
+            .level_block_state(level, pos)
+            .and_then(|id| id.try_into_api().ok())
+    }
+
+    fn push(&mut self, delta: [f64; 3]) -> bool {
+        if !delta.iter().all(|v| v.is_finite()) {
+            return false;
+        }
+        let Some(m) = self.mob_mut() else {
+            return false;
+        };
+        m.velocity = m
+            .velocity
+            .add_vector(Vec3::new(delta[0], delta[1], delta[2]));
+        true
+    }
+
+    fn set_velocity(&mut self, velocity: [f64; 3]) -> bool {
+        if !velocity.iter().all(|v| v.is_finite()) {
+            return false;
+        }
+        let Some(m) = self.mob_mut() else {
+            return false;
+        };
+        m.velocity = Vec3::new(velocity[0], velocity[1], velocity[2]);
+        true
+    }
+
+    fn make_stuck_in_block(&mut self, speed_multiplier: [f64; 3]) -> bool {
+        if !speed_multiplier.iter().all(|v| v.is_finite()) {
+            return false;
+        }
+        let Some(m) = self.mob_mut() else {
+            return false;
+        };
+        m.fall_distance = 0.0;
+        m.stuck_multiplier = Vec3::new(
+            speed_multiplier[0],
+            speed_multiplier[1],
+            speed_multiplier[2],
+        );
+        true
+    }
+
+    fn reset_fall_distance(&mut self) {
+        if let Some(m) = self.mob_mut() {
+            m.fall_distance = 0.0;
+        }
+    }
+
+    fn set_remaining_fire_ticks(&mut self, ticks: i32) {
+        if let Some(m) = self.mob_mut() {
+            m.fire_ticks = ticks;
+        }
+    }
+
+    fn add_effect(&mut self, effect: mod_api::EffectKey, duration: i32, amplifier: u8) -> bool {
+        let Some(def) = mod_api::__private::effect_index(effect)
+            .and_then(sunrise_client_core::potions::effect_by_index)
+        else {
+            return false;
+        };
+        if duration < -1 {
+            return false;
+        }
+        let Some(m) = self.mob() else {
+            return false;
+        };
+        if m.species() == Species::Wither {
+            return false;
+        }
+        let kind = m.kind.id.clone();
+        let name = mod_api::__private::effect_key_id(effect).expect("resolved effect name");
+        let new = !m
+            .extra
+            .effects
+            .iter()
+            .any(|e| e.registry_index == Some(def.index));
+        if !self
+            .game
+            .can_be_affected_resolved(Some(self.mob_id as i32), &kind, name, Some(effect))
+        {
+            return false;
+        }
+        let instance =
+            sunrise_client::effects::EffectInstance::from_def(def, duration, i32::from(amplifier));
+        let Some(changed) = self
+            .game
+            .mutate_mob_effects(self.mob_id, Some(name), |mob| {
+                mob.add_effect_instance(name, instance)
+            })
+        else {
+            return false;
+        };
+        self.game.mod_effect_added_resolved(
+            effect,
+            Some(self.mob_id as i32),
+            i32::from(amplifier),
+            new,
+        );
+        changed
+    }
+
+    fn hurt_with_source(
+        &mut self,
+        damage_type: &str,
+        amount: f32,
+        direct: Option<mod_api::EntityRef>,
+        causing: Option<mod_api::EntityRef>,
+    ) -> bool {
+        if !amount.is_finite() || amount < 0.0 {
+            return false;
+        }
+        if sunrise_client::health::resolve_damage_kind(
+            Some(&self.game.health_resources.damage),
+            damage_type,
+        )
+        .is_none()
+        {
+            return false;
+        }
+        let Some(m) = self.mob() else {
+            return false;
+        };
+        let subject_pos = [m.position.x, m.position.y, m.position.z];
+        let Some((direct, causing, from)) = self.game.resolve_inside_damage_sources(
+            self.mob_id,
+            crate::game::commands::Target::Mob(self.mob_id),
+            subject_pos,
+            direct,
+            causing,
+        ) else {
+            return false;
+        };
+        self.game.hurt_target(
+            crate::game::commands::Target::Mob(self.mob_id),
+            amount,
+            damage_type,
+            direct,
+            causing,
+            from,
+        )
+    }
+
+    fn set_block(&mut self, pos: [i32; 3], state: mod_api::BlockState) -> bool {
+        use crate::game::api_values::TryIntoEngine as _;
+        let Some(level) = self.game.level(self.game.dim.id()) else {
+            return false;
+        };
+        let Ok(id) = state.try_into_engine(&*self.game) else {
+            return false;
+        };
+        let flags = mod_api::BlockUpdateFlags::NEIGHBORS | mod_api::BlockUpdateFlags::CLIENTS;
+        self.game
+            .level_set_block(level, pos, id, flags)
+            .unwrap_or(false)
+    }
+
+    fn destroy_block(&mut self, pos: [i32; 3], drop: bool) -> bool {
+        let Some(level) = self.game.level(self.game.dim.id()) else {
+            return false;
+        };
+        self.game
+            .level_destroy_block(level, pos, drop, None, false)
+            .is_some()
+    }
+
+    fn apply_effect(&mut self, effect: mod_api::InsideEffect) {
+        match effect {
+            mod_api::InsideEffect::Freeze => {
+                let can_freeze = self.mob().is_some_and(|m| self.game.mob_can_freeze(m));
+                if let Some(m) = self.mob_mut() {
+                    m.in_powder_snow = true;
+                    if can_freeze {
+                        m.ticks_frozen = (m.ticks_frozen + 1)
+                            .min(sunrise_client::motion::PlayerMotion::TICKS_REQUIRED_TO_FREEZE);
+                    }
+                }
+            }
+            mod_api::InsideEffect::ClearFreeze => {
+                if let Some(m) = self.mob_mut() {
+                    m.ticks_frozen = 0;
+                }
+            }
+            mod_api::InsideEffect::FireIgnite => {
+                if let Some(m) = self.mob_mut() {
+                    m.fire_ignite_contact();
+                }
+            }
+            mod_api::InsideEffect::LavaIgnite => {
+                if let Some(m) = self.mob_mut()
+                    && !m.fire_immune()
+                {
+                    m.ignite_for_ticks(300);
+                }
+            }
+            mod_api::InsideEffect::Extinguish => {
+                if let Some(m) = self.mob_mut() {
+                    m.fire_ticks = m.fire_ticks.min(0);
+                }
+            }
+        }
+    }
+
+    fn apply_builtin(&mut self, action: mod_api::__private::BuiltinInsideAction) {
+        match action {
+            mod_api::__private::BuiltinInsideAction::PowderSnowMelt(pos) => {
+                if self.mob().is_some_and(Mob::is_on_fire)
+                    && self.game.can_entity_grief(Some(self.mob_id))
+                    && let Some(level) = self.game.level(self.game.dim.id())
+                {
+                    let _ = self
+                        .game
+                        .level_destroy_block(level, pos, false, None, false);
+                }
+            }
+            mod_api::__private::BuiltinInsideAction::LayeredCauldronExtinguish(pos) => {
+                if self.mob().is_some_and(Mob::is_on_fire)
+                    && self.game.can_entity_grief(Some(self.mob_id))
+                {
+                    self.game
+                        .cauldron_extinguish_at(sunrise_core::position::BlockPos::new(
+                            pos[0], pos[1], pos[2],
+                        ));
+                }
+            }
+            mod_api::__private::BuiltinInsideAction::FireHurt(damage) => {
+                let _ = self.game.hurt_target(
+                    crate::game::commands::Target::Mob(self.mob_id),
+                    damage,
+                    "minecraft:in_fire",
+                    None,
+                    None,
+                    None,
+                );
+            }
         }
     }
 }

@@ -195,6 +195,20 @@ impl MotionWorld<'_, '_, '_> {
         }
         Ok(())
     }
+    /// Reset the player's fire-contact delay (`-getFireImmuneTicks()`) when
+    /// not touching fire (`Entity.baseTick`). Ordinary fire ignition and hurt
+    /// run inside `BaseFireBlock.entityInside`'s collector steps.
+    pub fn reset_unlit_fire(&mut self) {
+        if self.player.spectator {
+            self.player.fire_ticks = 0;
+            return;
+        }
+        if fire_contact(self.scene, self.assets.registry, self.player.bounds()) <= 0.0
+            && self.player.fire_ticks <= 0
+        {
+            self.player.fire_ticks = -20;
+        }
+    }
     pub fn apply_fire_contact(&mut self) -> Result<()> {
         if self.player.spectator {
             self.player.fire_ticks = 0;

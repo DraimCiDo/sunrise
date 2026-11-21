@@ -48,6 +48,19 @@ impl Game<'_> {
         if self.remote.is_some() || !self.may_interact_at(pos) {
             return;
         }
+        self.cauldron_extinguish_at(pos);
+    }
+    /// `LayeredCauldronBlock.handleEntityOnFireInside` without the player-only
+    /// `mayInteract` spawn-protection gate, shared by burning players and mobs.
+    pub(super) fn cauldron_extinguish_at(&mut self, pos: BlockPos) {
+        if self.remote.is_some()
+            || !self
+                .border
+                .geometry()
+                .is_within_bounds(f64::from(pos.x), f64::from(pos.z), 0.0)
+        {
+            return;
+        }
         let at = [pos.x, pos.y, pos.z];
         let registry = self.pack.assets.registry;
         let judged = self.world.block(at[0], at[1], at[2]);
