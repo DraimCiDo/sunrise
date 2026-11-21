@@ -85,10 +85,12 @@ impl Hooks for DimProbe {
     }
 
     fn register_commands(&self, _: &mut dyn ServerHost, event: &mut RegisterCommandsEvent<'_>) {
-        event.commands.extend([
+        for command in [
             mod_api::Command::new("dimprobe enter <level:word>"),
             mod_api::Command::new("dimprobe later <level:word>"),
-        ]);
+        ] {
+            event.register(command);
+        }
     }
 
     fn run_mod_command(

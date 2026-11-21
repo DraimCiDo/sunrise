@@ -313,9 +313,7 @@ fn reload_command_runs_listeners_on_both_sides_of_function_library() {
             registrar.register_command_argument("argument", Argument(self.trace.clone()));
         }
         fn register_commands(&self, _: &mut dyn ServerHost, event: &mut RegisterCommandsEvent<'_>) {
-            event
-                .commands
-                .push(Command::new("reload_probe <value:reload_probe:argument>"));
+            event.register(Command::new("reload_probe <value:reload_probe:argument>"));
         }
         fn add_server_reload_listeners(
             &self,

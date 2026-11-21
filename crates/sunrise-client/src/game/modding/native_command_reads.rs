@@ -201,7 +201,9 @@ mod tests {
                 _: &mut dyn mod_api::ServerHost,
                 event: &mut mod_api::RegisterCommandsEvent<'_>,
             ) {
-                event.commands.extend([mod_api::Command::new("where")]);
+                for command in [mod_api::Command::new("where")] {
+                    event.register(command);
+                }
             }
             fn run_mod_command(
                 &self,

@@ -15,7 +15,7 @@ impl mod_api::Hooks for SelectorCommands {
         _: &mut dyn mod_api::ServerHost,
         event: &mut mod_api::RegisterCommandsEvent<'_>,
     ) {
-        event.commands.extend([
+        for command in [
             mod_api::Command::new("heal <targets:players>"),
             mod_api::Command::new("selectone <target:entity>"),
             mod_api::Command::new("selectall <targets:entities>"),
@@ -23,7 +23,9 @@ impl mod_api::Hooks for SelectorCommands {
             mod_api::Command::new("optionalplayers [targets:players]"),
             mod_api::Command::new("optionalentity [target:entity]"),
             mod_api::Command::new("optionalentities [targets:entities]"),
-        ]);
+        ] {
+            event.register(command);
+        }
     }
 
     fn run_mod_command(

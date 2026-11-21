@@ -184,9 +184,7 @@ impl Hooks for MyMod {
     }
 
     fn register_commands(&self, _: &mut dyn ServerHost, event: &mut RegisterCommandsEvent<'_>) {
-        event
-            .commands
-            .push(Command::new("machine use <machine:mymod:machine>"));
+        event.register(Command::new("machine use <machine:mymod:machine>"));
     }
 }
 ```

@@ -1664,9 +1664,7 @@ mod tests {
                 event: &mut mod_api::RegisterCommandsEvent<'_>,
             ) {
                 if self.offered.load(Ordering::Relaxed) {
-                    event
-                        .commands
-                        .push(mod_api::Command::new("fnmod [n:integer]"));
+                    event.register(mod_api::Command::new("fnmod [n:integer]"));
                 }
             }
             fn run_mod_command(

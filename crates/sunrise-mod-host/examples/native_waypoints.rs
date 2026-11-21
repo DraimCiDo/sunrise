@@ -49,7 +49,7 @@ impl Hooks for Waypoints {
         _: &mut dyn ClientHost,
         event: &mut RegisterClientCommandsEvent<'_>,
     ) {
-        event.commands.push(mod_api::Command::new("waypoint_set"));
+        event.register(mod_api::Command::new("waypoint_set"));
     }
 
     fn command(&self, host: &mut dyn ClientHost, event: &mut CommandEvent<'_>) -> Flow {

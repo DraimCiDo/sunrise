@@ -3548,7 +3548,7 @@ mod tests {
                 event: &mut mod_api::RegisterCommandsEvent<'_>,
             ) {
                 self.registrations.fetch_add(1, Ordering::Relaxed);
-                event.commands.push(mod_api::Command::new(
+                event.register(mod_api::Command::new(
                     if self.changed.load(Ordering::Relaxed) {
                         "after <n:integer>"
                     } else {
@@ -3702,15 +3702,21 @@ mod tests {
                 _: &mut dyn mod_api::ServerHost,
                 event: &mut mod_api::RegisterCommandsEvent<'_>,
             ) {
-                event.commands.extend([
-                    mod_api::Command::new("typed give <who:player> <amount:integer> [message:text]"),
-                    mod_api::Command::new("typed data <word:word> <number:number> <enabled:boolean> <item:item> <pos:block_pos>"),
+                for command in [
+                    mod_api::Command::new(
+                        "typed give <who:player> <amount:integer> [message:text]",
+                    ),
+                    mod_api::Command::new(
+                        "typed data <word:word> <number:number> <enabled:boolean> <item:item> <pos:block_pos>",
+                    ),
                     mod_api::Command::new("typed opt [value:integer]"),
                     mod_api::Command::new("/set <x:word>"),
                     mod_api::Command::new("typed repeat <value:player> <value:integer>"),
                     mod_api::Command::new("typed at <pos:vec3>"),
                     mod_api::Command::op("protected <who:player>", 4),
-                ]);
+                ] {
+                    event.register(command);
+                }
             }
             fn run_mod_command(
                 &self,
@@ -3917,11 +3923,13 @@ mod tests {
                 _: &mut dyn mod_api::ServerHost,
                 event: &mut mod_api::RegisterCommandsEvent<'_>,
             ) {
-                event.commands.extend([
+                for command in [
                     mod_api::Command::new("origin"),
                     mod_api::Command::op("denied", 4),
                     mod_api::Command::new("unhandled"),
-                ]);
+                ] {
+                    event.register(command);
+                }
             }
             fn run_mod_command(
                 &self,
@@ -4019,13 +4027,15 @@ mod tests {
                 _: &mut dyn mod_api::ServerHost,
                 event: &mut mod_api::RegisterCommandsEvent<'_>,
             ) {
-                event.commands.extend([
+                for command in [
                     mod_api::Command::op("foo [value:integer]", 4),
                     mod_api::Command::new("foo bar"),
                     mod_api::Command::op("choice <a:integer>", 4),
                     mod_api::Command::new("choice <a:integer> bar"),
                     mod_api::Command::new("choice <b:word>"),
-                ]);
+                ] {
+                    event.register(command);
+                }
             }
             fn run_mod_command(
                 &self,
