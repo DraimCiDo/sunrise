@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! NeoForge's load conditions (`neoforge:conditions`): a data file that has
 //! the key loads only when every condition in it holds. A false condition
 //! silently omits the file; a decode or handler error goes to the owning loader.

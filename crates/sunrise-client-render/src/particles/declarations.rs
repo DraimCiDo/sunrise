@@ -1,6 +1,7 @@
+//! stable-line: content-declarations
 //! A mod particle's declared behaviour (`particles/<name>.json` of a native mod): how it moves, walks
 //! through its sprite set and fades, read once when the sprite sets load.
-use super::{Behaviour, Particle};
+use super::{Behaviour, ModSet, Particle, ParticleEngine, ParticleType, ResourceSource};
 use sunrise_core::random::{LegacyRandom, RandomSource};
 
 /// How a mod particle walks through its sprite set.
@@ -117,4 +118,82 @@ impl ModBehaviour {
 pub(super) fn mod_curve([start, end]: [f32; 2], age: i32, lifetime: i32) -> f32 {
     let progress = (age as f32 / lifetime.max(1) as f32).clamp(0.0, 1.0);
     start + (end - start) * progress
+}
+
+impl ParticleEngine {
+    pub(super) fn load_mod_sprites(&mut self, root: &ResourceSource) {
+        for ns in root.namespaces("assets") {
+            if ns != "minecraft" {
+                self.load_namespace_sprites(root, &ns);
+            }
+        }
+    }
+
+    /// A namespace's particle JSONs that vanilla has no type for: each becomes
+    /// one sprite set under `<ns>:<file name>`.
+    fn load_namespace_sprites(&mut self, root: &ResourceSource, ns: &str) {
+        let prefix = format!("assets/{ns}/particles/");
+        for path in root.list(&prefix) {
+            let Some(stem) = path
+                .strip_prefix(&prefix)
+                .and_then(|p| p.strip_suffix(".json"))
+            else {
+                continue;
+            };
+            let key = format!("{ns}:{stem}");
+            if ParticleType::from_name(&key).is_some() {
+                continue;
+            }
+            let Ok(bytes) = root.read(&path) else {
+                continue;
+            };
+            let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+                continue;
+            };
+            let behaviour = json.get("sunrise:behaviour").and_then(|value| {
+                let behaviour = ModBehaviour::parse(value);
+                if behaviour.is_none() {
+                    log::warn!("Invalid particle behaviour in {}", path);
+                }
+                behaviour
+            });
+            let sprites: Vec<u32> = json["textures"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|t| t.as_str())
+                        .map(|t| {
+                            // A texture is `<ns>:<path>` (bare means
+                            // `minecraft:`), and the atlas names a sprite
+                            // `<ns>:particle/<path>` — `minecraft`'s own
+                            // without its namespace.
+                            let name = match t.split_once(':') {
+                                Some(("minecraft", path)) => format!("particle/{path}"),
+                                Some((ns, path)) => format!("{ns}:particle/{path}"),
+                                None => format!("particle/{t}"),
+                            };
+                            self.intern(&name)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            if !sprites.is_empty() {
+                let provider = self
+                    .providers
+                    .iter()
+                    .position(|(name, _)| *name == key)
+                    .map(|slot| (slot as u32, self.providers[&key].clone()));
+                self.mod_sets.insert(
+                    key,
+                    ModSet {
+                        set: self.set_sprites.len() as u32,
+                        behaviour,
+                        provider,
+                        group: None,
+                    },
+                );
+                self.set_sprites.push(sprites);
+            }
+        }
+    }
 }

@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! Holder sets as data files write them, read by one decoder for every field
 //! vanilla types as a `HolderSet`: an id, a `#tag`, a list of ids
 //! (`HolderSetCodec`), and NeoForge's `neoforge:any`, `neoforge:and` /

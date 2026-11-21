@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! Effective configured-carver registries for biome modifiers.
 use super::{J, Result, SavedModifiers, biomes::Registry};
 use sunrise_world::worldgen::overrides::WorldgenOverrides;

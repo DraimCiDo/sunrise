@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! A content mod's `assets/` and `data/` (API 0.2, docs/modpacks.md): the
 //! files it adds to the game's resource tree, and the blocks, items, mob
 //! effects, entity types and menu types it declares in

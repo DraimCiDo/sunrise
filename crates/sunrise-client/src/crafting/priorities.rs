@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! Pack-layered `data/neoforge/recipe_priorities.json` (NeoForge's public
 //! recipe-priorities format). Order the shared sources before any table is built.
 use super::{ResolvedSources, registration_key};

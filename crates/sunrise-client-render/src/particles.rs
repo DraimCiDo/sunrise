@@ -33,12 +33,12 @@ pub use sunrise_items::firework::{DYE_FIREWORK_COLORS, FireworkExplosion, Firewo
 mod collide;
 mod explosions;
 pub use explosions::ExplosionParticle;
+mod declarations;
 mod groups;
-mod mod_behaviour;
 mod native;
 mod spawn;
+use declarations::{ModBehaviour, mod_curve};
 pub use groups::register_particle_groups;
-use mod_behaviour::{ModBehaviour, mod_curve};
 pub use native::{ParticleController, ParticleUpdate, register_particle_providers};
 use spawn::next_double_between;
 pub mod polytone;
@@ -1339,11 +1339,7 @@ impl ParticleEngine {
     /// The sprite sets of every `particles/*.json` under `root`: vanilla's own
     /// and a native mod's (`assets/<namespace>/particles/<name>.json`).
     fn load_sprites(&mut self, root: &ResourceSource) {
-        for ns in root.namespaces("assets") {
-            if ns != "minecraft" {
-                self.load_mod_sprites(root, &ns);
-            }
-        }
+        self.load_mod_sprites(root);
         for &ty in ParticleType::ALL {
             let Ok(bytes) = root.read(&format!("assets/minecraft/particles/{}.json", ty.name()))
             else {
@@ -1365,73 +1361,6 @@ impl ParticleEngine {
                 .unwrap_or_default();
             if !sprites.is_empty() {
                 self.sets.insert(ty, self.set_sprites.len() as u32);
-                self.set_sprites.push(sprites);
-            }
-        }
-    }
-    /// A namespace's particle JSONs that vanilla has no type for: each becomes
-    /// one sprite set under `<ns>:<file name>`.
-    fn load_mod_sprites(&mut self, root: &ResourceSource, ns: &str) {
-        let prefix = format!("assets/{ns}/particles/");
-        for path in root.list(&prefix) {
-            let Some(stem) = path
-                .strip_prefix(&prefix)
-                .and_then(|p| p.strip_suffix(".json"))
-            else {
-                continue;
-            };
-            let key = format!("{ns}:{stem}");
-            if ParticleType::from_name(&key).is_some() {
-                continue;
-            }
-            let Ok(bytes) = root.read(&path) else {
-                continue;
-            };
-            let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-                continue;
-            };
-            let behaviour = json.get("sunrise:behaviour").and_then(|value| {
-                let behaviour = ModBehaviour::parse(value);
-                if behaviour.is_none() {
-                    log::warn!("Invalid particle behaviour in {}", path);
-                }
-                behaviour
-            });
-            let sprites: Vec<u32> = json["textures"]
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|t| t.as_str())
-                        .map(|t| {
-                            // A texture is `<ns>:<path>` (bare means
-                            // `minecraft:`), and the atlas names a sprite
-                            // `<ns>:particle/<path>` — `minecraft`'s own
-                            // without its namespace.
-                            let name = match t.split_once(':') {
-                                Some(("minecraft", path)) => format!("particle/{path}"),
-                                Some((ns, path)) => format!("{ns}:particle/{path}"),
-                                None => format!("particle/{t}"),
-                            };
-                            self.intern(&name)
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            if !sprites.is_empty() {
-                let provider = self
-                    .providers
-                    .iter()
-                    .position(|(name, _)| *name == key)
-                    .map(|slot| (slot as u32, self.providers[&key].clone()));
-                self.mod_sets.insert(
-                    key,
-                    ModSet {
-                        set: self.set_sprites.len() as u32,
-                        behaviour,
-                        provider,
-                        group: None,
-                    },
-                );
                 self.set_sprites.push(sprites);
             }
         }

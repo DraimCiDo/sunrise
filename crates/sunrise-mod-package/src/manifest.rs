@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! `sunrise-mod.toml`, a mod's manifest, and the `.smod` file around it.
 //!
 //! Native mixin schema adapted from horizon-mixins (Copyright (c) 2026 levzzz),

@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! The one place a content file's comments are skipped, as Gson's lenient reader does (vanilla reads data
 //! files with it): shared by the port's carry and the reference check.
 

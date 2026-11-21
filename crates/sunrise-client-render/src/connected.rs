@@ -6,6 +6,7 @@
 //! The rules and the tile geometry are `sunrise_connected`'s.
 
 mod files;
+pub use files::read_rules;
 
 use crate::resource_source::ResourceSource;
 use crate::sprites::Sprites;
@@ -47,18 +48,6 @@ fn heights(
                 }))
         })
         .collect()
-}
-
-/// The rules to load for `root`: those the installed pack formats read, then the mods' asset
-/// files, in the order they are tried.
-pub fn read_rules(root: &ResourceSource) -> Vec<Rule> {
-    let mut rules = crate::pack_hooks::formats().connected(root);
-    let files = files::read(root);
-    if !files.is_empty() {
-        rules.extend(files);
-        geometry::sort(&mut rules);
-    }
-    rules
 }
 
 /// A tile as the mesher draws it.

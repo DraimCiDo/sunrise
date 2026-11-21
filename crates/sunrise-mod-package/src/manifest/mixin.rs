@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! `[[native.mixin]]`: a source-level edit of a game function, the only form that compiles game code.
 //! Each row is one horizon-mixins `[[injection]]`, forwarded to the pinned tool, which owns the
 //! vocabulary beyond the keys named here. Native only.
