@@ -135,7 +135,7 @@ pub trait ItemStorage {
         &self,
         host: &mut dyn ServerHost,
         visitor: &mut dyn FnMut(&ItemResource, u64) -> ControlFlow<()>,
-    ) -> Result<(), StorageError>;
+    ) -> Result<ControlFlow<()>, StorageError>;
 }
 
 const STORAGE_SOURCE: &CapabilityKey<dyn ResourceHandler<ItemResource>> = &ITEMS;
@@ -214,7 +214,7 @@ impl ItemStorage for GameStorage {
         &self,
         host: &mut dyn ServerHost,
         visitor: &mut dyn FnMut(&ItemResource, u64) -> ControlFlow<()>,
-    ) -> Result<(), StorageError> {
+    ) -> Result<ControlFlow<()>, StorageError> {
         crate::backend_of(&*host)
             .ok_or(crate::LevelReadError::Unavailable)
             .and_then(|backend| backend.container_visit_entries(self.0, visitor))
@@ -333,16 +333,17 @@ impl ItemStorage for Slots {
         &self,
         host: &mut dyn ServerHost,
         visitor: &mut dyn FnMut(&ItemResource, u64) -> ControlFlow<()>,
-    ) -> Result<(), StorageError> {
+    ) -> Result<ControlFlow<()>, StorageError> {
         for index in 0..self.0.size(host) {
             if let Some(resource) = self.0.resource(host, index) {
                 let amount = u64::from(self.0.amount(host, index));
-                if visitor(&resource, amount).is_break() {
-                    break;
+                let flow = visitor(&resource, amount);
+                if flow.is_break() {
+                    return Ok(flow);
                 }
             }
         }
-        Ok(())
+        Ok(ControlFlow::Continue(()))
     }
 }
 
@@ -401,7 +402,7 @@ pub fn transfer_matching(
     while moved < max {
         let mut seen = 0u64;
         let mut selected = Ok(None);
-        from.visit_entries(host, &mut |resource, _| {
+        let _ = from.visit_entries(host, &mut |resource, _| {
             let Some(occurrence) = seen.checked_add(1) else {
                 selected = Err(StorageError::Overflow);
                 return ControlFlow::Break(());
@@ -504,13 +505,16 @@ mod tests {
             &self,
             _: &mut dyn ServerHost,
             visitor: &mut dyn FnMut(&ItemResource, u64) -> ControlFlow<()>,
-        ) -> Result<(), StorageError> {
+        ) -> Result<ControlFlow<()>, StorageError> {
             for (resource, &amount) in self.0.held.borrow().iter() {
-                if amount != 0 && visitor(resource, amount).is_break() {
-                    break;
+                if amount != 0 {
+                    let flow = visitor(resource, amount);
+                    if flow.is_break() {
+                        return Ok(flow);
+                    }
                 }
             }
-            Ok(())
+            Ok(ControlFlow::Continue(()))
         }
     }
     fn bulk(
@@ -555,7 +559,7 @@ mod tests {
         let came = host.transaction(|host, tx| Ok::<_, ()>(storage.extract(host, tx, stone, 100)));
         assert_eq!(came, Ok(100));
         let mut total = 0;
-        storage
+        let _ = storage
             .visit_entries(host, &mut |_, amount| {
                 total += amount;
                 ControlFlow::Continue(())
@@ -587,7 +591,7 @@ mod tests {
         chest(&mut host, [0, 64, 0], &slots);
         let storage = storage_at(&mut host, [0, 64, 0]);
         let mut entries = Vec::new();
-        storage
+        let _ = storage
             .visit_entries(&mut host, &mut |resource, amount| {
                 entries.push((resource.clone(), amount));
                 ControlFlow::Continue(())
@@ -662,7 +666,7 @@ mod tests {
             owner: None,
         });
         let mut delivered = Vec::new();
-        storage
+        let _ = storage
             .visit_entries(&mut host, &mut |kind, amount| {
                 delivered.push((kind.clone(), amount));
                 if *kind == r[0] {
@@ -796,14 +800,15 @@ mod tests {
                 &self,
                 _: &mut dyn ServerHost,
                 visitor: &mut dyn FnMut(&ItemResource, u64) -> ControlFlow<()>,
-            ) -> Result<(), StorageError> {
+            ) -> Result<ControlFlow<()>, StorageError> {
                 let entries = self.entries.borrow();
                 for (kind, amount) in entries.iter() {
-                    if visitor(kind, *amount).is_break() {
-                        break;
+                    let flow = visitor(kind, *amount);
+                    if flow.is_break() {
+                        return Ok(flow);
                     }
                 }
-                Ok(())
+                Ok(ControlFlow::Continue(()))
             }
         }
 

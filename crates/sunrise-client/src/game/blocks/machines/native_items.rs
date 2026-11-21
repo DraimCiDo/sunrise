@@ -325,10 +325,10 @@ impl Game<'_> {
         &self,
         at: BlockSide,
         visitor: &mut dyn FnMut(&ItemResource, u64) -> std::ops::ControlFlow<()>,
-    ) -> Result<(), LevelReadError> {
+    ) -> Result<std::ops::ControlFlow<()>, LevelReadError> {
         use crate::game::api_values::TryIntoApi;
         let Some(view) = self.capability_view(at) else {
-            return Ok(());
+            return Ok(std::ops::ControlFlow::Continue(()));
         };
         let c = self.containers();
         for stack in view
@@ -338,11 +338,12 @@ impl Game<'_> {
             let stack = stack
                 .try_into_api()
                 .map_err(|_| LevelReadError::Unavailable)?;
-            if visitor(&ItemResource::of(&stack), u64::from(stack.count())).is_break() {
-                break;
+            let flow = visitor(&ItemResource::of(&stack), u64::from(stack.count()));
+            if flow.is_break() {
+                return Ok(flow);
             }
         }
-        Ok(())
+        Ok(std::ops::ControlFlow::Continue(()))
     }
     /// Puts up to `amount` of `resource` into the slots `at`'s side reaches, those holding it
     /// first and then the empty ones, in transaction `tx`, on one view of the container: what

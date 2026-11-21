@@ -329,7 +329,7 @@ pub trait ItemsBackend {
         &self,
         at: BlockSide,
         visitor: &mut dyn FnMut(&ItemResource, u64) -> std::ops::ControlFlow<()>,
-    ) -> Result<(), LevelReadError>;
+    ) -> Result<std::ops::ControlFlow<()>, LevelReadError>;
     /// Side: both.
     /// Whether an enchantment on `stack` has effect component `effect`, by the world's
     /// enchantment definitions (`EnchantmentHelper.has`), behind
