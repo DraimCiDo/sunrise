@@ -1344,6 +1344,7 @@ pub struct ClientBossBar {
 
 /// One player's open menu, invalidated on close, replacement or reconnect.
 /// Client menu handles are also invalidated on respawn.
+/// Read related fields together with [`Self::with_view`] or [`Self::with_client_view`].
 ///
 /// Clicks require a mutable client host, not a server or a read-only hook:
 /// ```compile_fail

@@ -1060,7 +1060,7 @@ A status or control screen that has no item slots at all can omit the player inv
 container slots, never the optional player group. A mapping to an absent slot is refused at load.
 
 The optional menu `inputs` list marks machine feeds, including fuel, as `Input`
-in [`MenuRef::slot_kinds`](../concepts/capabilities/menu-slots.md). Indices start at zero and
+in [`ClientMenuView::slot_kinds`](../concepts/capabilities/menu-slots.md). Indices start at zero and
 must be unique and below `slots`; they cannot overlap `results`, the crafting grid,
 or its result slot. Both linked and unlinked slots can be inputs. Omit the list (or
 use `[]`) to leave ordinary slots as `Storage`. The role does not change which items

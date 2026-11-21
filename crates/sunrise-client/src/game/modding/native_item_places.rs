@@ -242,7 +242,7 @@ impl Game<'_> {
                         (false, view.slot_stack(slot, backing).flatten())
                     }
                 }
-                None => (false, view.carried().clone()),
+                None => (false, view.carried_stack().clone()),
             }
         };
         // Call a handler only after releasing the view; the display mirror does not own the item.
@@ -2132,9 +2132,10 @@ pub(super) mod tests {
             let cursor = menu.cursor();
             let slot = ItemPlace::MenuSlot { menu, slot: 36 };
             let held_ids = |game: &Game<'_>| {
+                let view = game.resolve_server_menu(menu).unwrap();
                 [
-                    game.menu_carried(menu).flatten().as_ref().and_then(map_id),
-                    game.menu_slot(menu, 36).flatten().as_ref().and_then(map_id),
+                    view.carried_stack().as_ref().and_then(map_id),
+                    view.shown_stack(36).flatten().as_ref().and_then(map_id),
                 ]
             };
             let saved_counter = || {
@@ -2151,7 +2152,12 @@ pub(super) mod tests {
             assert_eq!(held_ids(game), [Some(source + 1), Some(source + 2)]);
 
             // A held map derived from the parent's pending copy can find the new map.
-            let mut derived = game.menu_carried(menu).flatten().unwrap();
+            let mut derived = game
+                .resolve_server_menu(menu)
+                .unwrap()
+                .carried_stack()
+                .clone()
+                .unwrap();
             derived.data_mut().map_post_processing = Some(0);
             let maps = game.level_maps([&derived]);
             Menu::map_crafted(Some(&maps), &mut derived);
@@ -2183,8 +2189,9 @@ pub(super) mod tests {
             game.save_maps();
             assert_eq!(saved_counter(), Tag::Int(source));
             assert_eq!(game.peek_map_id(), source + 1);
-            assert_eq!(game.menu_carried(menu).flatten(), Some(map(1)));
-            assert_eq!(game.menu_slot(menu, 36).flatten(), Some(map(0)));
+            let view = game.resolve_server_menu(menu).unwrap();
+            assert_eq!(view.carried_stack(), &Some(map(1)));
+            assert_eq!(view.shown_stack(36).flatten(), Some(map(0)));
             for id in [source + 1, source + 2, source + 3] {
                 assert!(game.map(id).is_none());
                 assert!(!maps_dir.join(format!("{id}.dat")).exists());

@@ -642,14 +642,13 @@ handle, an entity the client doesn't track and a level it doesn't show:
   speeds); `selected_slot` (the hotbar slot held); `experience` (`ClientboundSetExperience`) and
   `xp_needed_for_next_level`. Another player reads `None` there: the client is not sent their state.
 - The local player's open menu: `host.local_player()` then `player.container_menu(host)` makes a `MenuRef` for the menu
-  the client has open (the player's own inventory when none is), and `menu.slot_count(host)`, `slot(host, index)` and
-  `carried(host)` read it as the server's `ClientboundContainerSetSlot` and `SetCursorItem` packets left it. Indexes are
-  the menu's own slot order (the same `slot_backing` names), not network slot ids. Another player's menu is `None`, and
-  so are `container_id` and `kind` on a client (server reads). A slot reads `Some(None)` when empty and the outer `None`
-  when it doesn't exist or the menu is unavailable; a menu type the client has no slot map for reads `None` throughout
-  rather than guessed contents. A handle goes stale, and reads `None`, when its menu is closed or replaced (a reused
-  window id included), on a respawn, a dimension change or a logout, and after a reconnect. Nothing here sends a packet
-  or changes the menu.
+  the client has open (the player's own inventory when none is). Use `menu.with_view(host, |view| …)` to read its
+  `slot_count()`, `slot(index)` and `carried()` together after server synchronization and local prediction. Indexes are
+  the menu's own slot order, not indices in the backing container. Another player's menu is `None`; `container_id()`
+  and `kind()` only have server answers. A slot reads `Some(None)` when empty and `None` when it doesn't exist or can't
+  be projected. An unknown client layout has no count or indexed stacks, but can still have a cursor. The callback
+  is skipped when its menu is closed or replaced (a reused window id included), on respawn, dimension change, logout
+  and reconnect. Nothing here sends a packet or changes the menu.
 
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
@@ -1763,7 +1762,7 @@ still go on each event or registrar.
 
 - `native_item_burn_time(item)` answers the item's cooking-fuel burn time in ticks (`FuelValues.burnDuration`: its `cooking_fuel` component, the data pack's context int provider resolved), None where it is no fuel. `native_item_compost_chance(item)` answers the chance the item raises a composter's level (its `compostable` component's layers provider resolved; the `compostables` data map), None where it is not compostable. A mod cannot resolve either from the item's default component, which holds only the provider's name. Client-side, API next.
 - `native_screen_hovered_item()` answers the id of the item in the slot under the pointer on the open container screen (`AbstractContainerScreen.getHoveredSlot()`'s stack), None over no slot, an empty one, or with no window. A recipe viewer reads it for its look-up keys. Client-side, API next.
-- `menu.slot_boxes(host)` (`menu_slot_boxes`) answers the open inventory screen's slot rectangles (`[x, y, width, height]`, GUI pixels) in menu slot order: `AbstractContainerScreen.leftPos`/`topPos` plus each `Slot.x`/`Slot.y`, 16 by 16, so a mod that highlights or searches slots in `screen_render_post` draws where vanilla's own slot highlight does. `None` entries are slots the screen does not show; the whole answer is `None` for a stale menu, another screen, or an inventory covered by the recipe book. Client-side.
+- `menu.with_client_view(host, |view| view.slot_boxes())` reads the open inventory screen's slot rectangles (`[x, y, width, height]`, GUI pixels) in menu slot order: `AbstractContainerScreen.leftPos`/`topPos` plus each `Slot.x`/`Slot.y`, 16 by 16, so a mod that highlights or searches slots in `screen_render_post` draws where vanilla's own slot highlight does. `None` entries are slots the screen does not show; the view's answer is `None` for another screen or an inventory covered by the recipe book. The scope does not call the closure for a stale menu. Client-side.
 
 - `modify_default_components(context, item, components)`, in `sunrise-world`'s `item_defaults.rs`: an item's default
   components in `items.json`'s form, for any item, vanilla's included (NeoForge's `ModifyDefaultComponentsEvent`). Insert

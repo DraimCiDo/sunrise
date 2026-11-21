@@ -298,9 +298,12 @@ impl Game<'_> {
             return Ok(());
         }
         let menu = self.menu(before.uuid, before.window).ok_or(R::Changed)?;
-        if changes.iter().any(|change| {
-            self.native_menu_place(before.conn, before.window, change.slot) != Some(change.place)
-        }) {
+        if menu.with_view(self, |view| {
+            changes.iter().all(|change| {
+                view.slot_backing(change.slot) == Some(MenuSlotBacking::Place(change.place))
+            })
+        }) != Some(true)
+        {
             return Err(R::Changed);
         }
         let writes = changes
@@ -318,7 +321,10 @@ impl Game<'_> {
         let host: &mut dyn ServerHost = self;
         host.transaction(|host, tx| {
             for (slot, backing, before, after) in &writes {
-                if menu.slot_backing(host, *slot) != Some(MenuSlotBacking::Place(*backing)) {
+                // A prior handler or write can change which storage this slot shows.
+                if menu.with_view(host, |view| view.slot_backing(*slot))
+                    != Some(Some(MenuSlotBacking::Place(*backing)))
+                {
                     return Err(());
                 }
                 let place = ItemPlace::MenuSlot { menu, slot: *slot };

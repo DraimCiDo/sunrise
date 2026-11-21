@@ -89,9 +89,9 @@ pub enum ItemPlace {
         slot: usize,
     },
     /// Slot `slot` of a player's open menu, `menu`, a fork addition (NeoForge 26.3 has no
-    /// `ItemAccess` for a menu slot): the storage the slot shows ([`MenuRef::slot_backing`]),
-    /// its own slot only, under the slot's own rules first ([`MenuRef::slot_holds`],
-    /// [`MenuRef::slot_gives`]). Nothing where the menu is closed, replaced or its player gone;
+    /// `ItemAccess` for a menu slot): the storage the slot shows ([`crate::MenuView::slot_backing`]),
+    /// its own slot only, under the slot's own rules first ([`crate::MenuView::slot_holds`],
+    /// [`crate::MenuView::slot_gives`]). Nothing where the menu is closed, replaced or its player gone;
     /// nothing goes into or out of the crafting result.
     MenuSlot {
         /// The open menu.
@@ -529,14 +529,20 @@ impl ItemPlace {
             }
             // A slot backed by a mod's storage reads it through its handler; every other slot
             // reads as before.
-            ItemPlace::MenuSlot { menu, slot } => match menu.slot_backing(host, *slot) {
-                Some(MenuSlotBacking::Place(place)) => {
+            ItemPlace::MenuSlot { menu, slot } => {
+                let (place, stack) =
+                    menu.with_view(host, |view| match view.slot_backing(*slot) {
+                        Some(MenuSlotBacking::Place(place)) => (Some(place), None),
+                        _ => (None, view.slot(*slot).flatten()),
+                    })?;
+                if let Some(place) = place {
                     let (handler, index) = place.handler(host, menu.player)?;
                     let resource = handler.resource(host, index)?;
                     resource.to_stack(handler.amount(host, index))
+                } else {
+                    stack
                 }
-                _ => menu.slot(host, *slot)?,
-            },
+            }
             _ => backend_mut_of(host).and_then(|backend| backend.game_stack(self)),
         }
     }
@@ -759,11 +765,17 @@ impl ItemPlace {
         // `getMaxStackSize` for what goes in, `Slot.mayPickup` for what comes out.
         let amount = match self {
             ItemPlace::MenuSlot { menu, slot } if insert => {
-                let holds = menu.slot_holds(host, *slot, resource.as_stack());
+                let holds = menu
+                    .with_view(host, |view| view.slot_holds(*slot, resource.as_stack()))
+                    .flatten();
                 let room = holds.unwrap_or(0).saturating_sub(self.amount(host));
                 amount.min(room)
             }
-            ItemPlace::MenuSlot { menu, slot } if menu.slot_gives(host, *slot) != Some(true) => 0,
+            ItemPlace::MenuSlot { menu, slot }
+                if menu.with_view(host, |view| view.slot_gives(*slot)) != Some(Some(true)) =>
+            {
+                0
+            }
             _ => amount,
         };
         if amount == 0 {
@@ -820,7 +832,11 @@ impl ItemPlace {
                 through(handler, host, tx, *slot, false)
             }
             ItemPlace::MenuSlot { menu, slot } => {
-                let (handler, index) = match menu.slot_backing(host, *slot).ok_or(())? {
+                let backing = menu
+                    .with_view(host, |view| view.slot_backing(*slot))
+                    .flatten()
+                    .ok_or(())?;
+                let (handler, index) = match backing {
                     MenuSlotBacking::Player(index) => {
                         let player = menu.player.entity();
                         (player.capability(host, &ENTITY_ITEMS, ()), index)

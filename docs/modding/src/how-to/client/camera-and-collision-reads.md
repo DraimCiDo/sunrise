@@ -215,7 +215,7 @@ These read the local player as the client sees it. They take no mod-controlled n
   It is false for an empty stack or one with no model.
 - Reach comes from the interaction-range attributes with the server's and equipment's
   modifiers. Menu slot numbers are `Slot.index`, the position in the menu's slot list
-  that `menu_slot` and `menu_slot_count` take; `menu_slot_backing` gives the index in the backing container.
+  that `MenuView::slot` takes; `MenuView::slot_backing` gives the server's index in the backing container.
 
 ## Combat targeting
 

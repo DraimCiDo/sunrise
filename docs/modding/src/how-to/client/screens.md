@@ -52,8 +52,13 @@ closes; there is no close that skips it, because the vanilla client never omits 
 ## Reading open trades
 
 From a client hook in the world, get the menu from `host.local_player()` and
-`PlayerRef::container_menu(host)`, then call `menu.merchant_offers(host)`. The result is an owned
-snapshot of the latest offers the server sent to the open merchant menu, in display order. Each
+`PlayerRef::container_menu(host)`. Read the offers in a client menu scope:
+
+```rust,ignore
+let offers = menu.with_client_view(host, |view| view.merchant_offers())?.transpose()?.flatten();
+```
+
+This returns an owned snapshot of the latest offers the server sent, in display order. Each
 `MerchantOffer` has the first payment, an optional second payment, the result stack and its
 components, and stock and pricing data. Use `offer.cost_a_count(host)` for the adjusted first
 payment and `offer.out_of_stock()` to check availability.
@@ -64,9 +69,10 @@ server offer refresh earlier. A take is stale if a listener wrote through the `H
 inventory, cursor or menu storage (the take read its own player's; a write to any player's counts).
 A refused click sends the authoritative offers and contents again to correct the client's prediction.
 
-`Ok(None)` means the handle is no longer current, doesn't belong to the local player, or isn't a
-merchant menu. An open merchant menu can return `Ok(Some(vec![]))` before the offers arrive.
-`Err(LevelReadError::Unavailable)` means the snapshot couldn't be read. The call doesn't select
+After propagating both errors, `None` means the handle is no longer current, doesn't belong to
+the local player, or isn't a merchant menu. An open merchant menu can return `Some(vec![])`
+before the offers arrive. `LevelReadError::Unavailable` means the phase or backend declined the
+scope, the merchant state was unavailable, or an offer couldn't be projected. The call doesn't select
 an offer, buy anything, or send packets; the server still decides every trade.
 
 ## Frame coordinates

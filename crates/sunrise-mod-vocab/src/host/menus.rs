@@ -71,90 +71,25 @@ pub trait MenusClientHost {
 #[doc(hidden)]
 #[sunrise_mod_api_macros::host_area]
 pub trait MenusBackend {
-    /// Side: server.
-    /// Container id (0 for the player's inventory menu).
-    #[access(WorldOnly)]
-    fn menu_container_id(&self, menu: MenuRef) -> Option<i32>;
-    /// Side: server.
-    /// Registry menu type; the inventory menu has no MenuType in vanilla.
-    /// The outer None means an unavailable menu.
-    #[access(WorldOnly)]
-    fn menu_kind(&self, menu: MenuRef) -> Option<Option<String>>;
     /// Side: both.
-    /// Number of slots in AbstractContainerMenu.slots.
+    /// Lends the current menu once, or skips the callback if it is unavailable.
     #[access(WorldOnly)]
-    fn menu_slot_count(&self, menu: MenuRef) -> Option<usize>;
-    /// Side: both.
-    /// Full stack at a menu index. Outer None means unavailable or out of
-    /// range; Some(None) means an empty slot. `slot` is the slot's position in the menu's slot
-    /// list, vanilla's `Slot.index`, the number container click packets carry; vanilla has no other
-    /// player-visible slot number. `menu_slot_backing` gives the index inside the backing container.
-    #[access(WorldOnly)]
-    fn menu_slot(&self, menu: MenuRef, slot: usize) -> Option<Option<ItemStack>>;
-    /// Side: both.
-    /// Carried (cursor) stack; outer None means unavailable.
-    #[access(WorldOnly)]
-    fn menu_carried(&self, menu: MenuRef) -> Option<Option<ItemStack>>;
-    /// Side: server.
-    /// The storage menu slot `slot` shows (`Slot.container` and `getContainerSlot`): the
-    /// player's inventory by `ENTITY_ITEMS` index (`InventoryMenu`'s armour slots 5..9 go head
-    /// to feet), a block entity's or an entity's slot, the ender chest's, the crafting grid's
-    /// or a mod's chest menu's.
-    #[access(WorldOnly)]
-    fn menu_slot_backing(&self, menu: MenuRef, slot: usize) -> Option<MenuSlotBacking>;
-    /// Side: server.
-    /// How many of `stack` menu slot `slot` holds (`Slot.mayPlace`, then `Slot.getMaxStackSize`):
-    /// a furnace's fuel slot one bucket, an armour slot one piece that fits it, a crafting result
-    /// none.
-    #[access(WorldOnly)]
-    fn menu_slot_holds(&self, menu: MenuRef, slot: usize, stack: &ItemStack) -> Option<u32>;
-    /// Side: server.
-    /// Whether menu slot `slot` gives up what it holds (`Slot.mayPickup`): bound armour stays
-    /// on outside creative.
-    #[access(WorldOnly)]
-    fn menu_slot_gives(&self, menu: MenuRef, slot: usize) -> Option<bool>;
+    #[decline_unavailable]
+    fn with_menu_view(&self, menu: MenuRef, read: &mut dyn FnMut(&dyn MenuView));
 }
-/// The handles' client reads of the `menus` area, implemented by the game and reached through [`ClientBackend`].
-// hidden: a handle's backend, reached through `ClientBackend`; mods call the handle, never this trait
+/// The handles' client reads of the `menus` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 #[sunrise_mod_api_macros::host_area]
 pub trait MenusClientBackend {
     /// Side: client.
-    /// The open inventory screen's slot boxes in menu slot order
-    /// (`AbstractContainerScreen.leftPos`/`topPos` plus each `Slot.x`/`Slot.y`, 16x16). A box
-    /// is `[x, y, width, height]` in GUI pixels, with `None` for a hidden slot.
-    /// Returns `None` for a stale menu, another screen, or an inventory covered
-    /// by the recipe book. The boxes follow the actual layout, including GUI
-    /// scale and the recipe book's horizontal offset.
+    /// Lends the current client menu once, skips a stale menu, or refuses an unavailable read.
     #[access(WorldOnly)]
-    fn menu_slot_boxes(&self, menu: MenuRef) -> Option<Vec<Option<[f32; 4]>>>;
-    /// Side: client.
-    /// Slot roles from the client layout and content menu declaration, in menu order.
-    /// The length equals `slot_count`. Machine inputs (including fuel and brewing
-    /// bottle slots) are `Input`; unknown roles are `Other`. Roles describe neither
-    /// server backing nor rules for accepting items. Returns `None` outside
-    /// a world, without an open menu, for stale/foreign menus or missing content types.
-    /// Game types with no known slot count return `None`; workstations without
-    /// classified layouts give all `Other` when their count is known. Creative returns the underlying inventory menu, not tab wrappers:
-    /// read the screen type to distinguish them. Stable until the menu changes.
-    /// Built per call with one Vec allocation and a table lookup; cache for the menu.
-    #[access(WorldOnly)]
-    fn menu_slot_kinds(&self, menu: MenuRef) -> Option<Vec<MenuSlotKind>>;
-    /// Side: client.
-    /// The local player's open merchant menu's synchronized offers, copied in display order
-    /// (`MerchantMenu.getOffers`). Includes both payments, the result with its components,
-    /// and the synchronized stock and price data. Use [`MerchantOffer::cost_a_count`] for
-    /// the adjusted first payment. Reading does not select or take a trade or send a packet.
-    ///
-    /// `Ok(None)` means the menu is stale, foreign, closed, or not a merchant menu.
-    /// An open merchant menu without offers returns `Ok(Some(Vec::new()))`.
-    /// Returns [`LevelReadError::Unavailable`] when the phase or backend cannot supply the
-    /// read, or an offer cannot be converted to an API value.
-    #[access(WorldOnly)]
-    fn menu_merchant_offers(
+    fn with_client_menu_view(
         &self,
         menu: MenuRef,
-    ) -> Result<Option<Vec<MerchantOffer>>, LevelReadError>;
+        read: &mut dyn FnMut(&dyn ClientMenuView),
+    ) -> Result<(), LevelReadError>;
 }
 /// The handles' client writes of the `menus` area, implemented by the game and reached through [`ClientBackendMut`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait

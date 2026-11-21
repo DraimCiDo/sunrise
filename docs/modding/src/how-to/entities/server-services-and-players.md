@@ -237,11 +237,11 @@ wait for the outermost commit.
 
 ## The client's open menu
 
-`Host::player_container_menu(player)` reads on both sides. On a client it returns only the
-local player's supported open menu, or the inventory menu when none is open; every other
-player returns `None`. `MenuRef::slot_count`, `slot` and `carried` read the client's view:
-server slot updates plus local prediction, not server authority. A menu ref becomes stale
-when that menu closes or another opens. The server retains its supported-menu restrictions.
+`player.container_menu(host)` reads on both sides. On a client it returns only the local
+player's supported open menu, or the inventory menu when none is open. `menu.with_view(host, |view| …)`
+resolves that handle once for `view.slot_count()`, `view.slot(index)` and `view.carried()`. The
+client sees server slot updates plus local prediction, not server authority. The callback is not
+called when the menu closes or is replaced. The server retains its supported-menu restrictions.
 
 ## Local player reads on a client
 

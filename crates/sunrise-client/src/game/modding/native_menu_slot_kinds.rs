@@ -1,27 +1,9 @@
 //! Client layout roles; never inspect stacks or server container identities.
-use super::{Game, Screen};
-use mod_api::{MenuRef, MenuSlotKind};
-use sunrise_client::containers::{ModMenuType, mod_menu_type};
+use super::Game;
+use mod_api::MenuSlotKind;
+use sunrise_client::containers::ModMenuType;
 
-impl Game<'_> {
-    pub(super) fn menu_slot_kinds(&self, menu: MenuRef) -> Option<Vec<MenuSlotKind>> {
-        if !matches!(self.screen, Screen::Inventory | Screen::Creative) {
-            return None;
-        }
-        self.remote.as_ref().filter(|remote| remote.has_level())?;
-        let name = self.native_client_menu_name(menu)?;
-        let content = mod_menu_type(name);
-        let count = match content {
-            Some(content) => content.slot_count(),
-            None => self.menu_slot_count(menu)?,
-        };
-        Some(layout_kinds(name, count, content, |slot| {
-            Self::inventory_screen_slot(name, slot as i32)
-        }))
-    }
-}
-
-fn layout_kinds(
+pub(super) fn layout_kinds(
     name: &str,
     count: usize,
     content: Option<&ModMenuType>,
@@ -122,6 +104,7 @@ fn layout_kinds(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::Screen;
     use MenuSlotKind::*;
     use mod_api::__private::game::Fields;
 

@@ -1,17 +1,20 @@
 //! Handles to supported menus: shared reads, server storage and client clicks.
+use super::api_values::{TryIntoApi, stack_value};
 use super::{
-    Game,
+    Game, Screen,
     lan::LanHost,
     lan_crafting::{load_player, machine_menu_kind},
+    native_menu_slot_kinds::layout_kinds,
 };
 use mod_api::__private::game::*;
 use mod_api::{
-    DragKind, EntityRef, LevelReadError, LevelRef, MenuClick, MenuRef, MenuSlotBacking,
-    MenuSlotPlace, MouseButton, PlayerRef, SwapWith, WorldEpoch,
+    ClientMenuView, DragKind, EntityRef, LevelReadError, LevelRef, MenuClick, MenuRef,
+    MenuSlotBacking, MenuSlotKind, MenuSlotPlace, MenuView, MerchantOffer, MouseButton, PlayerRef,
+    SwapWith, WorldEpoch,
 };
 use std::cell::OnceCell;
 use sunrise_client::{
-    containers::BlockEntity,
+    containers::{BlockEntity, ModMenuType, mod_menu_type},
     items::ItemStack,
     lan::{
         guest::Guest,
@@ -42,6 +45,19 @@ struct OpenBacking<'read> {
     places: Option<&'read [MenuSlotPlace]>,
 }
 
+/// A current client window, independent of whether the player can see its screen.
+struct ClientMenuRead<'read, 'game> {
+    game: &'read Game<'game>,
+    name: &'read str,
+    window: i32,
+    has_level: bool,
+    // The built screen determines geometry and count; indexed prediction and roles
+    // can also read the content declaration before a screen is built.
+    window_type: OnceCell<Option<&'static ModMenuType>>,
+    declared_type: OnceCell<Option<&'static ModMenuType>>,
+    slot_count: OnceCell<Option<usize>>,
+}
+
 /// A slot in the game's own menu storage, not a handler's display mirror.
 pub(super) struct MenuStorageSlot {
     conn: u32,
@@ -67,10 +83,10 @@ impl<'game> Game<'game> {
         if self.is_logical_server() || self.screen == super::Screen::Creative || self.spectator() {
             return false;
         }
-        let Some(name) = self.native_client_menu_name(menu) else {
+        let Some(view) = self.resolve_client_menu(menu) else {
             return false;
         };
-        let Some(ops) = client_click_ops(name, clicks, self.instabuild()) else {
+        let Some(ops) = client_click_ops(view.name, clicks, self.instabuild()) else {
             return false;
         };
         self.remote_menu_ops(&ops)
@@ -84,7 +100,7 @@ impl<'game> Game<'game> {
     pub(super) fn menu_close(&mut self, menu: MenuRef) -> bool {
         if self.is_logical_server()
             || self.screen != super::Screen::Inventory
-            || self.native_client_menu_name(menu).is_none()
+            || self.resolve_client_menu(menu).is_none()
         {
             return false;
         }
@@ -160,87 +176,57 @@ impl<'game> Game<'game> {
     /// opened. True means sent, not that the menu took it.
     pub(super) fn menu_click_button(&mut self, menu: MenuRef, button: i32) -> bool {
         !self.is_logical_server()
-            && self.native_client_menu_name(menu).is_some()
+            && self.resolve_client_menu(menu).is_some()
             && self.remote_button_click(button)
     }
 
-    pub(super) fn menu_slot_boxes(&self, menu: MenuRef) -> Option<Vec<Option<[f32; 4]>>> {
-        if self.screen != super::Screen::Inventory || !self.screen_hooks_open() {
-            return None;
-        }
-        let name = self.native_client_menu_name(menu)?;
-        let renderer = self.renderer.as_ref()?;
-        let batch = super::HudBatch::new(
-            [renderer.config.width, renderer.config.height],
-            self.settings.gui_scale_inputs(),
-        );
-        self.inventory_menu_slot_boxes(menu.fields().window, name, &batch)
-    }
-
-    fn inventory_menu_slot_boxes(
-        &self,
-        window: i32,
-        name: &str,
-        batch: &super::HudBatch,
-    ) -> Option<Vec<Option<[f32; 4]>>> {
-        if self.book_covers_menu(batch.width) {
-            return None;
-        }
-        let kind = self.native_screen_menu_type(window, name);
-        let slot_id = |slot| Self::inventory_screen_slot_with_type(name, slot, || kind);
-        match kind {
-            None => {
-                slot_id(0)?;
+    pub(super) fn with_menu_view(&self, menu: MenuRef, read: &mut dyn FnMut(&dyn MenuView)) {
+        if self.is_logical_server() {
+            if let Some(view) = self.resolve_server_menu(menu) {
+                read(&view);
             }
-            Some(kind) if kind.slot_count() == 0 => return Some(Vec::new()),
-            Some(_) => {}
+        } else if let Some(view) = self.resolve_client_menu(menu) {
+            read(&view);
         }
-        let visible = self.slots();
-        let (ox, oy) = self.inventory_origin(batch);
-        Some(
-            (0..)
-                .map_while(slot_id)
-                .map(|slot| {
-                    visible.contains(&slot).then(|| {
-                        let (x, y) = self.slot_position(slot);
-                        [ox + x, oy + y, 16.0, 16.0]
-                    })
-                })
-                .collect(),
-        )
     }
 
-    pub(super) fn menu_merchant_offers(
+    pub(super) fn with_client_menu_view(
         &self,
         menu: MenuRef,
-    ) -> Result<Option<&[sunrise_client::merchant::MerchantOffer]>, LevelReadError> {
-        if self.native_client_menu_name(menu) != Some("minecraft:merchant") {
-            return Ok(None);
+        read: &mut dyn FnMut(&dyn ClientMenuView),
+    ) -> Result<(), LevelReadError> {
+        if let Some(view) = self.resolve_client_menu(menu) {
+            read(&view);
         }
-        let merchant = self
-            .station
-            .as_ref()
-            .and_then(|station| station.merchant.as_ref())
-            .ok_or(LevelReadError::Unavailable)?;
-        Ok(Some(&merchant.session.offers))
+        Ok(())
     }
 
-    pub(super) fn native_client_menu_name(&self, menu: MenuRef) -> Option<&str> {
+    fn resolve_client_menu(&self, menu: MenuRef) -> Option<ClientMenuRead<'_, 'game>> {
         let remote = self.remote.as_ref().filter(|remote| remote.logged_in)?;
         let epoch = self.native_lifecycle.epoch()?;
-        (menu.fields().player.fields().entity.epoch() == epoch
-            && menu.fields().player.fields().entity.id()
-                == u32::try_from(remote.entity_id).ok()?
-            && menu.fields().player.fields().uuid == remote.profile
-            && menu.fields().generation == remote.menu.generation
-            && menu.fields().window == remote.menu.as_ref().map_or(0, |entry| entry.0))
-        .then_some(())?;
-        Some(
-            remote
-                .menu
-                .as_ref()
-                .map_or("inventory", |entry| entry.1.as_str()),
-        )
+        let fields = menu.fields();
+        let player = fields.player.fields();
+        let (window, name) = remote
+            .menu
+            .as_ref()
+            .map_or((0, "inventory"), |entry| (entry.0, entry.1.as_str()));
+        if player.entity.epoch() != epoch
+            || player.entity.id() != u32::try_from(remote.entity_id).ok()?
+            || player.uuid != remote.profile
+            || fields.generation != remote.menu.generation
+            || fields.window != window
+        {
+            return None;
+        }
+        Some(ClientMenuRead {
+            game: self,
+            name,
+            window,
+            has_level: remote.has_level(),
+            window_type: OnceCell::new(),
+            declared_type: OnceCell::new(),
+            slot_count: OnceCell::new(),
+        })
     }
 
     /// The local player in a logged-in client world.
@@ -330,65 +316,6 @@ impl<'game> Game<'game> {
         }
         let (_, guest, window) = self.current_server_menu(player)?;
         Some(menu_ref(player, window, guest.menu_generation))
-    }
-
-    /// Container id (0 for the player's inventory menu).
-    pub(super) fn menu_container_id(&self, menu: MenuRef) -> Option<i32> {
-        Some(self.resolve_server_menu(menu)?.container_id())
-    }
-
-    /// Registry menu type; the inventory menu has no MenuType in vanilla.
-    /// The outer None means an unavailable menu.
-    pub(super) fn menu_kind(&self, menu: MenuRef) -> Option<Option<String>> {
-        Some(self.resolve_server_menu(menu)?.kind()?.map(str::to_owned))
-    }
-
-    /// Number of slots in AbstractContainerMenu.slots.
-    pub(super) fn menu_slot_count(&self, menu: MenuRef) -> Option<usize> {
-        if self.remote.is_some() {
-            let name = self.native_client_menu_name(menu)?;
-            if let Some(kind) = self.native_screen_menu_type(menu.fields().window, name) {
-                return Some(kind.slot_count());
-            }
-            let count = (0..)
-                .map_while(|slot| Self::inventory_screen_slot_with_type(name, slot, || None))
-                .count();
-            return (count != 0).then_some(count);
-        }
-        Some(self.resolve_server_menu(menu)?.slot_count())
-    }
-
-    /// The storage menu slot `slot` shows (`Slot.container` and `getContainerSlot`): the
-    /// player's inventory, a block entity's or entity's slot, the ender chest's, the crafting
-    /// grid's or a mod's menu's own storage.
-    pub(super) fn menu_slot_backing(&self, menu: MenuRef, slot: usize) -> Option<MenuSlotBacking> {
-        self.resolve_server_menu(menu)?.slot_backing(slot)
-    }
-
-    /// Full stack at a menu index. Outer None means unavailable or out of
-    /// range; Some(None) means an empty slot.
-    pub(super) fn menu_slot(&self, menu: MenuRef, slot: usize) -> Option<Option<ItemStack>> {
-        if self.remote.is_some() {
-            let name = self.native_client_menu_name(menu)?;
-            let index = Self::inventory_screen_slot(name, i32::try_from(slot).ok()?)?;
-            return Some(self.slot_view(index));
-        }
-        self.resolve_server_menu(menu)?.slot(slot)
-    }
-
-    /// How many of `stack` menu slot `slot` holds (`Slot.mayPlace`, then `Slot.getMaxStackSize`).
-    pub(super) fn menu_slot_holds(
-        &self,
-        menu: MenuRef,
-        slot: usize,
-        stack: &ItemStack,
-    ) -> Option<u32> {
-        self.resolve_server_menu(menu)?.slot_holds(slot, stack)
-    }
-
-    /// Whether menu slot `slot` gives up what it holds (`Slot.mayPickup`).
-    pub(super) fn menu_slot_gives(&self, menu: MenuRef, slot: usize) -> Option<bool> {
-        self.resolve_server_menu(menu)?.slot_gives(slot)
     }
 
     #[cfg(test)]
@@ -492,37 +419,53 @@ impl<'game> Game<'game> {
             }
         }
     }
-
-    /// Carried (cursor) stack; outer None means unavailable.
-    pub(super) fn menu_carried(&self, menu: MenuRef) -> Option<Option<ItemStack>> {
-        if self.remote.is_some() {
-            self.native_client_menu_name(menu)?;
-            return Some(self.carried.clone());
-        }
-        Some(self.resolve_server_menu(menu)?.carried().clone())
-    }
 }
 
-impl<'read> ServerMenuRead<'read, '_> {
-    pub(super) fn container_id(&self) -> i32 {
-        self.window
+impl MenuView for ServerMenuRead<'_, '_> {
+    fn container_id(&self) -> Option<i32> {
+        Some(self.window)
     }
 
-    pub(super) fn kind(&self) -> Option<Option<&'read str>> {
+    fn kind(&self) -> Option<Option<&str>> {
         match self.open {
             Some(open) => Some(Some(self.menu_registry_name(open)?)),
             None => Some(None),
         }
     }
 
+    fn slot_count(&self) -> Option<usize> {
+        Some(self.open.map_or(46, OpenMenu::slot_count))
+    }
+
+    fn slot(&self, slot: usize) -> Option<Option<mod_api::ItemStack>> {
+        self.shown_stack(slot)?.try_into_api().ok()
+    }
+
+    fn carried(&self) -> Option<Option<mod_api::ItemStack>> {
+        self.carried_stack().try_into_api().ok()
+    }
+
+    fn slot_backing(&self, slot: usize) -> Option<MenuSlotBacking> {
+        ServerMenuRead::slot_backing(self, slot)
+    }
+
+    fn slot_holds(&self, slot: usize, stack: &mod_api::ItemStack) -> Option<u32> {
+        let stack = stack_value(stack).ok()?;
+        let rules = self.native_menu_rules(slot)?;
+        Some(rules.slot_holds(&self.game.menu_env(), slot, &stack))
+    }
+
+    fn slot_gives(&self, slot: usize) -> Option<bool> {
+        let rules = self.native_menu_rules(slot)?;
+        Some(rules.slot_gives(&self.game.menu_env(), slot))
+    }
+}
+
+impl<'read> ServerMenuRead<'read, '_> {
     fn menu_registry_name(&self, open: &OpenMenu) -> Option<&'read str> {
         *self
             .registry_name
             .get_or_init(|| self.host.hub.registry_name("minecraft:menu", open.kind))
-    }
-
-    pub(super) fn slot_count(&self) -> usize {
-        self.open.map_or(46, OpenMenu::slot_count)
     }
 
     // Metadata and cursor reads don't require live backing. Check it once, if a slot needs it.
@@ -602,7 +545,7 @@ impl<'read> ServerMenuRead<'read, '_> {
         })
     }
 
-    pub(super) fn slot(&self, slot: usize) -> Option<Option<ItemStack>> {
+    pub(super) fn shown_stack(&self, slot: usize) -> Option<Option<ItemStack>> {
         self.slot_stack(slot, self.slot_backing(slot)?)
     }
 
@@ -658,16 +601,6 @@ impl<'read> ServerMenuRead<'read, '_> {
             MenuSlotBacking::Place(_) => guest.native_menu.get(slot)?.clone(),
             _ => return None,
         })
-    }
-
-    pub(super) fn slot_holds(&self, slot: usize, stack: &ItemStack) -> Option<u32> {
-        let rules = self.native_menu_rules(slot)?;
-        Some(rules.slot_holds(&self.game.menu_env(), slot, stack))
-    }
-
-    pub(super) fn slot_gives(&self, slot: usize) -> Option<bool> {
-        let rules = self.native_menu_rules(slot)?;
-        Some(rules.slot_gives(&self.game.menu_env(), slot))
     }
 
     /// Make the same detached Menu used for the slot rules, only for a rule query with a
@@ -735,7 +668,7 @@ impl<'read> ServerMenuRead<'read, '_> {
         Some(self.rules.get_or_init(|| rules))
     }
 
-    pub(super) fn carried(&self) -> &'read Option<ItemStack> {
+    pub(super) fn carried_stack(&self) -> &'read Option<ItemStack> {
         if self.acting {
             &self.game.carried
         } else {
@@ -783,6 +716,141 @@ impl<'read> ServerMenuRead<'read, '_> {
         ))
     }
 }
+
+impl ClientMenuRead<'_, '_> {
+    fn window_type(&self) -> Option<&'static ModMenuType> {
+        *self
+            .window_type
+            .get_or_init(|| self.game.native_screen_menu_type(self.window, self.name))
+    }
+
+    fn declared_type(&self) -> Option<&'static ModMenuType> {
+        *self.declared_type.get_or_init(|| mod_menu_type(self.name))
+    }
+
+    fn inventory_slot_boxes(&self, batch: &super::HudBatch) -> Option<Vec<Option<[f32; 4]>>> {
+        let game = self.game;
+        if game.book_covers_menu(batch.width) {
+            return None;
+        }
+        let kind = self.window_type();
+        let slot_id = |slot| Game::inventory_screen_slot_with_type(self.name, slot, || kind);
+        match kind {
+            None => {
+                slot_id(0)?;
+            }
+            Some(kind) if kind.slot_count() == 0 => return Some(Vec::new()),
+            Some(_) => {}
+        }
+        let visible = game.slots();
+        let (ox, oy) = game.inventory_origin(batch);
+        Some(
+            (0..)
+                .map_while(slot_id)
+                .map(|slot| {
+                    visible.contains(&slot).then(|| {
+                        let (x, y) = game.slot_position(slot);
+                        [ox + x, oy + y, 16.0, 16.0]
+                    })
+                })
+                .collect(),
+        )
+    }
+}
+
+impl MenuView for ClientMenuRead<'_, '_> {
+    fn container_id(&self) -> Option<i32> {
+        None
+    }
+
+    fn kind(&self) -> Option<Option<&str>> {
+        None
+    }
+
+    fn slot_count(&self) -> Option<usize> {
+        *self.slot_count.get_or_init(|| {
+            if let Some(kind) = self.window_type() {
+                return Some(kind.slot_count());
+            }
+            let count = (0..)
+                .map_while(|slot| Game::inventory_screen_slot_with_type(self.name, slot, || None))
+                .count();
+            (count != 0).then_some(count)
+        })
+    }
+
+    fn slot(&self, slot: usize) -> Option<Option<mod_api::ItemStack>> {
+        let index =
+            Game::inventory_screen_slot_with_type(self.name, i32::try_from(slot).ok()?, || {
+                self.declared_type()
+            })?;
+        self.game.slot_view(index).try_into_api().ok()
+    }
+
+    fn carried(&self) -> Option<Option<mod_api::ItemStack>> {
+        self.game.carried.try_into_api().ok()
+    }
+
+    fn slot_backing(&self, _: usize) -> Option<MenuSlotBacking> {
+        None
+    }
+
+    fn slot_holds(&self, _: usize, _: &mod_api::ItemStack) -> Option<u32> {
+        None
+    }
+
+    fn slot_gives(&self, _: usize) -> Option<bool> {
+        None
+    }
+}
+
+impl ClientMenuView for ClientMenuRead<'_, '_> {
+    fn slot_boxes(&self) -> Option<Vec<Option<[f32; 4]>>> {
+        let game = self.game;
+        if game.screen != Screen::Inventory || !game.screen_hooks_open() {
+            return None;
+        }
+        let renderer = game.renderer.as_ref()?;
+        let batch = super::HudBatch::new(
+            [renderer.config.width, renderer.config.height],
+            game.settings.gui_scale_inputs(),
+        );
+        self.inventory_slot_boxes(&batch)
+    }
+
+    fn slot_kinds(&self) -> Option<Vec<MenuSlotKind>> {
+        if !matches!(self.game.screen, Screen::Inventory | Screen::Creative) || !self.has_level {
+            return None;
+        }
+        let content = self.declared_type();
+        let count = match content {
+            Some(content) => content.slot_count(),
+            None => self.slot_count()?,
+        };
+        Some(layout_kinds(self.name, count, content, |slot| {
+            Game::inventory_screen_slot_with_type(self.name, slot as i32, || content)
+        }))
+    }
+
+    fn merchant_offers(&self) -> Result<Option<Vec<MerchantOffer>>, LevelReadError> {
+        if self.name != "minecraft:merchant" {
+            return Ok(None);
+        }
+        let merchant = self
+            .game
+            .station
+            .as_ref()
+            .and_then(|station| station.merchant.as_ref())
+            .ok_or(LevelReadError::Unavailable)?;
+        merchant
+            .session
+            .offers
+            .try_into_api()
+            .map(Some)
+            .map_err(|_| LevelReadError::Unavailable)
+    }
+}
+
 fn client_click_ops(
     menu: &str,
     clicks: &[MenuClick],
@@ -847,7 +915,6 @@ fn client_click_ops(
 
 #[cfg(test)]
 mod tests {
-    use super::super::api_values::TryIntoApi;
     use super::super::{lan::LanSettings, native_entity_refs::tests::with_game};
     use super::*;
     use std::sync::{
@@ -958,8 +1025,12 @@ mod tests {
         with_panel(0, |game, opening| {
             game.screen = super::super::Screen::Inventory;
             let batch = super::super::HudBatch::new([800, 600], game.settings.gui_scale_inputs());
+            let player = game.local_player().unwrap();
+            let inventory = game.player_container_menu(player).unwrap();
             let boxes = game
-                .inventory_menu_slot_boxes(0, "inventory", &batch)
+                .resolve_client_menu(inventory)
+                .unwrap()
+                .inventory_slot_boxes(&batch)
                 .unwrap();
             assert_eq!(boxes.len(), 46);
             for (index, expected_slot) in [(0, 200), (9, 9), (36, 0), (45, 504)] {
@@ -969,7 +1040,8 @@ mod tests {
                     Some(expected_slot)
                 );
             }
-            assert!(game.inventory_menu_slot_boxes(1, PANEL, &batch).is_none());
+            let future = menu_ref(player, 1, inventory.fields().generation);
+            assert!(game.resolve_client_menu(future).is_none());
             game.screen = super::super::Screen::Playing;
             open_panel(game);
             let menu = game
@@ -980,14 +1052,19 @@ mod tests {
                 Some((menu, 0)),
                 "the same live handle and count are available during screen_opening"
             );
-            assert!(
-                game.inventory_menu_slot_boxes(1, "unsupported", &batch)
-                    .is_none()
-            );
             assert_eq!(
-                game.inventory_menu_slot_boxes(1, PANEL, &batch),
+                game.resolve_client_menu(menu)
+                    .unwrap()
+                    .inventory_slot_boxes(&batch),
                 Some(vec![])
             );
+            let remote = game.remote.as_mut().unwrap();
+            remote.menu.set(Some((1, "unsupported".into())));
+            let unknown = menu_ref(player, 1, remote.menu.generation);
+            let view = game.resolve_client_menu(unknown).unwrap();
+            assert_eq!(view.inventory_slot_boxes(&batch), None);
+            assert_eq!(view.slot_count(), None);
+            assert_eq!(view.carried(), Some(None));
         });
     }
 
@@ -1295,40 +1372,16 @@ mod tests {
             let player = game.player(123).unwrap();
             let inventory = game.player_container_menu(player).unwrap();
             assert_eq!(
-                inventory
-                    .with_view(game, |view| view.container_id())
-                    .flatten(),
-                Some(0)
-            );
-            assert_eq!(
-                inventory.with_view(game, |view| assert_eq!(view.kind(), Some(None))),
+                inventory.with_view(game, |view| {
+                    assert_eq!(view.container_id(), Some(0));
+                    assert_eq!(view.kind(), Some(None));
+                    assert_eq!(view.slot_count(), Some(46));
+                    assert_eq!(view.slot(0), Some(None));
+                    assert_eq!(view.slot_backing(36), Some(MenuSlotBacking::Player(0)));
+                    assert_eq!(view.slot_backing(45), Some(MenuSlotBacking::Player(40)));
+                    assert_eq!(view.slot(46), None);
+                }),
                 Some(())
-            );
-            assert_eq!(
-                inventory
-                    .with_view(game, |view| view.slot_count())
-                    .flatten(),
-                Some(46)
-            );
-            assert_eq!(
-                inventory.with_view(game, |view| view.slot(0)).flatten(),
-                Some(None)
-            );
-            assert_eq!(
-                inventory
-                    .with_view(game, |view| view.slot_backing(36))
-                    .flatten(),
-                Some(MenuSlotBacking::Player(0))
-            );
-            assert_eq!(
-                inventory
-                    .with_view(game, |view| view.slot_backing(45))
-                    .flatten(),
-                Some(MenuSlotBacking::Player(40))
-            );
-            assert_eq!(
-                inventory.with_view(game, |view| view.slot(46)).flatten(),
-                None
             );
             let stone = ItemStack::new("minecraft:stone", 4);
             let host = game.lan.as_mut().unwrap();
@@ -1336,10 +1389,9 @@ mod tests {
                 let value = Some(stone.clone());
                 host.hub.guests.update(0, |g| g.inventory[9] = value);
             }
-            {
-                let value = Some(stone.clone());
-                host.hub.guests.update(0, |guest| guest.carried = value);
-            }
+            host.hub.guests.update(0, |guest| {
+                guest.carried = Some(ItemStack::new("minecraft:stick", 2));
+            });
             let title = sunrise_core::nbt::Tag::String("test".into());
             let window = host
                 .hub
@@ -1352,37 +1404,29 @@ mod tests {
                 None
             );
             let menu = game.player_container_menu(player).unwrap();
-            assert_eq!(menu.container_id(game), Some(window));
-            assert_eq!(menu.kind(game), Some(Some("minecraft:generic_9x1".into())));
-            assert_eq!(menu.slot_count(game), Some(45));
-            assert_eq!(
-                menu.with_view(game, |view| view.slot(0)).flatten(),
-                Some(Some(stone.try_into_api().unwrap()))
+            let expected_stone = mod_api::ItemStack::new(
+                mod_api::__private::item_key("minecraft:stone").unwrap(),
+                4,
             );
-            assert_eq!(menu.slot(game, 1), Some(None));
-            assert_eq!(
-                menu.slot(game, 9),
-                Some(Some(stone.try_into_api().unwrap()))
+            let expected_cursor = mod_api::ItemStack::new(
+                mod_api::__private::item_key("minecraft:stick").unwrap(),
+                2,
             );
             assert_eq!(
-                menu.carried(game),
-                Some(Some(stone.try_into_api().unwrap()))
-            );
-            assert_eq!(
-                menu.with_view(game, |view| view.slot_backing(0)).flatten(),
-                Some(MenuSlotBacking::Native(0))
-            );
-            assert_eq!(
-                menu.with_view(game, |view| view.slot_backing(9)).flatten(),
-                Some(MenuSlotBacking::Player(9))
-            );
-            assert_eq!(
-                menu.with_view(game, |view| view.slot_backing(36)).flatten(),
-                Some(MenuSlotBacking::Player(0))
-            );
-            assert_eq!(
-                menu.with_view(game, |view| view.slot_backing(45)).flatten(),
-                None
+                menu.with_view(game, |view| {
+                    assert_eq!(view.container_id(), Some(1));
+                    assert_eq!(view.kind(), Some(Some("minecraft:generic_9x1")));
+                    assert_eq!(view.slot_count(), Some(45));
+                    assert_eq!(view.slot(0), Some(expected_stone.clone()));
+                    assert_eq!(view.slot(1), Some(None));
+                    assert_eq!(view.slot(9), Some(expected_stone));
+                    assert_eq!(view.carried(), Some(expected_cursor));
+                    assert_eq!(view.slot_backing(0), Some(MenuSlotBacking::Native(0)));
+                    assert_eq!(view.slot_backing(9), Some(MenuSlotBacking::Player(9)));
+                    assert_eq!(view.slot_backing(36), Some(MenuSlotBacking::Player(0)));
+                    assert_eq!(view.slot_backing(45), None);
+                }),
+                Some(())
             );
             let host = game.lan.as_mut().unwrap();
             for _ in 0..100 {
@@ -1391,9 +1435,11 @@ mod tests {
                     .unwrap();
             }
             assert_eq!(host.hub.guests[0].menu.as_ref().unwrap().window, window);
-            assert_eq!(
-                menu.with_view(game, |view| view.slot_count()).flatten(),
-                None
+            let mut stale_called = false;
+            assert_eq!(menu.with_view(game, |_| stale_called = true), None);
+            assert!(
+                !stale_called,
+                "the reused window id cannot lend its replacement"
             );
             let newer = game.player_container_menu(player).unwrap();
             let host = game.lan.as_mut().unwrap();

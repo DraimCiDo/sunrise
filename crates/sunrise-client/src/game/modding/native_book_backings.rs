@@ -49,7 +49,7 @@ pub(super) struct Backings {
     pub main: Vec<Option<ItemStack>>,
     main_keys: Vec<Option<MainKey>>,
     native: Option<Vec<Option<NativeMenuSlot>>>,
-    native_menu: Option<(u32, u128, i32)>,
+    native_menu: Option<(u128, i32)>,
     native_hidden: BTreeSet<usize>,
     clear: BTreeSet<MainKey>,
     pub source_keys: Vec<Vec<Option<Key>>>,
@@ -88,11 +88,7 @@ impl Backings {
                             .map(Option::flatten)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                (
-                    main,
-                    Some(native),
-                    Some((before.conn, before.uuid, before.window)),
-                )
+                (main, Some(native), Some((before.uuid, before.window)))
             }
             sunrise_client::lan::menu::Slots::Block(_) => {
                 let guest = game
@@ -278,41 +274,50 @@ impl Backings {
         self.unchanged_blocks(game) && self.native_is_unchanged(game)
     }
     fn native_is_unchanged(&self, game: &mut Game<'_>) -> bool {
-        let (Some(native), Some((conn, uuid, window))) = (&self.native, self.native_menu) else {
+        let (Some(native), Some((uuid, window))) = (&self.native, self.native_menu) else {
             return self.native.is_none() && self.native_menu.is_none();
         };
-        if game.menu(uuid, window).is_none()
-            || native.iter().enumerate().any(|(slot, before)| {
-                !self.native_hidden.contains(&slot)
-                    && game.native_menu_place(conn, window, slot)
-                        != before.as_ref().map(|slot| slot.place)
+        let Some(menu) = game.menu(uuid, window) else {
+            return false;
+        };
+        if menu.with_view(game, |view| {
+            native.iter().enumerate().all(|(slot, before)| {
+                self.native_hidden.contains(&slot)
+                    || match before {
+                        Some(before) => {
+                            view.slot_backing(slot) == Some(MenuSlotBacking::Place(before.place))
+                        }
+                        None => matches!(view.slot_backing(slot), Some(MenuSlotBacking::Native(_))),
+                    }
             })
+        }) != Some(true)
         {
             return false;
         }
         // Live handler values are checked through the same menu slot place recipe placement
-        // publishes, not the guest's cached native-menu mirror.
-        let Some(menu) = game.menu(uuid, window) else {
-            return false;
-        };
+        // publishes, not the guest's cached mirror. Re-resolve after any handler can reenter.
         let player = menu.fields().player;
         let host: &mut dyn ServerHost = game;
+        let mut handlers_read = false;
         native.iter().enumerate().all(|(slot, before)| {
             if self.native_hidden.contains(&slot) {
                 return true;
             }
             match before {
                 Some(before) => {
+                    handlers_read = true;
                     before.place.resolves(host, player)
-                        && menu.slot_backing(host, slot)
-                            == Some(MenuSlotBacking::Place(before.place))
+                        && menu.with_view(host, |view| view.slot_backing(slot))
+                            == Some(Some(MenuSlotBacking::Place(before.place)))
                         && ItemPlace::MenuSlot { menu, slot }.stack(host).as_ref()
                             == before.stack.as_ref()
                 }
-                None => matches!(
-                    menu.slot_backing(host, slot),
-                    Some(MenuSlotBacking::Native(_))
-                ),
+                None => {
+                    !handlers_read
+                        || menu.with_view(host, |view| {
+                            matches!(view.slot_backing(slot), Some(MenuSlotBacking::Native(_)))
+                        }) == Some(true)
+                }
             }
         })
     }

@@ -219,12 +219,21 @@ callback has no `Host`.
 
 ## Reading and clicking
 
-Client hooks can read the local player's menu with `host.local_player()?.container_menu(host)`,
-including the inventory when no container is open. `MenuRef::slot_count`, `slot` and `carried`
-read on either side; `slot` and `carried` return an outer `None` when the handle or slot is
-unavailable and `Some(None)` for an empty slot. Each read checks the world epoch and menu generation,
-so a handle cannot read a replacement, reopened or respawned menu. These methods do not click or
-change slots.
+Client hooks can get the local player's menu with `host.local_player()?.container_menu(host)`,
+including the inventory when no container is open. On either side, group related reads in
+`menu.with_view(host, |view| …)`. It checks the world epoch and menu generation once; a stale
+handle or unavailable host returns `None` without calling the closure. For example:
+
+```rust,ignore
+let snapshot = menu.with_view(host, |view| (view.slot_count(), view.slot(0), view.carried()));
+```
+
+`view.slot` and `view.carried` return owned stacks: `Some(None)` is empty, and `None` means the
+slot does not exist or the stack could not be read. `view.slot_count()` is `None` for an unknown
+client layout, which can still have a cursor. On the server, `view.container_id()` includes id 0
+for inventory, and `view.kind()` is `Some(None)` for inventory or `Some(Some(name))` for a known
+registry menu type. The name is borrowed: copy it inside the closure if you need to keep it. Reads
+do not click or change slots. Do any writes after the scope ends; a write resolves the handle again.
 
 Server hooks can also read the acting player's supported menu through
 `player.container_menu(host)`. Inventory, equipment, cursor and ender contents come from
@@ -233,7 +242,7 @@ menu kinds, hidden-slot refusal and stale-generation checks still apply.
 
 Mutable client hooks can submit a vanilla click with
 `menu.click(host, &[mod_api::MenuClick::QuickMove { slot }])`. The slot is the same menu-order
-index used by `slot`, not a hotbar index or a GUI slot id. For example:
+index used by `MenuView::slot`, not a hotbar index or a GUI slot id. For example:
 
 ```rust,ignore
 {{#include ../../../examples/src/lib.rs:menu_quick_move}}
@@ -262,15 +271,15 @@ buttons don't take; the server's menu decides what it does, and the inventory me
 ## Writing slot storage
 
 `ItemPlace::MenuSlot { menu, slot }` is slot `slot` of a player's open menu, a `MenuRef` (`player.container_menu(host)`). NeoForge 26.3's `ItemAccess` reaches a player's inventory slot (`forPlayerSlot`) and cursor
-(`forPlayerCursor`), not a menu's slot. It is the storage the slot shows, named by `menu.slot_backing(host, slot)`
+(`forPlayerCursor`), not a menu's slot. It is the storage the slot shows, named by `view.slot_backing(slot)` in a menu read scope
 (`MenuSlotBacking`), and a write goes to that storage through its own handler, so it is kept once by the transaction
 and the storage's rules hold: the player's inventory, armour and off hand by their
 [`ENTITY_ITEMS`](entity-items.md) index, a chest's or a furnace's slot through its `ITEMS` handler, a chest minecart's
 or a chested mount's through its `ENTITY_ITEMS`, and the player's ender chest, inventory crafting grid and a mod's chest
 menu (`open_menu`, reached with `host.menu(uuid, window)`), kept by the game. The slot's own rules come first, as a click has them:
-`menu.slot_holds(host, slot, &stack)` is how many of a stack it holds (`Slot.mayPlace`, then `Slot.getMaxStackSize`: a
+`view.slot_holds(slot, &stack)` is how many of a stack it holds (`Slot.mayPlace`, then `Slot.getMaxStackSize`: a
 furnace's fuel slot one bucket, an armour slot one piece that fits it, a shulker box's slot no shulker box, a result
-slot none), and `menu.slot_gives(host, slot)` whether it gives up what it holds (`Slot.mayPickup`: bound armour stays
+slot none), and `view.slot_gives(slot)` whether it gives up what it holds (`Slot.mayPickup`: bound armour stays
 on outside creative). An insert fills that slot alone, and what doesn't fit stays out. A crafting grid a transaction
 changed has its result made again at the outermost commit, once for each player however many writes it took
 (`InventoryMenu.slotsChanged`, with `prepare_item_craft`); the result slot takes nothing and gives nothing,
@@ -350,7 +359,7 @@ slots with `player.back_mod_menu_slots(host, window, places)`, one `MenuSlotPlac
 - `MenuSlotPlace::EntityItems { entity, slot }`: slot `slot` of `entity`'s `ENTITY_ITEMS` handler, as a mod's provider
   answers it.
 
-From then on `MenuRef::slot_backing` names the slot `MenuSlotBacking::Place(place)`. A pickup or shift-click on the
+From then on `MenuView::slot_backing` names the slot `MenuSlotBacking::Place(place)`. A pickup or shift-click on the
 menu, and an `ItemPlace::MenuSlot` write, go through that storage's own handler in one transaction, so an aborted
 transaction leaves it as it was. The client sees ordinary synced slots; there is no new packet. Nothing runs per tick:
 the slots are mirrored after each click on the menu and after each `ItemPlace` write to the player's places (their hand,
@@ -413,8 +422,11 @@ crafting grid). A dry run, the viewer's check, must move nothing. Vanilla menu t
 world and a LAN host's own player get the same contract: the game is the server there and asks the part of the
 player's open block menu before its own grid transfer, on the same thread.
 
-`menu.slot_kinds(host)` is a client read in menu index order, with exactly
-`slot_count` entries. It describes the client's layout and content declaration,
+`menu.with_client_view(host, |view| view.slot_kinds())` reads client slot roles in menu index order,
+with exactly `slot_count` entries when both are known. The outer result refuses an unavailable phase
+or backend; `Ok(None)` means the menu did not resolve. The view itself can resolve even when its
+screen is not visible. To treat all unavailable cases as `None`, use `.ok().flatten().flatten()`.
+The roles describe the client's layout and content declaration,
 not the server's backing or acceptance rules. `Player(index)` uses hotbar 0–8,
 main 9–35, armour 36–39 (feet to head), off hand 40. Container equipment is
 `Equipment`. General storage, including unmarked linked slots, is `Storage`.

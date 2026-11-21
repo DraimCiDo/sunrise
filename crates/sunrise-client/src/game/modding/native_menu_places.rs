@@ -676,13 +676,18 @@ mod tests {
     fn stone(game: &mut Game<'_>, menu: MenuRef) -> u32 {
         let host: &mut dyn ServerHost = game;
         let boxed: u32 = (0..27).map(|n| held_slot(n).amount(host)).sum();
-        let own: u32 = (0..27)
-            .map(|slot| match menu.slot_backing(host, slot) {
-                // A backed slot is a view of the box, already counted above.
-                Some(MenuSlotBacking::Native(_)) => ItemPlace::MenuSlot { menu, slot }.amount(host),
-                _ => 0,
+        let own: u32 = menu
+            .with_view(host, |view| {
+                // Only count native storage here: backed slots mirror the box counted above.
+                (0..27)
+                    .filter(|&slot| {
+                        matches!(view.slot_backing(slot), Some(MenuSlotBacking::Native(_)))
+                    })
+                    .filter_map(|slot| view.slot(slot).flatten())
+                    .map(|stack| stack.count())
+                    .sum()
             })
-            .sum();
+            .unwrap_or(0);
         let carried = ItemPlace::PlayerSlot {
             player: 123,
             slot: 9,

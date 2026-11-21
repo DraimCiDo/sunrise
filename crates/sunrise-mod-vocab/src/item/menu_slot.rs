@@ -2,9 +2,82 @@
 //! NeoForge 26.3's `ItemAccess.forPlayerSlot`. A slot is the storage it shows, so a write through
 //! [`ItemPlace::MenuSlot`] is a write to that storage, journaled once, through its own handler,
 //! under the slot's own rules.
-use crate::{EntityRef, ItemPlace, LevelRef, MenuRef, MenuSlotPlace};
+use crate::{
+    ClientHost, EntityRef, Host, ItemPlace, ItemStack, LevelReadError, LevelRef, MenuRef,
+    MenuSlotPlace, MerchantOffer, backend_of,
+};
 
-/// What a menu slot shows: where [`MenuRef::slot_backing`] says its stack lives.
+/// Read-only access to one resolved menu (`PlayerContainerEvent.getContainer`).
+/// Use [`MenuRef::with_view`] to read it while it is lent to your callback.
+// no wire: a borrowed view of a live menu, not a transported value.
+pub trait MenuView {
+    /// The server's container id (0 for inventory). `None` on the client.
+    fn container_id(&self) -> Option<i32>;
+
+    /// The server's registry menu type, borrowed for this read. `Some(None)` is the
+    /// inventory menu; `None` means missing registry metadata or a client view.
+    fn kind(&self) -> Option<Option<&str>>;
+
+    /// Number of slots in `AbstractContainerMenu.slots`. `None` for an unknown client layout.
+    fn slot_count(&self) -> Option<usize>;
+
+    /// The stack at vanilla's `Slot.index`, in menu order, as an owned API value.
+    /// `Some(None)` is an empty slot; `None` is an unavailable or out-of-range slot,
+    /// or a stack that could not be projected. [`Self::slot_backing`] gives the server's
+    /// index in the backing container instead.
+    fn slot(&self, slot: usize) -> Option<Option<ItemStack>>;
+
+    /// Carried (cursor) stack as an owned API value, even if the layout is unknown.
+    /// `Some(None)` is an empty cursor; `None` means the stack could not be projected.
+    fn carried(&self) -> Option<Option<ItemStack>>;
+
+    /// The storage a slot shows (`Slot.container` and `getContainerSlot`): the player's
+    /// [`ENTITY_ITEMS`](crate::ENTITY_ITEMS) index, a block entity or entity slot, the
+    /// ender chest, a crafting grid or a mod's menu. `None` for an unavailable or
+    /// out-of-range slot, or on the client.
+    fn slot_backing(&self, slot: usize) -> Option<MenuSlotBacking>;
+
+    /// How many of `stack` this server slot holds (`Slot.mayPlace`, then
+    /// `Slot.getMaxStackSize`): a furnace's fuel slot one bucket, an armour slot one
+    /// piece that fits it, a crafting result zero. `None` when the rules or stack are
+    /// unavailable, the slot is out of range, or this is a client view.
+    fn slot_holds(&self, slot: usize, stack: &ItemStack) -> Option<u32>;
+
+    /// Whether this server slot gives up what it holds (`Slot.mayPickup`); for example,
+    /// bound armour stays on outside creative. `None` when the rules or slot are
+    /// unavailable, or on the client.
+    fn slot_gives(&self, slot: usize) -> Option<bool>;
+}
+
+/// A resolved client menu, including queries about its layout and synchronized offers.
+/// Use [`MenuRef::with_client_view`] to read it while it is lent to your callback.
+// no wire: a borrowed view of a live menu, not a transported value.
+pub trait ClientMenuView: MenuView {
+    /// The open inventory screen's slot boxes in menu order, as `[x, y, width, height]`
+    /// in GUI pixels (`AbstractContainerScreen.leftPos`/`topPos` plus each `Slot.x`/`Slot.y`,
+    /// 16x16). A `None` entry is a hidden slot. The whole answer is `None` when geometry
+    /// is unavailable, including on another screen or with the recipe book covering the
+    /// inventory. The boxes follow the GUI scale and recipe book offset.
+    fn slot_boxes(&self) -> Option<Vec<Option<[f32; 4]>>>;
+
+    /// The client layout's slot roles in menu order, with the length of [`MenuView::slot_count`]
+    /// when known. Machine inputs (including fuel and brewing bottle slots) are `Input`;
+    /// unclassified roles are `Other`. In creative mode this describes the underlying
+    /// inventory, not the tab wrappers. `None` without an inventory screen or known layout.
+    fn slot_kinds(&self) -> Option<Vec<MenuSlotKind>>;
+
+    /// A merchant's synchronized offers, copied in display order (`MerchantMenu.getOffers`).
+    /// Includes both payments, the result with its components, and stock and price data.
+    /// Use [`MerchantOffer::cost_a_count`] for the adjusted first payment. No trade is
+    /// selected or taken and no packet is sent.
+    ///
+    /// A non-merchant menu returns `Ok(None)`; an open merchant with no offers returns
+    /// `Ok(Some(Vec::new()))`. An unavailable merchant or an offer that cannot be projected
+    /// returns [`LevelReadError::Unavailable`].
+    fn merchant_offers(&self) -> Result<Option<Vec<MerchantOffer>>, LevelReadError>;
+}
+
+/// What a menu slot shows: where [`MenuView::slot_backing`] says its stack lives.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
 pub enum MenuSlotBacking {
@@ -70,6 +143,41 @@ impl crate::AccessRefusal for MenuDataRefusal {
 }
 
 impl MenuRef {
+    /// Resolve this menu once for related reads. Calls `read` once if it is current and the
+    /// host can supply it, or returns `None` without calling it. The view and borrows from
+    /// it cannot escape the callback; return copied data or an owned value instead.
+    pub fn with_view<R>(self, host: &dyn Host, read: impl FnOnce(&dyn MenuView) -> R) -> Option<R> {
+        let backend = backend_of(host)?;
+        let mut read = Some(read);
+        let mut result = None;
+        backend.with_menu_view(self, &mut |view| {
+            if let Some(read) = read.take() {
+                result = Some(read(view));
+            }
+        });
+        result
+    }
+
+    /// Resolve this client's current menu once, including when its screen is not visible.
+    /// Calls `read` once if the menu resolves, returns `Ok(None)` for a stale or foreign
+    /// handle, and returns [`LevelReadError::Unavailable`] when the phase or host cannot
+    /// supply the read. The view and borrows from it cannot escape the callback.
+    pub fn with_client_view<R>(
+        self,
+        host: &dyn ClientHost,
+        read: impl FnOnce(&dyn ClientMenuView) -> R,
+    ) -> Result<Option<R>, LevelReadError> {
+        let backend = backend_of(host).ok_or(LevelReadError::Unavailable)?;
+        let mut read = Some(read);
+        let mut result = None;
+        backend.with_client_menu_view(self, &mut |view| {
+            if let Some(read) = read.take() {
+                result = Some(read(view));
+            }
+        })?;
+        Ok(result)
+    }
+
     /// The stack on this menu's cursor, as a place (`ItemAccess.forPlayerCursor`): nothing once
     /// the menu is gone.
     pub fn cursor(self) -> ItemPlace {

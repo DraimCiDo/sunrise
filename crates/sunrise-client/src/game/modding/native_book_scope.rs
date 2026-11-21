@@ -137,7 +137,7 @@ impl Game<'_> {
             }
             Slots::Native => (
                 None,
-                Some(self.mod_book_native_slots(conn, uuid, window, size, &hidden)?),
+                Some(self.mod_book_native_slots(uuid, window, size, &hidden)?),
             ),
             _ => return Err(Refusal::Unavailable),
         };
@@ -240,7 +240,6 @@ impl Game<'_> {
 
     fn mod_book_native_slots(
         &mut self,
-        conn: u32,
         uuid: u128,
         window: i32,
         size: usize,
@@ -248,33 +247,49 @@ impl Game<'_> {
     ) -> Result<Vec<Option<NativeMenuSlot>>, Refusal> {
         let menu = self.menu(uuid, window).ok_or(Refusal::Changed)?;
         let player = menu.fields().player;
-        let places: Vec<_> = (0..size)
-            .map(|slot| self.native_menu_place(conn, window, slot))
-            .collect();
+        let places = menu
+            .with_view(self, |view| {
+                (0..size)
+                    .map(|slot| {
+                        if hidden.contains(&slot) {
+                            return Ok(None);
+                        }
+                        match view.slot_backing(slot) {
+                            Some(MenuSlotBacking::Place(place)) => Ok(Some(place)),
+                            Some(MenuSlotBacking::Native(_)) => Ok(None),
+                            _ => Err(Refusal::Changed),
+                        }
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .ok_or(Refusal::Changed)??;
         let mut slots = Vec::with_capacity(size);
         let host: &mut dyn ServerHost = self;
+        let mut handlers_read = false;
         for (slot, place) in places.into_iter().enumerate() {
             if hidden.contains(&slot) {
                 slots.push(None);
                 continue;
             }
-            match place {
-                Some(place)
-                    if menu.slot_backing(host, slot) == Some(MenuSlotBacking::Place(place))
-                        && place.resolves(host, player) =>
-                {
-                    let stack = ItemPlace::MenuSlot { menu, slot }.stack(host);
-                    slots.push(Some(NativeMenuSlot { place, stack }));
+            // A previous handler may have reentered and changed the backing. The snapshot
+            // alone only suffices until the first handler call.
+            if handlers_read
+                && menu.with_view(host, |view| match place {
+                    Some(place) => view.slot_backing(slot) == Some(MenuSlotBacking::Place(place)),
+                    None => matches!(view.slot_backing(slot), Some(MenuSlotBacking::Native(_))),
+                }) != Some(true)
+            {
+                return Err(Refusal::Changed);
+            }
+            if let Some(place) = place {
+                if !place.resolves(host, player) {
+                    return Err(Refusal::Changed);
                 }
-                Some(_) => return Err(Refusal::Changed),
-                None if matches!(
-                    menu.slot_backing(host, slot),
-                    Some(MenuSlotBacking::Native(_))
-                ) =>
-                {
-                    slots.push(None);
-                }
-                None => return Err(Refusal::Changed),
+                let stack = ItemPlace::MenuSlot { menu, slot }.stack(host);
+                slots.push(Some(NativeMenuSlot { place, stack }));
+                handlers_read = true;
+            } else {
+                slots.push(None);
             }
         }
         Ok(slots)

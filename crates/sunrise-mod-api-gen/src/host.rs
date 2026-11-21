@@ -981,10 +981,18 @@ fn signature_args(sig: &syn::Signature, name: &str) -> Result<String, String> {
         .join(", "))
 }
 
-/// How a read answers where there is no backend to ask: its typed refusal, or `None` where only
-/// a `String` forwards.
-fn refusal(sig: &syn::Signature, name: &str) -> Result<Option<&'static str>, String> {
-    let syn::ReturnType::Type(_, ty) = &sig.output else {
+/// How a read answers where there is no backend to ask: its typed refusal, an explicit
+/// no-op for optional loans, or `None` where only a `String` forwards.
+fn refusal(entry: &Entry) -> Result<Option<&'static str>, String> {
+    let name = &entry.name;
+    let syn::ReturnType::Type(_, ty) = &entry.sig.output else {
+        if entry
+            .attrs
+            .iter()
+            .any(|attr| attr.path().is_ident("decline_unavailable"))
+        {
+            return Ok(Some("()"));
+        }
         return Err(format!("{name}: a backend read returns a value"));
     };
     let syn::Type::Path(path) = &**ty else {
@@ -1216,7 +1224,7 @@ fn goal_view(
             entry.name.as_str(),
             signature_args(&entry.sig, &entry.name)?,
         );
-        let refusal = refusal(&entry.sig, name)?;
+        let refusal = refusal(entry)?;
         let mut sig = entry.sig.clone();
         sig.ident = syn::parse_str(name).map_err(|e| format!("{name}: {e}"))?;
         // Entity data answers the tick's view; everything else forwards to the real backend the
@@ -1233,15 +1241,19 @@ fn goal_view(
         );
         // How a forwarded read answers a host without a backend: the typed refusal, or the empty
         // string of a metadata read.
+        let forward = format!(
+            "mod_api::__private::backend_read(self.host, |backend| backend.{name}({args}))"
+        );
         let forwarded = match refusal {
-            Some("None") => ".flatten()".to_string(),
+            Some("()") => format!("let _ = {forward};"),
+            Some("None") => format!("{forward}.flatten()"),
             // A `Result` read's no-backend answer is its error type's own `NoBackend` value,
             // wrapped back in the `Err`.
             Some(refusal) if refusal.starts_with("Err(") => {
-                ".unwrap_or_else(|| Err(mod_api::NoBackend::no_backend()))".to_string()
+                format!("{forward}.unwrap_or_else(|| Err(mod_api::NoBackend::no_backend()))")
             }
-            Some(refusal) => format!(".unwrap_or({refusal})"),
-            None => ".unwrap_or_default()".to_string(),
+            Some(refusal) => format!("{forward}.unwrap_or({refusal})"),
+            None => format!("{forward}.unwrap_or_default()"),
         };
         let body = if GOAL_VIEW_READS.contains(&name) {
             format!("self.r_{name}({args})")
@@ -1259,11 +1271,8 @@ fn goal_view(
                 format!("let _ = {args}; {refusal}")
             }
         } else {
-            // The read names data the tick leaves in place, so the real backend answers it:
-            // `backend_read` holds the `None` a host without one answers.
-            format!(
-                "mod_api::__private::backend_read(self.host, |backend| backend.{name}({args})){forwarded}"
-            )
+            // The read names data the tick leaves in place, so the real backend answers it.
+            forwarded.clone()
         };
         // Entities that remain in Game can use its ordinary backend. For a
         // multi-entity query all handle arguments must be present there: the
@@ -1298,9 +1307,12 @@ fn goal_view(
                 .map(|entity| format!("self.is_game_entity({entity})"))
                 .collect::<Vec<_>>()
                 .join(" && ");
-            format!(
-                "if {all_available} {{ return mod_api::__private::backend_read(self.host, |backend| backend.{name}({args})){forwarded}; }} {body}"
-            )
+            let forward_and_return = if refusal == Some("()") {
+                format!("{forwarded} return;")
+            } else {
+                format!("return {forwarded};")
+            };
+            format!("if {all_available} {{ {forward_and_return} }} {body}")
         } else {
             body
         };

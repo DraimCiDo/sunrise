@@ -1,6 +1,7 @@
 //! A client's `LevelRef::brightness`, `EntityRef::set_sprinting` and the server's
 //! `tick_rate_is_frozen`.
 
+use super::api_values::TryIntoApi;
 use super::native_entity_refs::tests::with_game;
 use super::native_guest_turn_tests::with_guests;
 use super::{Game, execution_role::ExecutionRole};
@@ -313,21 +314,17 @@ fn client_merchant_offers_follow_the_open_menu() {
                 window,
                 menu.fields().generation,
             );
-            assert_eq!(
-                foreign
-                    .with_client_view(game, |view| view.merchant_offers())
-                    .and_then(|scope| scope.transpose())
-                    .map(Option::flatten),
-                Ok(None)
-            );
+            let mut called = false;
+            assert_eq!(foreign.with_client_view(game, |_| called = true), Ok(None));
+            assert!(!called);
             {
                 let _phase = PhaseOwner::scope(ModPhase::Reloading);
                 assert_eq!(
-                    menu.with_client_view(game, |view| view.merchant_offers())
-                        .and_then(|scope| scope.transpose())
-                        .map(Option::flatten),
+                    menu.with_client_view(game, |_| called = true),
                     Err(LevelReadError::Unavailable)
                 );
+                assert_eq!(menu.with_view(game, |_| called = true), None);
+                assert!(!called);
             }
 
             let discounted_book = play::NetOffer {
