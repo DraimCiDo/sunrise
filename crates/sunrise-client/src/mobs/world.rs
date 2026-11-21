@@ -799,9 +799,9 @@ impl MobWorld<'_> {
 
 /// Level.clip with VISUAL shapes and no fluids: the block the segment first
 /// hits, None inside when it hits nothing and outside when the segment is
-/// too long to walk. Glass and copper grates (`TransparentBlock`) and bars and panes
-/// (`IronBarsBlock`) have no visual shape; mud, soul sand and powder snow
-/// look like full blocks.
+/// too long to walk. Glass and copper grates (`TransparentBlock`), bars and panes
+/// (`IronBarsBlock`) and powder snow have no visual shape; mud and soul sand
+/// look like full blocks; fences and snow layers use their outline.
 pub fn visual_clip<W: DynamicCollisionWorld>(
     facts: &BlockFacts,
     collision: &BlockCollisionRegistry,
@@ -821,10 +821,23 @@ pub fn visual_clip<W: DynamicCollisionWorld>(
             || name.ends_with("glass_pane")
             || name.ends_with("_bars")
             || name.ends_with("copper_grate")
+            || name == "powder_snow"
         {
             return None;
         }
-        if matches!(name, "mud" | "soul_sand" | "powder_snow") {
+        // FenceBlock and SnowLayerBlock: their outline (a fence's collision shape is 24 px tall).
+        if name == "snow" || name.ends_with("_fence") {
+            return VoxelShape::clip_boxes(
+                facts.get(id).outline.iter().map(|b| {
+                    Aabb::new(Vec3::new(b[0], b[1], b[2]), Vec3::new(b[3], b[4], b[5]))
+                }),
+                from,
+                to,
+                p,
+            )
+            .map(|_| [p.x, p.y, p.z]);
+        }
+        if matches!(name, "mud" | "soul_sand") {
             return full
                 .move_by(Vec3::new(f64::from(p.x), f64::from(p.y), f64::from(p.z)))
                 .clip(from, to)
@@ -1123,6 +1136,50 @@ mod scaffolding_sight_tests {
                 let above = Vec3::new(0.5, 66.0 + 1.62, 0.5);
                 assert!(w.line_of_sight_for(Some(64.0), below, above));
                 assert!(!w.line_of_sight_for(Some(66.0), above, below));
+            },
+        );
+        assert!(ran, "vanilla data is missing");
+    }
+
+    /// `ClipContext.Block.VISUAL` (Creaking's `isLookingAtMe`): a fence and a snow layer use their
+    /// outline, not the 24 px / one-layer-shorter collision shape; powder snow has none.
+    #[test]
+    #[ignore = "daily"]
+    fn visual_sight_uses_the_fence_outline_and_skips_powder_snow() {
+        use sunrise_core::nbt::Tag;
+        let ran = super::with_built_test_world(
+            &[],
+            |world, registry| {
+                world.chunks.insert(
+                    (0, 0),
+                    std::sync::Arc::new(crate::chunk::Chunk::empty(0, 0)),
+                );
+                let snow4 = registry
+                    .saved_state_id(&Tag::compound([
+                        ("id", Tag::String("minecraft:snow".into())),
+                        (
+                            "properties",
+                            Tag::compound([("layers", Tag::String("4".into()))]),
+                        ),
+                    ]))
+                    .unwrap();
+                for (x, name) in [(0, "oak_fence"), (2, "powder_snow")] {
+                    let id = registry.default_state(&format!("minecraft:{name}")).unwrap();
+                    world.set(x, 65, 0, id).unwrap();
+                }
+                world.set(4, 65, 0, snow4).unwrap();
+            },
+            |w, _| {
+                let see = |x: f64, y0: f64, y1: f64| {
+                    w.visual_clear_between(Vec3::new(x, y0, 0.5), Vec3::new(x, y1, 0.5))
+                };
+                // Fence: outline top 66.0, collision top 66.5.
+                assert!(see(0.5, 67.0, 66.2));
+                assert!(!see(0.5, 67.0, 65.5));
+                // Powder snow never blocks a visual ray.
+                assert!(see(2.5, 66.5, 65.1));
+                // Four layers: outline top 65.5, collision top 65.375.
+                assert!(!see(4.5, 66.0, 65.45));
             },
         );
         assert!(ran, "vanilla data is missing");
