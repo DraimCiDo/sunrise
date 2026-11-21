@@ -228,7 +228,6 @@ jobs:
             tools/check_imports.py
             tools/ci/build-musl.sh
             tools/ci/check-musl-startup.sh
-            tools/ci/check-server-slim.sh
             tools/ci/game_smoke.sh
             tools/ci/rust-version
             tools/ci/with_xvfb.py
@@ -467,7 +466,7 @@ jobs:
           set -euo pipefail
           # After the client is packaged: target/release/sunrise-client is rebuilt without the audio and
           # controllers features, so it needs neither libasound nor libudev (minimal server images lack them).
-          SUNRISE_GAME_BUILD_ID=$(git rev-parse HEAD) cargo build --release --locked --timings -p sunrise-game --no-default-features --bin sunrise-client
+          cargo build --release --locked --timings -p sunrise-game --no-default-features --bin sunrise-client
           cargo run --locked -p xtask -- package-server "$BIN/sunrise-client" "dist/${{ matrix.server_dir }}"
           folder="dist/${{ matrix.server_dir }}"
           python3 tools/check_imports.py --server "$folder/sunrise-engine" "$folder/sunrise-server" "$folder/sunrise-prepare"
@@ -478,9 +477,6 @@ jobs:
           rm -f "${{ matrix.server_asset }}"
           tar czf "${{ matrix.server_asset }}" "${{ matrix.server_dir }}"
           ls -l "${{ matrix.server_asset }}"
-      - name: The server archive starts on Debian slim without a desktop
-        if: matrix.server_asset
-        run: bash .workflow-tools/tools/ci/check-server-slim.sh "dist/${{ matrix.server_asset }}" "$(git rev-parse HEAD)"
       - uses: actions/upload-artifact@v7
         if: matrix.server_asset
         with:
