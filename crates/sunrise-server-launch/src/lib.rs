@@ -3,6 +3,7 @@
 
 pub mod config;
 mod install;
+pub mod mod_lock;
 pub mod prune;
 
 use config::Config;

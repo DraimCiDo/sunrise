@@ -5178,6 +5178,7 @@ dependencies = [
  "png",
  "rcgen",
  "rustls",
+ "semver",
  "serde",
  "serde_json",
  "sha1",
@@ -5186,6 +5187,7 @@ dependencies = [
  "sunrise-platform",
  "sunrise-release-sign",
  "sunrise-server-launch",
+ "tempfile",
  "toml",
  "ureq",
  "windows-sys 0.61.2",
@@ -5211,11 +5213,14 @@ name = "sunrise-server-launch"
 version = "0.1.0"
 dependencies = [
  "dunce",
+ "semver",
  "serde",
  "sunrise-core",
+ "sunrise-mod-package",
  "sunrise-platform",
  "toml",
  "toml_edit",
+ "url",
  "windows-sys 0.61.2",
 ]
 
@@ -5792,6 +5797,7 @@ dependencies = [
  "idna",
  "percent-encoding",
  "serde",
+ "serde_derive",
 ]
 
 [[package]]

@@ -177,7 +177,13 @@ pub struct Config {
     /// The game reads this opt-in itself before opening a world with missing mods (docs/hosting.md).
     #[serde(default, skip_serializing_if = "MissingMods::is_default")]
     pub missing_mods: MissingMods,
+    /// Launcher-managed mod choices. Even an empty table opts in to the lock check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mods: Option<Mods>,
 }
+
+mod mods;
+pub use mods::Mods;
 
 const EVENTS: [&str; 6] = ["chat", "join", "leave", "death", "kick", "announce"];
 
@@ -702,6 +708,9 @@ impl Config {
         self.transfer.check()?;
         self.discord.check()?;
         self.prune_chunks.check()?;
+        if let Some(mods) = &self.mods {
+            mods.check()?;
+        }
         if self.server.port == 0 {
             return Err("server.port must be a port number from 1 to 65535".into());
         }
