@@ -1217,7 +1217,7 @@ impl Game<'_> {
         }
         log("INFO", &startup_done(level_load_time));
         // DedicatedServer.initServer ends with saveEverything(false, true, true).
-        if self.save_dedicated_checkpoint("server startup")? {
+        if self.save_dedicated_checkpoint("server startup")?.is_none() {
             self.log_saved_levels();
         }
         if let Some(host) = self.lan.as_mut() {
@@ -1317,7 +1317,7 @@ impl Game<'_> {
                         state.pause_when_empty_seconds
                     ),
                 );
-                self.save_dedicated_checkpoint("pause on empty")?;
+                let _ = self.save_dedicated_checkpoint("pause on empty")?;
             }
             if !paused && !auto_save(&state) {
                 // `MinecraftServer.autoSave` keeps its schedule while every level's
@@ -2381,13 +2381,14 @@ fn console_level(active: super::Dim, spawn: super::Dim) -> Option<super::Dim> {
 }
 
 impl Game<'_> {
-    /// Dedicated lifecycle saves continue after an individual record refusal, but not I/O errors.
-    fn save_dedicated_checkpoint(&mut self, phase: &str) -> Result<bool> {
+    /// A partial checkpoint returns its diagnostic; only hard failures stop the lifecycle.
+    fn save_dedicated_checkpoint(&mut self, phase: &str) -> Result<Option<String>> {
         match self.save_game() {
-            Ok(()) => Ok(true),
+            Ok(()) => Ok(None),
             Err(error) if error.is::<RecordSaveFailures>() => {
-                log::warn!("Partial save during {phase}: {error}");
-                Ok(false)
+                let diagnostic = error.to_string();
+                log::warn!("Partial save during {phase}: {diagnostic}");
+                Ok(Some(diagnostic))
             }
             Err(error) => Err(error),
         }
@@ -2416,10 +2417,13 @@ impl Game<'_> {
         }
         self.native_lifecycle.begin_close();
         log("INFO", "Saving worlds");
-        if self.save_dedicated_checkpoint("crash shutdown")? {
-            self.log_saved_levels();
+        match self.save_dedicated_checkpoint("crash shutdown")? {
+            Some(diagnostic) => self.native_lifecycle_close_failed(&diagnostic),
+            None => {
+                self.log_saved_levels();
+                self.native_lifecycle_world_closed();
+            }
         }
-        self.native_lifecycle_world_closed();
         self.lan_close(false);
         Err(format!("the server thread panicked: {message}").into())
     }
@@ -2434,12 +2438,37 @@ mod tests {
             execution_role::ExecutionRole,
             native_entity_refs::tests::{fixture_root, with_game_role},
         };
-        use std::sync::Arc;
+        use mod_api::{Authority, Hooks, ModEntry, ServerHost, WorldLifecycleEvent, WorldPhase};
+        use std::sync::{Arc, Mutex};
         use sunrise_client::save::{LevelShape, SaveDir};
         use sunrise_core::nbt::{DISK_WRITE_NESTING_GUARD, Tag};
 
-        mod_platform::testing::with_mods(Vec::new().into(), || {
+        struct CloseEvents(Arc<Mutex<Vec<(WorldPhase, String)>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for CloseEvents {
+            fn world_lifecycle(&self, _: &mut dyn ServerHost, event: &mut WorldLifecycleEvent<'_>) {
+                if matches!(
+                    event.phase,
+                    WorldPhase::WorldCloseFailed | WorldPhase::WorldCloseFinal
+                ) {
+                    self.0
+                        .lock()
+                        .unwrap()
+                        .push((event.phase, event.error_text.to_owned()));
+                }
+            }
+        }
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![ModEntry::new(
+            "crash_close_events",
+            Box::new(CloseEvents(events.clone())),
+        )]
+        .into();
+        mod_platform::testing::with_mods(mods, || {
             with_game_role(fixture_root(), ExecutionRole::DedicatedServer, |game| {
+                game.native_lifecycle.begin_open(Authority::DedicatedServer);
+                game.native_lifecycle.world_open_ready().unwrap();
                 let dir = tempfile::tempdir().unwrap();
                 game.world_root = dir.path().to_path_buf();
                 game.save = Arc::new(SaveDir::new(
@@ -2447,18 +2476,33 @@ mod tests {
                     LevelShape::OVERWORLD,
                     Some(Default::default()),
                 ));
-                assert!(game.save_dedicated_checkpoint("startup fixture").unwrap());
+                assert!(
+                    game.save_dedicated_checkpoint("startup fixture")
+                        .unwrap()
+                        .is_none()
+                );
                 let invalid = (0..=DISK_WRITE_NESTING_GUARD)
                     .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
                 game.save
                     .save_entities_later(vec![((2, 0), vec![invalid])])
                     .unwrap();
-                assert!(!game.save_dedicated_checkpoint("startup fixture").unwrap());
-                assert!(!game.save_dedicated_checkpoint("pause fixture").unwrap());
+                assert!(
+                    game.save_dedicated_checkpoint("startup fixture")
+                        .unwrap()
+                        .is_some()
+                );
+                let diagnostic = game
+                    .save_dedicated_checkpoint("pause fixture")
+                    .unwrap()
+                    .unwrap();
                 let error = game.stop_after_crash("fixture panic").unwrap_err();
                 assert_eq!(
                     error.to_string(),
                     "the server thread panicked: fixture panic"
+                );
+                assert_eq!(
+                    *events.lock().unwrap(),
+                    [(WorldPhase::WorldCloseFailed, diagnostic)]
                 );
 
                 std::fs::write(dir.path().join("entities"), b"not a directory").unwrap();
