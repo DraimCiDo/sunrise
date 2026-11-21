@@ -406,14 +406,6 @@ impl Walker<'_> {
         }
     }
 }
-fn builtin(kind: &str, function: bool) -> bool {
-    shapes::contains(kind, function)
-        || (!function
-            && matches!(
-                kind,
-                "neoforge:loot_table_id" | "neoforge:can_item_perform_ability"
-            ))
-}
 
 impl<R: sunrise_core::random::RandomSource> super::Context<'_, R> {
     pub(super) fn registered_condition(&mut self, kind: &str, data: &Value) -> bool {

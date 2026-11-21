@@ -170,17 +170,6 @@ fn closer_than(a: [i32; 3], b: [i32; 3], length: i32) -> bool {
     (d as f64) < f64::from(length) * f64::from(length)
 }
 
-/// Direction's serialized names, in Direction.values() order.
-const DIRECTION_NAMES: [&str; 6] = ["down", "up", "north", "south", "west", "east"];
-
-fn direction(name: &str) -> Result<Direction, DecodeError> {
-    let i = DIRECTION_NAMES
-        .iter()
-        .position(|n| *n == name)
-        .ok_or(DecodeError::Field("direction"))?;
-    Ok(Direction::ALL[i])
-}
-
 fn direction_name(d: Direction) -> &'static str {
     DIRECTION_NAMES[Direction::ALL.iter().position(|x| *x == d).unwrap_or(0)]
 }
@@ -188,24 +177,6 @@ fn direction_name(d: Direction) -> &'static str {
 fn add(pos: [i32; 3], d: Direction) -> [i32; 3] {
     let n = d.normal();
     [pos[0] + n[0], pos[1] + n[1], pos[2] + n[2]]
-}
-
-/// The processor list a pillar runs on each of its blocks: a list holder
-/// (a name or the processors), none when absent or `minecraft:empty`.
-fn nested(
-    v: Option<&Value>,
-    resources: &StructureResources,
-    bindings: &FeatureBlockBindings<'_>,
-) -> Result<Option<ProcessorList>, DecodeError> {
-    match v {
-        None => Ok(None),
-        Some(Value::String(s)) if s == "minecraft:empty" => Ok(None),
-        Some(v) => Ok(Some(ProcessorList::decode(
-            &v.to_string(),
-            resources,
-            bindings,
-        )?)),
-    }
 }
 
 /// Runs a pillar's processor list on one of its blocks, as the mods do:
@@ -242,28 +213,6 @@ struct HeightRandomizer {
     default: BlockStateId,
 }
 impl HeightRandomizer {
-    fn decode(
-        v: &Value,
-        state: &impl Fn(&Value) -> Result<BlockStateId, DecodeError>,
-    ) -> Result<Self, DecodeError> {
-        let entries = v["entries"]
-            .as_array()
-            .map(Vec::as_slice)
-            .unwrap_or_default()
-            .iter()
-            .map(|e| {
-                let y = |k: &str| e.get(k).and_then(Value::as_i64).map(|y| y as i32);
-                let p = e["probability"]
-                    .as_f64()
-                    .ok_or(DecodeError::Field("randomizer probability"))?;
-                Ok((state(&e["block"])?, p as f32, y("min_y"), y("max_y")))
-            })
-            .collect::<Result<_, DecodeError>>()?;
-        Ok(Self {
-            entries,
-            default: state(&v["default"])?,
-        })
-    }
     fn get(&self, random: &mut dyn ProcessorRandom, y: i32) -> BlockStateId {
         let target = random.float();
         let mut bottom = 0f32;
@@ -296,32 +245,6 @@ pub struct Pillar {
     blocks: Blocks,
 }
 impl Pillar {
-    pub(super) fn decode(
-        v: &Value,
-        resources: &StructureResources,
-        bindings: &FeatureBlockBindings<'_>,
-        state: impl Fn(&Value) -> Result<BlockStateId, DecodeError>,
-    ) -> Result<Self, DecodeError> {
-        let triggers = v["pillar_trigger_and_replacements"]
-            .as_array()
-            .ok_or(DecodeError::Field("pillar_trigger_and_replacements"))?
-            .iter()
-            .map(|p| Ok((state(&p["trigger"])?, state(&p["replacement"])?)))
-            .collect::<Result<_, DecodeError>>()?;
-        Ok(Self {
-            triggers,
-            list: nested(v.get("pillar_processor_list"), resources, bindings)?,
-            direction: direction(v["direction"].as_str().unwrap_or("down"))?,
-            original: v.get("original_replaced_block").map(&state).transpose()?,
-            length: v["pillar_length"].as_i64().unwrap_or(1000) as i32,
-            forced: v["forced_placement"].as_bool().unwrap_or(false),
-            randomizer: v
-                .get("pillar_state_randomizer")
-                .map(|r| HeightRandomizer::decode(r, &state))
-                .transpose()?,
-            blocks: Blocks::decode(bindings)?,
-        })
-    }
     pub(super) fn process<W: PlacementContext>(
         &self,
         world: &mut W,
@@ -397,18 +320,6 @@ pub struct BottomPillar {
     blocks: Blocks,
 }
 impl BottomPillar {
-    pub(super) fn decode(
-        v: &Value,
-        resources: &StructureResources,
-        bindings: &FeatureBlockBindings<'_>,
-    ) -> Result<Self, DecodeError> {
-        Ok(Self {
-            list: nested(v.get("pillar_processor_list"), resources, bindings)?,
-            length: v["pillar_length"].as_i64().unwrap_or(1000) as i32,
-            forced: v["forced_placement"].as_bool().unwrap_or(false),
-            blocks: Blocks::decode(bindings)?,
-        })
-    }
     /// `relative` is the block's position in the template.
     pub(super) fn process<W: PlacementContext>(
         &self,
@@ -476,19 +387,6 @@ pub struct CloseOffFluidSources {
     blocks: Blocks,
 }
 impl CloseOffFluidSources {
-    pub(super) fn decode(
-        v: &Value,
-        resources: &StructureResources,
-        bindings: &FeatureBlockBindings<'_>,
-    ) -> Result<Self, DecodeError> {
-        let replacements = weighted_blocks(v, resources)?;
-        Ok(Self {
-            replacements,
-            ignore_down: v["ignore_down"].as_bool().unwrap_or(false),
-            if_air: v["if_air_in_world"].as_bool().unwrap_or(false),
-            blocks: Blocks::decode(bindings)?,
-        })
-    }
     pub(super) fn process<W: PlacementContext>(
         &self,
         world: &mut W,
@@ -535,16 +433,6 @@ pub struct CloseOffAirSources {
     blocks: Blocks,
 }
 impl CloseOffAirSources {
-    pub(super) fn decode(
-        v: &Value,
-        resources: &StructureResources,
-        bindings: &FeatureBlockBindings<'_>,
-    ) -> Result<Self, DecodeError> {
-        Ok(Self {
-            replacements: weighted_blocks(v, resources)?,
-            blocks: Blocks::decode(bindings)?,
-        })
-    }
     pub(super) fn process<W: PlacementContext>(
         &self,
         world: &mut W,
@@ -579,33 +467,6 @@ impl CloseOffAirSources {
     }
 }
 
-/// `weighted_list_of_replacement_blocks`: blocks by name with their weight,
-/// at least one.
-fn weighted_blocks(
-    v: &Value,
-    resources: &StructureResources,
-) -> Result<Vec<(BlockStateId, i32)>, DecodeError> {
-    let replacements = v["weighted_list_of_replacement_blocks"]
-        .as_array()
-        .ok_or(DecodeError::Field("weighted_list_of_replacement_blocks"))?
-        .iter()
-        .map(|e| {
-            let name = e["block"].as_str().ok_or(DecodeError::Field("block"))?;
-            let name = crate::worldgen::tags::identifier(name)?;
-            let state = resources
-                .registry
-                .default_state(&name)
-                .ok_or_else(|| DecodeError::Registry(format!("unknown block {name}")))?;
-            let weight = e["weight"].as_i64().ok_or(DecodeError::Field("weight"))?;
-            Ok((state, weight as i32))
-        })
-        .collect::<Result<Vec<_>, DecodeError>>()?;
-    if replacements.is_empty() {
-        return Err(DecodeError::Field("weighted_list_of_replacement_blocks"));
-    }
-    Ok(replacements)
-}
-
 /// GeneralUtils.getRandomEntry: `nextFloat() * total` less each weight in
 /// turn, the last entry when none takes it.
 fn pick(entries: &[(BlockStateId, i32)], random: &mut dyn ProcessorRandom) -> BlockStateId {
@@ -631,34 +492,6 @@ struct YungRandomizer {
     default: BlockStateId,
 }
 impl YungRandomizer {
-    fn decode(
-        v: &Value,
-        state: &impl Fn(&Value) -> Result<BlockStateId, DecodeError>,
-    ) -> Result<Self, DecodeError> {
-        let entries = v["entries"]
-            .as_array()
-            .ok_or(DecodeError::Field("randomizer entries"))?
-            .iter()
-            .map(|e| {
-                let p = e["probability"]
-                    .as_f64()
-                    .ok_or(DecodeError::Field("randomizer probability"))?;
-                // yungsapi:altitude, the one condition the mods' pillars use.
-                let (bottom, top) = match e.get("condition") {
-                    None => (None, None),
-                    Some(c) if c["type"] == "yungsapi:altitude" => {
-                        (c["bottom_cutoff_y"].as_f64(), c["top_cutoff_y"].as_f64())
-                    }
-                    Some(_) => return Err(DecodeError::Field("randomizer condition")),
-                };
-                Ok((state(&e["blockState"])?, p as f32, bottom, top))
-            })
-            .collect::<Result<_, DecodeError>>()?;
-        Ok(Self {
-            entries,
-            default: state(&v["defaultBlockState"])?,
-        })
-    }
     /// `get(random)` with no height, `get(random, ctx)` with the block's.
     fn get(&self, random: &mut dyn ProcessorRandom, y: Option<i32>) -> BlockStateId {
         let target = random.float();
@@ -692,20 +525,6 @@ pub struct YungPillar {
     blocks: Blocks,
 }
 impl YungPillar {
-    pub(super) fn decode(
-        v: &Value,
-        bindings: &FeatureBlockBindings<'_>,
-        state: impl Fn(&Value) -> Result<BlockStateId, DecodeError>,
-    ) -> Result<Self, DecodeError> {
-        let target = state(&v["target_block"])?;
-        Ok(Self {
-            target: bindings.registry().state(target).unwrap().name.clone(),
-            output: YungRandomizer::decode(&v["target_block_output"], &state)?,
-            pillar: YungRandomizer::decode(&v["pillar_states"], &state)?,
-            keep_properties: v["keep_properties"].as_bool().unwrap_or(false),
-            blocks: Blocks::decode(bindings)?,
-        })
-    }
     pub(super) fn process<W: PlacementContext>(
         &self,
         world: &mut W,
@@ -758,32 +577,6 @@ pub struct StairPillar {
     blocks: Blocks,
 }
 impl StairPillar {
-    pub(super) fn decode(
-        v: &Value,
-        resources: &StructureResources,
-        bindings: &FeatureBlockBindings<'_>,
-    ) -> Result<Self, DecodeError> {
-        let id = |v: &Value| -> Result<String, DecodeError> {
-            let name = v.as_str().ok_or(DecodeError::Field("stair_pillar block"))?;
-            Ok(crate::worldgen::tags::identifier(name)?.to_string())
-        };
-        let blocks_to = v["blocks"]
-            .as_object()
-            .ok_or(DecodeError::Field("stair_pillar blocks"))?
-            .iter()
-            .map(|(from, to)| Ok((id(&Value::String(from.clone()))?, id(to)?)))
-            .collect::<Result<_, DecodeError>>()?;
-        let pillar = id(&v["pillar"])?;
-        Ok(Self {
-            blocks_to,
-            front: id(&v["front"])?,
-            pillar: resources
-                .registry
-                .default_state(&pillar)
-                .ok_or_else(|| DecodeError::Registry(format!("unknown block {pillar}")))?,
-            blocks: Blocks::decode(bindings)?,
-        })
-    }
     /// `block`'s default state with the stair properties of `from` it has.
     fn stair(
         resources: &StructureResources,
