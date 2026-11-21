@@ -1714,10 +1714,11 @@ impl Game<'_> {
                     if shapes(now) != shapes(entity) {
                         reshaped.push(pos);
                     }
-                    *now = entity.clone();
-                    self.world
-                        .block_entities
-                        .restore_generation(pos, kept.generation.unwrap());
+                    self.world.block_entities.restore_snapshot(
+                        pos,
+                        entity.clone(),
+                        kept.generation.unwrap(),
+                    );
                 }
                 // One this transaction removed comes back.
                 (Some(_), None) if level.removed_block_entities.contains(&pos) => {
