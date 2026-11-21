@@ -30,14 +30,18 @@ migrate = """
 - In `Hooks::extract_block_screen_effect`, change the event parameter to `&mut ExtractBlockScreenEffectEvent<'_>`.
   Replace `event.custom_draw = true` with `event.set_custom_renderer(self.renderer.clone())`. Store your renderer in
   an `Arc` on the hook implementation and construct it before extraction. Replace `event.custom_draw = false`
-  with `event.clear_custom_renderer()`, which resets the choice without changing cancellation.
+  with `event.clear_custom_renderer()`, which resets the choice without changing cancellation. If you want to
+  return `Flow::Cancel` for fire and still draw its vanilla quads, select a renderer that draws nothing and
+  returns `false` instead: canceling with an empty slot selects the built-in no-op.
 - Remove `Hooks::block_screen_effect_draw` and move its drawing into
   `BlockScreenEffectRenderer::submit(&self, host: &dyn ClientHost, render: BlockScreenEffectRender<'_>) -> bool`.
   Use `render.effect`, `render.state`, `render.pos`, `render.partial_tick`, `render.hide_gui` and `render.draw` in place
   of the former `BlockScreenEffectDrawEvent` fields. Instead of setting `replace_vanilla`, return `true` to suppress the
   vanilla quads, or `false` to prepend yours. If a Host phase refusal interrupts submission, none of its quads are kept.
-- Keep `Flow::Cancel` and `#[listener(receive_cancelled)]` on extraction. Cancellation suppresses vanilla block and water
-  quads; for fire it does so only if no renderer was selected. Return `true` from a selected fire renderer if vanilla fire
+- Keep `Flow::Cancel` and `#[listener(receive_cancelled)]` on extraction. Read `event.cancelled()` instead of
+  `event.cancelled` and write `event.set_cancelled(value)` instead of assigning to the field. Cancellation suppresses
+  vanilla block and water quads. For fire an empty slot becomes a no-op at cancellation; a later listener can clear
+  the slot to restore vanilla fire without uncanceling. Return `true` from a selected fire renderer if vanilla fire
   must not follow its quads.
 - For water, `event.state` is now the default water state. If you need the actual block, read it from the client's level
   with `level.block_state(host, [event.pos.x, event.pos.y, event.pos.z])`.

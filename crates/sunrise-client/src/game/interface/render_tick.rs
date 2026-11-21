@@ -2,7 +2,10 @@
 //! campfire smoke and rain splashes (`ClientLevel.tickWeatherEffects`).
 use super::{Dim, Game, api_values::TryIntoApi, host::draw::GameCameraDrawContext};
 use mod_api::{
-    __private::{SelectedBlockScreenEffectRenderer, block_screen_effect_render},
+    __private::{
+        BlockScreenEffectRendererSlot, SelectedBlockScreenEffectRenderer,
+        block_screen_effect_render,
+    },
     BlockScreenEffect,
 };
 use sunrise_client::assets::Properties;
@@ -578,33 +581,32 @@ impl Game<'_> {
                         &mut custom[1],
                     ))
         };
-        // Canceling fire acts as a no-op renderer only if no listener selected one.
-        // A selected renderer can still prepend to the eligible vanilla overlay.
+        // Fire's cancellation changes its renderer choice, not its eligibility.
         let on_fire = first_person && p.is_on_fire();
-        let fire_suppressed = on_fire
+        if on_fire
             && modded
-            && self
+            && let Some(fire) = self
                 .pack
                 .assets
                 .registry
                 .default_state("minecraft:fire")
                 .and_then(|fire| fire.try_into_api().ok())
-                .is_some_and(|fire| {
-                    let feet = [p.position.x, p.position.y, p.position.z].map(|c| c.floor() as i32);
-                    !self.screen_effect_kept(
-                        BlockScreenEffect::Fire,
-                        fire,
-                        feet,
-                        partial,
-                        player_partial_tick,
-                        &mut custom[2],
-                    ) && custom[2].is_none()
-                });
+        {
+            let feet = [p.position.x, p.position.y, p.position.z].map(|c| c.floor() as i32);
+            self.screen_effect_kept(
+                BlockScreenEffect::Fire,
+                fire,
+                feet,
+                partial,
+                player_partial_tick,
+                &mut custom[2],
+            );
+        }
         BlockScreenEffects {
             block,
             water,
             on_fire,
-            fire_suppressed,
+            fire_suppressed: false,
             custom,
         }
     }
@@ -619,7 +621,8 @@ impl Game<'_> {
         custom: &mut Option<ExtractedBlockScreenEffect>,
     ) -> bool {
         let pos = BlockPos::new(pos[0], pos[1], pos[2]);
-        let (mut canceled, mut renderer) = (false, None);
+        let mut canceled = false;
+        let mut renderer = BlockScreenEffectRendererSlot::new(effect);
         self.native_extract_block_screen_effect(
             effect,
             state,
@@ -629,11 +632,13 @@ impl Game<'_> {
             &mut canceled,
             &mut renderer,
         );
-        *custom = renderer.map(|renderer| ExtractedBlockScreenEffect {
-            state,
-            pos,
-            renderer,
-        });
+        *custom = renderer
+            .into_renderer()
+            .map(|renderer| ExtractedBlockScreenEffect {
+                state,
+                pos,
+                renderer,
+            });
         !canceled
     }
     /// `Lightmap.getBrightness(getMaxLocalRawBrightness(eye))`.

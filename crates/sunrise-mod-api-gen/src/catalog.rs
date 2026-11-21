@@ -184,6 +184,8 @@ pub struct Hook {
     /// vector/scalar outputs in declaration order and naming the first refused one. A refused
     /// result, including its cancellation, rolls back; later listeners still run.
     pub output_validator: Option<String>,
+    /// Use the event's own `set_cancelled` method instead of exposing a mutable flag.
+    pub cancel_setter: bool,
     pub scope: Option<PartScope>,
     pub host: Option<HostAccess>,
     pub context: Option<PhaseContext>,
@@ -363,6 +365,8 @@ struct ModApiEntry {
     staged_surface: Option<String>,
     single_answer: Option<bool>,
     output_validator: Option<String>,
+    #[serde(default)]
+    cancel_setter: bool,
 }
 
 #[derive(Deserialize)]
@@ -547,6 +551,17 @@ impl Hook {
                     .into(),
             });
         }
+        if api.cancel_setter
+            && (api.contract != Contract::Cancel
+                || scope.is_some()
+                || api.output_validator.is_some())
+        {
+            return Err(CatalogError::InvalidHook {
+                hook: name,
+                error: "cancel_setter requires a global cancel hook without output_validator"
+                    .into(),
+            });
+        }
         let counterparts = Counterparts {
             neoforge: counterparts(&name, "neoforge", entry.neoforge)?,
             fabric: counterparts(&name, "fabric", entry.fabric)?,
@@ -569,6 +584,7 @@ impl Hook {
             single_answer,
             inert: entry.inert,
             output_validator: api.output_validator,
+            cancel_setter: api.cancel_setter,
             scope,
             host: entry.host,
             context: entry.context,
@@ -866,6 +882,7 @@ impl Declared {
                             "staged_surface",
                             "single_answer",
                             "output_validator",
+                            "cancel_setter",
                         ] {
                             if let Some(value) = entry.remove(key) {
                                 api.insert(key.into(), value);
@@ -1042,6 +1059,7 @@ impl Hook {
             single_answer: false,
             inert: None,
             output_validator: None,
+            cancel_setter: false,
             scope: None,
             host: None,
             context: None,

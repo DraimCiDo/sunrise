@@ -8,10 +8,11 @@ pub trait Hooks {
     /// `Fire` only in first person. Water eligibility comes from the player's eye fluid, sampled
     /// through death tick 20. While the death screen stays open after removal, extraction keeps
     /// that last sample. `camera_submersion` can still override it at the eye.
-    /// Cancel to leave the vanilla overlay out, except that a selected fire renderer still decides
-    /// whether its vanilla quads follow it. Use [`ExtractBlockScreenEffectEvent::set_custom_renderer`]
-    /// to prepend or replace the quads. Later eligible listeners can check or clear that selection
-    /// without changing cancellation. A failed listener leaves the previous choice and cancellation
+    /// Cancel to leave the vanilla block or water overlay out. Canceling fire selects a built-in
+    /// no-op only if the renderer slot is empty at that moment. Use
+    /// [`ExtractBlockScreenEffectEvent::set_custom_renderer`] to prepend or replace the quads.
+    /// Later eligible listeners can check or clear the choice without changing cancellation;
+    /// clearing fire's slot lets vanilla fire draw. A failed listener leaves the previous choice and cancellation
     /// intact so later eligible listeners still run. A panic disables that mod's
     /// listener for the session and is reported in the log and the client error toast. A phase
     /// refusal is reported each time without disabling the listener.
@@ -25,13 +26,14 @@ pub trait Hooks {
         out = "canceled",
         neoforge = "ExtractBlockScreenEffectEvent",
         cancellable = true,
-        version = 4
+        cancel_setter = true,
+        version = 5
     )]
     #[notes = r##"## Block screen effects
 
-`extract_block_screen_effect` fires before block, water and fire overlays are drawn. Water and fire are first-person only. Water uses the player's eye fluid sampled through death tick 20 and kept after removal until respawn. `camera_submersion` can override that sample. The event carries the default water state at the player's eye block, including inside a waterlogged block. The event's `set_custom_renderer` is NeoForge's `setCustomRenderer`: pass a clone of an existing `Arc` to select a renderer. The last eligible listener to set or clear the choice wins. Use `has_custom_renderer` to check whether one is selected and `clear_custom_renderer` to remove it without changing cancellation. Cancellation skips listeners that did not opt in with `#[listener(receive_cancelled)]`, but it does not clear a renderer. A canceled overlay with no renderer draws nothing. For block and water, cancellation suppresses the vanilla quads even if a renderer was selected. For fire, cancellation uses a no-op only if no renderer was selected; otherwise a renderer that returns `false` still precedes vanilla fire.
+`extract_block_screen_effect` fires before block, water and fire overlays are drawn. Water and fire are first-person only. Water uses the player's eye fluid sampled through death tick 20 and kept after removal until respawn. `camera_submersion` can override that sample. The event carries the default water state at the player's eye block, including inside a waterlogged block. The event's `set_custom_renderer` is NeoForge's `setCustomRenderer`: pass a clone of an existing `Arc` to select a renderer. Use `has_custom_renderer` to check the slot and `clear_custom_renderer` to empty it without changing cancellation. Read cancellation with `cancelled()` and set it with `set_cancelled(bool)`; returning `Flow::Cancel` sets it to `true` as the listener ends. Cancellation skips listeners that did not opt in with `#[listener(receive_cancelled)]`. For block and water, cancellation suppresses vanilla even if a renderer is selected. For fire, setting cancellation fills the slot with a built-in no-op only when it is empty. A later listener can replace the no-op or clear the slot to restore vanilla fire without uncanceling. A selected fire renderer that returns `false` still precedes vanilla fire.
 
-After extraction, the game calls each selected renderer's `submit` in block, water, fire order. It submits just before its own overlay and can return `true` to suppress that overlay's vanilla quads. A failed submission contributes no quads and does not change extraction's vanilla drawing decision. A panic disables that mod's submission for that overlay kind for the session, not its extraction hook or its other overlay submissions. Panics name the mod in the log and client error toast; phase refusals are reported every time without disabling the callback. Earlier overlays, later overlays and the HUD's camera overlays are unaffected. `CameraDrawContext` takes camera-space quads under the first-person hand's projection, after the level and hand and before the GUI. The player and camera can be read on `ClientHost`; `partial_tick` is `getWorldPartialTick` at both stages, and `player_partial_tick` is `getPlayerPartialTick` at extraction. Nothing drawn outlives the frame, and no GPU handle is exposed."##]
+After extraction, the game calls each selected renderer's `submit` in block, water, fire order. It submits just before its own overlay and can return `true` to suppress that overlay's vanilla quads. A failed submission contributes no quads and does not change extraction's vanilla drawing decision. A panic in submission or during engine-owned release of the renderer disables that mod's submission for that overlay kind for the session, not its extraction hook or its other overlay submissions. Panics name the mod in the log and client error toast; phase refusals are reported every time without disabling the callback. Earlier overlays, later overlays and the HUD's camera overlays are unaffected. `CameraDrawContext` takes camera-space quads under the first-person hand's projection, after the level and hand and before the GUI. The player and camera can be read on `ClientHost`; `partial_tick` is `getWorldPartialTick` at both stages, and `player_partial_tick` is `getPlayerPartialTick` at extraction. Nothing drawn outlives the frame, and no GPU handle is exposed."##]
     fn extract_block_screen_effect(
         effect: mod_api::BlockScreenEffect,
         state: mod_api::BlockState,
@@ -39,8 +41,6 @@ After extraction, the game calls each selected renderer's `submit` in block, wat
         partial_tick: f32,
         player_partial_tick: f32,
         canceled: &mut bool,
-        #[event_private] renderer: &mut Option<
-            mod_api::__private::SelectedBlockScreenEffectRenderer,
-        >,
+        #[event_private] renderer: &mut mod_api::__private::BlockScreenEffectRendererSlot,
     );
 }

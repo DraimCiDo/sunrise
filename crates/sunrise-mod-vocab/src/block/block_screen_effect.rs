@@ -25,12 +25,13 @@ impl BlockScreenEffect {
 pub trait BlockScreenEffectRenderer: Send + Sync {
     /// Submit this overlay as the selecting mod, with read-only access to the client. Return
     /// `true` to suppress its vanilla quads or `false` to leave them after yours. For block and water,
-    /// cancellation at extraction still suppresses vanilla quads. For fire, only this
-    /// return value decides once a renderer was selected. A failed submission contributes
-    /// no quads and leaves extraction's vanilla drawing decision unchanged. A panic disables
-    /// this mod's submissions for this overlay kind for the session; its extractor and
-    /// submissions for other overlays still run. A phase refusal is reported on every call
-    /// without disabling anything. Neither borrow outlives the call.
+    /// cancellation at extraction still suppresses vanilla quads. A selected fire renderer
+    /// decides whether vanilla fire follows, even if the event is canceled. A failed submission
+    /// contributes no quads and leaves extraction's vanilla drawing decision unchanged. A panic
+    /// in this callback or during engine-owned release of the renderer disables this mod's
+    /// submissions for this overlay kind for the session; its extractor and submissions for other
+    /// overlays still run. A phase refusal is reported on every call without disabling anything.
+    /// Neither borrow outlives the call.
     fn submit(&self, host: &dyn ClientHost, render: BlockScreenEffectRender<'_>) -> bool;
 }
 
@@ -73,10 +74,10 @@ pub fn block_screen_effect_render(
 }
 
 impl ExtractBlockScreenEffectEvent<'_> {
-    /// Whether a custom renderer is currently selected for this overlay, including a choice
-    /// made by an earlier listener. Cancellation by itself is not a custom renderer choice.
+    /// Whether a renderer is currently selected, including an earlier listener's choice or
+    /// the built-in no-op selected when fire's cancellation is set with an empty slot.
     pub fn has_custom_renderer(&self) -> bool {
-        self.renderer.is_some()
+        self.renderer.selected.is_some()
     }
 
     /// Select or replace the renderer for this overlay. Clone a renderer you already own so
@@ -92,16 +93,60 @@ impl ExtractBlockScreenEffectEvent<'_> {
             installed.overlay_owners.get(id)
         });
         if let Some(owners) = owners {
-            *self.renderer = Some(SelectedBlockScreenEffectRenderer { owners, renderer });
+            let owned = OwnedOverlayRenderer {
+                owner: &owners[self.renderer.effect as usize],
+                renderer: Some(renderer),
+            };
+            self.renderer.selected = Some(SelectedBlockScreenEffectRenderer(Some(owned)));
         } else {
             log::error!("extract_block_screen_effect: renderer selection has no listener owner");
         }
     }
 
-    /// Clear the current choice without changing cancellation. With no new selection, only the
-    /// vanilla effect can draw, and it draws only if the overlay is not canceled.
+    /// Clear the current choice without changing cancellation. Canceled block and water still
+    /// do not draw. For fire, clearing the slot lets vanilla fire draw even if canceled.
     pub fn clear_custom_renderer(&mut self) {
-        *self.renderer = None;
+        self.renderer.selected = None;
+    }
+
+    /// Whether cancellation is set, independently of the current renderer choice.
+    pub fn cancelled(&self) -> bool {
+        self.cancelled
+    }
+
+    /// Set cancellation. As in NeoForge, setting either value on fire with no renderer
+    /// selects a built-in no-op. Clear the choice afterward if you want vanilla fire to draw.
+    /// Returning [`crate::Flow::Cancel`] is equivalent to setting `true` as the listener ends.
+    pub fn set_cancelled(&mut self, cancelled: bool) {
+        self.cancelled = cancelled;
+        if self.renderer.effect == BlockScreenEffect::Fire && self.renderer.selected.is_none() {
+            self.renderer.selected = Some(SelectedBlockScreenEffectRenderer::NO_OP);
+        }
+    }
+}
+
+// no wire: this slot holds the choice for an in-process callback.
+/// The current choice for an overlay and the effect it actually belongs to.
+#[doc(hidden)]
+#[derive(Clone)]
+// exhaustive: engine-only bookkeeping with private fields.
+pub struct BlockScreenEffectRendererSlot {
+    effect: BlockScreenEffect,
+    selected: Option<SelectedBlockScreenEffectRenderer>,
+}
+
+impl BlockScreenEffectRendererSlot {
+    /// Start extraction with no renderer selected.
+    pub fn new(effect: BlockScreenEffect) -> Self {
+        Self {
+            effect,
+            selected: None,
+        }
+    }
+
+    /// Move the final choice out for submission.
+    pub fn into_renderer(self) -> Option<SelectedBlockScreenEffectRenderer> {
+        self.selected
     }
 }
 
@@ -111,28 +156,49 @@ impl ExtractBlockScreenEffectEvent<'_> {
 #[doc(hidden)]
 #[derive(Clone)]
 // exhaustive: only the extraction event can construct this private-field selection.
-pub struct SelectedBlockScreenEffectRenderer {
-    owners: &'static [crate::callback_owner::CallbackOwner; BlockScreenEffect::COUNT],
-    renderer: Arc<dyn BlockScreenEffectRenderer>,
+pub struct SelectedBlockScreenEffectRenderer(Option<OwnedOverlayRenderer>);
+
+#[derive(Clone)]
+struct OwnedOverlayRenderer {
+    owner: &'static crate::callback_owner::CallbackOwner,
+    renderer: Option<Arc<dyn BlockScreenEffectRenderer>>,
+}
+
+impl Drop for OwnedOverlayRenderer {
+    fn drop(&mut self) {
+        // Any clone, including a listener's dispatch snapshot, can hold the final reference.
+        self.owner.dispose(
+            "block screen effect renderer",
+            "block_screen_effect_renderer::drop",
+            self.renderer.take(),
+        );
+    }
 }
 
 impl SelectedBlockScreenEffectRenderer {
+    const NO_OP: Self = Self(None);
+
     /// Submit under the selecting listener's mod scope, returning no answer on failure.
     pub fn submit(
         &self,
         host: &dyn ClientHost,
         render: BlockScreenEffectRender<'_>,
     ) -> Option<bool> {
-        let owner = &self.owners[render.effect as usize];
+        let Some(owned) = &self.0 else {
+            // The engine's no-op for fire claims the overlay without submitting any quads.
+            return Some(true);
+        };
         // A poisoned submission is skipped on later frames, without building a disabled error.
-        if !owner.is_enabled() {
+        if !owned.owner.is_enabled() {
             return None;
         }
-        owner
+        let renderer = owned.renderer.as_deref().expect("live overlay renderer");
+        owned
+            .owner
             .call(
                 "block screen effect renderer",
                 "block_screen_effect_renderer::submit",
-                || self.renderer.submit(host, render),
+                || renderer.submit(host, render),
             )
             .ok()
     }

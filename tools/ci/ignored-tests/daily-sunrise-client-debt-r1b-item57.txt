@@ -1,2 +1,4 @@
+sunrise-client game::block_screen_effect_tests::a_later_listener_can_clear_cancelled_fire_and_restore_vanilla_fire lib daily resources
 sunrise-client game::block_screen_effect_tests::a_later_listener_can_inspect_and_clear_the_renderer_without_uncancelling lib daily resources
+sunrise-client game::block_screen_effect_tests::a_panicking_renderer_drop_is_contained_at_every_engine_release lib daily resources
 sunrise-client game::block_screen_effect_tests::submit_runs_as_the_mod_that_selected_the_renderer lib daily resources

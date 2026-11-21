@@ -604,13 +604,19 @@ pub(super) fn emit<'a>(
                     "{name}: a cancel hook's event has its own `cancelled` field"
                 ));
             }
-            fields.push_str("/// Whether the event is cancelled: by the game or an earlier listener, or by this one\n/// setting it. Only a listener that receives cancelled events (`#[listener(receive_cancelled)]`)\n/// sees `true`.\n");
-            if hook.output_validator.is_some() {
-                fields.push_str("/// An accepted cancellation cannot be cleared.\n");
+            if hook.cancel_setter {
+                fields.push_str("pub(super) cancelled: bool,\n");
             } else {
-                fields.push_str("/// Setting it back to `false` lets the game's behaviour run.\n");
+                fields.push_str("/// Whether the event is cancelled: by the game or an earlier listener, or by this one\n/// setting it. Only a listener that receives cancelled events (`#[listener(receive_cancelled)]`)\n/// sees `true`.\n");
+                if hook.output_validator.is_some() {
+                    fields.push_str("/// An accepted cancellation cannot be cleared.\n");
+                } else {
+                    fields.push_str(
+                        "/// Setting it back to `false` lets the game's behaviour run.\n",
+                    );
+                }
+                fields.push_str("pub cancelled: bool,\n");
             }
-            fields.push_str("pub cancelled: bool,\n");
             inits.push(format!("cancelled: *{}", cancel_out.unwrap()));
         }
         if let Some((name, ty)) = output
@@ -911,6 +917,9 @@ pub(super) fn emit<'a>(
             (Contract::Cancel, Some(out)) if mod_cancel && hook.output_validator.is_some() => method_source.push_str(&format!(
                 "///\n/// Return `Flow::Cancel` to propose setting `{out}`. Once accepted, a cancellation cannot be\n/// cleared; only mods registered with `#[listener(receive_cancelled)]` still run.\n"
             )),
+            (Contract::Cancel, Some(_)) if hook.cancel_setter => method_source.push_str(
+                "///\n/// Returning `Flow::Cancel` calls `event.set_cancelled(true)` after the listener returns.\n/// Later listeners must opt in with `#[listener(receive_cancelled)]`.\n"
+            ),
             (Contract::Cancel, Some(out)) if mod_cancel => method_source.push_str(&format!(
                 "///\n/// Return `Flow::Cancel` to take it: this sets `{out}`, and later mods are skipped unless they\n/// listen with `#[listener(receive_cancelled)]`; those see `{event}.cancelled` and may set it back to\n/// `false`.\n"
             )),
@@ -1247,8 +1256,13 @@ pub(super) fn emit<'a>(
                      {event}.cancelled |= {saved}.{previous_cancel} || matches!({flow}, Flow::Cancel);"
                 )
             } else {
+                let set = if hook.cancel_setter {
+                    format!("{event}.set_cancelled(true);")
+                } else {
+                    format!("{event}.cancelled = true;")
+                };
                 let cancel = format!(
-                    "{snapshot_statement}if matches!({invocation}, Flow::Cancel) {{ {event}.cancelled = true; }}"
+                    "{snapshot_statement}if matches!({invocation}, Flow::Cancel) {{ {set} }}"
                 );
                 if stack_after.is_empty() {
                     cancel

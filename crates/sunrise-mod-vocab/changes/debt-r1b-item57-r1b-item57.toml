@@ -1,6 +1,10 @@
 ids = [
     "hook:extract_block_screen_effect",
+    "hook:extract_block_screen_effect.cancelled",
+    "type:ExtractBlockScreenEffectEvent.cancelled",
     "trait:BlockScreenEffectRenderer",
+    "handle:ExtractBlockScreenEffectEvent::cancelled",
+    "handle:ExtractBlockScreenEffectEvent::set_cancelled",
     "handle:ExtractBlockScreenEffectEvent::set_custom_renderer",
     "handle:ExtractBlockScreenEffectEvent::has_custom_renderer",
     "handle:ExtractBlockScreenEffectEvent::clear_custom_renderer",
@@ -10,16 +14,23 @@ Vanilla 26.3's LevelExtractor.extractPlayerState and ScreenEffectRenderer.submit
 NeoForge's ExtractBlockScreenEffectEvent.getPlayerRenderState and setCustomRenderer let later listeners inspect or
 replace a renderer for the same overlay; ScreenEffectRenderer.submit uses the final choice and does not require
 static renderers. Sunrise now lets later listeners see and clear the selection and accepts an owned Arc, so a mod
-can reuse a stateful renderer without a global or a per-frame allocation. The hook version moves from 3 to 4:
-a later listener can now clear an earlier choice without changing overlay cancellation.
+can reuse a stateful renderer without a global or a per-frame allocation. Engine-held references, including
+listener snapshots, are released under the selecting mod's panic boundary so one broken renderer destructor does
+not unwind into another mod or the engine. NeoForge's ExtractBlockScreenEffectEvent.setCanceled fills fire's empty
+renderer slot at the time of the call, not after all listeners finish. The hook version moves from 3 to 5: a later
+listener can inspect or clear a choice, including the built-in fire no-op, without changing the canceled bit.
 """
 migrate = """
 Replace event.set_custom_renderer(&MY_RENDERER) with event.set_custom_renderer(self.renderer.clone()). Store
 renderer: Arc<MyRenderer> (or Arc<dyn BlockScreenEffectRenderer>) in your Hooks implementation and create it once
 before extraction. Renderer implementations must now be Send + Sync. If your renderer stores a thread-bound
-lock guard, store the lock instead and take the guard inside submit. If you selected a renderer that draws nothing
-and returns false just to undo an earlier listener's choice, use event.clear_custom_renderer() instead.
-Use event.has_custom_renderer() to test the current
-choice before replacing or clearing it. Clear does not change cancellation; with no renderer, a canceled overlay
-still draws nothing. The submit signature and its return value are unchanged.
+lock guard, store the lock instead and take the guard inside submit.
+Replace reads of event.cancelled with event.cancelled() and writes with event.set_cancelled(value).
+Returning Flow::Cancel still cancels after your listener returns. Use event.has_custom_renderer() to test the slot;
+for fire this includes the built-in no-op if setting cancellation filled an empty slot.
+For block and water, replace a no-quads renderer that returns false just to remove an earlier choice with
+event.clear_custom_renderer(); canceled vanilla block and water quads still stay hidden. For fire, clearing after
+cancellation restores vanilla fire without changing the cancellation flag. If you want to return Flow::Cancel
+and still draw vanilla fire, select a renderer that returns false instead of clearing the slot: cancellation would
+otherwise put the no-op back. The submit signature and its return value are unchanged.
 """

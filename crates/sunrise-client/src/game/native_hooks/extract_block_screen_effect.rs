@@ -12,7 +12,7 @@ impl Game<'_> {
         partial_tick: f32,
         player_partial_tick: f32,
         canceled: &mut bool,
-        renderer: &mut Option<mod_api::__private::SelectedBlockScreenEffectRenderer>,
+        renderer: &mut mod_api::__private::BlockScreenEffectRendererSlot,
     ) {
         self.fire_extract_block_screen_effect(
             effect,

@@ -426,7 +426,7 @@ fn a_panicking_extractor_preserves_the_previous_selection_and_other_listeners() 
             if event.effect == Water {
                 self.attempts.fetch_add(1, Ordering::Relaxed);
                 event.set_custom_renderer(self.renderer.clone());
-                event.cancelled = true;
+                event.set_cancelled(true);
                 panic!("extractor failed after replacing the selection");
             }
             Flow::Continue
@@ -582,6 +582,172 @@ fn a_panicking_renderer_discards_its_quads_and_is_skipped_on_later_frames() {
                 }
             }
         });
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_panicking_renderer_drop_is_contained_at_every_engine_release() {
+    use mod_api::{
+        __private::{HookPanicReport, ModPhase, PhaseOwner, take_hook_panics},
+        content::crash::current_native_mod,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Release {
+        FrameEnd,
+        Replaced,
+        Refused,
+    }
+
+    struct PanicsOnDrop(Arc<Mutex<Vec<Option<&'static str>>>>);
+    impl BlockScreenEffectRenderer for PanicsOnDrop {
+        fn submit(&self, _: &dyn ClientHost, render: BlockScreenEffectRender<'_>) -> bool {
+            assert!(render.draw.quad(QUAD, marker(Fire)));
+            false
+        }
+    }
+    impl Drop for PanicsOnDrop {
+        fn drop(&mut self) {
+            self.0.lock().unwrap().push(current_native_mod());
+            panic!("overlay renderer drop failed");
+        }
+    }
+
+    struct First {
+        release: Release,
+        extractions: Arc<AtomicUsize>,
+        drops: Arc<Mutex<Vec<Option<&'static str>>>>,
+        healthy_fire: Arc<Choice>,
+    }
+    #[mod_api::__subscriptions]
+    impl Hooks for First {
+        #[listener(priority = 10)]
+        fn extract_block_screen_effect(
+            &self,
+            host: &dyn ClientHost,
+            event: &mut ExtractBlockScreenEffectEvent<'_>,
+        ) -> Flow {
+            if event.effect == Fire {
+                if self.extractions.fetch_add(1, Ordering::Relaxed) == 0 {
+                    // The engine owns the only reference to this renderer once selected.
+                    event.set_custom_renderer(Arc::new(PanicsOnDrop(self.drops.clone())));
+                    if self.release == Release::Refused {
+                        // Reject this selection without poisoning the extraction listener.
+                        let _ = host.level("minecraft:overworld");
+                    }
+                } else {
+                    event.set_custom_renderer(self.healthy_fire.clone());
+                }
+            }
+            Flow::Continue
+        }
+    }
+
+    struct Next {
+        replace: bool,
+        extractions: Arc<AtomicUsize>,
+        water: Arc<Choice>,
+        fire: Arc<Choice>,
+    }
+    #[mod_api::__subscriptions]
+    impl Hooks for Next {
+        fn extract_block_screen_effect(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut ExtractBlockScreenEffectEvent<'_>,
+        ) -> Flow {
+            match event.effect {
+                Water => event.set_custom_renderer(self.water.clone()),
+                Fire if self.replace && self.extractions.load(Ordering::Relaxed) == 1 => {
+                    event.set_custom_renderer(self.fire.clone());
+                }
+                _ => {}
+            }
+            Flow::Continue
+        }
+    }
+
+    with_client_game(|game| {
+        burning_player(game);
+        let water = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:water")
+            .unwrap();
+        game.world.set(0, 65, 0, water).unwrap();
+        assert!(sample_eye_in_water(game));
+        for (release, expected) in [
+            (
+                Release::FrameEnd,
+                &["mod water", "water", "mod fire", "fire", "fire"][..],
+            ),
+            (
+                Release::Replaced,
+                &["mod water", "water", "fire", "fire"][..],
+            ),
+            (
+                Release::Refused,
+                &["mod water", "water", "fire", "fire"][..],
+            ),
+        ] {
+            let extractions = Arc::new(AtomicUsize::new(0));
+            let drops = Arc::new(Mutex::new(Vec::new()));
+            let mods = vec![
+                ModEntry::new(
+                    "owns-fire",
+                    Box::new(First {
+                        release,
+                        extractions: extractions.clone(),
+                        drops: drops.clone(),
+                        healthy_fire: Arc::new(Choice(marker(Fire))),
+                    }),
+                ),
+                ModEntry::new(
+                    "other-overlay",
+                    Box::new(Next {
+                        replace: release == Release::Replaced,
+                        extractions: extractions.clone(),
+                        water: Arc::new(Choice(marker(Water))),
+                        fire: Arc::new(Choice(RED)),
+                    }),
+                ),
+            ];
+            mod_platform::testing::with_mods(mods.into(), || {
+                let frame = {
+                    let _phase = PhaseOwner::scope(if release == Release::Refused {
+                        ModPhase::Setup
+                    } else {
+                        ModPhase::World
+                    });
+                    quads(game)
+                };
+                assert_eq!(names(&frame), expected);
+                if release == Release::Replaced {
+                    // The replacing renderer also ran and did not inherit the old owner's panic.
+                    assert!(
+                        frame
+                            .iter()
+                            .any(|q| q.vertices[0].color == [1.0, 0.0, 0.0, 1.0])
+                    );
+                }
+                assert_eq!(*drops.lock().unwrap(), [Some("owns-fire")]);
+                assert_eq!(
+                    take_hook_panics(),
+                    [HookPanicReport {
+                        mod_id: "owns-fire",
+                        hook: "block_screen_effect_renderer::drop",
+                    }]
+                );
+
+                let _phase = PhaseOwner::scope(ModPhase::World);
+                assert_eq!(names(&quads(game)), ["mod water", "water", "fire", "fire"]);
+                assert_eq!(extractions.load(Ordering::Relaxed), 2);
+                assert!(take_hook_panics().is_empty());
+            });
+        }
     });
 }
 
@@ -945,7 +1111,7 @@ impl Hooks for ReceiveCancelled {
         _: &dyn ClientHost,
         event: &mut ExtractBlockScreenEffectEvent<'_>,
     ) -> Flow {
-        if event.effect == Block && event.cancelled {
+        if event.effect == Block && event.cancelled() {
             event.set_custom_renderer(self.0.clone());
         }
         Flow::Continue
@@ -1032,10 +1198,11 @@ fn a_later_listener_can_inspect_and_clear_the_renderer_without_uncancelling() {
             if event.effect == Block {
                 let before = event.has_custom_renderer();
                 event.clear_custom_renderer();
-                self.0
-                    .lock()
-                    .unwrap()
-                    .push([before, event.has_custom_renderer(), event.cancelled]);
+                self.0.lock().unwrap().push([
+                    before,
+                    event.has_custom_renderer(),
+                    event.cancelled(),
+                ]);
             }
             Flow::Continue
         }
@@ -1071,6 +1238,67 @@ fn a_later_listener_can_inspect_and_clear_the_renderer_without_uncancelling() {
             assert_eq!(names(&frame), expected);
             assert_eq!(seen.lock().unwrap().as_slice(), [[select, false, cancel]]);
             seen.lock().unwrap().clear();
+        }
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_later_listener_can_clear_cancelled_fire_and_restore_vanilla_fire() {
+    struct CancelFire(Option<Arc<Choice>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for CancelFire {
+        #[listener(priority = 10)]
+        fn extract_block_screen_effect(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut ExtractBlockScreenEffectEvent<'_>,
+        ) -> Flow {
+            if event.effect == Fire {
+                if let Some(renderer) = &self.0 {
+                    event.set_custom_renderer(renderer.clone());
+                }
+                return Flow::Cancel;
+            }
+            Flow::Continue
+        }
+    }
+
+    struct ClearFire(Arc<Mutex<Vec<[bool; 4]>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for ClearFire {
+        #[listener(receive_cancelled)]
+        fn extract_block_screen_effect(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut ExtractBlockScreenEffectEvent<'_>,
+        ) -> Flow {
+            if event.effect == Fire {
+                let before = [event.has_custom_renderer(), event.cancelled()];
+                event.clear_custom_renderer();
+                self.0.lock().unwrap().push([
+                    before[0],
+                    before[1],
+                    event.has_custom_renderer(),
+                    event.cancelled(),
+                ]);
+            }
+            Flow::Continue
+        }
+    }
+
+    with_client_game(|game| {
+        burning_player(game);
+        for selected in [None, Some(Arc::new(Choice(marker(Fire))))] {
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let mods = vec![
+                ModEntry::new("clear", Box::new(ClearFire(seen.clone()))),
+                ModEntry::new("cancel", Box::new(CancelFire(selected))),
+            ];
+            let frame = mod_platform::testing::with_mods(mods.into(), || quads(game));
+            assert_eq!(names(&frame), ["fire", "fire"]);
+            // Both an explicit renderer and the fire no-op occupy the slot until cleared.
+            assert_eq!(seen.lock().unwrap().as_slice(), [[true, true, false, true]]);
         }
     });
 }
