@@ -93,6 +93,7 @@ impl ChunkRecord {
 
 pub struct RegionFile {
     file: File,
+    writable: bool,
     path: PathBuf,
     position: ChunkPos,
     offsets: [u32; 1024],
@@ -251,7 +252,7 @@ impl RegionFile {
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref().to_owned();
         let file = File::open(&path)?;
-        Self::from_file(path, file)
+        Self::from_file(path, file, false)
     }
 
     /// Open for reading and in-place writes (`write`, `clear`), creating an
@@ -264,14 +265,15 @@ impl RegionFile {
             .create(create)
             .truncate(false)
             .open(&path)?;
-        Self::from_file(path, file)
+        Self::from_file(path, file, true)
     }
 
-    fn from_file(path: PathBuf, mut file: File) -> io::Result<Self> {
+    fn from_file(path: PathBuf, mut file: File, writable: bool) -> io::Result<Self> {
         let position = position_from_path(&path)?;
         let (offsets, timestamps) = read_header(&mut file)?;
         let mut region = Self {
             file,
+            writable,
             path,
             position,
             offsets,
@@ -420,6 +422,15 @@ impl RegionFile {
     /// Flush the writes to the disk.
     pub fn sync(&self) -> io::Result<()> {
         self.file.sync_data()
+    }
+
+    /// `RegionFile.flush`: force file data and metadata. The read-only fallback
+    /// has no writes to force (and some systems require a writable handle).
+    pub fn sync_all(&self) -> io::Result<()> {
+        if self.writable {
+            self.file.sync_all()?;
+        }
+        Ok(())
     }
 
     /// Clone the file handle so a caller can flush after releasing the region lock.

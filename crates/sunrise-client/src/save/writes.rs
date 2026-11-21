@@ -359,9 +359,13 @@ impl SaveDir {
         self.save_failure_reporter().reported_failures()
     }
 
-    /// Wait until every queued write attempt finishes. Individual record failures are reported
-    /// by the writer. A storage sync failure fails this barrier once; a stopped writer remains an error.
+    /// Drain queued writes and force every cached writable region. Individual record failures
+    /// are reported by the writer; a storage sync failure fails the barrier that reports it.
     pub fn flush(&self) -> Result<()> {
+        self.flush_with(RegionFile::sync_all)
+    }
+
+    fn flush_with(&self, mut force: impl FnMut(&RegionFile) -> std::io::Result<()>) -> Result<()> {
         let mut count = self
             .outstanding
             .count
@@ -374,7 +378,45 @@ impl SaveDir {
                 .wait(count)
                 .map_err(|_| "writer poisoned")?;
         }
-        self.write_result(true)
+        let mut result = self.write_result(true);
+        // A completion poll must not block behind this explicit flush's disk I/O.
+        drop(count);
+
+        // `RegionFileStorage.flush` forces the whole cache even when no new records were queued.
+        for (folder, cache) in [
+            (Folder::Region, &self.regions),
+            (Folder::Entities, &self.entity_regions),
+            (Folder::Poi, &self.poi_regions),
+        ] {
+            let Ok(cache) = cache.lock() else {
+                if result.is_ok() {
+                    result = Err(std::io::Error::other("region cache poisoned").into());
+                }
+                continue;
+            };
+            let regions: Vec<_> = cache
+                .regions
+                .iter()
+                .filter_map(|(&key, (file, _))| Some((key, file.as_ref()?.clone())))
+                .collect();
+            drop(cache);
+            for ((rx, rz), region) in regions {
+                let synced = region
+                    .lock()
+                    .map_err(|_| std::io::Error::other("region file poisoned"))
+                    .and_then(|region| force(&region));
+                if let Err(error) = synced {
+                    log::warn!(
+                        "Failed to synchronize {} region [{rx}, {rz}]: {error}",
+                        folder.name()
+                    );
+                    if result.is_ok() {
+                        result = Err(error.into());
+                    }
+                }
+            }
+        }
+        result
     }
     /// Wait until at most `low` chunk records are still queued, without waiting
     /// for all of them; a save pass resuming at half the cap keeps the writer fed
@@ -518,14 +560,23 @@ mod tests {
         assert_eq!(error.downcast_ref::<std::io::Error>().unwrap().kind(), kind);
         assert_eq!(save.record_save_failures(), 0);
         assert_eq!(sync_attempts.load(Ordering::Relaxed), 2);
+
+        // Nothing new was queued: the next flush must still force both regions, including
+        // whichever one failed above. It must not carry the old error into this barrier.
+        let mut forced = Vec::new();
+        save.flush_with(|region| {
+            forced.push(region.position().x);
+            region.sync_all()
+        })
+        .unwrap();
+        forced.sort_unstable();
+        assert_eq!(forced, [0, 1]);
+        assert_eq!(sync_attempts.load(Ordering::Relaxed), 2);
         assert!(save.writes_finished().unwrap());
-        save.write_records("region", vec![((64, 0), Some(record()))], true)
-            .unwrap();
-        assert_eq!(sync_attempts.load(Ordering::Relaxed), 3);
         drop(save);
         let disk = open();
+        assert_eq!(disk.read_record_raw("region", 0, 0), Some(record()));
         assert_eq!(disk.read_record_raw("region", 32, 0), Some(record()));
-        assert_eq!(disk.read_record_raw("region", 64, 0), Some(record()));
     }
 
     #[test]
