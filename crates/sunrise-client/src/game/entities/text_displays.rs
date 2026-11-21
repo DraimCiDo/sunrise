@@ -641,7 +641,13 @@ mod tests {
                 sunrise_client::text_display::display_data(&game.persist.raw[&12], false);
             let mut client = RemoteTextDisplay::new(Shows::Text, [0.0; 3], 0.0);
             client.metadata(&metadata);
-            client.move_to(entity.position(game).unwrap(), None);
+            client.move_to(
+                entity
+                    .with_view(game, |view| view.position())
+                    .flatten()
+                    .unwrap(),
+                None,
+            );
             client.tick();
             assert_eq!(client.position.x, 2.0);
             for _ in 0..3 {

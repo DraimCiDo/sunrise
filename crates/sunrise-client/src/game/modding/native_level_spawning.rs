@@ -282,10 +282,16 @@ mod tests {
                     .level_spawn_entity(level, "minecraft:cow", [8.5, 64.0, 8.25], &living())
                     .unwrap();
                 assert_eq!(
-                    game.entity_kind(cow).map(|kind| kind.id(game)).as_deref(),
+                    cow.with_view(game, |view| view.kind())
+                        .flatten()
+                        .map(|kind| kind.id(game))
+                        .as_deref(),
                     Some("minecraft:cow")
                 );
-                assert_eq!(game.entity_position(cow), Some([8.5, 64.0, 8.25]));
+                assert_eq!(
+                    cow.with_view(game, |view| view.position()).flatten(),
+                    Some([8.5, 64.0, 8.25])
+                );
                 let mob = game.mobs.iter().find(|m| m.id == cow.id()).unwrap();
                 assert!(!mob.persistent);
                 assert_eq!(
@@ -379,7 +385,10 @@ mod tests {
                 .level_spawn_entity(level, "cow", [9.5, 64.0, 8.5], &living())
                 .unwrap();
             assert_eq!(
-                game.entity_kind(bare).map(|kind| kind.id(game)).as_deref(),
+                bare.with_view(game, |view| view.kind())
+                    .flatten()
+                    .map(|kind| kind.id(game))
+                    .as_deref(),
                 Some("minecraft:cow")
             );
             // The ender dragon takes its own creation, facing the given yaw;

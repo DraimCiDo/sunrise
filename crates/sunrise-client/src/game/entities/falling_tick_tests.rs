@@ -74,10 +74,13 @@ impl Hooks for Recorder {
 #[mod_api::sunrise_part]
 impl BlockPart for Recorder {
     fn falling_tick(&self, host: &mut dyn ServerHost, event: &mut FallingTickEvent) {
-        self.0
-            .lock()
-            .unwrap()
-            .push((event.entity.id(), event.entity.position(host)));
+        self.0.lock().unwrap().push((
+            event.entity.id(),
+            event
+                .entity
+                .with_view(host, |view| view.position())
+                .flatten(),
+        ));
         assert!(event.entity.set_velocity(host, [0.0, 0.5, 0.0]));
     }
 }

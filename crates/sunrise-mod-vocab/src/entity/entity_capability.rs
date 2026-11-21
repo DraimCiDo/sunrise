@@ -41,7 +41,12 @@ pub const ENTITY_ITEMS: EntityCapabilityKey<dyn ResourceHandler<ItemResource>> =
     EntityCapabilityKey {
         name: "sunrise:entity_items",
         default: Some(|host, entity, ()| {
-            if !builtin_player_inventory_type(&entity.kind(host)?.id(host)) {
+            if !builtin_player_inventory_type(
+                &entity
+                    .with_view(host, |view| view.kind())
+                    .flatten()?
+                    .id(host),
+            ) {
                 if let Some(size) = backend_of(host)?.entity_container_size(entity.id()) {
                     return Some(Box::new(ContainerItems { entity, size }));
                 }
@@ -111,7 +116,11 @@ impl EntityRef {
         let table = host.capability_providers();
         let kind = table
             .provided(ProvidedBy::Entity, key.name)
-            .then(|| self.kind(host).map(|kind| kind.id(host)))
+            .then(|| {
+                self.with_view(host, |view| view.kind())
+                    .flatten()
+                    .map(|kind| kind.id(host))
+            })
             .flatten();
         crate::answered(
             crate::ask_providers(
@@ -302,7 +311,8 @@ impl ResourceHandler<ItemResource> for LivingEquipment {
 /// The entity type `entity` is (`minecraft:zombie`), empty where the handle no longer reads.
 fn kind_of(host: &dyn Host, entity: EntityRef) -> String {
     entity
-        .kind(host)
+        .with_view(host, |view| view.kind())
+        .flatten()
         .map(|kind| kind.id(host))
         .unwrap_or_default()
 }

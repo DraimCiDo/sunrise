@@ -251,10 +251,14 @@ impl<T: Wire> ToClient<T> {
             .into_iter()
             .filter(|player| Some(*player) != except)
             .filter(|player| {
-                player.entity().position(host).is_some_and(|at| {
-                    let [dx, dy, dz] = [at[0] - pos[0], at[1] - pos[1], at[2] - pos[2]];
-                    dx * dx + dy * dy + dz * dz < radius * radius
-                })
+                player
+                    .entity()
+                    .with_view(host, |view| view.position())
+                    .flatten()
+                    .is_some_and(|at| {
+                        let [dx, dy, dz] = [at[0] - pos[0], at[1] - pos[1], at[2] - pos[2]];
+                        dx * dx + dy * dy + dz * dz < radius * radius
+                    })
             })
             .collect();
         Ok(self.deliver(host, near, body))

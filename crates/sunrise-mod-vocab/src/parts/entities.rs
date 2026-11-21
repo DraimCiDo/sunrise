@@ -90,11 +90,13 @@ pub fn entity_providers<T: ?Sized + 'static, C: Copy + 'static>(
     entity: EntityRef,
     context: C,
 ) -> Option<EntityProviders<T, C>> {
-    let parts = installed()?
-        .keys
-        .entity_capabilities
-        .get(key.name)?
-        .get(entity.kind(host)?.id(host).as_str())?;
+    let parts = installed()?.keys.entity_capabilities.get(key.name)?.get(
+        entity
+            .with_view(host, |view| view.kind())
+            .flatten()?
+            .id(host)
+            .as_str(),
+    )?;
     Some(EntityProviders {
         parts,
         entity,

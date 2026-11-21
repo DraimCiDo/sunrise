@@ -334,13 +334,23 @@ fn another_guest_and_online_players_are_visible_during_a_turn() {
     with_guests(|game| {
         let rider = game.entity(13).unwrap();
         game.as_guest(12, |game| {
-            assert_eq!(rider.position(game), Some([3.0, 64.0, 5.0]));
+            assert_eq!(
+                rider.with_view(game, |view| view.position()).flatten(),
+                Some([3.0, 64.0, 5.0])
+            );
             let online = game.native_server_players();
             assert_eq!(
                 online.iter().map(|p| p.uuid()).collect::<Vec<_>>(),
                 [12, 13]
             );
-            assert_eq!(online[1].entity().position(game).unwrap(), [3.0, 64.0, 5.0]);
+            assert_eq!(
+                online[1]
+                    .entity()
+                    .with_view(game, |view| view.position())
+                    .flatten()
+                    .unwrap(),
+                [3.0, 64.0, 5.0]
+            );
         })
         .unwrap();
     });
@@ -359,26 +369,37 @@ fn move_by_moves_a_player_and_refuses_what_it_cannot() {
         }
         let a = game.player(12).unwrap();
         let b = game.player(13).unwrap();
-        let before = b.entity().position(game).unwrap();
+        let before = b
+            .entity()
+            .with_view(game, |view| view.position())
+            .flatten()
+            .unwrap();
         let by = game
             .entity_move_by(b.entity(), [0.5, 0.0, 0.25], MoveCause::SelfMovement)
             .unwrap();
         assert_eq!(by, [0.5, 0.0, 0.25]);
         let now = [before[0] + 0.5, before[1], before[2] + 0.25];
-        assert_eq!(b.entity().position(game), Some(now));
+        assert_eq!(
+            b.entity().with_view(game, |view| view.position()).flatten(),
+            Some(now)
+        );
         let hub = &game.lan.as_ref().unwrap().hub;
         let guest = hub.guest(13).unwrap();
         assert_eq!(guest.position, now, "the hub's copy follows the body");
         assert!(guest.awaiting_teleport.is_some(), "the client is told");
         // The acting player is moved in its turn, and another during it.
         game.as_guest(12, |game| {
-            let own = a.entity().position(game).unwrap();
+            let own = a
+                .entity()
+                .with_view(game, |view| view.position())
+                .flatten()
+                .unwrap();
             assert_eq!(
                 game.entity_move_by(a.entity(), [0.0, 0.0, -2.0], MoveCause::SelfMovement),
                 Some([0.0, 0.0, -2.0])
             );
             assert_eq!(
-                a.entity().position(game),
+                a.entity().with_view(game, |view| view.position()).flatten(),
                 Some([own[0], own[1], own[2] - 2.0])
             );
             assert!(
@@ -388,7 +409,7 @@ fn move_by_moves_a_player_and_refuses_what_it_cannot() {
         })
         .unwrap();
         // Nothing moves for a value that is not finite or a target outside the world.
-        let held = b.entity().position(game);
+        let held = b.entity().with_view(game, |view| view.position()).flatten();
         for delta in [
             [f64::NAN, 0.0, 0.0],
             [0.0, f64::INFINITY, 0.0],
@@ -400,7 +421,10 @@ fn move_by_moves_a_player_and_refuses_what_it_cannot() {
                 "{delta:?}"
             );
         }
-        assert_eq!(b.entity().position(game), held);
+        assert_eq!(
+            b.entity().with_view(game, |view| view.position()).flatten(),
+            held
+        );
     });
 }
 
@@ -427,10 +451,13 @@ fn a_players_move_by_is_heard_once_and_a_cancel_moves_nothing() {
         with_guests(|game| {
             game.as_guest(13, |_| {}).unwrap();
             let b = game.player(13).unwrap();
-            let before = b.entity().position(game);
+            let before = b.entity().with_view(game, |view| view.position()).flatten();
             let moved = game.entity_move_by(b.entity(), [1.0, 0.0, 0.0], MoveCause::Piston);
             assert_eq!(moved, Some([0.0; 3]));
-            assert_eq!(b.entity().position(game), before);
+            assert_eq!(
+                b.entity().with_view(game, |view| view.position()).flatten(),
+                before
+            );
             assert!(
                 game.lan
                     .as_ref()
@@ -457,7 +484,11 @@ fn a_players_move_by_stops_at_a_boat() {
     with_guests(|game| {
         game.as_guest(13, |_| {}).unwrap();
         let b = game.player(13).unwrap();
-        let [x, y, z] = b.entity().position(game).unwrap();
+        let [x, y, z] = b
+            .entity()
+            .with_view(game, |view| view.position())
+            .flatten()
+            .unwrap();
         let free = game
             .entity_move_by(b.entity(), [4.0, 0.0, 0.0], MoveCause::SelfMovement)
             .unwrap();
@@ -496,7 +527,11 @@ fn a_players_move_by_is_the_mover_a_colliders_stack_exempts() {
     with_guests(|game| {
         game.as_guest(13, |_| {}).unwrap();
         let b = game.player(13).unwrap();
-        let [x, y, z] = b.entity().position(game).unwrap();
+        let [x, y, z] = b
+            .entity()
+            .with_view(game, |view| view.position())
+            .flatten()
+            .unwrap();
         let player = game.lan.as_ref().unwrap().hub.guest(13).unwrap().entity_id as u32;
         let block = |id: u32, at: f64, exempt: Vec<u32>| Placed {
             id,
@@ -535,7 +570,11 @@ fn a_players_move_by_falls_through_a_happy_ghast_that_is_not_held_still() {
     with_guests(|game| {
         game.as_guest(13, |_| {}).unwrap();
         let b = game.player(13).unwrap();
-        let [x, y, z] = b.entity().position(game).unwrap();
+        let [x, y, z] = b
+            .entity()
+            .with_view(game, |view| view.position())
+            .flatten()
+            .unwrap();
         game.next_entity += 1;
         let id = game.next_entity;
         let kind = game
@@ -918,10 +957,19 @@ fn another_guest_follows_a_vehicle_teleported_during_a_turn() {
         let before = [3.0, 64.0 + (f64::from(1.44375_f32) - 0.6), 5.0];
         let after = [10.0, 70.0 + (f64::from(1.44375_f32) - 0.6), -4.0];
         game.as_guest(12, |game| {
-            assert_eq!(rider.position(game), Some(before));
+            assert_eq!(
+                rider.with_view(game, |view| view.position()).flatten(),
+                Some(before)
+            );
             assert!(vehicle.teleport_to(game, [10.0, 70.0, -4.0], None));
-            assert_eq!(vehicle.position(game), Some([10.0, 70.0, -4.0]));
-            assert_eq!(rider.position(game), Some(after));
+            assert_eq!(
+                vehicle.with_view(game, |view| view.position()).flatten(),
+                Some([10.0, 70.0, -4.0])
+            );
+            assert_eq!(
+                rider.with_view(game, |view| view.position()).flatten(),
+                Some(after)
+            );
             assert_eq!(
                 game.lan.as_ref().unwrap().hub.guest(13).unwrap().vehicle,
                 Some(42)
@@ -1755,7 +1803,10 @@ fn run_command_runs_as_the_entity_from_where_it_is() {
         };
 
         assert!(stand.run_command(game, "/tp @s ~2 ~ ~-1", Gamemasters));
-        assert_eq!(stand.position(game), Some([3.5, 70.0, 0.5]));
+        assert_eq!(
+            stand.with_view(game, |view| view.position()).flatten(),
+            Some([3.5, 70.0, 0.5])
+        );
         assert_eq!(guest(game, 12), [3.0, 64.0, 5.0]);
         assert_eq!(guest(game, 13), [3.0, 64.0, 5.0]);
 

@@ -127,7 +127,14 @@ mod on_entity_item_update_tests {
                         .entity()
                         .remove(host, mod_api::RemovalReason::Discarded)
                 );
-                assert_eq!(event.item.entity().position(host), None);
+                assert_eq!(
+                    event
+                        .item
+                        .entity()
+                        .with_view(host, |view| view.position())
+                        .flatten(),
+                    None
+                );
                 assert!(!event.item.set_pickup_delay(host, 7));
                 return Flow::Continue;
             }

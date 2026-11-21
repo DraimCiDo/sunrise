@@ -574,10 +574,17 @@ mod tests {
             ) -> Flow {
                 let entity = host.entity(event.entity).expect("joining handle");
                 assert_eq!(
-                    entity.kind(host).map(|kind| kind.id(host)).as_deref(),
+                    entity
+                        .with_view(host, |view| view.kind())
+                        .flatten()
+                        .map(|kind| kind.id(host))
+                        .as_deref(),
                     Some(event.kind)
                 );
-                assert_eq!(entity.position(host), Some(event.pos));
+                assert_eq!(
+                    entity.with_view(host, |view| view.position()).flatten(),
+                    Some(event.pos)
+                );
                 let level = host.level(event.dimension).unwrap();
                 if event.kind != "minecraft:eye_of_ender" {
                     assert!(
@@ -650,11 +657,16 @@ mod tests {
                     .entities_in(game, [4.0, 63.0, 4.0], [6.0, 66.0, 6.0])
                     .unwrap();
                 assert_eq!(reloaded.len(), 5);
-                assert!(handles.iter().all(|e| e.kind(game).is_none()));
+                assert!(
+                    handles
+                        .iter()
+                        .all(|e| e.with_view(game, |view| view.kind()).flatten().is_none())
+                );
                 assert!(
                     reloaded
                         .iter()
-                        .all(|e| e.position(game) == Some([5.0, 64.0, 5.0]))
+                        .all(|e| e.with_view(game, |view| view.position()).flatten()
+                            == Some([5.0, 64.0, 5.0]))
                 );
                 assert_eq!(
                     game.persist.live.len(),

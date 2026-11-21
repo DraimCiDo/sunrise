@@ -906,7 +906,8 @@ fn the_player_the_tick_sees_resolves_by_its_captured_identity() {
             let uuid = sunrise_client::lan::playerdata::ints_uuid([1, 2, 3, 4]);
             let by_uuid = host.player(uuid).is_some();
             let entity = host.entity(5000);
-            let position = entity.and_then(|entity| entity.position(host));
+            let position =
+                entity.and_then(|entity| entity.with_view(host, |view| view.position()).flatten());
             let as_mob = entity.is_some_and(|entity| host.mob(entity).is_some());
             READS.lock().unwrap().push((by_uuid, position, as_mob));
             false

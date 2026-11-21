@@ -42,7 +42,10 @@ fn client_camera_entity_returns_to_player_after_removal() {
             7,
             "use the remote identity, not PlayerMotion's default"
         );
-        assert_eq!(local.position(game), Some([0.0; 3]));
+        assert_eq!(
+            local.with_view(game, |view| view.position()).flatten(),
+            Some([0.0; 3])
+        );
 
         let creeper = game
             .remote
@@ -74,7 +77,10 @@ fn client_camera_entity_returns_to_player_after_removal() {
             .unwrap();
         assert_eq!(camera(game), Some(attached));
         assert_eq!(attached.id(), 31);
-        assert_eq!(attached.position(game), Some([10.0, 64.0, 12.0]));
+        assert_eq!(
+            attached.with_view(game, |view| view.position()).flatten(),
+            Some([10.0, 64.0, 12.0])
+        );
         game.handle_packet(C::SetCamera(play::SetCamera { camera_id: 99 }))
             .unwrap();
         assert_eq!(
@@ -114,10 +120,20 @@ fn client_camera_entity_returns_to_player_after_removal() {
         let fresh = camera(game).unwrap();
         assert_eq!(fresh.id(), local.id());
         assert_ne!(fresh.epoch(), local.epoch());
-        assert_eq!(local.position(game), None, "old level handles stay stale");
-        assert_eq!(fresh.position(game), Some([0.0; 3]));
+        assert_eq!(
+            local.with_view(game, |view| view.position()).flatten(),
+            None,
+            "old level handles stay stale"
+        );
+        assert_eq!(
+            fresh.with_view(game, |view| view.position()).flatten(),
+            Some([0.0; 3])
+        );
         game.client_logging_out();
         assert!(camera(game).is_none());
-        assert_eq!(fresh.position(game), None);
+        assert_eq!(
+            fresh.with_view(game, |view| view.position()).flatten(),
+            None
+        );
     });
 }

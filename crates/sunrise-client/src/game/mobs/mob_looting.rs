@@ -242,7 +242,10 @@ mod tests {
         fn can_equip(&self, host: &dyn mod_api::Host, event: &mut mod_api::CanEquipEvent<'_>) {
             let entity = event.entity.entity();
             (self.1.lock().unwrap()).push((event.slot.to_owned(), entity.id()));
-            let standing = entity.position(host).is_some_and(|[_, y, _]| y >= 64.0);
+            let standing = entity
+                .with_view(host, |view| view.position())
+                .flatten()
+                .is_some_and(|[_, y, _]| y >= 64.0);
             event.can_equip = event.kind == self.0 && standing;
         }
     }

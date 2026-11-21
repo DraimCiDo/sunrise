@@ -29,9 +29,15 @@ mod tests {
                     return;
                 };
                 assert_eq!(host.entity_by_uuid(EntityUuid(u128::MAX)), None);
-                let hit = host
-                    .entity_by_uuid(UUID)
-                    .map(|entity| (entity.id(), entity.position(host).unwrap()));
+                let hit = host.entity_by_uuid(UUID).map(|entity| {
+                    (
+                        entity.id(),
+                        entity
+                            .with_view(host, |view| view.position())
+                            .flatten()
+                            .unwrap(),
+                    )
+                });
                 self.0.lock().unwrap().push(hit);
             }
         }

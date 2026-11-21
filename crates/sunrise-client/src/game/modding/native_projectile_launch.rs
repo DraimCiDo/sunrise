@@ -41,7 +41,9 @@ impl Game<'_> {
         let kind = thrown_projectile_kind(&entity_type.to_string(), &carried)?;
         let entity = owner.entity();
         let [x, y, z] = self.entity_eye_position(entity)?;
-        let [yaw, pitch] = self.entity_rotation(entity)?;
+        let [yaw, pitch] = self
+            .resolve_entity_view(entity)
+            .and_then(|view| mod_api::EntityView::rotation(&view))?;
         let motion = self.native_entity_known_speed(entity)?;
         let on_ground = self.entity_on_ground(entity)?;
         let ((who, uuid, guest), vehicle) = self.native_projectile_owner_fields(Some(entity))?;

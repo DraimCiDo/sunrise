@@ -73,7 +73,12 @@ fn saved_painting_residency_precedes_reads_and_retires_at_the_sweep() {
         assert!(game.entity_discard(entity));
         assert_eq!(game.paintings.len(), 1);
         assert!(game.entity(id).is_none());
-        assert!(game.entity_position(entity).is_none());
+        assert!(
+            entity
+                .with_view(game, |view| view.position())
+                .flatten()
+                .is_none()
+        );
         // Residency ends at the sweep, but the row's handle is already stale.
         let pending = index.lock().unwrap().snapshot(&key);
         assert_eq!(pending.len(), 1);

@@ -174,12 +174,17 @@ mod tests {
                 .level_pop_resource(level, [4, 64, -2], stone())
                 .unwrap();
             assert_eq!(
-                game.entity_kind(popped)
+                popped
+                    .with_view(game, |view| view.kind())
+                    .flatten()
                     .map(|kind| kind.id(game))
                     .as_deref(),
                 Some("minecraft:item")
             );
-            assert_eq!(game.entity_position(popped), Some(at));
+            assert_eq!(
+                popped.with_view(game, |view| view.position()).flatten(),
+                Some(at)
+            );
             let item = game.dropped.last().unwrap();
             assert_eq!((item.pickup_delay, item.stack.count), (10, 3));
             assert_eq!(item.velocity.y, 0.2);
@@ -202,7 +207,10 @@ mod tests {
             let spawned = game
                 .level_spawn_item_with_motion(level, 1.5, 70.0, 2.5, stone(), [0.0, 0.3, 0.0], 40)
                 .unwrap();
-            assert_eq!(game.entity_position(spawned), Some([1.5, 70.0, 2.5]));
+            assert_eq!(
+                spawned.with_view(game, |view| view.position()).flatten(),
+                Some([1.5, 70.0, 2.5])
+            );
             let item = game.dropped.last().unwrap();
             assert_eq!((item.pickup_delay, item.velocity.y), (40, 0.3));
             assert!(
@@ -244,7 +252,12 @@ mod tests {
             assert_eq!(after[..before.len()], before[..]);
             assert_eq!(after[before.len()].0, hooked.id());
             assert!(after[before.len()].1 > before.iter().map(|j| j.1).max().unwrap());
-            assert!(game.entity_kind(hooked).is_some());
+            assert!(
+                hooked
+                    .with_view(game, |view| view.kind())
+                    .flatten()
+                    .is_some()
+            );
 
             // ExperienceOrb.award: 100 is 73, 17, 7 and 3, far apart from other orbs.
             assert!(game.level_award_experience(level, 100.5, 70.0, 0.5, 100));

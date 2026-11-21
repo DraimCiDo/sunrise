@@ -2616,7 +2616,11 @@ mod tests {
     #[mod_api::sunrise_part]
     impl mod_api::ItemPart for Fits {
         fn can_equip(&self, host: &dyn mod_api::Host, event: &mut mod_api::CanEquipEvent<'_>) {
-            let at = event.entity.entity().position(host);
+            let at = event
+                .entity
+                .entity()
+                .with_view(host, |view| view.position())
+                .flatten();
             let (slot, kind) = (event.slot.to_owned(), event.kind.to_owned());
             (self.asked.lock().unwrap()).push((slot, event.entity.id(), kind, at));
             event.can_equip = event.kind == *self.accepts.lock().unwrap();

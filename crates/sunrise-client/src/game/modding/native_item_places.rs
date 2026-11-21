@@ -2978,7 +2978,10 @@ pub(super) mod tests {
             let host: &mut dyn ServerHost = game;
             let cart = host.entity(500).unwrap();
             assert_eq!(
-                cart.kind(host).map(|kind| kind.id(host)).as_deref(),
+                cart.with_view(host, |view| view.kind())
+                    .flatten()
+                    .map(|kind| kind.id(host))
+                    .as_deref(),
                 Some("minecraft:chest_minecart")
             );
             let items = cart.capability(host, &ENTITY_ITEMS, ()).unwrap();

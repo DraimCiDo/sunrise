@@ -642,7 +642,10 @@ mod tests {
                 game.handle_packet(set(9, vec![12, 99, 7])).unwrap();
                 game.handle_packet(set(12, vec![4])).unwrap();
                 game.position_riders();
-                assert_eq!(row.position(game), Some([2.5, 71.25, 1.5]));
+                assert_eq!(
+                    row.with_view(game, |view| view.position()).flatten(),
+                    Some([2.5, 71.25, 1.5])
+                );
                 let host: &dyn ClientHost = game;
                 assert_eq!(vehicle.passengers(host), Some(vec![row, me]));
                 assert_eq!(vehicle.is_vehicle(host), Some(true));
@@ -683,7 +686,10 @@ mod tests {
                 let ghast = game.entity(20).unwrap();
                 game.handle_packet(set(20, vec![7, 12])).unwrap();
                 game.position_riders();
-                assert_eq!(row.position(game), Some([2.5 - 1.7, 74.0, 0.5]));
+                assert_eq!(
+                    row.with_view(game, |view| view.position()).flatten(),
+                    Some([2.5 - 1.7, 74.0, 0.5])
+                );
                 game.handle_packet(set(9, vec![12])).unwrap();
                 assert_eq!(me.vehicle(game), Some(ghast));
                 game.handle_packet(set(7, vec![99])).unwrap();
@@ -698,7 +704,10 @@ mod tests {
                 assert_eq!(game.remote.as_ref().unwrap().ghast_dismount, None);
                 game.handle_packet(position(2)).unwrap();
                 assert_eq!(game.entity(7), Some(me));
-                assert_eq!(ghast.position(game), Some([2.5, 70.0, 0.5]));
+                assert_eq!(
+                    ghast.with_view(game, |view| view.position()).flatten(),
+                    Some([2.5, 70.0, 0.5])
+                );
                 assert_eq!(
                     game.mobs
                         .iter()

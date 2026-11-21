@@ -1671,7 +1671,13 @@ mod entity_tick_tests {
             let positions = match host {
                 mod_api::HostSide::Client(host) => entities
                     .iter()
-                    .map(|&id| host.entity(id).unwrap().position(*host).unwrap())
+                    .map(|&id| {
+                        host.entity(id)
+                            .unwrap()
+                            .with_view(*host, |view| view.position())
+                            .flatten()
+                            .unwrap()
+                    })
                     .collect(),
                 _ => Vec::new(),
             };

@@ -110,7 +110,13 @@ fn owner_launch_sets_owner_before_insertion_and_uses_projectile_random() {
         let shot = game
             .spawn_projectile_from_rotation(owner, &wind, &wind_stack, 0.0, 1.5, 1.0)
             .unwrap();
-        assert_eq!(game.entity_position(shot.entity()).unwrap()[1], eye[1]);
+        assert_eq!(
+            shot.entity()
+                .with_view(game, |view| view.position())
+                .flatten()
+                .unwrap()[1],
+            eye[1]
+        );
     });
 }
 

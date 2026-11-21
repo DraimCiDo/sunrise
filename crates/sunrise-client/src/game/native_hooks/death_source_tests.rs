@@ -81,7 +81,11 @@ impl Hooks for Probe {
             event.weapon,
         ));
         let entity = host.entity(event.entity).expect("dying mob still resolves");
-        let kind = entity.kind(host).expect("dying entity has a type").id(host);
+        let kind = entity
+            .with_view(host, |view| view.kind())
+            .flatten()
+            .expect("dying entity has a type")
+            .id(host);
         self.seen
             .lock()
             .unwrap()

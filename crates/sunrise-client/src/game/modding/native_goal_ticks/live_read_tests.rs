@@ -109,7 +109,10 @@ fn scoped_host_resolves_other_real_players_from_the_game() {
         assert!(context.lookup_living(player.entity()).is_some());
         assert_eq!(
             player.entity().position(&context),
-            player.entity().position(game)
+            player
+                .entity()
+                .with_view(game, |view| view.position())
+                .flatten()
         );
         assert!(context.lookup_player(999).is_none());
     });

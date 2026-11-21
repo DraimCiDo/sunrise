@@ -23,7 +23,13 @@ impl Hooks for PearlProbe {
         event: &mut EnderPearlTeleportEvent<'_>,
     ) -> Flow {
         self.owners.lock().unwrap().push(event.owner.id());
-        assert_eq!(event.owner.position(host), Some(event.from));
+        assert_eq!(
+            event
+                .owner
+                .with_view(host, |view| view.position())
+                .flatten(),
+            Some(event.from)
+        );
         assert_eq!(
             event.damage, 0.0,
             "non-player owners take no vanilla fall damage"

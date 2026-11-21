@@ -33,8 +33,14 @@ struct PositionListener(Positions);
 impl Hooks for PositionListener {
     fn entity_entering_section(&self, host: HostSide<'_>, event: &mut EntityEnteringSectionEvent) {
         let position = match host {
-            HostSide::Server(host) => event.entity.position(host),
-            HostSide::Client(host) => event.entity.position(host),
+            HostSide::Server(host) => event
+                .entity
+                .with_view(host, |view| view.position())
+                .flatten(),
+            HostSide::Client(host) => event
+                .entity
+                .with_view(host, |view| view.position())
+                .flatten(),
         };
         self.0.lock().unwrap().push(position);
     }

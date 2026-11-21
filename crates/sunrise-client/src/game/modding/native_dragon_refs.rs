@@ -445,7 +445,10 @@ mod tests {
             // The handle `entity` gives is the one `parts` listed.
             assert_eq!(game.entity(part.id()), Some(*part));
             assert_ne!(*part, dragon);
-            assert_eq!(game.entity_position(*part), Some([x, y, z]));
+            assert_eq!(
+                (*part).with_view(game, |view| view.position()).flatten(),
+                Some([x, y, z])
+            );
             assert_eq!(
                 game.entity_bounding_box(*part),
                 Some([
@@ -454,10 +457,17 @@ mod tests {
                 ])
             );
             assert_eq!(
-                game.entity_kind(*part).map(|kind| kind.id(game)).as_deref(),
+                (*part)
+                    .with_view(game, |view| view.kind())
+                    .flatten()
+                    .map(|kind| kind.id(game))
+                    .as_deref(),
                 Some("minecraft:ender_dragon")
             );
-            assert_eq!(game.entity_rotation(*part), Some([0.0, 0.0]));
+            assert_eq!(
+                (*part).with_view(game, |view| view.rotation()).flatten(),
+                Some([0.0, 0.0])
+            );
             assert_eq!(game.entity_velocity(*part), Some([0.0; 3]));
             assert_eq!(game.entity_level(*part), game.entity_level(dragon));
             assert_eq!(game.entity_is_multipart(*part), Some(false));
@@ -470,7 +480,10 @@ mod tests {
             assert!(game.dragon(*part).is_none());
         }
         // The parent keeps its own place and has no box.
-        assert_eq!(game.entity_position(dragon), Some([0.0; 3]));
+        assert_eq!(
+            dragon.with_view(game, |view| view.position()).flatten(),
+            Some([0.0; 3])
+        );
         assert_eq!(game.entity_bounding_box(dragon), None);
     }
 
@@ -493,22 +506,34 @@ mod tests {
             );
             // A handle of an earlier open names nothing.
             let stale = EntityRef::new(WorldEpoch::new(entity.epoch().get() + 1), parts[0].id());
-            assert_eq!(game.entity_position(stale), None);
+            assert_eq!(
+                stale.with_view(game, |view| view.position()).flatten(),
+                None
+            );
             assert_eq!(game.entity_bounding_box(stale), None);
             assert_eq!(game.entity_is_multipart(stale), None);
             let stale_dragon = EntityRef::new(stale.epoch(), entity.id());
             assert_eq!(game.entity_parts(stale_dragon), None);
             // Parts cannot move independently of their parent, even without rotation.
-            let before = game.entity_position(parts[2]);
+            let before = parts[2].with_view(game, |view| view.position()).flatten();
             assert!(!game.entity_teleport_to(parts[2], [10.0, 80.0, 10.0], None));
-            assert_eq!(game.entity_position(parts[2]), before);
+            assert_eq!(
+                parts[2].with_view(game, |view| view.position()).flatten(),
+                before
+            );
             // A dragon that is dying still has its parts.
             game.dragon.as_mut().unwrap().health = 0.0;
-            assert_eq!(game.entity_position(parts[2]), Some(part_fixture(2).0));
+            assert_eq!(
+                parts[2].with_view(game, |view| view.position()).flatten(),
+                Some(part_fixture(2).0)
+            );
             // A dragon a mod removed takes its parts with it, before the sweep.
             assert!(game.entity_discard(entity));
             for part in &parts {
-                assert_eq!(game.entity_position(*part), None);
+                assert_eq!(
+                    (*part).with_view(game, |view| view.position()).flatten(),
+                    None
+                );
                 assert!(game.entity(part.id()).is_none());
             }
             assert_eq!(game.entity_parts(entity), None);
@@ -564,9 +589,15 @@ mod tests {
             // The window's own player is not one, and a stale handle is none.
             assert_eq!(game.entity(7).map(|e| e.id()), Some(7));
             let stale = EntityRef::new(WorldEpoch::new(dragon.epoch().get() + 1), parts[3].id());
-            assert_eq!(game.entity_position(stale), None);
+            assert_eq!(
+                stale.with_view(game, |view| view.position()).flatten(),
+                None
+            );
             game.remote.as_mut().unwrap().logged_in = false;
-            assert_eq!(game.entity_position(parts[3]), None);
+            assert_eq!(
+                parts[3].with_view(game, |view| view.position()).flatten(),
+                None
+            );
         });
     }
 }

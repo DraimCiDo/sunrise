@@ -48,12 +48,17 @@ impl mod_api::Hooks for Players {
             .unwrap()
             .push(("post", event.entities.to_vec()));
         if let HostSide::Server(host) = host {
-            self.post_positions.lock().unwrap().extend(
-                event
-                    .entities
-                    .iter()
-                    .filter_map(|&id| Some((id, host.entity(id)?.position(host)?))),
-            );
+            self.post_positions
+                .lock()
+                .unwrap()
+                .extend(event.entities.iter().filter_map(|&id| {
+                    Some((
+                        id,
+                        host.entity(id)?
+                            .with_view(host, |view| view.position())
+                            .flatten()?,
+                    ))
+                }));
         }
     }
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {

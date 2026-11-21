@@ -115,11 +115,20 @@ fn a_client_reads_the_entities_and_menu_the_server_shows_it() {
     .unwrap();
     let me = game.entity(7).expect("the own player");
     assert_eq!(
-        game.entity_kind(me).map(|kind| kind.id(&game)).as_deref(),
+        me.with_view(&game, |view| view.kind())
+            .flatten()
+            .map(|kind| kind.id(&game))
+            .as_deref(),
         Some("minecraft:player")
     );
-    assert_eq!(game.entity_position(me), Some([0.5, 65.0, 0.5]));
-    assert_eq!(game.entity_rotation(me), Some([45.0, 10.0]));
+    assert_eq!(
+        me.with_view(&game, |view| view.position()).flatten(),
+        Some([0.5, 65.0, 0.5])
+    );
+    assert_eq!(
+        me.with_view(&game, |view| view.rotation()).flatten(),
+        Some([45.0, 10.0])
+    );
     // The profile the login named (the net thread's `Joined`).
     game.remote.as_mut().unwrap().profile_name = "Steve".into();
     assert_eq!(
@@ -143,14 +152,27 @@ fn a_client_reads_the_entities_and_menu_the_server_shows_it() {
     .unwrap();
     let stand = game.entity(20).expect("the stand is tracked");
     assert_eq!(
-        game.entity_kind(stand)
+        stand
+            .with_view(&game, |view| view.kind())
+            .flatten()
             .map(|kind| kind.id(&game))
             .as_deref(),
         Some("minecraft:armor_stand")
     );
-    assert_eq!(game.entity_position(stand), Some([1.5, 64.0, 2.5]));
-    assert_eq!(game.entity_block_position(stand), Some([1, 64, 2]));
-    assert_eq!(game.entity_rotation(stand), Some([90.0, 0.0]));
+    assert_eq!(
+        stand.with_view(&game, |view| view.position()).flatten(),
+        Some([1.5, 64.0, 2.5])
+    );
+    assert_eq!(
+        stand
+            .with_view(&game, |view| view.block_position())
+            .flatten(),
+        Some([1, 64, 2])
+    );
+    assert_eq!(
+        stand.with_view(&game, |view| view.rotation()).flatten(),
+        Some([90.0, 0.0])
+    );
     assert_eq!(game.entity_uuid(stand), Some(uuid));
     assert_eq!(
         stand.name(&game as &dyn mod_api::ClientHost).as_deref(),
@@ -181,12 +203,17 @@ fn a_client_reads_the_entities_and_menu_the_server_shows_it() {
         .unwrap();
     let display = game.entity(21).expect("the display is tracked");
     assert_eq!(
-        game.entity_kind(display)
+        display
+            .with_view(&game, |view| view.kind())
+            .flatten()
             .map(|kind| kind.id(&game))
             .as_deref(),
         Some("minecraft:text_display")
     );
-    assert_eq!(game.entity_position(display), Some([4.0, 70.0, -3.0]));
+    assert_eq!(
+        display.with_view(&game, |view| view.position()).flatten(),
+        Some([4.0, 70.0, -3.0])
+    );
     assert_eq!(game.entity_uuid(display), Some(5));
     assert_eq!(game.entity(99), None);
 
@@ -311,8 +338,11 @@ fn a_client_reads_the_entities_and_menu_the_server_shows_it() {
         keep: 0,
     }))
     .unwrap();
-    assert_eq!(game.entity_position(stand), None);
-    assert_eq!(game.entity_kind(display), None);
+    assert_eq!(
+        stand.with_view(&game, |view| view.position()).flatten(),
+        None
+    );
+    assert_eq!(display.with_view(&game, |view| view.kind()).flatten(), None);
 }
 
 /// #8589: the server sends entity event 42 (the raid sweat) for a villager;

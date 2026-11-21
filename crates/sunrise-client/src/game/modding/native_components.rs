@@ -329,9 +329,13 @@ impl Game<'_> {
             return None;
         }
         self.native_entity_read_target(target)?;
-        let target = self.entity_kind(target).map(|kind| kind.id(self))?;
+        let target = self
+            .resolve_entity_view(target)
+            .and_then(|view| mod_api::EntityView::kind(&view))
+            .map(|kind| kind.id(self))?;
         let actor = self
-            .entity_kind(attacker.entity())
+            .resolve_entity_view(attacker.entity())
+            .and_then(|view| mod_api::EntityView::kind(&view))
             .map(|kind| kind.id(self))?;
         let source = self.item_resource_damage_source(stack, attacker)?;
         let source = source.damage_type.to_string();

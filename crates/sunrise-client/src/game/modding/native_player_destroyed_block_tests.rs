@@ -238,7 +238,12 @@ fn items(host: &dyn mod_api::Host) -> usize {
         .unwrap_or_default()
         .into_iter()
         .filter(|entity| {
-            entity.kind(host).map(|kind| kind.id(host)).as_deref() == Some("minecraft:item")
+            entity
+                .with_view(host, |view| view.kind())
+                .flatten()
+                .map(|kind| kind.id(host))
+                .as_deref()
+                == Some("minecraft:item")
         })
         .count()
 }

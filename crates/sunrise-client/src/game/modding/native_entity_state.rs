@@ -1368,7 +1368,10 @@ mod tests {
             // side's and not a fabricated id that never resolved.
             let entity = game.entity(15).unwrap();
             assert!(
-                entity.position(game).is_some(),
+                entity
+                    .with_view(game, |view| view.position())
+                    .flatten()
+                    .is_some(),
                 "the handle is live on this client"
             );
             assert!(!entity.set_portal_cooldown(game, 5));

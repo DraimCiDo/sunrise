@@ -220,8 +220,14 @@ fn client_handle_reads_answer_from_the_clients_copy() {
         let living = game.living(me).unwrap();
         let level = game.level("minecraft:overworld").unwrap();
         assert!(game.level("minecraft:the_nether").is_none());
-        assert_eq!(me.position(game), Some([1.5, 65.0, -2.5]));
-        assert_eq!(me.rotation(game), Some([90.0, 10.0]));
+        assert_eq!(
+            me.with_view(game, |view| view.position()).flatten(),
+            Some([1.5, 65.0, -2.5])
+        );
+        assert_eq!(
+            me.with_view(game, |view| view.rotation()).flatten(),
+            Some([90.0, 10.0])
+        );
         game.player.as_mut().unwrap().velocity = Vec3::new(0.0, -0.5, 0.25);
         assert_eq!(me.velocity(game), Some([0.0, -0.5, 0.25]));
 
@@ -360,20 +366,31 @@ fn client_handle_reads_answer_from_the_clients_copy() {
         }))
         .unwrap();
         let other = game.entity(31).unwrap();
-        assert_eq!(other.position(game), Some([10.0, 64.0, 12.0]));
+        assert_eq!(
+            other.with_view(game, |view| view.position()).flatten(),
+            Some([10.0, 64.0, 12.0])
+        );
         assert!(other.velocity(game).is_some());
-        assert!(other.rotation(game).is_some());
+        assert!(
+            other
+                .with_view(game, |view| view.rotation())
+                .flatten()
+                .is_some()
+        );
         assert!(game.living(other).is_none(), "only the local player");
         assert!(game.entity(99).is_none());
         let untracked = EntityRef::new(me.epoch(), 99);
-        assert_eq!(untracked.position(game), None);
+        assert_eq!(
+            untracked.with_view(game, |view| view.position()).flatten(),
+            None
+        );
         assert_eq!(untracked.velocity(game), None);
 
         // A replaced level retires the handles.
         let mut other_level = spawn.clone();
         other_level.dimension = "test:other_overworld".into();
         game.enter_remote_dimension(&other_level, true, Reason::Other);
-        assert_eq!(me.position(game), None);
+        assert_eq!(me.with_view(game, |view| view.position()).flatten(), None);
         assert_eq!(living.health(game), None);
         assert_eq!(level.block(game, at), None);
         assert!(!level.is_loaded(game, at));

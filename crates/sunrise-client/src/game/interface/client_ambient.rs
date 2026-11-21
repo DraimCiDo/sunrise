@@ -155,7 +155,10 @@ impl Game<'_> {
         let Some(target) = self.native_client_entity_target(entity) else {
             return false;
         };
-        let Some([x, y, z]) = self.entity_position(entity) else {
+        let Some([x, y, z]) = self
+            .resolve_entity_view(entity)
+            .and_then(|view| mod_api::EntityView::position(&view))
+        else {
             return false;
         };
         let Some([vx, vy, vz]) = self.entity_velocity(entity) else {

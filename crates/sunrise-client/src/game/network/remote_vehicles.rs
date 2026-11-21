@@ -162,7 +162,9 @@ impl Game<'_> {
             {
                 return None;
             }
-            let origin = self.entity_position(entity)?;
+            let origin = self
+                .resolve_entity_view(entity)
+                .and_then(|view| mod_api::EntityView::position(&view))?;
             return Some(ObjectHit {
                 id: entity.id() as i32,
                 distance,

@@ -26,11 +26,15 @@ struct DespawnProbe {
 impl mod_api::Hooks for DespawnProbe {
     fn mob_despawn(&self, host: &dyn mod_api::Host, event: &mut mod_api::MobDespawnEvent<'_>) {
         let id = event.mob.entity().id();
-        let own = event.mob.entity().position(host);
+        let own = event
+            .mob
+            .entity()
+            .with_view(host, |view| view.position())
+            .flatten();
         let other_id = if id == 71 { 72 } else { 71 };
         let other = host
             .entity(other_id)
-            .and_then(|entity| entity.position(host));
+            .and_then(|entity| entity.with_view(host, |view| view.position()).flatten());
         self.records.lock().unwrap().0.push((id, own, other));
         if id == self.allow.load(Ordering::Relaxed) {
             *event.result = Despawn::Allow;
@@ -56,7 +60,8 @@ impl mod_api::Hooks for MoveOnPre {
         if event.entities.contains(&self.id) {
             let entity = host.entity(self.id).expect("a live handle in its own Pre");
             let at = entity
-                .position(host)
+                .with_view(host, |view| view.position())
+                .flatten()
                 .expect("the tick view reads its position");
             self.seen.lock().unwrap().push(Some(at));
             assert!(
@@ -114,7 +119,7 @@ impl mod_api::Hooks for RemovedPeerProbe {
         let id = event.mob.entity().id();
         let victim = host
             .entity(self.victim)
-            .and_then(|entity| entity.position(host));
+            .and_then(|entity| entity.with_view(host, |view| view.position()).flatten());
         self.records.lock().unwrap().push((id, victim));
         if id == self.victim {
             *event.result = Despawn::Allow;
@@ -262,7 +267,7 @@ impl mod_api::Hooks for PassProbe {
         self.records.lock().unwrap().push(PassObservation {
             actor: event.mob.entity().id(),
             peer_velocity: host.entity(72).and_then(|peer| peer.velocity(host)),
-            spawned_position: spawned.position(host),
+            spawned_position: spawned.with_view(host, |view| view.position()).flatten(),
             spawned_handles: [
                 host.entity(74).is_some(),
                 host.living(spawned).is_some(),
@@ -311,7 +316,10 @@ fn scoped_despawn_view_tracks_peer_turns_and_defers_mid_pass_spawns() {
                     // Only the scoped view must keep it outside this pass.
                     let entity = game.entity(74).expect("spawn has a resident handle");
                     assert!(game.mob(entity).is_some());
-                    assert_eq!(entity.position(game), Some([10.0, 80.0, 0.5]));
+                    assert_eq!(
+                        entity.with_view(game, |view| view.position()).flatten(),
+                        Some([10.0, 80.0, 0.5])
+                    );
                 },
                 || game.tick_creature_entities().unwrap(),
             );
@@ -551,7 +559,7 @@ impl mod_api::Hooks for TickTiming {
         };
         let at = host
             .entity(event.entities[0])
-            .and_then(|entity| entity.position(host));
+            .and_then(|entity| entity.with_view(host, |view| view.position()).flatten());
         let mut heard = self.heard.lock().unwrap();
         heard.push(("post", event.entities.to_vec(), at));
     }

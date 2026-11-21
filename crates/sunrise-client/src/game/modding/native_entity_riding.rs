@@ -58,7 +58,9 @@ impl Game<'_> {
             return Some([at.x, at.y, at.z]);
         }
         let vehicle = self.entity(vehicle_id)?;
-        let [x, _, z] = self.entity_position(vehicle)?;
+        let [x, _, z] = self
+            .resolve_entity_view(vehicle)
+            .and_then(|view| mod_api::EntityView::position(&view))?;
         let [_, [_, top, _]] = self.entity_bounding_box(vehicle)?;
         Some([x, top, z])
     }
@@ -320,7 +322,9 @@ impl Game<'_> {
         if let Some(at) = at {
             return Some([at.x, at.y, at.z]);
         }
-        let [x, _, z] = self.entity_position(vehicle)?;
+        let [x, _, z] = self
+            .resolve_entity_view(vehicle)
+            .and_then(|view| mod_api::EntityView::position(&view))?;
         let [_, [_, top, _]] = self.entity_bounding_box(vehicle)?;
         Some([x, top, z])
     }
@@ -1710,7 +1714,10 @@ mod tests {
         assert!(game.entity_start_riding(rider, vehicle, true).is_ok());
         assert_eq!(vehicle.dismount_location(game, living), Some(asked));
         assert!(game.entity_stop_riding(rider));
-        assert_eq!(game.entity_position(rider), Some(asked));
+        assert_eq!(
+            rider.with_view(game, |view| view.position()).flatten(),
+            Some(asked)
+        );
         asked
     }
     /// The level holds exactly one dropped item, a single lead at `at`; takes it away.
@@ -1862,7 +1869,10 @@ mod tests {
             // Nothing rides a player: the top of its box.
             let player = super::super::native_player_death::tests::add_guest(game).entity();
             let [_, [_, top, _]] = game.entity_bounding_box(player).unwrap();
-            let [x, _, z] = game.entity_position(player).unwrap();
+            let [x, _, z] = player
+                .with_view(game, |view| view.position())
+                .flatten()
+                .unwrap();
             assert_eq!(player.dismount_location(game, living), Some([x, top, z]));
 
             assert_eq!(stale(cow).dismount_location(game, living), None);

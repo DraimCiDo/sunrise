@@ -199,9 +199,12 @@ fn mixed_passengers_sit_and_unload_with_their_actual_root() {
         // The mobs' pass first, as tick_mobs runs it: it names the general vehicles mobs ride.
         game.position_riders();
         game.tick_general().unwrap();
-        assert_eq!(pig_ref.position(game), Some([2.5, 65.25, 1.5]));
         assert_eq!(
-            leaf_ref.position(game),
+            pig_ref.with_view(game, |view| view.position()).flatten(),
+            Some([2.5, 65.25, 1.5])
+        );
+        assert_eq!(
+            leaf_ref.with_view(game, |view| view.position()).flatten(),
             Some([2.5, 65.25 + f64::from(0.86875_f32), 1.5])
         );
         assert_eq!(leaf_ref.root_vehicle(game), Some(root_ref));
@@ -598,15 +601,30 @@ fn a_same_level_teleport_places_the_general_tree_and_unseats_a_separately_moved_
 
         let to = [10.5, 64.0, 0.5];
         assert!(root.teleport_to(game, to, Some([90.0, 30.0])));
-        assert_eq!(root.position(game), Some(to));
-        assert_eq!(rider.position(game), Some(to));
-        assert_eq!(rider.rotation(game), Some([90.0, 30.0]));
+        assert_eq!(
+            root.with_view(game, |view| view.position()).flatten(),
+            Some(to)
+        );
+        assert_eq!(
+            rider.with_view(game, |view| view.position()).flatten(),
+            Some(to)
+        );
+        assert_eq!(
+            rider.with_view(game, |view| view.rotation()).flatten(),
+            Some([90.0, 30.0])
+        );
 
         let rider_to = [12.5, 64.0, 0.5];
         assert!(rider.teleport_to(game, rider_to, None));
-        assert_eq!(rider.position(game), Some(rider_to));
+        assert_eq!(
+            rider.with_view(game, |view| view.position()).flatten(),
+            Some(rider_to)
+        );
         assert_eq!(rider.vehicle(game), None);
-        assert_eq!(root.position(game), Some(to));
+        assert_eq!(
+            root.with_view(game, |view| view.position()).flatten(),
+            Some(to)
+        );
     });
 }
 
@@ -635,8 +653,11 @@ fn killing_or_removing_a_general_row_keeps_its_passengers_in_the_level() {
             }
             assert!(game.resident_entities.general.row(root.id()).is_none());
             assert!(!game.persist.uuids.contains_key(&root.id()));
-            assert_eq!(root.position(game), None);
-            assert_eq!(rider.position(game), Some([0.5, 64.0, 0.5]));
+            assert_eq!(root.with_view(game, |view| view.position()).flatten(), None);
+            assert_eq!(
+                rider.with_view(game, |view| view.position()).flatten(),
+                Some([0.5, 64.0, 0.5])
+            );
             assert_eq!(rider.vehicle(game), None);
         }
     });
@@ -657,11 +678,20 @@ fn a_general_entity_turns_in_place_without_dismounting() {
         let _world = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
 
         assert!(rider.set_rotation(game, 90.0, 30.0));
-        assert_eq!(rider.rotation(game), Some([90.0, 30.0]));
-        assert_eq!(rider.position(game), Some([0.5, 64.0, 0.5]));
+        assert_eq!(
+            rider.with_view(game, |view| view.rotation()).flatten(),
+            Some([90.0, 30.0])
+        );
+        assert_eq!(
+            rider.with_view(game, |view| view.position()).flatten(),
+            Some([0.5, 64.0, 0.5])
+        );
         assert_eq!(rider.vehicle(game), Some(root));
         assert!(!rider.set_rotation(game, f32::NAN, 0.0));
-        assert_eq!(rider.rotation(game), Some([90.0, 30.0]));
+        assert_eq!(
+            rider.with_view(game, |view| view.rotation()).flatten(),
+            Some([90.0, 30.0])
+        );
     });
 }
 
@@ -681,11 +711,31 @@ fn a_general_row_has_its_declared_kind_and_is_selectable_by_type() {
         game.build_registries();
         let _world = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
 
-        assert_eq!(robot.kind(game).unwrap().id(game), "mymod:robot");
-        assert_eq!(ghost.kind(game).unwrap().id(game), "mymod:ghost");
+        assert_eq!(
+            robot
+                .with_view(game, |view| view.kind())
+                .flatten()
+                .unwrap()
+                .id(game),
+            "mymod:robot"
+        );
+        assert_eq!(
+            ghost
+                .with_view(game, |view| view.kind())
+                .flatten()
+                .unwrap()
+                .id(game),
+            "mymod:ghost"
+        );
         assert!(game.as_console(|game| game.run_command("kill @e[type=mymod:robot]")));
-        assert_eq!(robot.position(game), None);
-        assert_eq!(ghost.position(game), Some([0.5, 64.0, 0.5]));
+        assert_eq!(
+            robot.with_view(game, |view| view.position()).flatten(),
+            None
+        );
+        assert_eq!(
+            ghost.with_view(game, |view| view.position()).flatten(),
+            Some([0.5, 64.0, 0.5])
+        );
     });
 }
 

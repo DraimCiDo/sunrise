@@ -19,7 +19,9 @@ struct Probe(Arc<Mutex<Vec<Heard>>>);
 
 /// Where the spectator `player` (their UUID is their entity id in these tests) stands.
 fn at(host: &dyn ServerHost, player: u128) -> Option<[f64; 3]> {
-    host.entity(u32::try_from(player).ok()?)?.position(host)
+    host.entity(u32::try_from(player).ok()?)?
+        .with_view(host, |view| view.position())
+        .flatten()
 }
 
 #[mod_api::__subscriptions]

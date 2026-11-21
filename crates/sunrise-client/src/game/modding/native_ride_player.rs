@@ -199,7 +199,8 @@ impl Game<'_> {
             return false;
         };
         let (Some([x, _, z]), Some([low, high])) = (
-            self.entity_position(player),
+            self.resolve_entity_view(player)
+                .and_then(|view| mod_api::EntityView::position(&view)),
             self.entity_bounding_box(player),
         ) else {
             return false;
@@ -478,7 +479,10 @@ mod tests {
 
             // The seat: the top of the player's box, less the pig's attachment.
             game.sync_riders();
-            let [x, _, z] = game.entity_position(player).unwrap();
+            let [x, _, z] = player
+                .with_view(game, |view| view.position())
+                .flatten()
+                .unwrap();
             let [low, high] = game.entity_bounding_box(player).unwrap();
             let m = &game.mobs[0];
             let offset = riders::vehicle_attachment(m, (high[0] - low[0]) as f32);

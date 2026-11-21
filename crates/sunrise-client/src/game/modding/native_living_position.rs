@@ -25,7 +25,9 @@ impl Game<'_> {
         if self.target_level(seen) != self.dim {
             return Some(false);
         }
-        let feet = self.entity_position(living.entity())?;
+        let feet = self
+            .resolve_entity_view(living.entity())
+            .and_then(|view| mod_api::EntityView::position(&view))?;
         let from = self.entity_eye_position(living.entity())?;
         let to = self.entity_eye_position(target)?;
         let w = self.mob_world_base(&[]);

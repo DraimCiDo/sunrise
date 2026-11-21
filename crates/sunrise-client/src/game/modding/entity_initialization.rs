@@ -68,10 +68,11 @@ impl Game<'_> {
         }
         match holder {
             Holder::Entity(id) => {
-                let Some(kind) = self
-                    .entity(id)
-                    .and_then(|entity| self.entity_kind(entity).map(|kind| kind.id(self)))
-                else {
+                let Some(kind) = self.entity(id).and_then(|entity| {
+                    self.resolve_entity_view(entity)
+                        .and_then(|view| mod_api::EntityView::kind(&view))
+                        .map(|kind| kind.id(self))
+                }) else {
                     return;
                 };
                 self.initialize_entity(holder, &kind);

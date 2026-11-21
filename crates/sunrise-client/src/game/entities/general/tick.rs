@@ -123,9 +123,12 @@ impl Game<'_> {
                 }
                 continue;
             }
-            if let Some([x, _, z]) =
-                root.and_then(|root| self.entity(root).and_then(|e| self.entity_position(e)))
-                && entity_ticking(x.floor() as i32, z.floor() as i32)
+            if let Some([x, _, z]) = root.and_then(|root| {
+                self.entity(root).and_then(|e| {
+                    self.resolve_entity_view(e)
+                        .and_then(|view| mod_api::EntityView::position(&view))
+                })
+            }) && entity_ticking(x.floor() as i32, z.floor() as i32)
             {
                 self.tick_general_branch(index, Some(vehicle), &mut pass);
             }

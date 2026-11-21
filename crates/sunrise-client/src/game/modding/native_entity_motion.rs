@@ -263,20 +263,26 @@ impl Game<'_> {
     /// Where the entity's eyes are (`Entity.getEyePosition`). API
     /// 379.
     pub(super) fn entity_eye_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
-        let [x, y, z] = self.entity_position(entity)?;
+        let [x, y, z] = self
+            .resolve_entity_view(entity)
+            .and_then(|view| mod_api::EntityView::position(&view))?;
         Some([x, y + self.entity_eye_height(entity)?, z])
     }
     /// The unit vector the entity looks along (`Entity.getViewVector`, from
     /// its pitch and yaw). API 379.
     pub(super) fn entity_view_vector(&self, entity: EntityRef) -> Option<[f64; 3]> {
-        let [yaw, pitch] = self.entity_rotation(entity)?;
+        let [yaw, pitch] = self
+            .resolve_entity_view(entity)
+            .and_then(|view| mod_api::EntityView::rotation(&view))?;
         Some(turned_view_vector(yaw, pitch, 0.0))
     }
     /// The unit vector that points up out of the entity's head
     /// (`Entity.getUpVector`): its view vector turned a quarter of a turn
     /// toward the zenith.
     pub(super) fn entity_up_vector(&self, entity: EntityRef) -> Option<[f64; 3]> {
-        let [yaw, pitch] = self.entity_rotation(entity)?;
+        let [yaw, pitch] = self
+            .resolve_entity_view(entity)
+            .and_then(|view| mod_api::EntityView::rotation(&view))?;
         Some(turned_view_vector(yaw, pitch, -90.0))
     }
     /// `Entity.mainSupportingBlockPos` of an entity on the ground: the player's own, kept
@@ -305,7 +311,9 @@ impl Game<'_> {
     /// The block the entity stands on (`Entity.getOnPos`). API 379.
     pub(super) fn entity_on_block(&self, entity: EntityRef) -> Option<[i32; 3]> {
         let t = self.native_entity_target(entity)?;
-        let [x, y, z] = self.entity_position(entity)?;
+        let [x, y, z] = self
+            .resolve_entity_view(entity)
+            .and_then(|view| mod_api::EntityView::position(&view))?;
         Some(on_block_position(
             self.native_supporting_block(entity, t),
             Vec3::new(x, y, z),
@@ -330,7 +338,9 @@ impl Game<'_> {
     /// The square of the distance from the entity's feet to `pos`
     /// (`Entity.distanceToSqr`). API 379.
     pub(super) fn entity_distance_to_sqr(&self, entity: EntityRef, pos: [f64; 3]) -> Option<f64> {
-        let p = self.entity_position(entity)?;
+        let p = self
+            .resolve_entity_view(entity)
+            .and_then(|view| mod_api::EntityView::position(&view))?;
         let [dx, dy, dz] = std::array::from_fn(|i| p[i] - pos[i]);
         Some(dx * dx + dy * dy + dz * dz)
     }

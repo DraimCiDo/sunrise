@@ -366,7 +366,10 @@ impl Game<'_> {
         let Some(scope) = self.entity_section_scope() else {
             return;
         };
-        if let Some(at) = self.entity_position(EntityRef::new(scope.epoch, id)) {
+        if let Some(at) = self
+            .resolve_entity_view(EntityRef::new(scope.epoch, id))
+            .and_then(|view| mod_api::EntityView::position(&view))
+        {
             self.native_lifecycle
                 .entity_sections
                 .moved(scope, id, None, at);
@@ -503,7 +506,9 @@ impl Game<'_> {
         let Some(scope) = self.entity_section_scope() else {
             return;
         };
-        let now = self.entity_position(EntityRef::new(scope.epoch, id));
+        let now = self
+            .resolve_entity_view(EntityRef::new(scope.epoch, id))
+            .and_then(|view| mod_api::EntityView::position(&view));
         self.native_lifecycle
             .entity_sections
             .placed(scope, id, now.unwrap_or(at));
@@ -524,7 +529,10 @@ impl Game<'_> {
         let mut sections = std::mem::take(&mut self.native_lifecycle.entity_sections);
         if let Some(r) = self.remote.as_ref() {
             for &id in r.entities.keys().filter(|&&id| id != own && id > 0) {
-                if let Some(at) = self.entity_position(EntityRef::new(scope.epoch, id as u32)) {
+                if let Some(at) = self
+                    .resolve_entity_view(EntityRef::new(scope.epoch, id as u32))
+                    .and_then(|view| mod_api::EntityView::position(&view))
+                {
                     sections.moved(scope, id as u32, None, at);
                 }
             }

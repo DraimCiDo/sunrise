@@ -33,7 +33,7 @@
 //!         "Stroll"
 //!     }
 //!     fn start(&mut self, cx: &mut BehaviorCx<'_>) {
-//!         let at = cx.mob().entity().position(cx.host()).map_or(
+//!         let at = cx.mob().entity().with_view(cx.host(), |view| view.position()).flatten().map_or(
 //!             [0.0; 3],
 //!             |p| [p[0] + 4.0, p[1], p[2]],
 //!         );

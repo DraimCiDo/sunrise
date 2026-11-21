@@ -5275,7 +5275,10 @@ pub(super) mod fake_action_tests {
                 };
                 assert_eq!(event.click.player, 2);
                 let entity = host.entity(event.click.player_entity_id as u32).unwrap();
-                assert_eq!(entity.rotation(host), Some([123.0, 17.0]));
+                assert_eq!(
+                    entity.with_view(host, |view| view.rotation()).flatten(),
+                    Some([123.0, 17.0])
+                );
                 assert_eq!(
                     entity.eye_position(host),
                     Some([0.5, 64.0 + f64::from(1.62_f32), 0.5])

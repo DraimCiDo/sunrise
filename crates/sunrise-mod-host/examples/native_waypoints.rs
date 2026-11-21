@@ -63,7 +63,8 @@ impl Hooks for Waypoints {
             .zip(host.local_player().and_then(|player| {
                 player
                     .entity()
-                    .position(host)
+                    .with_view(host, |view| view.position())
+                    .flatten()
                     .map(|pos| pos.map(|axis| axis.floor() as i32))
             }))
         {

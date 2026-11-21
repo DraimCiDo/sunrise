@@ -1830,7 +1830,7 @@ mod tests {
             assert!(![zombie, bystander, pig].contains(&credit.id()));
             assert_eq!(living.last_attacker(game), Some(credit));
             assert_eq!(
-                credit.kind(game),
+                credit.with_view(game, |view| view.kind()).flatten(),
                 mod_api::__private::resolved_entity_type_key("minecraft:zombie")
             );
             assert_eq!(
@@ -1844,7 +1844,7 @@ mod tests {
             game.in_goal_view(&mut actor, |view| {
                 assert_eq!(living.kill_credit(view), Some(credit));
                 assert_eq!(
-                    credit.kind(view),
+                    credit.with_view(view, |view| view.kind()).flatten(),
                     mod_api::__private::resolved_entity_type_key("minecraft:zombie")
                 );
                 // `uuid` takes a `ServerHost`, which a goal view is not.
@@ -2771,7 +2771,10 @@ mod tests {
             );
             let item = game.living_drop(wolf, bone.clone(), false, true).unwrap();
             assert_eq!(
-                game.entity_kind(item).map(|kind| kind.id(game)).as_deref(),
+                item.with_view(game, |view| view.kind())
+                    .flatten()
+                    .map(|kind| kind.id(game))
+                    .as_deref(),
                 Some("minecraft:item")
             );
             let wolf_uuid = game.uuid_for(id);

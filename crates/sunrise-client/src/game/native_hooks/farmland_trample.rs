@@ -194,7 +194,11 @@ mod tests {
                     .and_then(|level| level.block_state(host, FIELD));
                 self.0.lock().unwrap().push(Moment::Lift(
                     event.entity.id(),
-                    event.entity.position(host).unwrap()[1],
+                    event
+                        .entity
+                        .with_view(host, |view| view.position())
+                        .flatten()
+                        .unwrap()[1],
                     state,
                 ));
                 if event.entity.id() == LANDING {
@@ -272,7 +276,10 @@ mod tests {
             let level = entity.level(host).unwrap();
             assert_eq!(level.block_state(host, FIELD), Some(event.state));
             self.1.lock().unwrap().push(Moment::Hook {
-                y: entity.position(host).unwrap()[1],
+                y: entity
+                    .with_view(host, |view| view.position())
+                    .flatten()
+                    .unwrap()[1],
                 health: event.entity.health(host).unwrap(),
             });
             if matches!(self.0, Choice::Cancel | Choice::Trap | Choice::Replace) {

@@ -43,7 +43,7 @@
 //!     }
 //!     fn tick(&mut self, cx: &mut GoalContext<'_>) {
 //!         self.ticks -= 1;
-//!         cx.look_at(cx.mob().entity().position(cx.host()).map_or(
+//!         cx.look_at(cx.mob().entity().with_view(cx.host(), |view| view.position()).flatten().map_or(
 //!             [0.0; 3],
 //!             |p| [p[0] + 8.0, p[1], p[2]],
 //!         ));

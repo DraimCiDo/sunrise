@@ -592,8 +592,15 @@ impl BlockPart for SkullProof {
         host: &dyn mod_api::Host,
         event: &mut CanEntityDestroyEvent,
     ) -> Option<bool> {
-        let kind = event.entity.kind(host).map(|kind| kind.id(host).to_owned());
-        let position = event.entity.position(host);
+        let kind = event
+            .entity
+            .with_view(host, |view| view.kind())
+            .flatten()
+            .map(|kind| kind.id(host).to_owned());
+        let position = event
+            .entity
+            .with_view(host, |view| view.position())
+            .flatten();
         let skull = kind.as_deref() == Some("minecraft:wither_skull")
             && position.is_some_and(|p| (1.0..=2.5).contains(&p[0]));
         self.seen.lock().unwrap().push((kind, position));

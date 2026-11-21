@@ -6,8 +6,23 @@ struct Accept23(Arc<Mutex<Vec<u32>>>);
 impl mod_api::ItemPart for Accept23 {
     fn can_equip(&self, host: &dyn mod_api::Host, event: &mut mod_api::CanEquipEvent<'_>) {
         assert_eq!(event.stack.count(), 3);
-        assert_eq!(event.entity.entity().position(host).unwrap()[1], 64.0);
-        assert!(event.entity.entity().kind(host).is_some());
+        assert_eq!(
+            event
+                .entity
+                .entity()
+                .with_view(host, |view| view.position())
+                .flatten()
+                .unwrap()[1],
+            64.0
+        );
+        assert!(
+            event
+                .entity
+                .entity()
+                .with_view(host, |view| view.kind())
+                .flatten()
+                .is_some()
+        );
         assert!(
             event
                 .entity

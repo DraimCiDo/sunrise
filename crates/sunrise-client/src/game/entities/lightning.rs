@@ -1052,9 +1052,12 @@ mod tests {
                 host: &mut dyn ServerHost,
                 event: &mut LivingConversionPostEvent<'_>,
             ) {
-                let old = host
-                    .entity(event.entity)
-                    .and_then(|entity| entity.kind(host).map(|kind| kind.id(host)));
+                let old = host.entity(event.entity).and_then(|entity| {
+                    entity
+                        .with_view(host, |view| view.kind())
+                        .flatten()
+                        .map(|kind| kind.id(host))
+                });
                 let outcome = host.entity(event.converted);
                 let weapon = outcome
                     .and_then(|entity| host.living(entity))
@@ -1081,7 +1084,12 @@ mod tests {
                     .count();
                 self.seen.lock().unwrap().push(SeenConversion {
                     old,
-                    outcome: outcome.and_then(|entity| entity.kind(host).map(|kind| kind.id(host))),
+                    outcome: outcome.and_then(|entity| {
+                        entity
+                            .with_view(host, |view| view.kind())
+                            .flatten()
+                            .map(|kind| kind.id(host))
+                    }),
                     weapon,
                     mushrooms,
                 });

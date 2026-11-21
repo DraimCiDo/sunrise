@@ -1104,7 +1104,14 @@ mod fox_consumption_hook_tests {
                 .lock()
                 .unwrap()
                 .push((event.consumer.entity().id(), event.consumed.clone()));
-            assert_eq!(event.consumer.entity().position(host), Some(event.from));
+            assert_eq!(
+                event
+                    .consumer
+                    .entity()
+                    .with_view(host, |view| view.position())
+                    .flatten(),
+                Some(event.from)
+            );
             match self.mode.load(Ordering::SeqCst) {
                 0 => Flow::Cancel,
                 1 => {
@@ -1148,7 +1155,10 @@ mod fox_consumption_hook_tests {
                             // Full owning-host access, before this fox moves and
                             // before any later mob's AI/consumption step.
                             let next = host.entity(201).unwrap();
-                            assert_eq!(next.position(host), Some([11.5, 64.0, 8.5]));
+                            assert_eq!(
+                                next.with_view(host, |view| view.position()).flatten(),
+                                Some([11.5, 64.0, 8.5])
+                            );
                             let next_living = host.living(next).unwrap();
                             assert_eq!(next_living.hand_item(host, Hand::Main).unwrap().count(), 7);
                             assert!(

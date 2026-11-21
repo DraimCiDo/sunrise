@@ -426,7 +426,7 @@ pub(super) fn emit<'a>(
                     "EntityRef" if table == "entity" => {
                         let host = &host.as_ref().ok_or("entity handle needs a Host")?.0;
                         format!(
-                            "entity(|| {key}.kind({host}).and_then(super::content::registry_keys::entity_type_name))"
+                            "entity(|| {key}.with_view({host}, |view| view.kind()).flatten().and_then(super::content::registry_keys::entity_type_name))"
                         )
                     }
                     "BlockEntityRef" if table == "block_entity" => {

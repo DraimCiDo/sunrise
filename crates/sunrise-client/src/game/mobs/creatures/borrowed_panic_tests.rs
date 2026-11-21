@@ -95,7 +95,10 @@ impl mod_api::Goal for GoalSpec {
             return;
         }
         assert_eq!(
-            cx.mob().entity().position(cx.host()),
+            cx.mob()
+                .entity()
+                .with_view(cx.host(), |view| view.position())
+                .flatten(),
             Some([2.0, 80.0, 0.5])
         );
         if !self.target {

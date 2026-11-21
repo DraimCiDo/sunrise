@@ -159,7 +159,10 @@ fn removing_a_bobber_in_its_impact_clears_the_line_without_rewards() {
             game.native_removals_flush();
             assert_eq!(observed.hits.lock().unwrap().len(), 1);
             assert!(game.entity(71).is_none());
-            assert_eq!(game.entity_position(handle), None);
+            assert_eq!(
+                handle.with_view(game, |view| view.position()).flatten(),
+                None
+            );
             assert!(game.hook.is_none(), "the owner's fishing line remains");
             assert!(game.dropped.is_empty());
             assert!(game.orbs.is_empty());

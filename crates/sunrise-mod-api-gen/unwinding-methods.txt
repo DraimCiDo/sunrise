@@ -314,7 +314,6 @@ entity_flags::entity_set_silent
 entity_identity::entity_classification
 entity_identity::entity_custom_name_visible
 entity_identity::entity_is_multipart
-entity_identity::entity_kind
 entity_identity::entity_level
 entity_identity::entity_name
 entity_identity::entity_owner
@@ -346,7 +345,6 @@ entity_physics::entity_set_collision_exclusions
 entity_physics::entity_set_no_physics
 entity_physics::entity_set_velocity
 entity_physics::entity_velocity
-entity_position::entity_block_position
 entity_position::entity_body_yaw
 entity_position::entity_direction
 entity_position::entity_distance_to_sqr
@@ -354,8 +352,6 @@ entity_position::entity_head_yaw
 entity_position::entity_move_by
 entity_position::entity_on_block
 entity_position::entity_on_ground
-entity_position::entity_position
-entity_position::entity_rotation
 entity_position::entity_set_hanging_direction
 entity_position::entity_set_head_yaw
 entity_position::entity_set_item_frame_rotation

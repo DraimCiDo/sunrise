@@ -56,7 +56,11 @@ fn fresh_fake_player_kind_has_player_id() {
     host.resolve_entity_types().unwrap();
     host.level.entity(20, "minecraft:player");
     let player = host.player(1).unwrap();
-    let kind = player.entity().kind(&host).unwrap();
+    let kind = player
+        .entity()
+        .with_view(&host, |view| view.kind())
+        .flatten()
+        .unwrap();
     assert_eq!(kind.id(&host), "minecraft:player");
 }
 

@@ -71,7 +71,11 @@ impl Game<'_> {
         let (entity, block, _, _) = self.pearl_hit(hit);
         if let Some(id) = entity {
             let entity = self.entity(id)?;
-            Some(ImpactTarget::Entity(entity, self.entity_position(entity)?))
+            Some(ImpactTarget::Entity(
+                entity,
+                self.resolve_entity_view(entity)
+                    .and_then(|view| mod_api::EntityView::position(&view))?,
+            ))
         } else if matches!(hit, Hit::Block { .. }) {
             Some(ImpactTarget::Block(
                 self.world.block(block[0], block[1], block[2]),
@@ -102,7 +106,10 @@ impl Game<'_> {
         let (entity, block, face, at) = self.pearl_hit(hit);
         let entity_kind = entity
             .and_then(|id| self.entity(id))
-            .and_then(|entity| self.entity_kind(entity))
+            .and_then(|entity| {
+                self.resolve_entity_view(entity)
+                    .and_then(|view| mod_api::EntityView::kind(&view))
+            })
             .map(|kind| kind.id(self))
             .unwrap_or_default();
         let mut canceled = false;

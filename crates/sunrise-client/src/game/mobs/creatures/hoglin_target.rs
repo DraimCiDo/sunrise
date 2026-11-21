@@ -19,7 +19,9 @@ impl Game<'_> {
                 let connection = if current { current_player } else { player };
                 let id = u32::try_from(self.player_entity_id_by_connection(connection)?).ok()?;
                 let epoch = self.native_lifecycle.epoch()?;
-                let p = self.entity_position(mod_api::EntityRef::new(epoch, id))?;
+                let p = self
+                    .resolve_entity_view(mod_api::EntityRef::new(epoch, id))
+                    .and_then(|view| mod_api::EntityView::position(&view))?;
                 Some(Vec3::new(p[0], p[1], p[2]))
             }
         };

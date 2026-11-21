@@ -446,17 +446,32 @@ mod tests {
             assert!(!mob.extra.passenger);
             assert_eq!(mob.fall_distance, 5.0);
             assert_eq!(mob.velocity.y, 0.0);
-            assert_eq!(entity.position(game), Some([5.0, 70.0, -3.0]));
-            assert_eq!(entity.rotation(game), Some([90.0, 90.0]));
+            assert_eq!(
+                entity.with_view(game, |view| view.position()).flatten(),
+                Some([5.0, 70.0, -3.0])
+            );
+            assert_eq!(
+                entity.with_view(game, |view| view.rotation()).flatten(),
+                Some([90.0, 90.0])
+            );
             assert_eq!(entity.head_yaw(game), Some(90.0));
             let before = entity.velocity(game).unwrap();
             assert!(entity.set_rotation(game, 15.0, 360.0));
-            assert_eq!(entity.rotation(game), Some([15.0, 0.0]));
+            assert_eq!(
+                entity.with_view(game, |view| view.rotation()).flatten(),
+                Some([15.0, 0.0])
+            );
             assert_eq!(entity.head_yaw(game), Some(90.0));
-            assert_eq!(entity.position(game), Some([5.0, 70.0, -3.0]));
+            assert_eq!(
+                entity.with_view(game, |view| view.position()).flatten(),
+                Some([5.0, 70.0, -3.0])
+            );
             assert_eq!(entity.velocity(game), Some(before));
             assert!(entity.teleport_to(game, [5.0, 70.0, -3.0], Some([0.0, 450.0])));
-            assert_eq!(entity.rotation(game), Some([0.0, 90.0]));
+            assert_eq!(
+                entity.with_view(game, |view| view.rotation()).flatten(),
+                Some([0.0, 90.0])
+            );
             assert!(entity.push(game, [1.0, 2.0, -1.0]));
             assert_eq!(
                 entity.velocity(game),

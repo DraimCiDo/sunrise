@@ -279,7 +279,11 @@ mod tests {
                     self.0.lock().unwrap().push((
                         event.old_section,
                         event.new_section,
-                        event.entity.position(host).unwrap(),
+                        event
+                            .entity
+                            .with_view(host, |view| view.position())
+                            .flatten()
+                            .unwrap(),
                         event.entity.on_ground(host),
                     ));
                 }
