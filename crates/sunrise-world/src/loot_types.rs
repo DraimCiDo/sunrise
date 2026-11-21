@@ -1,9 +1,12 @@
 //! Load validation and direct type dispatch, shared by both loot evaluators.
 use crate::loot::{LootContext, LootStack, LootTags};
+use declarations::builtin;
 use serde_json::Value;
 #[cfg(test)]
 #[path = "loot_types/argument_tests.rs"]
 mod argument_tests;
+#[path = "loot_types/declarations.rs"]
+mod declarations;
 #[path = "loot_types/normalize.rs"]
 mod normalize;
 #[path = "loot_types/parameters.rs"]
@@ -405,14 +408,6 @@ impl Walker<'_> {
             self.entry(data, function, path)
         }
     }
-}
-fn builtin(kind: &str, function: bool) -> bool {
-    shapes::contains(kind, function)
-        || (!function
-            && matches!(
-                kind,
-                "neoforge:loot_table_id" | "neoforge:can_item_perform_ability"
-            ))
 }
 
 impl<R: sunrise_core::random::RandomSource> super::Context<'_, R> {

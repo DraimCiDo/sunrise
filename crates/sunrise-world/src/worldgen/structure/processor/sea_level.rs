@@ -24,8 +24,9 @@ use crate::{
     registry::{BlockRegistry, BlockStateId},
     worldgen::{DecodeError, placement::PlacementContext, structure::BlockInfo},
 };
-use serde_json::Value;
 use std::collections::BTreeSet;
+
+mod declarations;
 
 fn known(registry: &BlockRegistry, name: &str) -> Result<BlockStateId, DecodeError> {
     registry
@@ -105,20 +106,6 @@ pub struct KeepWorldBlock {
     blocks: BTreeSet<String>,
 }
 impl KeepWorldBlock {
-    pub(super) fn decode(value: &Value) -> Result<Self, DecodeError> {
-        let blocks = value["blocks"]
-            .as_array()
-            .ok_or(DecodeError::Field("keep_world_block blocks"))?
-            .iter()
-            .map(|b| {
-                let b = b
-                    .as_str()
-                    .ok_or(DecodeError::Field("keep_world_block blocks"))?;
-                Ok(crate::worldgen::tags::identifier(b)?.to_string())
-            })
-            .collect::<Result<_, DecodeError>>()?;
-        Ok(Self { blocks })
-    }
     pub(super) fn process<W: PlacementContext>(
         &self,
         world: &mut W,
@@ -225,7 +212,7 @@ impl MineshaftSkyView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde_json::{Value, json};
     use {
         crate::{
             heightmap::HeightmapType,

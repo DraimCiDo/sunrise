@@ -3,6 +3,9 @@ use super::LootStack;
 use std::{cell::RefCell, rc::Rc};
 pub use sunrise_core::UNKNOWN_LOOT_TABLE;
 
+mod declarations;
+pub use declarations::condition;
+
 /// Parameters shared unchanged by all nested tables. The first id set wins.
 #[derive(Default)]
 pub struct LootQuery {
@@ -54,28 +57,4 @@ pub fn with_query<T>(query: Rc<LootQuery>, roll: impl FnOnce() -> T) -> T {
 /// A fresh context unless a caller explicitly supplied query parameters.
 pub fn current_query() -> Rc<LootQuery> {
     QUERY.with(|q| q.borrow().clone()).unwrap_or_default()
-}
-/// Recognise stock conditions before the mod-kind fallback, without drawing randomness.
-pub fn condition(
-    value: &serde_json::Value,
-    query: &LootQuery,
-    tool: Option<&LootStack>,
-    default: impl Fn(&str, &str) -> bool,
-) -> Option<bool> {
-    match value["type"].as_str()? {
-        "neoforge:loot_table_id" => Some(
-            value["loot_table_id"]
-                .as_str()
-                .is_some_and(|id| id == query.id.borrow().as_deref().unwrap_or(UNKNOWN_LOOT_TABLE)),
-        ),
-        "neoforge:can_item_perform_ability" => Some(
-            tool.zip(value["ability"].as_str())
-                .is_some_and(|(tool, ability)| {
-                    let mut holds = default(&tool.item, ability);
-                    crate::native_load_hooks::loot_ability(tool, ability, &mut holds);
-                    holds
-                }),
-        ),
-        _ => None,
-    }
 }
