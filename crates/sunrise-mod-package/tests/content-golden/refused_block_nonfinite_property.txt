@@ -35,4 +35,4 @@ icon:
 None
 
 content:
-refused: data/refused_block_nonfinite_property/sunrise/block/sample.json: hardness, explosion_resistance and friction are numbers
+refused: data/refused_block_nonfinite_property/sunrise/block/sample.json: number out of range at line 1 column 60
