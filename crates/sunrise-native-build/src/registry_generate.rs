@@ -7,6 +7,7 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
 };
+use sunrise_mod_package::native_route::PACKAGES;
 
 /// Copies only inert manifests. Source files, build scripts and Cargo config never enter it.
 pub fn stage(bundle: &Bundle, output: &Path) -> Result<(), String> {
@@ -100,7 +101,7 @@ pub fn rewrite_dependencies(
         for (key, dep) in deps.iter_mut() {
             let get = |field| dep.get(field).and_then(toml::Value::as_str);
             let package = get("package").unwrap_or(key);
-            if let Some(&(name, _)) = api::PACKAGES.iter().find(|(name, _)| *name == package) {
+            if let Some(&(name, _)) = PACKAGES.iter().find(|(name, _)| *name == package) {
                 api::sdk_source(key, name, dep)?;
                 sdk.push(key.clone());
                 continue;

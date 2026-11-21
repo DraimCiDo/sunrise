@@ -5,6 +5,7 @@ use crate::rust::Toolchain;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use sunrise_mod_package::native_route::{INTERNALS_PACKAGE, PACKAGES};
 
 /// The template the mods library is written from, in the `api` slice.
 pub const TEMPLATE: &str = "native_mod_entry.rs.template";
@@ -31,8 +32,8 @@ pub fn compile(
     let search =
         |edition: &str| prebuilt::rustc_with(rust, &[&deps, &host, &runtime_deps, out], edition);
     let mut libraries = HashMap::new();
-    for (package, name) in api::PACKAGES {
-        if package != api::INTERNALS_PACKAGE {
+    for (package, name) in PACKAGES {
+        if package != INTERNALS_PACKAGE {
             libraries.insert(name, prebuilt::library(&runtime_deps, name)?);
         }
     }

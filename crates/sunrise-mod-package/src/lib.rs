@@ -28,6 +28,7 @@ pub mod manifest;
 pub mod mixins_tool;
 pub mod mod_list;
 pub mod modpack;
+pub mod native_route;
 #[cfg(feature = "runtime-process")]
 pub mod output;
 pub mod packages;

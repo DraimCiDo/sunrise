@@ -37,6 +37,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 WINDOWS_WORKFLOW = ".github/workflows/windows-runtime-leases.yml"
+OWN_SDK_WORKFLOW = ".github/workflows/book-quickstart.yml"
 ADD_ROW = ("add its row: `python3 tools/ci/move_to_daily.py apply LIST` (its docstring has the list format), or write "
            "`PACKAGE TEST TARGET daily REASON` into tools/ci/ignored-tests/daily-PACKAGE-TOPIC.txt")
 
@@ -56,6 +57,10 @@ def daily_problems(rows, targets, matrix):
             if not windows_wired:
                 problems.append(f"{where}: daily.yml must call {WINDOWS_WORKFLOW}'s runtime-leases job and run "
                                 "ignored_tests.py --windows-rows --run there")
+        elif row.reason == ignored_tests.OWN_SDK_REASON:
+            if not own_sdk_daily_runs(ROOT, row):
+                problems.append(f"{where}: daily.yml must call {OWN_SDK_WORKFLOW} with own_sdk and run this "
+                                "integration test by exact name there")
         elif ignored_tests.shard_runs(row.package, row.reference):
             if not any(ignored_tests.parse_shard(shard)[0] == row.package for shard in matrix):
                 problems.append(f"{where}: no leg runs {row.package}'s shard")
@@ -63,6 +68,34 @@ def daily_problems(rows, targets, matrix):
                 row.test not in groups.get((row.package, row.reference), ()):
             problems.append(f"{where}: no leg runs it (the {leg} leg is missing)")
     return problems
+
+
+def own_sdk_daily_runs(root, row):
+    """Recognize the daily call and exact test step that run with the calling run's SDK."""
+    if not row.reference.startswith("test:"):
+        return False
+    daily_path = root / ".github/workflows/daily.yml"
+    quickstart_path = root / OWN_SDK_WORKFLOW
+    if not daily_path.is_file() or not quickstart_path.is_file():
+        return False
+    daily = yaml.load(daily_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader) or {}
+    call = daily.get("jobs", {}).get("book-quickstart", {})
+    # The call's own condition (skips, leg selection) is the daily's routing, not this row's concern.
+    needs = call.get("needs") or []
+    if (call.get("uses") != f"./{OWN_SDK_WORKFLOW}"
+            or not {"resolve", "sdk"} <= set([needs] if isinstance(needs, str) else needs)
+            or call.get("with", {}).get("own_sdk") != "true"
+            or call.get("with", {}).get("commit") != "${{ needs.resolve.outputs.commit }}"
+            or re.sub(r"^\$\{\{(.*)\}\}$", r"\1", call.get("if", "").strip()).strip() == "false"):
+        return False
+    enabled = (None, "true", "${{ true }}")
+    quickstart = yaml.load(quickstart_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader) or {}
+    job = quickstart.get("jobs", {}).get("quickstart", {})
+    command = ["cargo", "test", "--locked", "-p", row.package, "--test", row.reference[5:],
+               "--", "--ignored", "--exact", row.test]
+    return job.get("if") in enabled and any(
+        step.get("if") in ("inputs.own_sdk", "${{ inputs.own_sdk }}") and step.get("run", "").split() == command
+        for step in job.get("steps", ()))
 
 
 def windows_daily_runs(root):

@@ -1997,7 +1997,7 @@ impl Entity for ItemEntity {
         blast.items_ignore
     }
     fn explosion_eye_height(&self) -> f64 {
-        0.2125
+        Self::EYE_HEIGHT
     }
     fn bounds(&self) -> Aabb {
         ItemEntity::bounds(self)

@@ -143,6 +143,20 @@ mod root {
                 .find(|entry| entry.id == namespace)
         }
 
+        pub(super) fn entered_matching<'a>(
+            hook_id: super::HookId,
+            hook: &'static str,
+            mut allow: impl FnMut(&str) -> bool + 'a,
+        ) -> impl Iterator<Item = &'static dyn super::Hooks> + 'a {
+            super::listening(hook_id).filter_map(move |(_, entry)| {
+                if !allow(entry.id) {
+                    return None;
+                }
+                let ((), hooks) = super::enter_listener(entry, hook);
+                Some(hooks)
+            })
+        }
+
         pub(super) struct ListenerScope;
         impl ListenerScope {
             pub(super) fn new() -> Self {

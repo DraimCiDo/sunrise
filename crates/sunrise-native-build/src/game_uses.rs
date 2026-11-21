@@ -2,8 +2,14 @@
 use std::path::Path;
 use sunrise_mod_package::internals::{self, ListedInternal};
 use sunrise_mod_package::mod_surface::uses::{Change, Entry, Misfit};
-use sunrise_mod_package::{Manifest, build_data};
-use sunrise_platform::mod_build::api_gen::{self, functions::FunctionIndex};
+use sunrise_mod_package::{
+    Manifest,
+    build_data::{self, ReadError},
+};
+use sunrise_platform::mod_build::api_gen::{
+    self,
+    functions::{self, FunctionIndex},
+};
 
 /// What every such entry's id starts with; no surface item's id does.
 pub const PREFIX: &str = "game:";
@@ -36,6 +42,8 @@ pub enum Now {
     Is(String),
     /// The build has no such item.
     Gone,
+    /// The target is present, but the function index refuses to replace it.
+    Refused { code: &'static str, why: String },
     /// The build has it, and its build data does not hold the code a fingerprint needs (the body of a function it does not index), so no list can show it unchanged.
     Unjudged,
 }
@@ -55,66 +63,137 @@ fn document<T: serde::de::DeserializeOwned>(
     dir: &Path,
     file: &str,
     build: &str,
-) -> Result<T, String> {
+) -> Result<T, ReadError> {
     let path = dir.join(file);
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let (described, body) =
-        build_data::read::<T>(file, &text).map_err(|e| format!("{}: {e}", path.display()))?;
+    let invalid = |reason| ReadError::Invalid(format!("{}: {reason}", path.display()));
+    let text = std::fs::read_to_string(&path).map_err(|e| invalid(e.to_string()))?;
+    let document = build_data::read::<T>(file, &text);
+    let described = match &document {
+        Ok((described, _))
+        | Err(ReadError::Schema {
+            build: described, ..
+        }) => described,
+        Err(error) => return Err(invalid(error.to_string())),
+    };
     if described.commit != build {
-        return Err(format!(
-            "{}: it describes game build {}, not {build}",
-            path.display(),
+        return Err(invalid(format!(
+            "it describes game build {}, not {build}",
             described.commit
-        ));
+        )));
     }
-    Ok(body)
+    document.map(|(_, body)| body)
+}
+
+pub(crate) fn function_index(dir: &Path, build: &str) -> Result<FunctionIndex, String> {
+    document(dir, functions::FILE, build).map_err(|error| error.to_string())
+}
+
+pub(crate) fn mixin_refusal<'a>(
+    index: &'a FunctionIndex,
+    target: &str,
+) -> Option<&'a functions::Refused> {
+    index.refused.get(&functions::key(target))
 }
 
 /// Each piece of game code `manifest` declares, by id, as it is in `build`, whose build data is in `dir`. A function is fingerprinted by signature and body, since a replacement or a call written for an old body could meet a different one; a type by its signature; a loop by what the game publishes of it, its two functions and its slot trait.
 pub fn entries(manifest: &Manifest, dir: &Path, build: &str) -> Result<Vec<(String, Now)>, String> {
-    #[derive(serde::Deserialize)]
-    struct Loops {
-        loops: Vec<api_gen::loops::PublishedLoop>,
+    let loops = manifest
+        .native
+        .as_ref()
+        .is_some_and(|n| !n.r#loop.is_empty());
+    Ok(
+        Data::read_for(dir, build, loops || !manifest.internals.is_empty(), loops)
+            .map_err(|error| error.to_string())?
+            .entries(manifest),
+    )
+}
+
+/// The game-code tables of one build, read once when judging many packages.
+pub struct Data {
+    index: FunctionIndex,
+    internals: Vec<ListedInternal>,
+    loops: Vec<api_gen::loops::PublishedLoop>,
+}
+
+impl Data {
+    /// Read all build-data files, including those not used by any currently listed mod.
+    pub fn read(dir: &Path, build: &str) -> Result<Self, ReadError> {
+        Self::read_for(dir, build, true, true)
     }
-    #[derive(serde::Deserialize)]
-    struct Internals {
-        internals: Vec<ListedInternal>,
+
+    fn read_for(dir: &Path, build: &str, internals: bool, loops: bool) -> Result<Self, ReadError> {
+        #[derive(serde::Deserialize)]
+        struct Loops {
+            loops: Vec<api_gen::loops::PublishedLoop>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Internals {
+            internals: Vec<ListedInternal>,
+        }
+        let index = document(dir, api_gen::functions::FILE, build);
+        let internals = if internals {
+            document::<Internals>(dir, build_data::INTERNALS, build).map(|doc| doc.internals)
+        } else {
+            Ok(Vec::new())
+        };
+        let loops = if loops {
+            document::<Loops>(dir, api_gen::loops::FILE, build).and_then(|doc| {
+                if let Some(l) = doc.loops.iter().find(|l| !l.entry.contains("::")) {
+                    return Err(ReadError::Invalid(format!(
+                        "{}: the loop `{}` has the entry `{}`, which is not a function's path",
+                        dir.join(api_gen::loops::FILE).display(),
+                        l.name,
+                        l.entry
+                    )));
+                }
+                Ok(doc.loops)
+            })
+        } else {
+            Ok(Vec::new())
+        };
+        // A schema we do not read does not hide missing files, corrupt data, or a wrong build.
+        match (index, internals, loops) {
+            (Ok(index), Ok(internals), Ok(loops)) => Ok(Self {
+                index,
+                internals,
+                loops,
+            }),
+            (Err(e @ ReadError::Invalid(_)), _, _)
+            | (_, Err(e @ ReadError::Invalid(_)), _)
+            | (_, _, Err(e @ ReadError::Invalid(_))) => Err(e),
+            (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => Err(e),
+        }
     }
-    let native = manifest.native.as_ref();
-    let mixins = native.map_or(&[][..], |native| &native.mixin);
-    let loops = native.map_or(&[][..], |native| &native.r#loop);
-    let index: FunctionIndex = document(dir, api_gen::functions::FILE, build)?;
-    let code = |target: &str| {
-        index
-            .functions
-            .get(&api_gen::functions::key(target))
-            .map(|f| format!("{}:{}", f.signature_hash, f.sha256))
-    };
-    let listed = if manifest.internals.is_empty() && loops.is_empty() {
-        Vec::new()
-    } else {
-        document::<Internals>(dir, build_data::INTERNALS, build)?.internals
-    };
-    let mut entries = Vec::new();
-    for row in mixins {
-        entries.push((
-            format!("{PREFIX}fn:{}", row.target),
-            code(&row.target).map_or(Now::Gone, Now::Is),
-        ));
-    }
-    if !loops.is_empty() {
-        let published = document::<Loops>(dir, api_gen::loops::FILE, build)?.loops;
-        // The data is the caller's: an entry that is no path is named, never unwrapped.
-        if let Some(l) = published.iter().find(|l| !l.entry.contains("::")) {
-            return Err(format!(
-                "{}: the loop `{}` has the entry `{}`, which is not a function's path",
-                dir.join(api_gen::loops::FILE).display(),
-                l.name,
-                l.entry
+
+    /// The game code this mod declares, as this build has it.
+    pub fn entries(&self, manifest: &Manifest) -> Vec<(String, Now)> {
+        let native = manifest.native.as_ref();
+        let mixins = native.map_or(&[][..], |native| &native.mixin);
+        let loops = native.map_or(&[][..], |native| &native.r#loop);
+        let index = &self.index;
+        let code = |target: &str| {
+            index
+                .functions
+                .get(&api_gen::functions::key(target))
+                .map(|f| format!("{}:{}", f.signature_hash, f.sha256))
+        };
+        let listed = &self.internals;
+        let mut entries = Vec::new();
+        for row in mixins {
+            entries.push((
+                format!("{PREFIX}fn:{}", row.target),
+                if let Some(refused) = mixin_refusal(index, &row.target) {
+                    Now::Refused {
+                        code: refused.code.name(),
+                        why: refused.why.clone(),
+                    }
+                } else {
+                    code(&row.target).map_or(Now::Gone, Now::Is)
+                },
             ));
         }
         for row in loops {
-            let now = match published.iter().find(|l| l.name == row.name) {
+            let now = match self.loops.iter().find(|l| l.name == row.name) {
                 None => Now::Gone,
                 Some(l) => {
                     let generic = l.generic_target();
@@ -137,35 +216,35 @@ pub fn entries(manifest: &Manifest, dir: &Path, build: &str) -> Result<Vec<(Stri
             };
             entries.push((format!("{PREFIX}loop:{}", row.name), now));
         }
+        for declared in &manifest.internals {
+            let found = internals::resolve(
+                listed,
+                &manifest.id,
+                &declared.path,
+                declared.kind.as_deref(),
+            );
+            // The id is what the mod declares, so a record is found again whatever the item became;
+            // the kind it resolved to is part of the fingerprint.
+            let id = format!(
+                "{PREFIX}internal:{}:{}",
+                declared.kind.as_deref().unwrap_or("any"),
+                declared.path
+            );
+            let now = match found {
+                Err(_) => Now::Gone,
+                Ok(internal) => match internal.kind.as_str() {
+                    "fn" | "method" => code(&internal.path).map_or(Now::Unjudged, |code| {
+                        Now::Is(format!("{}:{}:{code}", internal.kind, internal.hash))
+                    }),
+                    kind => Now::Is(format!("{kind}:{}", internal.hash)),
+                },
+            };
+            entries.push((id, now));
+        }
+        entries.sort();
+        entries.dedup();
+        entries
     }
-    for declared in &manifest.internals {
-        let found = internals::resolve(
-            &listed,
-            &manifest.id,
-            &declared.path,
-            declared.kind.as_deref(),
-        );
-        // The id is what the mod declares, so a record is found again whatever the item became;
-        // the kind it resolved to is part of the fingerprint.
-        let id = format!(
-            "{PREFIX}internal:{}:{}",
-            declared.kind.as_deref().unwrap_or("any"),
-            declared.path
-        );
-        let now = match found {
-            Err(_) => Now::Gone,
-            Ok(internal) => match internal.kind.as_str() {
-                "fn" | "method" => code(&internal.path).map_or(Now::Unjudged, |code| {
-                    Now::Is(format!("{}:{}:{code}", internal.kind, internal.hash))
-                }),
-                kind => Now::Is(format!("{kind}:{}", internal.hash)),
-            },
-        };
-        entries.push((id, now));
-    }
-    entries.sort();
-    entries.dedup();
-    Ok(entries)
 }
 
 /// How a build's [`entries`] stand against a list's record of them.
@@ -186,6 +265,7 @@ pub fn compare(recorded: &[&Entry], now: Vec<(String, Now)>) -> Compared {
         let made = recorded.iter().find(|entry| entry.id == id);
         let change = match (made, now) {
             (_, Now::Gone) => Change::Removed,
+            (_, Now::Refused { code, why }) => Change::Refused { code, why },
             (_, Now::Unjudged) => {
                 compared.unjudged.push(id);
                 continue;

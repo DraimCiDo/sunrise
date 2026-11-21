@@ -431,6 +431,94 @@ fn a_project_with_no_usable_version_is_left_out_and_the_rest_loads() {
 }
 
 #[test]
+fn a_version_naming_a_release_the_index_does_not_list_is_left_out() {
+    let mut index = sample();
+    let listed = "26.3-0.1.0";
+    index.releases = Some(vec![SunriseRelease {
+        tag: listed.into(),
+        commit: "0123456789abcdef0123456789abcdef01234567".into(),
+        line: "26.3-0".into(),
+    }]);
+    let project = &mut index.projects[0];
+    let id = project.id.clone();
+    let game = project.versions[0].game.clone();
+    let tag = |release: &str| Some(listed.replace("0.1.0", release).replace("26.3", &game));
+    let mut versions = Vec::new();
+    for (version, release) in [
+        ("9.0.0", Some("0.2.0")),
+        ("9.0.1", Some("0.1.0")),
+        ("9.0.2", None),
+    ] {
+        let mut v = project.versions[0].clone();
+        v.version = version.into();
+        v.sunrise = release.and_then(tag);
+        versions.push(v);
+    }
+    project.versions = versions;
+    let error = index.check().unwrap_err();
+    assert!(error.contains(&id) && error.contains("9.0.0"), "{error}");
+    let read = reread(&index);
+    let kept: Vec<&str> = read
+        .project(&id)
+        .unwrap()
+        .versions
+        .iter()
+        .map(|v| v.version.as_str())
+        .collect();
+    assert_eq!(kept, ["9.0.1", "9.0.2"]);
+    let left_out: Vec<Option<&str>> = read
+        .left_out
+        .iter()
+        .filter(|l| l.id == id)
+        .map(|l| l.version.as_deref())
+        .collect();
+    assert_eq!(left_out, [Some("9.0.0")]);
+
+    // An index that lists no releases makes no claim about the tag.
+    index.releases = None;
+    assert_eq!(reread(&index).project(&id).unwrap().versions.len(), 3);
+}
+
+#[test]
+fn a_takedown_of_the_whole_project_drops_its_nightly_source_for_a_reader() {
+    let mut index = sample();
+    index.projects[0].nightly = Some(Nightly {
+        repo: "author/example".into(),
+        path: None,
+        metadata: Default::default(),
+    });
+    let id = index.projects[0].id.clone();
+    let mut source_only = index.projects[0].clone();
+    source_only.id = "source_only".into();
+    source_only.versions.clear();
+    index.projects.push(source_only);
+    let takedown = |id: &str, sha256: Option<String>| Revoked {
+        id: id.into(),
+        sha256,
+        reason: "Withdrawn test project.".into(),
+        date: String::new(),
+    };
+
+    // By hash: the named package alone.
+    let hash = index.projects[0].versions[0].file.sha256.clone();
+    index.revoked = vec![takedown(&id, Some(hash))];
+    assert_eq!(index.check(), Ok(()));
+    let read = reread(&index);
+    assert!(read.project(&id).unwrap().nightly.is_some());
+    assert!(read.project("source_only").is_some());
+
+    // By id: the source goes too, and a project left with nothing is left out.
+    index.revoked = vec![takedown(&id, None), takedown("source_only", None)];
+    let error = index.check().unwrap_err();
+    assert!(error.contains(&id), "{error}");
+    let read = reread(&index);
+    let project = read.project(&id).unwrap();
+    assert!(project.nightly.is_none() && !project.versions.is_empty());
+    assert!(read.project("source_only").is_none());
+    assert!(read.left_out.iter().any(|l| l.id == "source_only"));
+}
+
+#[test]
 fn a_bad_version_is_left_out_and_its_project_keeps_the_others() {
     let mut index = with_hnmod();
     let native = index.projects.last_mut().unwrap();

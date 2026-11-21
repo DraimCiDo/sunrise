@@ -31,7 +31,7 @@ fn index(files: &[(&str, &[u8])]) -> Index {
             date: "2026-11-13".into(),
             nightly: None,
         },
-        package_format: PACKAGE_FORMAT,
+        package_format: u64::from(PACKAGE_FORMAT),
         toolchain: Toolchain {
             rust: "1.99.1".into(),
         },
@@ -321,6 +321,20 @@ fn a_route_names_its_assets_for_the_target_and_every_missing_one() {
     let api = "api-x86_64-unknown-linux-gnu.tar.xz";
     let listed = index(&[(runtime, b"runtime"), (api, b"api"), (ENGINE, b"engine")]);
     let target = "x86_64-unknown-linux-gnu";
+    assert_eq!(
+        Asset::name(Kind::Runtime, target, Side::Client),
+        "runtime-x86_64-unknown-linux-gnu.tar.xz"
+    );
+    assert_eq!(
+        Asset::name(Kind::Api, target, Side::Server),
+        "api-x86_64-unknown-linux-gnu-server.tar.xz"
+    );
+    for side in [Side::Client, Side::Server] {
+        assert_eq!(
+            Asset::name(Kind::Tool, target, side),
+            "tool-x86_64-unknown-linux-gnu.tar.xz"
+        );
+    }
     // The API route never needs the engine archive; the engine route needs all three.
     assert_eq!(
         listed.route_assets("api", target, Side::Client).unwrap(),

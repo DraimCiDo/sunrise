@@ -52,7 +52,7 @@ impl CacheStamp {
         fs::write(&path, &self.0).map_err(|e| format!("{}: {e}", path.display()))
     }
 }
-const SURFACE: &str = "surface.json";
+pub(crate) const SURFACE: &str = "surface.json";
 const API_SOURCE: &str = "api-source.tar.xz";
 /// The most a small file (`sdk.json`, the sums, the signature, `surface.json`) may be.
 const SMALL: u64 = 16 << 20;
@@ -295,12 +295,21 @@ pub(crate) fn fetch(
     dir: &Path,
     api: bool,
 ) -> Result<PinnedSdk, String> {
+    fetch_index(base, keys, build, dir, api).map(|index| pinned(&index, dir))
+}
+
+fn fetch_index(
+    base: &Base,
+    keys: &[PublicKey],
+    build: &str,
+    dir: &Path,
+    api: bool,
+) -> Result<Index, String> {
     let tag = format!("sdk-{build}");
     let stamp = CacheStamp::new(build, keys);
     if stamp.matches(dir) {
         let bytes = fs::read(dir.join(sdk::INDEX)).map_err(|e| format!("{DIR}: {e}"))?;
-        let index = Index::read(&bytes, build).map_err(|e| format!("{tag}: {e}"))?;
-        return Ok(pinned(&index, dir));
+        return Index::read(&bytes, build).map_err(|e| format!("{tag}: {e}"));
     }
     if let Err(e) = fs::remove_dir_all(dir)
         && e.kind() != std::io::ErrorKind::NotFound
@@ -340,25 +349,31 @@ pub(crate) fn fetch(
     }
     write(sdk::INDEX, &bytes)?;
     stamp.write(dir)?;
-    Ok(pinned(&index, dir))
+    Ok(index)
 }
 
 /// The compiled slices (`runtime`, `api`, `engine`) of the build `index` describes, for `target`,
-/// verified and unpacked once into `dir/<target>/`, the folders `native-build`'s plan names. `say`
-/// gets one line per download.
+/// verified and unpacked into the folders `native-build`'s plan names. Independent release
+/// builds need only the runtime and API for one SDK host; the full client cache is unchanged.
 pub(crate) fn fetch_slices(
     base: &Base,
     index: &Index,
     target: &str,
+    side: sdk::Side,
+    release: bool,
     dir: &Path,
     stamp: &CacheStamp,
-    say: &dyn Fn(&str),
 ) -> Result<sunrise_native_build::prebuilt::Package, String> {
     let build = &index.build.commit;
+    let host = sdk::Asset::host_name(target, side);
     let names = index
-        .route_assets("engine", target, sdk::Side::Client)
+        .route_assets(if release { "api" } else { "engine" }, target, side)
         .map_err(|e| format!("sdk-{build} has no slices for this computer ({target}): {e}"))?;
-    let into = dir.join(target);
+    let into = if release {
+        dir.join("release-slices").join(host)
+    } else {
+        dir.join(host)
+    };
     let package = sunrise_native_build::prebuilt::Package::at(&into);
     if stamp.matches(&into) {
         return Ok(package);
@@ -376,10 +391,10 @@ pub(crate) fn fetch_slices(
         let Some((kind, ..)) = sdk::Asset::parts_of(&name) else {
             return Err(format!("sdk-{build}: {name} is no slice"));
         };
-        say(&format!(
+        println!(
             "Downloading {name} ({} MB), once for every project",
             asset.size.div_ceil(1_000_000)
-        ));
+        );
         unpack(base, index, &name, &into, kind.name(), SLICE_LIMIT)?;
     }
     stamp.write(&into)?;
@@ -458,18 +473,41 @@ fn build_data_from(
     if CacheStamp::new(build, keys).matches(&dir) && into.is_dir() {
         return Ok(into);
     }
-    fetch(base, keys, build, &dir, false)?;
-    let bytes = fs::read(dir.join(sdk::INDEX)).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let index = Index::read(&bytes, build).map_err(|e| format!("sdk-{build}: {e}"))?;
+    let index = fetch_index(base, keys, build, &dir, false)?;
+    unpack_build_data(base, &index, &dir)?;
+    Ok(into)
+}
+
+fn unpack_build_data(base: &Base, index: &Index, dir: &Path) -> Result<(), String> {
     unpack(
         base,
-        &index,
+        index,
         build_data::ARCHIVE,
-        &dir,
+        dir,
         BUILD_DATA,
         BUILD_DATA_LIMIT,
-    )?;
-    Ok(into)
+    )
+}
+
+/// Fetch release metadata into a private staging directory, not a reusable SDK cache.
+pub(crate) fn release_data(
+    base: &Base,
+    keys: &[PublicKey],
+    build: &str,
+    staging: &Path,
+    with_build_data: bool,
+) -> Result<Index, String> {
+    let dir = staging.join(build);
+    let index = fetch_index(base, keys, build, &dir, false)?;
+    if with_build_data {
+        unpack_build_data(base, &index, &dir)?;
+        // This staging folder has no other writers, unlike the shared SDK cache.
+        let lock = dir.join(format!("{BUILD_DATA}{}", sdk::LOCK_SUFFIX));
+        fs::remove_file(&lock).map_err(|e| format!("{}: {e}", lock.display()))?;
+    }
+    // A transported artifact must never be mistaken for a verified local SDK cache.
+    fs::remove_file(dir.join(STAMP)).map_err(|e| format!("{}: {e}", dir.display()))?;
+    Ok(index)
 }
 
 #[cfg(test)]

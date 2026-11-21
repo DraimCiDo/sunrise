@@ -27,9 +27,12 @@ when the variable is absent and require it to pass when present.
 `#[ignore = "daily"]` in its source, and its row, in a new `daily-PACKAGE-TOPIC.txt` with the rows sorted,
 names its cargo target
 (`lib`, `bin:NAME` or `test:NAME`) and why it is a daily test (`slow`, `game-boot`, `resources`, `child-process`,
-`network`, `windows`). It is not a known failure: it runs every day and must pass, and a row whose test no
+`network`, `windows`, `own-sdk`). It is not a known failure: it runs every day and must pass, and a row whose test no
 longer runs fails. Its package's shard runs it when that shard builds its target, and the `daily-rows` leg runs
-every other one except Windows-only tests.
+every other one except the tests run by the Windows or book quickstart jobs.
+An `own-sdk` row names an integration test that needs the daily head's SDK. The daily calls
+`book-quickstart.yml` with `own_sdk: true`, and that workflow runs the test by exact name after setting
+`SUNRISE_SDK_BASE`. No generic shard selects it.
 A `windows` row must name an integration test (`test:NAME`) in the game workspace. The Cargo target root
 must be the package's `tests/NAME.rs` and begin with `#![cfg(windows)]` after any comments. Library,
 binary and launcher-workspace targets cannot use this reason. No Linux shard or `daily-rows` leg runs or expects

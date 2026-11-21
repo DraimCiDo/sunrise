@@ -90,8 +90,10 @@ A registry or a release page can tell which builds a published package fits from
 `surface.json` alone, or with the build's build data too for a mod that declares game code:
 `cargo sunrise-mod fits <file.smod> --build <name>`. For a current list nothing from the build
 the mod was made for is needed, so pruning that build's compiled files never strands the mod. `fits` first checks
-that the list was made for the build the package pins (`[native] sunrise`). If the pin is missing, is not a full commit SHA,
-or does not match `made_for`, the list cannot show which other builds the package fits.
+that the list was made for the build the package pins (`[native] sunrise`). If the pin is missing, is not a full
+commit SHA, or does not match `made_for`, the list cannot show which other builds the package fits. If the
+function index refuses a declared mixin target, the fit report names the target, error code and reason
+rather than reporting the function as removed.
 
 The version promise covers the hooks in the list. A hook entry that holds no version cannot be shown to mean what
 the mod was written for, whatever the target's version is: when nothing else changed, the answer is "not known",

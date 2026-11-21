@@ -928,6 +928,10 @@ pub(super) fn emit<'a>(
                         crossing.before, crossing.after
                     )
                 }
+            } else if name == "add_pack_finders" {
+                format!(
+                    "let mods = self.mods.clone(); mod_api::dispatch_{name}_for({passed}, |id| mods.code_owner_enabled(id));"
+                )
             } else {
                 format!("mod_api::{call}({passed});")
             };
@@ -959,6 +963,8 @@ pub(super) fn emit<'a>(
             && host
                 .as_ref()
                 .is_some_and(|(_, param)| param.ty == "&mut dyn LevelWriteHost");
+        let filtered_subscribers = name == "add_pack_finders";
+        let allow_subscriber = fresh_name("allow", &mut used);
         let invoke_part = fresh_name("invoke_part", &mut used);
         let invoke = call_args.join(", ");
         let trait_params = trait_params.join(", ");
@@ -1096,6 +1102,11 @@ pub(super) fn emit<'a>(
         // A trait mod's call is marked with the mod for a panic to name.
         let each = match &hook.owner {
             Some(owner) => format!("super::entered_owned(HookId::{hook_id}, \"{name}\", {owner})"),
+            None if filtered_subscribers => {
+                format!(
+                    "super::runtime::entered_matching(HookId::{hook_id}, \"{name}\", {allow_subscriber})"
+                )
+            }
             None if answered || hook.collect_validator.is_some() => {
                 format!("super::entered_with_id(HookId::{hook_id}, \"{name}\")")
             }
@@ -1460,6 +1471,24 @@ pub(super) fn emit<'a>(
             dispatch.push_str(&format!(
                 "#[doc(hidden)] pub fn dispatch_{name}({dispatch_signature}) {{ dispatch_{name}_with({args}, |part, event| part.{name}(&mut *{host}, event)); }}\n\
                  #[doc(hidden)] pub fn dispatch_{name}_with({params}, mut {invoke_part}: impl FnMut(&dyn {part_trait}, &mut {event_type}{elided}){result}) {{ {unpack}{early_return}\n{body} }}\n"
+            ));
+        } else if filtered_subscribers {
+            let wrapper_params = dispatch_params
+                .iter()
+                .map(|param| param.trim().strip_prefix("mut ").unwrap_or(param.trim()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let args = dispatch_params
+                .iter()
+                .map(|param| {
+                    let binding = param.split_once(':').unwrap().0.trim();
+                    binding.strip_prefix("mut ").unwrap_or(binding)
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            dispatch.push_str(&format!(
+                "#[doc(hidden)] pub fn dispatch_{name}({wrapper_params}) {{ dispatch_{name}_for({args}, |_| true); }}\n\
+                 #[doc(hidden)] pub fn dispatch_{name}_for({dispatch_signature}, {allow_subscriber}: impl FnMut(&str) -> bool) {{ {unpack}{early_return}\n{body} }}\n"
             ));
         } else {
             dispatch.push_str(&format!(

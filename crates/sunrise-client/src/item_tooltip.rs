@@ -365,9 +365,8 @@ impl PlayerHeadName {
     }
     /// The title as a component, for command feedback.
     pub fn text(&self) -> crate::text::Text {
-        crate::text::Text::translate_with_fallback(
+        crate::text::Text::translate(
             "block.minecraft.player_head.named",
-            "%s's Head",
             &[crate::text::Text::literal(self.0.clone())],
         )
     }

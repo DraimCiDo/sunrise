@@ -2,6 +2,94 @@ use std::{path::Path, process::Command};
 
 #[test]
 #[ignore = "daily"]
+fn run_writes_native_registration_logs_to_latest_log() {
+    use std::fs;
+    use std::io::Write;
+
+    let target = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    fs::create_dir_all(target).unwrap();
+    let scratch = tempfile::tempdir_in(target).unwrap();
+    let root = fs::canonicalize(scratch.path()).unwrap();
+    let project = root.join("greeter");
+    let tool = |dir: &Path, args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_cargo-sunrise-mod"))
+            .current_dir(dir)
+            .env("SUNRISE_MOD_CACHE", root.join("cache"))
+            .env("SUNRISE_HOME", root.join("home"))
+            .env("SUNRISE_LAUNCHER_HOME", root.join("launcher"))
+            .env("SUNRISE_LAUNCHER_NO_SELF_UPDATE", "1")
+            .env("SUNRISE_NO_AUDIO", "1")
+            .env("XDG_DATA_HOME", root.join("data"))
+            .env("XDG_CONFIG_HOME", root.join("config"))
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    tool(&root, &["new", "greeter", "--template", "native"]);
+    writeln!(
+        fs::OpenOptions::new()
+            .append(true)
+            .open(project.join("Cargo.toml"))
+            .unwrap(),
+        "log = \"0.4\""
+    )
+    .unwrap();
+    fs::write(
+        project.join("src/lib.rs"),
+        r#"
+#[derive(Default)]
+struct Greeter;
+
+#[mod_api::sunrise_mod]
+impl mod_api::Hooks for Greeter {
+    fn register(&self, _: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+        log::info!(target: "greeter::registration", "ready for {}", "players");
+        log::debug!(target: "greeter::registration", "not a visible diagnostic");
+        log::logger().flush();
+        std::process::exit(0);
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    // Run the actual game through registration, then exit from the hook before a world or a
+    // window opens. Registration only needs the resource marker and the registry names table.
+    let resources = root.join("resources");
+    fs::create_dir(&resources).unwrap();
+    for name in ["sunrise-resources.json", "registries.json"] {
+        fs::write(resources.join(name), "{}").unwrap();
+    }
+    let game = project.join("target/sunrise-mod/run/game");
+    fs::create_dir_all(&game).unwrap();
+    fs::write(game.join("eula.txt"), "eula=true\n").unwrap();
+    tool(
+        &project,
+        &[
+            "run",
+            "--resources",
+            resources.to_str().unwrap(),
+            "--",
+            "--dedicated",
+        ],
+    );
+    let log = fs::read_to_string(game.join("logs/latest.log")).unwrap();
+    assert!(
+        log.lines()
+            .any(|line| line.ends_with("/INFO]: [greeter::registration] ready for players")),
+        "{log}"
+    );
+    assert!(!log.contains("not a visible diagnostic"), "{log}");
+}
+
+#[test]
+#[ignore = "daily"]
 fn run_of_a_native_mod_without_resources_says_how_to_make_them_before_building() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target")

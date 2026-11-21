@@ -12,6 +12,8 @@ pub fn install_parts(
     initialize().map_err(|reason| vec![reason.to_owned()])?;
     crate::parts::install_parts(mods, schema, dimension_shape)
 }
+#[path = "native_log.rs"]
+pub mod native_log;
 #[path = "profiler.rs"]
 pub mod profiler;
 

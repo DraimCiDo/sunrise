@@ -688,6 +688,7 @@ def _build_locked(out: Path, server: bool, target_dir: Path) -> None:
         "patch_files": {name: digest for name, digest in files.items() if name.startswith("patches/")},
         "registry_lock": (staged / "Cargo.lock").read_text(),
         "native_links": native_links(metadata, GAME),
+        "native_log": True,
         # The API route: the mods library's crate name and metadata, and which files the `runtime` and `api` archives
         # hold (every other file is the `engine` archive's).
         "slices": sliced,

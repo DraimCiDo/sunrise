@@ -2567,6 +2567,8 @@ fn list(
 pub enum Change {
     /// The target has no record with its id.
     Removed,
+    /// The target is present but cannot be replaced in this build.
+    Refused { code: &'static str, why: String },
     /// The target's record has another hash.
     Changed,
     /// The target's type no longer implements this trait.
@@ -2599,6 +2601,7 @@ impl std::fmt::Display for Misfit {
         let item = describe(&self.id);
         match &self.change {
             Change::Removed => write!(f, "{item} (removed)"),
+            Change::Refused { code, why } => write!(f, "{item} (refused: {code}: {why})"),
             Change::Changed => write!(f, "{item} (changed)"),
             Change::LostImpl(name) => write!(f, "{item} no longer implements `{name}`"),
             Change::Fields { gained, at } => match &gained[..] {

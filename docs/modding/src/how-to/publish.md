@@ -4,7 +4,8 @@ Sunrise's registry, [sunrise-org/sunrise-mods](https://github.com/sunrise-org/su
 resource packs and shader packs at [playsunrise.net/mods](https://playsunrise.net/mods). The
 [registry submission form](https://playsunrise.net/mods/submit) uploads your package and opens a pull request for a
 person to review. To prepare a mod submission locally, follow the steps below with `cargo sunrise-mod publish`,
-then upload the package and open the pull request yourself.
+then upload the package and open the pull request yourself. Native mods for stable releases use the
+[stable source submission](#publishing-a-stable-source-version) below.
 
 ## 1. Build and write the submission
 
@@ -98,30 +99,197 @@ not written into the entry. The dependencies are read from the package itself, s
 `--registry`, the registry's CI checks both when the pull request opens; it also checks sides and what the dependencies
 themselves require.
 
-Published versions never change and are never removed: a version already in the entry is refused by name, and a file
-that must go is taken down by the registry's maintainers in `revoked.toml`.
+Published source versions never change. A file that must go is taken down by the registry's maintainers in
+`revoked.toml`. The only update `publish` makes to an existing version is an [append of signed native builds](#publishing-native-binaries).
 
 ## Signing
 
-Authors may sign with an Ed25519 key in [minisign](https://jedisct1.github.io/minisign/) format. The entry then
-holds the public key, every version of the project must be signed with it, and an update signed with another key is
-refused. `cargo sunrise-mod` verifies a signature but does not make keys or signatures: use `minisign`.
+Signed projects use an Ed25519 key in [Minisign](https://jedisct1.github.io/minisign/) format. The registry entry
+holds the public key; every version of that project must be signed with the same private key.
 
-Build and sign before calling `publish`, including on the first listing. For example, for a mod with ID `my_mod`:
+Run `cargo sunrise-mod keygen` once in your mod project. It reads the mod ID from `sunrise-mod.toml`, asks for a
+passphrase without echoing it, and prints the registry public key. It saves the encrypted `signing.key` and a text
+copy of the public key (`signing.pub`) in the mod's per-user data folder:
+
+- Linux: `$XDG_DATA_HOME/sunrise-mod/keys/<mod-id>/` (default data home: `~/.local/share`).
+- macOS: `~/Library/Application Support/sunrise-mod/keys/<mod-id>/`.
+- Windows: `%LOCALAPPDATA%/sunrise-mod/keys/<mod-id>/` (fallback: `%USERPROFILE%/AppData/Local`).
+
+Use `--out <dir>` to choose a different folder, either outside the project or under its top-level `.sunrise/`,
+`target/`, or `.git/` directory, which are excluded from packages. The tool does not change Git's ignore rules.
+Back up the private key securely; never commit it or upload it as an asset.
+
+Build and sign before calling `publish`, including on the first listing. For example, for a mod with ID `my_mod`,
+set `public_key` to the value printed by `keygen`:
 
 ```sh
 cargo sunrise-mod build
-minisign -S -s my_mod.key -m target/sunrise-mod/my_mod.smod
+cargo sunrise-mod sign target/sunrise-mod/my_mod.smod
 cargo sunrise-mod publish --summary "..." --owner you --categories utility \
-  --key "$(tail -n 1 my_mod.pub)" --signature target/sunrise-mod/my_mod.smod.minisig
+  --key "$public_key" --signature target/sunrise-mod/my_mod.smod.minisig
 ```
+
+`sign` writes a detached `.minisig` beside the input. It uses the current mod's per-user `signing.key` unless
+`--key <path>` is given. Existing Minisign key files and signatures work too. On Unix, `keygen --no-password` explicitly
+opts in to generating an unencrypted key. On Windows, `keygen` requires encryption because key files inherit the
+folder's permissions. Use `sign --no-password` to sign with an existing unencrypted key file. Neither command
+overwrites an existing output. After rebuilding a file at the same path, remove its old `.minisig` before signing
+the new bytes. Keep the existing signature when retrying publication of unchanged, verified bytes.
+
+For CI, store the full private key file text as a protected secret named `SUNRISE_MOD_SIGNING_KEY` and, for an
+encrypted key, store its passphrase separately as `SUNRISE_MOD_SIGNING_PASSPHRASE`. Set those only in the
+signing step's environment and run `cargo sunrise-mod sign <file> --key-env`. With a passwordless CI key, leave
+the passphrase variable unset. The command never prompts in this mode. Do not put either secret on the command
+line, in a log, or in a build artifact. The tool clears its own in-memory copies of keys and passphrases after use;
+it cannot clear the process environment or the copies held internally by Minisign and the password prompt library.
 
 For a new version of an already-signed project, use the same key and replace the page flags (`--summary`, `--owner`,
 `--categories`) with `--registry <your checkout of sunrise-mods>`. With `--key` and `--signature`, `publish` checks
-and stages the exact bytes you signed, without rebuilding. If you change the package, build and sign it again.
+and copies the exact bytes you signed, without rebuilding.
 
-Generate a key pair once with `minisign -G -p my_mod.pub -s my_mod.key`. Keep the secret key (`my_mod.key`) out of
-both your repository and releases; losing it means a new key and a review.
+## Publishing a stable source version
+
+You can publish the signed `.smod` without binaries, including for a mod that is not eligible to ship them.
+Set `homepage` in the manifest to your project's GitHub repository. Pin the project to the stable Sunrise
+commit, build and [sign the source package](#signing), and pass a release list (`releases.json`, an array of
+`{ "tag", "commit" }` records). Use `--asset-base` for your GitHub release's download URL without the asset name:
+
+```sh
+cargo sunrise-mod publish --summary 'A brief summary' --owner you --categories utility \
+  --sunrise 26.3-0.1.0 --releases releases.json \
+  --key "$public_key" --signature target/sunrise-mod/my_mod.smod.minisig \
+  --package target/sunrise-mod/my_mod.smod \
+  --asset-base 'https://github.com/you/my_mod/releases/download/v0.1.0'
+```
+
+Upload only the author-release assets listed in `PULL_REQUEST.md`: the exact `.smod` and `.smod.minisig`.
+Submit `mods/<id>.toml` to the registry with `icons/<id>.png` if an icon was staged. The `file` field already
+points to your release asset. Registry CI downloads it from there, verifies it and mirrors it after merge.
+For a new version of an existing listing, use `--registry <checkout>` instead of the page flags.
+
+## Publishing native binaries
+
+Builds are optional. They are available only to a standalone API native mod: no game patches, crates.io dependencies
+or declared mod dependencies. Keep the signed `.smod` as the source release even when players can download binaries.
+Set the manifest's `homepage` to your project's GitHub repository. Use the stable release list (`releases.json`,
+an array of `{ "tag", "commit" }` records). To publish binaries, put the verified SDK index (`sdk.json`),
+`surface.json`, and extracted `build-data/` under `sdk-data/<commit>/` for both the original source package's
+pin and the target commit. To describe the archives with `--describe-binaries`, only the target's verified
+`sdk.json` is needed under `sdk-data/`.
+
+1. Pin your checkout to the stable SDK commit. On each SDK host, build the archive with:
+
+   ```sh
+   cargo sunrise-mod build --binaries release-assets --sunrise-release 26.3-0.1.0 --releases releases.json
+   ```
+
+   Run it with `--server` as well for each dedicated-server host the SDK lists. Every run writes a `.smod` and the
+   selected host's `<id>-<version>+<release>-<host>.tar.xz`. Keep one `.smod` to sign as the source for a new version.
+2. Sign every archive with `cargo sunrise-mod sign <archive>`. Gather the archives and their `.minisig` files
+   in `release-assets`, then assemble and sign the descriptor with the same key:
+
+   ```sh
+   cargo sunrise-mod build --describe-binaries release-assets --sunrise-release 26.3-0.1.0 \
+     --releases releases.json --sdk-data sdk-data
+   cargo sunrise-mod sign release-assets/my_mod-0.1.0+26.3-0.1.0.binaries.json
+   ```
+
+   The descriptor embeds the archive signatures; it does not sign the archives for you.
+3. Prepare the submission. For a new listing:
+
+   ```sh
+   cargo sunrise-mod sign target/sunrise-mod/my_mod.smod
+   cargo sunrise-mod publish --summary 'A brief summary' --owner you --categories utility \
+     --sunrise 26.3-0.1.0 --releases releases.json --sdk-data sdk-data \
+     --key "$public_key" --signature target/sunrise-mod/my_mod.smod.minisig \
+     --package target/sunrise-mod/my_mod.smod \
+     --binaries release-assets --asset-base 'https://github.com/you/my_mod/releases/download/v0.1.0'
+   ```
+
+   For an existing listing with a new mod version, replace the page flags with `--registry <checkout>`. For a later
+   Sunrise build of an **already published** mod version, build archives from a temporary checkout of that source
+   repinned to the new commit. Use `--registry <checkout>` and pass the **original published `.smod`** to `--package`,
+   not the temporary build's package. Omit `--sunrise`, `--key`, and `--signature`: `publish` uses the source row's
+   existing stable pin, key and signature and adds one build row without touching them. Keep `--asset-base`
+   on the original author release. `publish` checks the signed assets and the registry's fit verdict before writing output.
+   Use the output only after `publish` succeeds.
+4. Upload and verify only the author-release assets listed in `PULL_REQUEST.md` on the release at `--asset-base`
+   before opening the pull request. These are the archives, the descriptor and its `.binaries.json.minisig`, and,
+   for a new mod version only, the source package and its `.smod.minisig`. The descriptor embeds the archive
+   signatures, so no separate archive signature uploads are needed. If an upload fails partway through, upload
+   the missing files from the same verified output rather than rebuilding or re-signing. The tool does not upload anything.
+   Submit `mods/<id>.toml` with `icons/<id>.png` if an icon was staged; do not commit the release assets. See the
+   [registry format](../reference/registry-index.md#stable-native-builds) for offline verification and takedowns.
+
+## Tagged native releases in GitHub Actions
+
+New native projects include `.github/workflows/release.yml`, `.github/workflows/rebuild.yml`, a shared workflow
+and an action that verifies and installs the release tool. The repository does not carry the release scripts: every job extracts them
+from its verified tool with `cargo sunrise-mod release scripts`. Development still starts on Nightly. When
+you are ready to publish a stable version from GitHub:
+
+1. Set `homepage` to your mod's GitHub repository and pin the mod to the commit of a stable Sunrise release.
+   The tag you push must be `v` followed by the full version in `sunrise-mod.toml`, such as `v0.1.0`. Check in
+   your reviewed `Cargo.lock` if the project has one; CI does not update an existing lock for you.
+2. Run [`cargo sunrise-mod keygen`](#signing) once. Back up the private key outside the repository. Set the
+   Actions variable `SUNRISE_MOD_PUBLIC_KEY` to the printed public key. For an existing registry listing it
+   must match the key in that entry. Don't generate a fresh key for another release of the same project.
+3. Create the `sunrise-mod-signing` environment. Restrict it to your trusted release tags and require review
+   according to your repository's release policy. If you use rebuilds, also allow your trusted default branch.
+   Store `SUNRISE_MOD_SIGNING_KEY` and, if needed,
+   `SUNRISE_MOD_SIGNING_PASSPHRASE` there, not in repository variables or on the command line. Keep this
+   environment off pull requests. Only the signing step sees the secrets, and it never builds or runs mod code.
+4. For a first listing, set `SUNRISE_MOD_REGISTRY_OWNER` (your GitHub login), `SUNRISE_MOD_SUMMARY` and
+   `SUNRISE_MOD_CATEGORIES` (comma-separated). Fill the manifest's description and license and put `icon.png`
+   beside it. See the [registry page requirements](../reference/registry-index.md#submitting-a-project) for
+   anything else to add to your submission. Set `SUNRISE_MOD_RELEASES=true` in Actions variables to enable the workflow.
+
+A tag build verifies Sunrise's rolling signed [`mod-tool`](../start/install-tool.md#newest-tool-from-main), then
+plans against the tag's independently signed SDK. All jobs require the same authenticated tool commit. A
+standalone API mod builds an archive for each host in that SDK. Other valid native mods get a signed source
+package only, including mods with required content dependencies. If your code imports another mod's library,
+the standalone check cannot supply it and the tag workflow stops before signing. Dependency-aware tagged
+releases are tracked in [#3885](https://github.com/sunrise-org/sunrise/issues/3885). A failed check or binary
+build stops the release; it does not publish a source-only substitute.
+
+The workflow keeps the verified signed batch as a run artifact before uploading. If an upload stops partway,
+rerun the failed jobs of that run while the original signed batch is available. Identical assets are reused;
+only missing ones are uploaded. A different remote file stops the workflow. Recover the original signed batch
+rather than rebuilding or re-signing, even if the original source checkout did not change. A rolling tool update
+can also stop a retry; in that case finish the release manually with the saved, verified assets.
+
+Once the registry job succeeds, the `sunrise-registry-submission` artifact and the run summary give you the entry,
+any staged icon and the pull request draft. You can always submit these yourself. To let Actions open or update
+that pull request, set `SUNRISE_MOD_REGISTRY_FORK` to your own fork of `sunrise-org/sunrise-mods` (`owner/name`).
+In a separate `sunrise-mod-registry` environment, set `SUNRISE_MOD_REGISTRY_TOKEN` to a token for your listed
+GitHub owner account that can push to the fork and open registry pull requests. It is not the author release's
+token and is not available to the build, sign or upload jobs. If the registry needs page fields or screenshots
+that were not staged, complete the attached draft by hand. The workflow does not commit the author release assets.
+If the registry job fails on the fork or token, fix that setup or remove both settings, then rerun the registry job.
+
+## Rebuilding binaries for a newer stable release
+
+Once the registry has reviewed and published a version with binaries, `rebuild.yml` can add a build for a newer
+stable Sunrise release on the same line. It runs on the default branch with the same `SUNRISE_MOD_RELEASES`
+opt-in and signing key as the tag workflow. On its daily schedule it takes at most one candidate: the newest
+eligible reviewed mod version whose line's current stable release is not already covered. It does not walk back
+through older releases, and no candidate is a successful no-op. To try a specific pair, run **Rebuild reviewed
+native mod source** on the default branch with both the exact mod version (such as `0.1.0`) and the stable Sunrise
+tag (such as `26.3-0.1.1`). The same eligibility rules apply.
+
+A rebuild downloads the exact signed `.smod` from the original author release and verifies it against the
+reviewed source row. It builds from that package and its existing `Cargo.lock`, not the current branch's Rust
+source. Only the manifest in the disposable build folder is repinned; neither a branch nor the tag moves. If
+the lock no longer works unchanged or the mod does not fit the newer SDK, publish a new mod version instead.
+Planning skips withdrawn or ineligible versions. Build jobs use the plan snapshot; preflight stops publication
+if eligibility changes or either stable Sunrise tag moves or is withdrawn after planning.
+
+Only the target's signed archives and descriptor are added to the existing author release. The original source
+and its signature never change. The submission adds one build row to the reviewed version without editing its
+old builds or page fields. If the exact row was already accepted, nothing is submitted. If the source, key, owners
+or existing target changed since planning, stop and replan rather than rewriting the reviewed entry. Recover the
+original signed batch after an interrupted upload, as for a tagged release. Without a registry fork token, submit
+the staged append yourself from the run artifact, which is attached once the registry job succeeds.
 
 ## A collection
 

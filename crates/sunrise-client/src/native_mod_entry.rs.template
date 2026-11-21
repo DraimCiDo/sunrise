@@ -9,6 +9,7 @@ macro_rules! native_mods {
 
 #[inline(never)]
 pub fn entries() -> Vec<mod_api::ModEntry> {
+    /* MOD_LOGGERS */
     native_mods! {
     /* MOD_ENTRIES */
     }

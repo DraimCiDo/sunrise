@@ -2,6 +2,7 @@
 use super::{Bundle, internals};
 use std::fs;
 use std::path::Path;
+use sunrise_mod_package::native_route::{API_PACKAGE, INTERNALS_PACKAGE, PACKAGES};
 
 pub fn read(path: &Path) -> Result<toml::Table, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -65,15 +66,6 @@ pub struct Project<'a> {
     pub package: String,
     api_deps: Vec<ApiDependency>,
 }
-
-/// The mod API's package, the one crate every mod depends on.
-pub const API_PACKAGE: &str = "sunrise-mod-api";
-
-/// The per-mod facade's package, rewritten to its generated crate.
-pub const INTERNALS_PACKAGE: &str = "sunrise-internals";
-/// Each game package a mod may depend on, with its library's name.
-pub const PACKAGES: [(&str, &str); 2] =
-    [(API_PACKAGE, "mod_api"), (INTERNALS_PACKAGE, "internals")];
 
 /// Where a mod's `Cargo.toml` names the SDK package `package`: the copy of its pinned build that
 /// `cargo sunrise-mod` fetches into the project (`.sunrise/sdk/`).
@@ -199,6 +191,14 @@ impl<'a> Project<'a> {
 
     /// Parses the staged Cargo manifest, or one read by a caller with its own input bounds.
     pub fn parse(bundle: &'a Bundle, text: &str) -> Result<Self, ProjectError> {
+        Self::parse_with(bundle, text, |file| bundle.dir.join(file).exists())
+    }
+
+    pub(crate) fn parse_with(
+        bundle: &'a Bundle,
+        text: &str,
+        exists: impl Fn(&str) -> bool,
+    ) -> Result<Self, ProjectError> {
         let mod_id = || bundle.manifest.id.clone();
         let cargo: toml::Table = text.parse().map_err(|e| ProjectError::Cargo {
             mod_id: mod_id(),
@@ -213,7 +213,7 @@ impl<'a> Project<'a> {
             }
         }
         for config in [".cargo/config", ".cargo/config.toml"] {
-            if bundle.dir.join(config).exists() {
+            if exists(config) {
                 return Err(ProjectError::Cargo {
                     mod_id: mod_id(),
                     reason: format!(
@@ -331,12 +331,6 @@ impl<'a> Project<'a> {
         })
     }
 
-    /// The manifest's dependency tables: `[dependencies]` (no target), then each
-    /// `[target.<cfg>.dependencies]`.
-    pub fn dependency_tables(&self) -> impl Iterator<Item = (Option<&str>, &toml::Table)> + '_ {
-        dependency_tables(&self.cargo)
-    }
-
     /// Whether the mod links its game internals facade, under any dependency alias.
     pub fn uses_internals(&self) -> bool {
         self.api_deps
@@ -359,18 +353,6 @@ impl<'a> Project<'a> {
             })
             .collect()
     }
-}
-
-fn dependency_tables(cargo: &toml::Table) -> impl Iterator<Item = (Option<&str>, &toml::Table)> {
-    let targets = cargo
-        .get("target")
-        .and_then(toml::Value::as_table)
-        .into_iter()
-        .flatten()
-        .map(|(target, config)| (Some(target.as_str()), config.get("dependencies")));
-    std::iter::once((None, cargo.get("dependencies")))
-        .chain(targets)
-        .filter_map(|(target, table)| Some((target, table?.as_table()?)))
 }
 
 /// Add the mod libraries and their generated internals facades to the discovery workspace.

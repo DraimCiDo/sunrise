@@ -133,6 +133,277 @@ fn the_index_lists_each_function_with_its_text_or_its_refusal() {
 }
 
 #[test]
+fn restricted_reexports_in_another_module_refuse_a_target_by_name() {
+    let root = fixture();
+    fs::write(
+        root.path().join("crates/sunrise-client/src/game.rs"),
+        r#"
+mod inner {
+    mod deep { pub fn f() {} }
+    pub(crate) use deep::f;
+}
+mod public {
+    mod deep { pub fn f() {} }
+    pub use deep::f;
+}
+use public as local;
+fn private_reexport() { inner::f(); }
+fn public_reexport() { public::f(); }
+fn local_import() { local::f(); }
+"#,
+    )
+    .unwrap();
+    let index = index(root.path(), &BTreeSet::new()).unwrap();
+    let check = |name| index.check(root.path(), &format!("sunrise_client::game::{name}"));
+    let (code, why) = check("private_reexport").unwrap_err();
+    assert_eq!(code, "E_MIXIN_NOT_REPLACEABLE");
+    assert!(
+        why.contains("`inner::f`") && why.contains("`sunrise_client::game::inner`"),
+        "{why}"
+    );
+    check("public_reexport").unwrap();
+    check("local_import").unwrap();
+}
+
+#[test]
+fn qualified_paths_follow_module_aliases_and_globs() {
+    let root = fixture();
+    fs::write(
+        root.path().join("crates/sunrise-client/src/game.rs"),
+        r#"
+mod inner {
+    mod deep { pub fn f() {} pub fn private_glob() {} }
+    pub(super) use self::deep::{f as alias, *};
+}
+mod public {
+    mod deep { pub fn f() {} }
+    pub use deep::*;
+}
+use self::inner as local;
+mod child {
+    use super::*;
+    fn private_alias() { crate::game::inner::alias(); }
+    fn private_glob() { super::local::private_glob(); }
+    fn public_glob() { self::public::f(); }
+}
+fn block_import() { use crate::game::inner::alias; alias(); }
+fn shadowed() { use public as inner; inner::f(); }
+"#,
+    )
+    .unwrap();
+    let index = index(root.path(), &BTreeSet::new()).unwrap();
+    let check = |name| index.check(root.path(), &format!("sunrise_client::game::child::{name}"));
+    for (name, path) in [
+        ("private_alias", "crate::game::inner::alias"),
+        ("private_glob", "super::local::private_glob"),
+    ] {
+        let (code, why) = check(name).unwrap_err();
+        assert_eq!(code, "E_MIXIN_NOT_REPLACEABLE");
+        assert!(why.contains(path), "{why}");
+    }
+    check("public_glob").unwrap();
+    let (code, why) = index
+        .check(root.path(), "sunrise_client::game::block_import")
+        .unwrap_err();
+    assert_eq!(code, "E_MIXIN_NOT_REPLACEABLE");
+    assert!(why.contains("crate::game::inner::alias"), "{why}");
+    index
+        .check(root.path(), "sunrise_client::game::shadowed")
+        .unwrap();
+}
+
+#[test]
+fn only_unconditional_body_paths_can_prove_a_restricted_crossing() {
+    let root = fixture();
+    fs::write(
+        root.path().join("crates/sunrise-client/src/game.rs"),
+        r#"
+mod hooks {
+    mod imp {
+        pub fn f() {}
+        macro_rules! m { () => { () }; }
+        pub(crate) use m;
+    }
+    pub(super) use imp::{f, m};
+}
+fn active() { hooks::f(); }
+fn gated_macro() {
+    #[cfg(test)]
+    hooks::m!();
+}
+fn gated_block() {
+    #[cfg(test)]
+    { hooks::f(); }
+}
+fn gated_local() {
+    #[cfg(unix)]
+    let _value = hooks::f();
+}
+fn gated_arm() {
+    match 0 {
+        #[cfg(feature = "optional")]
+        0 => hooks::f(),
+        _ => (),
+    }
+}
+"#,
+    )
+    .unwrap();
+    let index = index(root.path(), &BTreeSet::new()).unwrap();
+    let check = |name| index.check(root.path(), &format!("sunrise_client::game::{name}"));
+    assert_eq!(check("active").unwrap_err().0, "E_MIXIN_NOT_REPLACEABLE");
+    for name in ["gated_block", "gated_local", "gated_arm", "gated_macro"] {
+        check(name).unwrap();
+    }
+}
+
+#[test]
+fn a_cfg_selected_public_provider_stays_replaceable() {
+    let root = fixture();
+    fs::write(
+        root.path().join("crates/sunrise-client/src/game.rs"),
+        r#"
+#[cfg(any())]
+mod provider {
+    mod imp { pub fn helper() {} }
+    pub(super) use imp::helper;
+}
+#[cfg(all())]
+mod provider { pub fn helper() {} }
+fn target() { provider::helper(); }
+"#,
+    )
+    .unwrap();
+    let index = index(root.path(), &BTreeSet::new()).unwrap();
+    index
+        .check(root.path(), "sunrise_client::game::target")
+        .unwrap();
+}
+
+#[test]
+fn restricted_imports_do_not_shadow_public_globs_in_another_namespace() {
+    let root = fixture();
+    fs::write(
+        root.path().join("crates/sunrise-client/src/game.rs"),
+        r#"
+mod types { pub type helper = (); }
+mod values { pub fn helper() {} }
+mod private_type {
+    pub(crate) use super::types::helper;
+    pub use super::values::*;
+}
+mod private_value {
+    pub use super::types::*;
+    pub(crate) use super::values::helper;
+}
+fn calls_public_value() { private_type::helper(); }
+fn uses_public_type() { let _: private_value::helper = (); }
+fn calls_private_value() { private_value::helper(); }
+fn uses_private_type() { let _: private_type::helper = (); }
+"#,
+    )
+    .unwrap();
+    let index = index(root.path(), &BTreeSet::new()).unwrap();
+    let check = |name| index.check(root.path(), &format!("sunrise_client::game::{name}"));
+    check("calls_public_value").unwrap();
+    check("uses_public_type").unwrap();
+    for (target, path) in [
+        ("calls_private_value", "private_value::helper"),
+        ("uses_private_type", "private_type::helper"),
+    ] {
+        let (code, why) = check(target).unwrap_err();
+        assert_eq!(code, "E_MIXIN_NOT_REPLACEABLE");
+        assert!(why.contains(path), "{why}");
+    }
+}
+
+#[test]
+fn a_cfg_gated_value_does_not_make_a_restricted_type_import_shadow_a_public_value() {
+    let root = fixture();
+    fs::write(
+        root.path().join("crates/sunrise-client/src/game.rs"),
+        r#"
+mod defs {
+    pub type helper = ();
+    #[cfg(any())]
+    pub fn helper() {}
+}
+mod values { pub fn helper() {} }
+mod provider {
+    pub(crate) use super::defs::helper;
+    pub use super::values::*;
+}
+fn calls_public_value() { provider::helper(); }
+fn uses_private_type() { let _: provider::helper = (); }
+"#,
+    )
+    .unwrap();
+    let index = index(root.path(), &BTreeSet::new()).unwrap();
+    let check = |name| index.check(root.path(), &format!("sunrise_client::game::{name}"));
+    check("calls_public_value").unwrap();
+    let (code, why) = check("uses_private_type").unwrap_err();
+    assert_eq!(code, "E_MIXIN_NOT_REPLACEABLE");
+    assert!(why.contains("provider::helper"), "{why}");
+}
+
+#[test]
+fn a_bare_reference_follows_the_mirrors_import_to_its_provider() {
+    let root = fixture();
+    fs::write(
+        root.path().join("crates/sunrise-client/src/game.rs"),
+        r#"
+mod native_hooks {
+    mod imp { pub fn queue() {} }
+    pub(super) use imp::queue as restricted;
+}
+mod native_level_effects {
+    use super::native_hooks::restricted as queue;
+    fn by_alias() { queue(); }
+}
+mod glob_user {
+    use super::native_hooks::*;
+    fn by_glob() { restricted(); }
+    fn shadowed_by_parameter(restricted: fn()) { restricted(); }
+    fn shadowed_by_local() { let restricted = || {}; restricted(); }
+    fn shadowed_by_item() { fn restricted() {} restricted(); }
+}
+mod opaque_glob_user {
+    use super::native_hooks::*;
+    use ::opaque::*;
+    fn not_proven() { restricted(); }
+}
+pub mod public_hooks { pub fn queue() {} }
+use self::public_hooks::queue as public_alias;
+fn through_public_alias() { public_alias(); }
+"#,
+    )
+    .unwrap();
+    let index = index(root.path(), &BTreeSet::new()).unwrap();
+    let check = |name| index.check(root.path(), &format!("sunrise_client::game::{name}"));
+    for (name, binding) in [
+        ("native_level_effects::by_alias", "queue"),
+        ("glob_user::by_glob", "restricted"),
+    ] {
+        let (code, why) = check(name).unwrap_err();
+        assert_eq!(code, "E_MIXIN_NOT_REPLACEABLE");
+        assert!(
+            why.contains(&format!("`{binding}`"))
+                && why.contains("`sunrise_client::game::native_hooks`"),
+            "{why}"
+        );
+    }
+    for name in [
+        "through_public_alias",
+        "glob_user::shadowed_by_parameter",
+        "glob_user::shadowed_by_local",
+        "glob_user::shadowed_by_item",
+        "opaque_glob_user::not_proven",
+    ] {
+        check(name).unwrap();
+    }
+}
+
+#[test]
 fn a_target_is_checked_by_its_key_and_its_text() {
     let root = fixture();
     let index = index(root.path(), &BTreeSet::new()).unwrap();

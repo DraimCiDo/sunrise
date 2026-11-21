@@ -2,9 +2,10 @@
 //! against the prebuilt game instead of rebuilding it. Each target function is copied, unchanged,
 //! out of the pinned source into a module that mirrors its own (`patch::game::autosave` for
 //! `sunrise_client::game::autosave`), where every name the body uses resolves as it did in the
-//! game: the mirror re-exports its module's items from the prebuilt game, which makes them all
-//! public, and repeats the module's own `use` items, so `self`, `super::` and `crate::` mean what
-//! they meant. A method moves into a one-method trait implemented for its own type, so `self`,
+//! game: the mirror re-exports its module's items from the prebuilt game and repeats the module's
+//! own `use` items, so `self`, `super::` and `crate::` mean what they meant. Staging makes item
+//! declarations public, not imports: restricted re-exports in modules outside the mirror stay
+//! inaccessible. A method moves into a one-method trait implemented for its own type, so `self`,
 //! `Self` and the helpers' bindings stay as written. horizon-mixins then patches the copies, and
 //! the game installs each through its function's replacement slot (`__fnr_<name>`).
 use quote::{ToTokens, format_ident, quote};
@@ -12,6 +13,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use syn::visit::Visit;
 use syn::{ImplItem, Item};
+
+mod reexports;
 
 /// One target function, copied.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,6 +163,7 @@ struct Cache {
     traits: Option<BTreeSet<String>>,
     /// The macro names the modules on each path define.
     on_path: BTreeMap<String, BTreeSet<String>>,
+    scopes: reexports::Scopes,
 }
 
 impl Source {
@@ -320,16 +324,22 @@ impl Source {
                     .rsplit_once("::")
                     .ok_or_else(|| format!("no module {path}"))?;
                 let parent = self.module(parent)?;
-                parent
-                    .items
-                    .iter()
-                    .find_map(|item| match item {
-                        Item::Mod(module) if module.ident == name => {
-                            module.content.as_ref().map(|(_, items)| items.clone())
-                        }
-                        _ => None,
-                    })
-                    .ok_or_else(|| format!("no module {path}"))?
+                let mut declarations = parent.items.iter().filter_map(|item| match item {
+                    Item::Mod(module)
+                        if module.ident == name
+                            && !mod_source::modules::test_only(&module.attrs) =>
+                    {
+                        module.content.as_ref().map(|(_, items)| items)
+                    }
+                    _ => None,
+                });
+                let items = declarations
+                    .next()
+                    .ok_or_else(|| format!("no module {path}"))?;
+                if declarations.next().is_some() {
+                    return Err(format!("multiple inline declarations for module {path}"));
+                }
+                items.clone()
             };
             self.parsed.insert(path.to_owned(), Module { items });
         }
@@ -695,10 +705,10 @@ pub(crate) fn replaceable(
         refusal: None,
     };
     check.visit_block(&found.function.block);
-    match check.refusal {
-        Some(why) => Err(why),
-        None => Ok(()),
+    if let Some(why) = check.refusal {
+        return Err(why);
     }
+    reexports::check_body(source, &found.module, sig, &found.function.block)
 }
 
 /// The names a module's own items define, for explicit re-export (an explicit name outranks the

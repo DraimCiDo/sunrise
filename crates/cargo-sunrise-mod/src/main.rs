@@ -11,6 +11,7 @@
 //! - `build [--update-lock]`: the `.smod` in `target/sunrise-mod/`, with the mod's `assets/`
 //!   and `data/`; a native mod is compiled first (`dev.rs`).
 //! - `publish`: build, then write the registry entry, the staged file and the pull request text (`publish.rs`).
+//! - `keygen`, `sign`: make an author-held Minisign key pair or sign a release asset (`signing.rs`).
 //! - `run [--game <sunrise-client>] [--resources <folder>] [--jars <dir>] [-- <game args>]`: build, then play with
 //!   the mod.
 //! - `check [--uses]` in a mod folder: the package rules and render pipeline shaders; for a native
@@ -22,7 +23,7 @@
 //! - `sdk diff <build> <build>`: what changed in the surface between two builds.
 //! - `fits [<file.smod>] [--build <name>]…`: whether the mod fits each build; exit 0 when all
 //!   do, 1 when one does not, 2 when it cannot be told.
-//! - `registry build|review|check|list|release|page`: the registry repository's CI (`registry.rs`).
+//! - `registry build|review|check|list|release|page|releases`: the registry repository's CI (`registry.rs`).
 //! - `use-jar <path>`: list an exact original Java jar as a passive asset/data source.
 //! - `native-build < plan.json`: compile native mods against an unpacked SDK, as the launcher does
 //!   (docs/modding/src/reference/sdk/08-native-build.md).
@@ -40,8 +41,10 @@ mod native_build;
 mod options;
 mod publish;
 mod registry;
+mod release;
 mod sdk_cmds;
 mod sdk_fetch;
+mod signing;
 mod uses_table;
 
 use options::Options;
@@ -95,6 +98,9 @@ fn main() -> ExitCode {
         }),
         Some("build") => build_command(entry, &args[1..]).map(drop),
         Some("publish") => publish::run(entry, &args[1..]),
+        Some("release") => release::run(Path::new("."), &args[1..]),
+        Some("keygen") => signing::keygen(&args[1..]),
+        Some("sign") => signing::sign(&args[1..]),
         Some("run") => run(&args[1..]).map_err(|e| e.to_string()),
         Some("check") => check_args(&args[1..]).and_then(|wanted| match wanted {
             Check::Folder { uses } => sdk_cmds::check_mod(entry, uses),
@@ -132,36 +138,129 @@ fn main() -> ExitCode {
     }
 }
 
-fn build_args(args: &[String]) -> Result<bool, String> {
-    let mut options = Options::new("build", args, &[]);
-    let update_lock = options.switch("--update-lock");
-    options.finish()?;
-    Ok(update_lock)
+#[derive(Debug, PartialEq, Eq)]
+enum BuildMode<'a> {
+    Package,
+    Archive {
+        dir: &'a Path,
+        tag: &'a str,
+        releases: &'a Path,
+        target: sunrise_native_build::contract::TargetName,
+    },
+    Describe {
+        dir: &'a Path,
+        tag: &'a str,
+        releases: &'a Path,
+        sdk: &'a Path,
+    },
 }
 
-/// `build [--update-lock]`: compile a native mod, then write the package in `target/sunrise-mod/`.
-/// Also the first step of `publish`.
+fn build_args(args: &[String]) -> Result<(bool, BuildMode<'_>), String> {
+    let mut options = Options::new(
+        "build",
+        args,
+        &[
+            "--binaries",
+            "--describe-binaries",
+            "--sunrise-release",
+            "--releases",
+            "--sdk-data",
+        ],
+    );
+    let update_lock = options.switch("--update-lock");
+    let server = options.switch("--server");
+    let archive = options.value("--binaries")?;
+    let describe = options.value("--describe-binaries")?;
+    let tag = options.value("--sunrise-release")?;
+    let releases = options.value("--releases")?;
+    let sdk = options.value("--sdk-data")?;
+    options.finish()?;
+    let mode = match (archive, describe, tag, releases, sdk) {
+        (None, None, None, None, None) if !server => BuildMode::Package,
+        (Some(dir), None, Some(tag), Some(releases), None) => BuildMode::Archive {
+            dir: Path::new(dir), tag, releases: Path::new(releases),
+            target: if server { sunrise_native_build::contract::TargetName::Server } else { sunrise_native_build::contract::TargetName::Client },
+        },
+        (None, Some(dir), Some(tag), Some(releases), Some(sdk)) if !server && !update_lock => BuildMode::Describe {
+            dir: Path::new(dir), tag, releases: Path::new(releases), sdk: Path::new(sdk),
+        },
+        _ => return Err("use --binaries <dir> with --sunrise-release <tag> and --releases <file>, or --describe-binaries <dir> with those inputs and --sdk-data <dir>".into()),
+    };
+    Ok((update_lock, mode))
+}
+
+/// Compile once through native-build, then write the source package and, when requested, the
+/// exact SDK host's archive. Describe mode only reads the resulting signed assets.
 fn build_command(
     entry: mod_surface::child::ChildEntry,
     args: &[String],
 ) -> Result<PathBuf, String> {
-    let update_lock = build_args(args)?;
+    let (update_lock, mode) = build_args(args)?;
     let root = Path::new(".");
-    // Known from the manifest, before any SDK or package work.
-    if update_lock && read_manifest(root)?.native.is_none() {
+    if let BuildMode::Describe {
+        dir,
+        tag,
+        releases,
+        sdk,
+    } = mode
+    {
+        let releases = release::releases(releases)?;
+        let release = release::stable(&releases, tag)?;
+        let dir = release::output_dir(dir)?;
+        let path = release::describe(&read_manifest(root)?, &dir, release, sdk)?;
+        println!(
+            "Wrote {}: sign this descriptor with the project key",
+            path.display()
+        );
+        return Ok(path);
+    }
+    let package = Package::read(root)?;
+    if update_lock && !package.is_native() {
         return Err(format!(
             "build --update-lock rewrites a native mod's Cargo.lock; {MANIFEST} has no [native] table"
         ));
     }
+    let archive = if let BuildMode::Archive {
+        dir,
+        tag,
+        releases,
+        target,
+    } = mode
+    {
+        let native = package
+            .manifest
+            .native
+            .as_ref()
+            .ok_or("build --binaries needs a native mod")?;
+        let version = release::version(&package.manifest)?;
+        let releases = release::releases(releases)?;
+        let release = release::stable(&releases, tag)?;
+        if native.sunrise != release.commit {
+            return Err(format!(
+                "{MANIFEST} pins {}, but Sunrise {tag} is {}; build this release in a checkout pinned to that commit",
+                native.sunrise, release.commit
+            ));
+        }
+        release::AssetName::descriptor(&package.manifest.id, &version, tag)?;
+        Some((release::output_dir(dir)?, tag, target, version))
+    } else {
+        None
+    };
     let output = PackageOutput::in_project(root)?;
-    let package = Package::read(root)?;
     if package.is_native() {
         fetched(root)?;
     }
-    // The package carries the mixins revision and Cargo.lock from the completed build.
     let built = package
         .is_native()
-        .then(|| dev::build(root, update_lock))
+        .then(|| {
+            dev::build(
+                root,
+                update_lock,
+                archive
+                    .as_ref()
+                    .map(|(_, tag, target, version)| (*target, *tag, version.as_str())),
+            )
+        })
         .transpose()?;
     let path = build(
         entry,
@@ -170,6 +269,16 @@ fn build_command(
         built.as_ref().map(|built| built.mixins.as_str()),
     )?;
     println!("Built {}", path.display());
+    if let Some((dir, _, _, _)) = archive {
+        let (library, name) = built
+            .and_then(|built| built.release)
+            .ok_or("the build returned no releasable library")?;
+        let archive = library.write(&dir, name)?;
+        println!(
+            "Wrote {}: sign this archive with the project key",
+            archive.display()
+        );
+    }
     Ok(path)
 }
 
@@ -412,6 +521,23 @@ fn new_native(
         ("src/lib.rs", include_str!("../template/native/lib.rs")),
         (MANIFEST, manifest.as_str()),
         (".gitignore", include_str!("../template/gitignore")),
+        ("README.md", include_str!("../template/native/README.md")),
+        (
+            ".github/workflows/release.yml",
+            include_str!("../template/native/release.yml"),
+        ),
+        (
+            ".github/workflows/rebuild.yml",
+            include_str!("../template/native/rebuild.yml"),
+        ),
+        (
+            ".github/workflows/sunrise-release-jobs.yml",
+            include_str!("../template/native/sunrise-release-jobs.yml"),
+        ),
+        (
+            ".github/actions/sunrise-release-tool/action.yml",
+            include_str!("../template/native/release-tool.yml"),
+        ),
     ];
     for (file, text) in files {
         let to = dir.join(file);
@@ -743,7 +869,7 @@ mod tests {
     const OLD_BUILD: &str = "0123456789abcdef0123456789abcdef01234567";
 
     /// A build's SDK as its `sdk.json` names it, without a download.
-    fn offline(project: &Path, build: &str) -> Result<sdk_fetch::PinnedSdk, String> {
+    pub(super) fn offline(project: &Path, build: &str) -> Result<sdk_fetch::PinnedSdk, String> {
         Ok(sdk_fetch::PinnedSdk {
             build: build.to_owned(),
             name: build.to_owned(),
@@ -909,6 +1035,7 @@ mod tests {
         ];
         new(&new_args, &offline).unwrap();
         assert!(!path.join("Cargo.toml").exists());
+        assert!(!path.join(".github").exists());
         let smod = build_in(&path).unwrap();
         assert_eq!(smod, path.join("target/sunrise-mod/gems.smod"));
         let package = Package::read(&smod).unwrap();
@@ -1076,6 +1203,22 @@ mod tests {
             commit.into(),
         ];
         assert_eq!(new(&args, &offline).unwrap(), Some(path.clone()));
+        for file in [
+            "README.md",
+            ".github/workflows/release.yml",
+            ".github/workflows/rebuild.yml",
+            ".github/workflows/sunrise-release-jobs.yml",
+            ".github/actions/sunrise-release-tool/action.yml",
+        ] {
+            assert!(path.join(file).is_file(), "template missing {file}");
+        }
+        let github_files: Vec<_> = std::fs::read_dir(path.join(".github"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(github_files.len(), 2);
+        assert!(github_files.contains(&"actions".into()));
+        assert!(github_files.contains(&"workflows".into()));
         // The template writes none of the fields the tool derives.
         let text = std::fs::read_to_string(path.join(MANIFEST)).unwrap();
         for key in ["api", "capabilities", "mixins"] {
@@ -1121,7 +1264,10 @@ mod tests {
         assert_eq!(bundle.manifest.id, "machine_mod");
         assert_eq!(bundle.facts().api, format!("native-1/{commit}/{rev}"));
         let names: Vec<_> = bundle.files.keys().map(String::as_str).collect();
-        assert_eq!(names, ["Cargo.toml", "src/lib.rs", "sunrise-mod.toml"]);
+        assert_eq!(
+            names,
+            ["Cargo.toml", "README.md", "src/lib.rs", "sunrise-mod.toml"]
+        );
         assert!(path.join("sunrise-mod.toml").is_file());
         for old in [
             "api",
@@ -1215,8 +1361,11 @@ mod tests {
 
     #[test]
     fn build_run_update_and_check_read_their_options_and_refuse_others() {
-        assert_eq!(build_args(&[]), Ok(false));
-        assert_eq!(build_args(&argv("--update-lock")), Ok(true));
+        assert_eq!(build_args(&[]), Ok((false, BuildMode::Package)));
+        assert_eq!(
+            build_args(&argv("--update-lock")),
+            Ok((true, BuildMode::Package))
+        );
         let line = argv("--game g --resources r --jars j -- --relase");
         assert_eq!(
             run_args(&line),
