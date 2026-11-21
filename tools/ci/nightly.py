@@ -56,6 +56,7 @@ import os
 import re
 import shutil
 import subprocess
+import string
 import sys
 import tarfile
 import tempfile
@@ -306,15 +307,6 @@ def sdk_ready(sha: str) -> bool:
     return sha in ready_sdk_shas()
 
 
-def listed(name: str, data: bytes, sums: str) -> bool:
-    """Whether `data` is the `name` that a `sha256sum` listing `sums` names."""
-    for line in sums.splitlines():
-        digest, _, file = line.partition(" ")
-        if file.strip().lstrip("*") == name:
-            return digest == hashlib.sha256(data).hexdigest()
-    return False
-
-
 REPOSITORY = Path(__file__).resolve().parents[2]
 # What a cargo build or a built tool never inherits from the job: its tokens and the files that change later steps
 # (a build script or proc macro runs whatever its crate says), another target folder, or a wrapper that would run in
@@ -332,49 +324,103 @@ def isolated_env() -> dict[str, str]:
 # The release keys launchers trust, read from main, never from the checkout a release builds: a candidate's own copy
 # could list a key of its own.
 KEYS_FILE = "crates/sunrise-release-sign/release-keys.txt"
-# A SHA256SUMS row as sha256sum writes it (text or binary mode), as sunrise-release-sign's parse_sums reads it.
-SUMS_ROW = re.compile(r"([0-9A-Fa-f]{64}) [ *]?(\S.*)")
 # An Ed25519 public key's DER: this SubjectPublicKeyInfo header, then its 32 bytes.
 ED25519_SPKI = bytes.fromhex("302a300506032b6570032100")
+# What Rust's `str::trim` strips (Unicode White_Space), which the native verifier uses. Python's own strip() takes
+# U+001C to U+001F too.
+RUST_WHITESPACE = "\t\n\v\f\r \x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a" \
+                  "\u2028\u2029\u202f\u205f\u3000"
+
+
+def text_lines(text: str) -> list[str]:
+    """`text`'s lines as Rust's `str::lines` splits them: at LF or CRLF, never at a bare CR."""
+    return text.replace("\r\n", "\n").split("\n")
+
+
+def canonical_base64(text: str) -> bytes | None:
+    """The bytes of `text` when it is base64 as the native verifier's strict decoder takes it (padded, no stray
+    characters, no unused bits set), else None."""
+    try:
+        decoded = base64.b64decode(text, validate=True)
+    except ValueError:
+        return None
+    return decoded if base64.b64encode(decoded).decode() == text else None
 
 
 def release_keys() -> list[str]:
-    """main's release-keys.txt (one base64 key per line, `#` comments): sunrise-org/sunrise's keys, none elsewhere."""
+    """main's release-keys.txt (one base64 key per line, `#` comments): sunrise-org/sunrise's keys, none elsewhere.
+    Read as the native verifier reads it: a line that is no 32-byte key makes it trust none, so that refuses here."""
     if os.environ.get("GITHUB_REPOSITORY", "sunrise-org/sunrise") != "sunrise-org/sunrise":
         return []
     subprocess.run(["git", "fetch", "--quiet", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"],
                    cwd=REPOSITORY, check=True)
-    text = subprocess.run(["git", "show", f"refs/remotes/origin/main:{KEYS_FILE}"], cwd=REPOSITORY, check=True,
-                          capture_output=True, text=True).stdout
-    return [line.strip() for line in text.splitlines() if line.strip() and not line.strip().startswith("#")]
+    data = subprocess.run(["git", "show", f"refs/remotes/origin/main:{KEYS_FILE}"], cwd=REPOSITORY, check=True,
+                          capture_output=True).stdout
+    try:
+        text = data.decode()
+    except UnicodeDecodeError:
+        raise SystemExit(f"::error::main's {KEYS_FILE} is not UTF-8 text: launchers would trust no key")
+    keys = [line.strip(RUST_WHITESPACE) for line in text_lines(text)]
+    keys = [key for key in keys if key and not key.startswith("#")]
+    for key in keys:
+        if len(canonical_base64(key) or b"") != 32:
+            raise SystemExit(f"::error::main's {KEYS_FILE} line {key!r} is no Ed25519 public key: launchers would "
+                             "trust no key")
+    return keys
+
+
+def sums_rows(tag: str, sums: bytes) -> list[tuple[str, str]]:
+    """The `(file, sha256)` rows of a SHA256SUMS, read as sunrise-release-sign's parse_sums reads them: UTF-8 text,
+    blank lines skipped, each line `<64 hex digits> <file>` with one ` ` or `*` before the file stripped. A file is a
+    name in the release's folder: one with a `/` or `\\`, or `.` or `..`, refuses."""
+    try:
+        text = sums.decode()
+    except UnicodeDecodeError:
+        raise SystemExit(f"::error::{tag}'s SHA256SUMS is not UTF-8 text")
+    rows = []
+    for line in text_lines(text):
+        if not line.strip(RUST_WHITESPACE):
+            continue
+        digest, space, name = line.partition(" ")
+        name = name[1:] if name[:1] in (" ", "*") else name
+        if (not space or len(digest) != 64 or not all(c in string.hexdigits for c in digest) or not name
+                or "/" in name or "\\" in name or name in (".", "..")):
+            raise SystemExit(f"::error::{tag}'s SHA256SUMS row {line!r} is not `<sha256>  <file>`")
+        rows.append((name, digest.lower()))
+    return rows
 
 
 def verify_sums(folder: Path, tag: str, only=(), signature: str = "SHA256SUMS.sig", keys=None,
                 publishing: bool = False) -> None:
-    """Checks a release folder as launchers do (sunrise-release-sign's `verify`), with only the runner's OpenSSL and
-    no code of the checkout: a key of `keys` (main's release-keys.txt by default) signed SHA256SUMS for `tag` (the
+    """Checks a release folder as launchers do (sunrise-release-sign's `verify`): this script, from the workflow's
+    checkout, with the runner's OpenSSL, compiling and running nothing of the release: a key of `keys` (main's release-keys.txt by default) signed SHA256SUMS for `tag` (the
     message `horizon release <tag>` and a newline, then SHA256SUMS), and each file of `only` (every file SHA256SUMS
-    lists when empty) is listed and matches. `publishing`: while no key is listed, an unsigned release goes out with
-    a warning, as before any key existed. Every SHA256SUMS row must be `<sha256> <file>` or `<sha256> *<file>`, and
-    every signature line one base64 Ed25519 signature; a repeated name is checked against each of its rows. Reports
-    on stderr (stdout is its callers' result), and exits naming what failed."""
+    lists when empty) is listed and matches. `publishing`: while no key is listed, a release of sunrise-org/sunrise
+    (no other repository) goes out with a warning, signed or not, as before any key existed. The signature file holds one base64 signature per line, and one line that
+    verifies is enough, as for the native verifier: a line that is no canonical base64 is skipped. A repeated name
+    is checked against each of its rows. Reports on stderr (stdout is its callers' result), and exits naming what
+    failed."""
     keys = release_keys() if keys is None else list(keys)
+    if "/" in signature or "\\" in signature or signature in ("", ".", ".."):
+        raise SystemExit(f"::error::--signature names a file of the folder, not {signature!r}")
     sums = (folder / "SHA256SUMS").read_bytes()
-    rows = []
-    for line in sums.decode(errors="replace").splitlines():
-        if not line.strip():
-            continue
-        if not (match := SUMS_ROW.fullmatch(line)):
-            raise SystemExit(f"::error::{tag}'s SHA256SUMS row {line!r} is not `<sha256>  <file>`")
-        rows.append((match[2], match[1].lower()))
-    if "/" in signature or not (folder / signature).is_file():
-        if publishing and not keys:
+    rows = sums_rows(tag, sums)
+    if not only and not rows:
+        raise SystemExit(f"::error::{tag}'s SHA256SUMS lists no file")
+    # Before any key exists, only Sunrise's own releases may go out unchecked, as with the native verifier.
+    unkeyed = publishing and not keys and os.environ.get("GITHUB_REPOSITORY", "sunrise-org/sunrise") == "sunrise-org/sunrise"
+    try:
+        lines = text_lines((folder / signature).read_bytes().decode())
+    except (OSError, UnicodeDecodeError):
+        lines = None
+    if lines is None:
+        if unkeyed:
             print(f"::warning::{tag}: published with SHA256SUMS but unsigned: release-keys.txt lists no key yet",
                   file=sys.stderr)
         else:
             raise SystemExit(f"::error::{tag} has no {signature}: launchers would refuse it")
     elif not keys:
-        if not publishing:
+        if not unkeyed:
             raise SystemExit(f"::error::{tag}: no key to check the signature with")
         print(f"::warning::{tag}: signed, but release-keys.txt lists no key yet, so launchers can't check it",
               file=sys.stderr)
@@ -384,13 +430,10 @@ def verify_sums(folder: Path, tag: str, only=(), signature: str = "SHA256SUMS.si
             message = work / "message"
             message.write_bytes(f"horizon release {tag}\n".encode() + sums)
             signed = False
-            for line in (folder / signature).read_text().split():
-                try:
-                    decoded = base64.b64decode(line, validate=True)
-                except ValueError:
-                    decoded = b""
-                if len(decoded) != 64:
-                    raise SystemExit(f"::error::{tag}'s {signature} line {line!r} is not a base64 Ed25519 signature")
+            for line in lines:
+                decoded = canonical_base64(line.strip(RUST_WHITESPACE))
+                if decoded is None or len(decoded) != 64:
+                    continue
                 (work / "signature").write_bytes(decoded)
                 for key in keys:
                     (work / "key.der").write_bytes(ED25519_SPKI + base64.b64decode(key))
@@ -687,7 +730,7 @@ def stable_parent(tag: str = "", verify: bool = True) -> train.Release | None:
             raise SystemExit(f"::error::refused: the tag {newest} names {sha}, but its signed {RELEASE_FILE} names "
                              f"{signed}")
     git("fetch", "--quiet", "--no-tags", "origin", sha)
-    return train.Release(newest, sha, published[newest]["published_at"])
+    return train.Release(newest, sha, train.github_time(published[newest].get("published_at")))
 
 
 def stable_step(tag: str, parent: train.Release | None) -> str:
@@ -926,6 +969,60 @@ def parent_stage(sha: str, work: Path) -> str:
     return str(work / "judge-target" / "debug" / "sunrise-stage")
 
 
+def json_text(value) -> str:
+    """`value` as canonical JSON: its objects' keys sorted, its lists in order. Equal exactly when the JSON is, which
+    Python's == is not (`true == 1`)."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def signed_surface(name: str, data: bytes) -> dict:
+    """A signed surface.json as a JSON object, refused when it is not one, names a key twice in any object (a later
+    value would hide the earlier one from one reader and not another) or nests deeper than this reader goes."""
+    def unique(pairs: list) -> dict:
+        keys = [key for key, _ in pairs]
+        if len(set(keys)) != len(keys):
+            raise ValueError(f"an object names {sorted(key for key in set(keys) if keys.count(key) > 1)} twice")
+        return dict(pairs)
+    try:
+        surface = json.loads(data, object_pairs_hook=unique)
+    except (ValueError, RecursionError) as error:
+        raise SystemExit(f"::error::refused: {name}'s signed {SDK_SURFACE} is not JSON this reader takes: "
+                         f"{type(error).__name__}: {error}")
+    if not isinstance(surface, dict):
+        raise SystemExit(f"::error::refused: {name}'s signed {SDK_SURFACE} is not a JSON object")
+    return surface
+
+
+# The member lists of each collection of a surface.json, by its schema: a member is a record of its own, under its
+# owner.
+SURFACE_MEMBERS = {"hooks": ("fields",), "traits": ("methods", "associated"), "types": ("fields", "variants")}
+
+
+def surface_entries(surface: dict) -> dict[str, str]:
+    """Each record of a surface.json as canonical JSON of its own fields, by where it is: `<collection>:<id>` (an
+    extension tag's id is `<registry>/<id>`), and a member by its owner's place, its list and its id. An owner's
+    member lists (SURFACE_MEMBERS) are left out of it, empty or not."""
+    entries = {}
+    for collection, records in surface.items():
+        for record in records if isinstance(records, list) else ():
+            lists = SURFACE_MEMBERS.get(collection, ())
+            place = f"{collection}:" + (f"{record['registry']}/{record['id']}" if collection == "extension_tags"
+                                        else record["id"])
+            entries[place] = json_text({name: value for name, value in record.items() if name not in lists})
+            for name in lists:
+                for member in record.get(name, []):
+                    entries[f"{place}/{name}:{member['id']}"] = json_text(member)
+    return entries
+
+
+def canonical_surface(surface: dict) -> dict:
+    """A surface.json as compared: every top-level key kept, each value as canonical JSON (so `true` is not `1`),
+    a list as its items' canonical JSON sorted (a repeated item kept), so two surfaces compare equal exactly when
+    they differ at most in their lists' order."""
+    return {key: sorted(map(json_text, value)) if isinstance(value, list) else json_text(value)
+            for key, value in surface.items()}
+
+
 def stable_mod_api(sha: str, tag: str, notes: Path) -> None:
     """Compare to the latest published stable release (stable_parent, its tag checked against its signed release
     file), not sdk.json's previous SDK or a reserved tag; judged by the parent's own sunrise-stage."""
@@ -959,7 +1056,10 @@ def stable_mod_api(sha: str, tag: str, notes: Path) -> None:
         new_content, new_functions = stable_sdk_inputs(sha, after if same_line else None)
         if same_line:
             report = work / "diff.json"
-            if break_glass and json.loads(before.read_bytes()) != json.loads(after.read_bytes()):
+            published = {}
+            for name, file in ((old_tag, before), (tag, after)):
+                published[name] = signed_surface(name, file.read_bytes())
+            if break_glass and json_text(published[old_tag]) != json_text(published[tag]):
                 raise SystemExit(f"::error::refused: {tag} changes surface.json from {old_tag}'s; a break-glass "
                                  "release never does")
             # No candidate code judges the candidate: the parent's own sunrise-stage, built from the parent's tree
@@ -975,10 +1075,10 @@ def stable_mod_api(sha: str, tag: str, notes: Path) -> None:
                     raise SystemExit(f"::error::refused: {old_tag}'s sunrise-stage cannot export {name} {commit}: "
                                      f"{done.stderr.strip()}")
                 exported[name] = json.loads(out.read_bytes())
-            if exported["parent"] != json.loads(before.read_bytes()):
+            if canonical_surface(exported["parent"]) != canonical_surface(published[old_tag]):
                 raise SystemExit(f"::error::refused: {old_tag}'s own sunrise-stage does not export its published "
                                  "surface.json from its tree")
-            if break_glass and exported["candidate"] != exported["parent"]:
+            if break_glass and json_text(exported["candidate"]) != json_text(exported["parent"]):
                 raise SystemExit(f"::error::refused: {old_tag}'s sunrise-stage exports a different surface from "
                                  f"{tag}'s tree; a break-glass release never changes it")
             # Both files are plain SDK surfaces: no native internals, loops, or change-note waivers.
@@ -992,6 +1092,42 @@ def stable_mod_api(sha: str, tag: str, notes: Path) -> None:
                 problems.append(f"mod API is {verdict} (see the changed records above)")
             if old_content != new_content:
                 problems.append(f"content_api changed from {old_content!r} to {new_content!r}")
+            # The signed surface.json is what modders build against, written by the candidate's own exporter. The
+            # parent's tool reads it as the SDK's readers do, refusing a stored hash its contract doesn't give
+            # (surface-read), and diffs it against its own export of the candidate's tree: the step allows what it
+            # allows there too. A minor's exporter may add records, fields and collections the parent's reader
+            # doesn't know, but every record the parent's tool exports must read back with each known field equal
+            # (the diff trusts an unchanged hash, and some fields are outside it). A patch's is that export exactly,
+            # whatever the order of its lists.
+            signed, export = published[tag], exported["candidate"]
+            known = work / "signed-known.json"
+            read = subprocess.run([stage, "surface-read", str(after), str(known)], cwd=work, env=isolated_env(),
+                                  capture_output=True, text=True)
+            if not read.returncode:
+                read = subprocess.run([stage, "surface-diff", str(work / "candidate.json"), str(after), "--json",
+                                       str(work / "signed-diff.json")], cwd=work, env=isolated_env(),
+                                      capture_output=True, text=True)
+            if read.returncode:
+                problems.append(f"the parent's tool cannot read the signed {SDK_SURFACE} for {tag}: "
+                                f"{read.stderr.strip()}")
+            else:
+                if (read_as := json.loads((work / "signed-diff.json").read_text())["verdict"]) not in allowed:
+                    problems.append(f"the parent's tool reads the signed {SDK_SURFACE} for {tag} as {read_as} "
+                                    "against its export of the candidate's tree")
+                entries = surface_entries(json.loads(known.read_bytes()))
+                if changed := sorted(key for key, record in surface_entries(export).items()
+                                     if entries.get(key) != record):
+                    problems.append(f"the signed {SDK_SURFACE} for {tag} changes or lacks {len(changed)} records the "
+                                    "parent's tool exports from its tree: " + ", ".join(changed[:5]))
+            if signed.get("engine_items"):
+                problems.append(f"the signed {SDK_SURFACE} for {tag} lists native internals, which an SDK surface "
+                                "never holds")
+            if signed.get("schema") != export.get("schema"):
+                problems.append(f"the signed {SDK_SURFACE} for {tag} has schema {signed.get('schema')!r}, the parent "
+                                f"tool's export {export.get('schema')!r}")
+            if not minor and canonical_surface(signed) != canonical_surface(export):
+                problems.append(f"the signed {SDK_SURFACE} for {tag} is not what the parent's tool exports from its "
+                                "tree")
             if problems:
                 step = "minor" if minor else "patch"
                 raise SystemExit(f"::error::refused: {tag} is a {step} release after {old_tag}: {'; '.join(problems)}")

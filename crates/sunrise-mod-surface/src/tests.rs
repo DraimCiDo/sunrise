@@ -592,3 +592,109 @@ fn an_argument_references_only_the_items_its_own_type_names_by_path() {
         ]
     );
 }
+
+#[test]
+fn a_stored_hash_its_contract_does_not_give_is_unsealed() {
+    let mut surface = sample();
+    surface.hooks = vec![hook_with(1, &[("player", "PlayerRef")])];
+    surface.traits = vec![api_trait("trait:Api", Role::Call, &["trait:Host"], &["a"])];
+    surface.hash = surface.document_hash();
+    assert!(surface.unsealed().is_empty(), "{:?}", surface.unsealed());
+    // A contract changed under its old hash, at every level, and a document hash its entries don't give. (A
+    // called trait's `refs` are outside its hash: the release gate compares them field by field.)
+    let mut changed = surface.clone();
+    changed.functions[0].contract.signature = "fn ground(other: u8)".into();
+    changed.types[0].fields[0].contract.ty = "u8".into();
+    changed.traits[0].contract.side = Side::Server;
+    changed.traits[0].methods[0].contract.signature = "fn a(&mut self)".into();
+    changed.hooks[0].contract.arguments[0].ty = "u8".into();
+    assert_eq!(
+        changed.unsealed(),
+        [
+            "hook:joined (its argument records)",
+            "trait:Api",
+            &changed.traits[0].methods[0].id,
+            &changed.functions[0].id,
+            "type:Block.state",
+        ]
+    );
+}
+
+const LATER_HASH: &str = "0123456789abcdef0123456789abcdef";
+
+#[test]
+fn a_newer_writers_lists_join_the_document_hash() {
+    let mut surface = sample();
+    surface.hash = surface.document_hash();
+    let read = |value: &serde_json::Value| Surface::read_sealed(value.to_string().as_bytes());
+    let mut value = serde_json::to_value(&surface).unwrap();
+    assert_eq!(read(&value).unwrap().1, Vec::<String>::new());
+    value["hash"] = "0".repeat(32).into();
+    assert_eq!(read(&value).unwrap().1, ["surface"]);
+    // A list this reader doesn't know: its records' ids and hashes count toward the hash, their
+    // other fields (however deep) are skipped.
+    let mut lines: Vec<String> = surface
+        .entries_with_engine()
+        .map(|(id, hash)| format!("{id} {hash}\n"))
+        .chain([format!("later:x {LATER_HASH}\n")])
+        .collect();
+    lines.sort();
+    value["later"] = serde_json::json!([{"id": "later:x", "hash": LATER_HASH, "contract": "deep"}]);
+    value["hash"] = digest(&lines.concat()).into();
+    let deep = format!("{}{}", "[".repeat(100_000), "]".repeat(100_000));
+    let text = value.to_string().replace(r#""deep""#, &deep);
+    assert_eq!(
+        Surface::read_sealed(text.as_bytes()).unwrap().1,
+        Vec::<String>::new()
+    );
+    // The same list with a hash that doesn't count it, or an empty one beside a bad hash: refused.
+    for (list, hash) in [
+        (value["later"].clone(), surface.hash.clone()),
+        (serde_json::json!([]), "0".repeat(32)),
+    ] {
+        value["later"] = list;
+        value["hash"] = hash.into();
+        assert_eq!(read(&value).unwrap().1, ["surface"]);
+    }
+    // An unknown list of anything but objects with a plain id and a hash in the writer's form is
+    // no surface: positional pairs, a missing hash, an id or hash that could frame other entries.
+    for list in [
+        serde_json::json!([1]),
+        serde_json::json!([["later:x", LATER_HASH]]),
+        serde_json::json!([{"id": "later:x"}]),
+        serde_json::json!([{"id": "later:x y", "hash": LATER_HASH}]),
+        serde_json::json!([{"id": "later:x\nfn:spawn", "hash": LATER_HASH}]),
+        serde_json::json!([{"id": "", "hash": LATER_HASH}]),
+        serde_json::json!([{"id": "later:x", "hash": "h"}]),
+        serde_json::json!([{"id": "later:x", "hash": LATER_HASH.to_uppercase()}]),
+    ] {
+        value["later"] = list;
+        assert!(
+            matches!(read(&value), Err(ReadError::Json(_))),
+            "{}",
+            value["later"]
+        );
+    }
+    // Every id once in the whole document: an unknown record may not reuse a known id, or one of
+    // another unknown list.
+    for (key, id) in [("later", "fn:spawn"), ("other", "later:x")] {
+        value["later"] = serde_json::json!([{"id": "later:x", "hash": LATER_HASH}]);
+        value[key] = serde_json::json!([{"id": id, "hash": LATER_HASH}]);
+        assert_eq!(read(&value).unwrap_err(), ReadError::DuplicateId(id.into()));
+        value.as_object_mut().unwrap().remove("other");
+    }
+    // A key listed twice: the list would be hidden by the value after it.
+    let mut text = serde_json::to_string(&surface).unwrap();
+    text.pop();
+    text.push_str(&format!(
+        r#","later":[{{"id":"later:x","hash":"{LATER_HASH}"}}],"later":"note"}}"#
+    ));
+    assert!(matches!(
+        Surface::read_sealed(text.as_bytes()),
+        Err(ReadError::Json(_))
+    ));
+    // An unknown value that is no list is outside the hash.
+    value["later"] = serde_json::json!({"note": [1]});
+    value["hash"] = surface.hash.clone().into();
+    assert_eq!(read(&value).unwrap().1, Vec::<String>::new());
+}

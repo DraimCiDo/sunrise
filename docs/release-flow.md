@@ -162,7 +162,8 @@ runner with no launcher on its PATH, since the mod tools never need one. The ins
 release, as a reader's does. The mod pages then run with `cargo-sunrise-mod` built from the commit as a debug-assertions build and
 against this run's own SDK, not the previous Nightly's, so a red quickstart cannot block the Nightly that would clear it. The SDK
 folder is laid out by `tools/ci/assemble_sdk_folder.sh`, which `fn-replace-check.yml` uses too (its `sdk-<sha>` folder, signed with a
-throwaway key that only a debug-assertions build trusts through `SUNRISE_SDK_TRUSTED_KEY`), plus `nightly/sdk.json` so a `new`
+throwaway key that only a debug-assertions build trusts through `SUNRISE_SDK_TRUSTED_KEY`; `prebuilt_game.py tool`,
+which builds the tool every SDK and mod-tool release ships, refuses a build that reads that variable), plus `nightly/sdk.json` so a `new`
 with no `--sunrise` resolves to it through `SUNRISE_SDK_BASE`. It is an ordinary leg, outside `sdk_green`. A hand dispatch of
 `book-quickstart.yml` checks the published release instead.
 
@@ -321,9 +322,13 @@ so a signed list can't be reused under another tag.
   can read it by changing what a build compiles; the key is in no file, no log and no password vault, and nobody
   needs to read it.
 - The publish job then checks the signature the way launchers do, against the public keys in main's
-  `crates/sunrise-release-sign/release-keys.txt`: `nightly-build.yml` with the runner's OpenSSL
-  (`nightly.py verify-sums --publishing`, which runs no code of the checkout, so a release branch's candidate can't
-  change the check), the SDK and mod-tool workflows with `sunrise-release-sign verify --publishing`. While that file lists no key, releases go out with SHA256SUMS
+  `crates/sunrise-release-sign/release-keys.txt`, with the runner's OpenSSL (`nightly.py verify-sums --publishing`
+  in `nightly-build.yml`, `sdk-publish.yml` and `mod-tool.yml`). That is the workflow checkout's Python and nothing
+  compiled: no binary of the release runs, and on a release branch the script is the branch's own, which its
+  ruleset protects (see below). It reads `SHA256SUMS` and its signature as the native verifier
+  does (one signature line that verifies is enough), and also refuses a listed file whose name is a path, and a
+  signed list that names no file. It reads release-keys.txt as the native verifier does too: a line that is no
+  Ed25519 public key would make launchers trust none, so it refuses. While that file lists no key, releases go out with SHA256SUMS
   alone and a warning (today's releases keep working). Once it lists one, a missing secret or a key it doesn't
   list fails the release before anything is published, instead of publishing something launchers would refuse.
 - Making the key: `tools/ci/new_release_key.sh` pipes a new key from `sunrise-release-sign keygen` straight into
@@ -473,7 +478,19 @@ The version must follow the parent: the first release is `0.1.0`, a patch keeps 
 `X.N.0` and a major `N.0.0`. Within the same Minecraft version and Sunrise major version (`26.3-0.x` is one line),
 the parent's own `sunrise-stage` judges the mod API, never the candidate's: built from the parent's tree alone (its
 own folder and target, no inherited compiler wrapper or job token), it exports both trees, its export of the parent
-must equal the parent's signed `surface.json`, and it diffs the two exports. A tree it cannot read is refused. A patch requires an identical mod API; a
+must equal the parent's signed `surface.json`, and it diffs the two exports. A tree it cannot read is refused. The
+candidate's signed `surface.json`, which modders build against, is written by the candidate's own exporter, so the
+parent's tool reads it as the SDK's readers do (`sunrise-stage surface-read`, which also refuses a stored hash its
+contract doesn't give, or a document hash that is not the one its records give) and diffs it against its own export
+of the candidate's tree: that diff, too, must be
+identical for a patch and at most additive for a minor. A minor's exporter may add records, fields and collections
+the parent's reader doesn't know (a new collection is a top-level list of JSON objects, each with an `id` free of
+whitespace and control characters and a `hash` of 32 lowercase hex digits, which join the document hash every reader
+recomputes; an id is listed once in the whole document, and a key once in any object), but every record the parent's tool exports, each member of a trait, type or hook
+on its own under the same owner, must read back with every field that reader knows equal, since the diff trusts an unchanged hash and
+some fields (a called trait's references) are outside it. A patch's file must also be that export exactly, with every key it has and its lists in any order, the same
+comparison as the parent's export against the parent's signed file. A file the
+reader refuses, one with another schema, or one listing native internals is refused. A patch requires an identical mod API; a
 minor allows only changes the SDK classifies as additive. Conditional changes can break some existing mods, so a
 minor refuses them too. For content mods, the SDK's `content_api` version string must stay the same within a line.
 The first release of a line has no API restriction. No label or dispatch option overrides the check. The mod API
@@ -517,7 +534,9 @@ Within a line, the candidate must descend from its previous stable tag and may n
 `main`'s first-parent history that are absent from that tag. Backport fixes by cherry-pick; merging a backport PR
 or merging the release branch back into main is fine. Bringing in new mainline history starts a new major.
 The workflow runs from the dispatch ref, so backport the check to the release branch before cutting a patch or
-minor there.
+minor there. The judge is the parent release's own `sunrise-stage`, built from its tag, so a line's first release
+must already ship `sunrise-stage surface-read`: a backport after that tag can't change the parent's binary, and
+every later patch or minor of the line is refused without it.
 
 The check runs in `pick`, before anything is built or signed (a dry run only warns), and again before tag
 reservation, on publish-only retries and in dry runs. Comparing against a previous
@@ -560,7 +579,11 @@ waives the full daily on the release commit and nothing else:
   means the full daily, and so does any change to the code that judges a release (`release_train.judge_graph`: the
   crates of its mod API surface, packages and signature and every local crate they build from, through path and
   workspace dependencies and the root manifest's `[patch]` and `[replace]`), to those two tables, to a
-  `[workspace.dependencies]` entry those crates take, or to the `Cargo.lock` entries they build from:
+  `[workspace.dependencies]` entry those crates take, to what the root manifest sets for every crate (its profiles,
+  `[workspace.package]`, `[workspace.lints]` and the resolver: a release profile with debug assertions would turn on
+  the developer SDK key), or to the `Cargo.lock` entries they build from (by version, source with its locked commit,
+  and checksum, and the packages each one depends on, resolved as Cargo writes them; a dependency that names no
+  entry or several counts as a change):
   the break-glass daily refuses to start and the release refuses to build. The SDK legs sdk-publish waits for always
   run, since a release ships only after its `sdk-<sha>`. A game crate's or Cargo change runs every leg that tests the
   game (the ignored-test shards, the Windows rows and the parity harnesses), and the release build's smoke test boots
@@ -581,7 +604,8 @@ waives the full daily on the release commit and nothing else:
   their comments. Once any stable release is published, `full-daily` dispatches the full daily on the release branch
   for its commit: a real run, whose reds file `bug` issues titled `Daily (release/26.3): …`. Each commit on
   `release/26.3` has its own daily queue, so another commit's run never replaces it. A break-glass patch needs its
-  parent's newest full daily created after the parent's publication to have passed, whatever kind of release the
+  parent's newest full daily created after the parent's publication (strictly: a run created in the same second
+  doesn't count) to have passed, whatever kind of release the
   parent was; until one has, the next patch can't take this path. If the follow-up was lost, dispatch it again:
   `gh workflow run daily.yml --ref release/26.3 -f dry_run=false -f commit=<its sha>`.
 

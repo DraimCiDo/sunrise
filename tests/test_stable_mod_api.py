@@ -14,11 +14,42 @@ from tools.ci import nightly
 
 PREVIOUS = "26.3-0.1.10"
 OLD, HEAD = "a" * 40, "b" * 40
-DECLARATION = {"id": "behaviour:example", "hash": "declaration", "version": 1}
-SURFACE = {"schema": 3, "hash": "surface", "behaviours": [DECLARATION]}
-ADDITIVE = {**SURFACE, "behaviours": [DECLARATION, {**DECLARATION, "id": "behaviour:new"}]}
-CONDITIONAL = {**SURFACE, "behaviours": [{**DECLARATION, "version": 2}]}
-BREAKING = {**SURFACE, "behaviours": []}
+
+
+def digest(text):
+    """sunrise-mod-surface's digest: the first 128 bits of SHA-256, in hex."""
+    return hashlib.sha256(text.encode()).hexdigest()[:32]
+
+
+def sealed(surface):
+    """`surface` with the document hash the real reader computes from its records' ids and hashes."""
+    entries = [(record["id"], record["hash"]) for record in surface.get("behaviours", [])]
+    entries += [(f"extension_tag:{tag['registry']}/{tag['id']}",
+                 digest(json.dumps([tag["registry"], tag["id"]], separators=(",", ":"))))
+                for tag in surface.get("extension_tags", [])]
+    return {**surface, "hash": digest("".join(f"{id} {hash}\n" for id, hash in sorted(entries)))}
+
+
+# Sealed as the real reader checks them (a behaviour's hash covers nothing: its version is compared on its own).
+DECLARATION = {"id": "behaviour:example", "hash": digest("{}"), "version": 1}
+SURFACE = sealed({"schema": 3, "hash": "", "behaviours": [DECLARATION]})
+ADDITIVE = sealed({**SURFACE, "behaviours": [DECLARATION, {**DECLARATION, "id": "behaviour:new"}]})
+CONDITIONAL = sealed({**SURFACE, "behaviours": [{**DECLARATION, "version": 2}]})
+BREAKING = sealed({**SURFACE, "behaviours": []})
+# The parent tool's runs on a same-line release: both exports, their diff, the signed surface read and diffed.
+JUDGED = ["surface", "surface", "surface-diff", "surface-read", "surface-diff"]
+# Two types, each with fields.
+TWO_TYPES = {**ADDITIVE, "types": [
+    {"id": "type:A", "hash": "a", "kind": "struct", "fields": [{"id": "type:A.a", "hash": "f", "type": "u8"},
+                                                               {"id": "type:A.b", "hash": "f", "type": "u8"}]},
+    {"id": "type:B", "hash": "b", "kind": "struct", "fields": [{"id": "type:B.a", "hash": "f", "type": "u8"}]}]}
+# `type:A.b` moved to type:B, every id, body and hash kept.
+A, B = TWO_TYPES["types"]
+MOVED_FIELD = {**TWO_TYPES,
+               "types": [{**A, "fields": A["fields"][:1]}, {**B, "fields": [*B["fields"], A["fields"][1]]}]}
+# A trait mods call, its `refs` outside its hash.
+CALLED = {**ADDITIVE, "traits": [{"id": "trait:T", "hash": "t", "role": "call", "refs": ["trait:Host"],
+                                  "methods": [{"id": "method:T::a", "hash": "a", "signature": "fn a(&self)"}]}]}
 
 
 def release(tag, *, draft=False, prerelease=False, body=""):
@@ -31,6 +62,7 @@ def function(signature="signature", source="source", span=(5, 9)):
 
 
 def sdk_assets(sha, surface, content_api, functions, *, function_header=None):
+    """A signed SDK's assets, its surface.json written from `surface` (bytes as they are)."""
     header = {"schema": 1, "build": {"commit": sha}}
     index_body = {"functions": functions, "crates": {}, "refused": {}}
     build_data = io.BytesIO()
@@ -41,7 +73,8 @@ def sdk_assets(sha, surface, content_api, functions, *, function_header=None):
             member = tarfile.TarInfo(f"./{name}.json")
             member.size = len(data)
             tar.addfile(member, io.BytesIO(data))
-    assets = {nightly.SDK_SURFACE: json.dumps(surface).encode(), nightly.SDK_BUILD_DATA: build_data.getvalue()}
+    surface = surface if isinstance(surface, bytes) else json.dumps(surface).encode()
+    assets = {nightly.SDK_SURFACE: surface, nightly.SDK_BUILD_DATA: build_data.getvalue()}
     index = {"schema": 1, "build": {"commit": sha}, "content_api": content_api,
              "surface": {"previous": "c" * 40},  # A Nightly SDK is not a stable baseline.
              "assets": {name: {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
@@ -71,8 +104,9 @@ class StableModApiTests(unittest.TestCase):
         self.enterContext(mock.patch.object(nightly, "unpack",
                                             side_effect=lambda sha, into: self.unpacked.append((sha, into.name))))
 
-    def judge(self, parent_tree, candidate_tree, verdict="identical", calls=None):
-        """subprocess.run as the parent's sunrise-stage answers: it exports each tree's surface, and diffs."""
+    def judge(self, parent_tree, candidate_tree, verdict="identical", calls=None, read_as="identical"):
+        """subprocess.run as the parent's sunrise-stage answers: it exports each tree's surface, diffs the two
+        (`verdict`), and diffs its candidate export with the signed surface (`read_as`)."""
         def run(args, *, cwd=None, env=None, check=False, capture_output=False, text=False):
             self.assertEqual(args[0], TOOL, "only the parent's own tool runs")
             self.assertFalse({"GH_TOKEN", "RUSTC_WRAPPER"} & env.keys())
@@ -81,8 +115,21 @@ class StableModApiTests(unittest.TestCase):
             if args[1] == "surface":
                 surface = parent_tree if Path(args[2]).name == "parent-tree" else candidate_tree
                 Path(args[3]).write_text(json.dumps(surface))
+            elif args[1] == "surface-read":
+                # What the parent's reader knows: here, everything but keys named `unknown`.
+                read = json.loads(Path(args[2]).read_text())
+                if "unsealed" in read:
+                    return subprocess.CompletedProcess(args, 2, "", "these hashes are not what their contracts give")
+                def known(value):
+                    if isinstance(value, dict):
+                        return {key: known(item) for key, item in value.items() if key != "unknown"}
+                    return [known(item) for item in value] if isinstance(value, list) else value
+                Path(args[3]).write_text(json.dumps(known(read)))
+            elif "unreadable" in json.loads(Path(args[3]).read_text()):
+                return subprocess.CompletedProcess(args, 1, "", "surface.json lists behaviour:example twice")
             else:
-                Path(args[-1]).write_text(json.dumps({"verdict": verdict}))
+                signed = Path(args[3]).name == "after.json"
+                Path(args[-1]).write_text(json.dumps({"verdict": read_as if signed else verdict}))
             return subprocess.CompletedProcess(args, 0, "", "")
         return run
 
@@ -138,8 +185,12 @@ class StableModApiTests(unittest.TestCase):
                                          "- Changed: `signature_change`\n")
                     lineage.assert_called_once_with(HEAD, tag, OLD, PREVIOUS)
                     # The parent's tool exported both trees, then diffed its own exports.
-                    self.assertEqual([args[1] for args in calls], ["surface", "surface", "surface-diff"])
-                    self.assertEqual([Path(name).name for name in calls[-1][2:4]], ["parent.json", "candidate.json"])
+                    self.assertEqual([args[1] for args in calls], JUDGED)
+                    self.assertEqual([[Path(name).name for name in args[2:4]] for args in calls[2:]],
+                                     [["parent.json", "candidate.json"], ["after.json", "signed-known.json"],
+                                      ["candidate.json", "after.json"]],
+                                     "its own exports diffed, then the signed surface read, and diffed against the "
+                                     "candidate's")
                 self.stage.assert_called_with(OLD, mock.ANY)
 
     def test_a_break_glass_release_keeps_its_parents_surface_judged_by_the_parents_own_stage(self):
@@ -147,12 +198,16 @@ class StableModApiTests(unittest.TestCase):
         # (its published surface.json unchanged) is still refused.
         tag = "26.3-0.1.11"
         other = {**SURFACE, "hash": "other"}
-        for published, parent_tree, candidate_tree, error in (
-                (SURFACE, SURFACE, SURFACE, None),
-                (other, SURFACE, SURFACE, "changes surface.json from 26.3-0.1.10"),
-                (SURFACE, SURFACE, other, "exports a different surface from 26.3-0.1.11's tree"),
-                (SURFACE, other, other, "does not export its published surface.json")):
-            assets = {OLD: sdk_assets(OLD, SURFACE, "1", {}), HEAD: sdk_assets(HEAD, published, "1", {})}
+        # A field no reader knows, `true` in one and `1` in the other: Python's == calls them equal, JSON doesn't.
+        true, one = {**SURFACE, "later": True}, {**SURFACE, "later": 1}
+        for old, published, parent_tree, candidate_tree, error in (
+                (SURFACE, SURFACE, SURFACE, SURFACE, None),
+                (SURFACE, other, SURFACE, SURFACE, "changes surface.json from 26.3-0.1.10"),
+                (SURFACE, SURFACE, SURFACE, other, "exports a different surface from 26.3-0.1.11's tree"),
+                (SURFACE, SURFACE, other, other, "does not export its published surface.json"),
+                (true, one, true, true, "changes surface.json from 26.3-0.1.10"),
+                (true, true, true, one, "exports a different surface from 26.3-0.1.11's tree")):
+            assets = {OLD: sdk_assets(OLD, old, "1", {}), HEAD: sdk_assets(HEAD, published, "1", {})}
             calls = []
             self.unpacked.clear()
             with self.subTest(error=error), mock.patch.dict(nightly.os.environ, {"BREAK_GLASS": "true"}), \
@@ -170,7 +225,7 @@ class StableModApiTests(unittest.TestCase):
                     continue
                 nightly.stable_mod_api(HEAD, tag, self.notes)
             self.assertEqual(self.unpacked, [(OLD, "parent-tree"), (HEAD, "candidate-tree")])
-            self.assertEqual([args[1] for args in calls], ["surface", "surface", "surface-diff"])
+            self.assertEqual([args[1] for args in calls], JUDGED)
 
     def test_an_ordinary_release_is_judged_by_the_parents_tool_too(self):
         # Not only break-glass: a candidate whose own exporter would hide a break is diffed from the parent tool's
@@ -202,6 +257,121 @@ class StableModApiTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, f"sunrise-stage cannot export candidate {HEAD}: unknown key"):
                 nightly.stable_mod_api(HEAD, tag, self.notes)
 
+    def test_the_signed_surface_is_judged_by_the_parents_reader_against_its_export(self):
+        # The parent's tool exports the candidate's tree and reads the signed surface.json (its verdict here is
+        # `read_as`; the real reader's is in the daily stable_mod_api_integration test). A patch's file is that
+        # export exactly, in any order; a minor's may hold what the parent's reader reads as additive.
+        two = {**ADDITIVE, "extension_tags": [{"registry": "item", "id": "tag:a"}, {"registry": "item", "id": "tag:b"}]}
+        reordered = {**two, "behaviours": two["behaviours"][::-1], "extension_tags": two["extension_tags"][::-1]}
+        newer = {**ADDITIVE, "hash": "newer", "extension_tags": [{"registry": "item", "id": "tag:new"}]}
+        internals = {**ADDITIVE, "engine_items": [{"id": "internal:x", "hash": "h", "contract": {}}]}
+        for tag, export, signed, read_as, error in (
+                ("26.3-0.1.11", SURFACE, SURFACE, "identical", None),
+                ("26.3-0.1.11", two, reordered, "identical", None),
+                # A key is kept even when its list is empty: the export says the collection is there.
+                ("26.3-0.1.11", {**SURFACE, "extension_tags": []}, SURFACE, "identical",
+                 "patch release.*is not what the parent's tool exports"),
+                # Fields and collections the parent's reader doesn't know are compared as JSON, repeats counted.
+                ("26.3-0.1.11", {**SURFACE, "later": True}, {**SURFACE, "later": 1}, "identical",
+                 "patch release.*is not what the parent's tool exports"),
+                ("26.3-0.1.11", {**SURFACE, "later": [{"id": "x"}]}, {**SURFACE, "later": [{"id": "x"}, {"id": "x"}]},
+                 "identical", "patch release.*is not what the parent's tool exports"),
+                ("26.3-0.1.11", SURFACE, {**SURFACE, "hash": "other"}, "identical",
+                 "patch release.*is not what the parent's tool exports"),
+                ("26.3-0.1.11", SURFACE, ADDITIVE, "additive", "patch release.*reads .* as additive"),
+                ("26.3-0.2.0", ADDITIVE, ADDITIVE, "identical", None),
+                ("26.3-0.2.0", ADDITIVE, newer, "additive", None),
+                ("26.3-0.2.0", ADDITIVE, SURFACE, "breaking", "minor release.*reads .* as breaking"),
+                ("26.3-0.2.0", ADDITIVE, CONDITIONAL, "conditional", "minor release.*reads .* as conditional"),
+                ("26.3-0.2.0", ADDITIVE, internals, "advisory", "minor release.*as advisory.*lists native internals"),
+                ("26.3-0.2.0", ADDITIVE, {**newer, "schema": 4}, "identical", "minor release.*schema 4"),
+                # Every record the parent's tool exports reads back with each field it knows equal, whatever the
+                # diff (which trusts an unchanged hash) says; what it doesn't know is no change.
+                ("26.3-0.2.0", ADDITIVE,
+                 {**ADDITIVE, "behaviours": [{**record, "unknown": 1} for record in ADDITIVE["behaviours"]]},
+                 "identical", None),
+                ("26.3-0.2.0", ADDITIVE,
+                 {**ADDITIVE, "behaviours": [DECLARATION, {**ADDITIVE["behaviours"][1], "doc": "x"}]}, "identical",
+                 "minor release.*changes or lacks 1 records .*: behaviours:behaviour:new"),
+                ("26.3-0.2.0", CALLED, {**CALLED, "traits": [{**CALLED["traits"][0], "refs": []}]}, "identical",
+                 "minor release.*changes or lacks 1 records .*: traits:trait:T$"),
+                ("26.3-0.2.0", CALLED, {**CALLED, "traits": [{**CALLED["traits"][0], "methods": [
+                    {**CALLED["traits"][0]["methods"][0], "signature": "fn a(&self, b: u8)"}]}]}, "identical",
+                 "minor release.*changes or lacks 1 records .*: traits:trait:T/methods:method:T::a"),
+                ("26.3-0.2.0", CALLED, {**CALLED, "traits": [{**CALLED["traits"][0], "methods": [
+                    *CALLED["traits"][0]["methods"], {"id": "method:T::b", "hash": "b", "signature": "fn b(&self)"}]}]},
+                 "additive", None),
+                # A member is judged under its owner: one moved to another type is a change, a first one added is
+                # not.
+                ("26.3-0.2.0", TWO_TYPES, MOVED_FIELD,
+                 "identical", "minor release.*changes or lacks 1 records .*: types:type:A/fields:type:A.b"),
+                ("26.3-0.2.0", {**CALLED, "traits": [{**CALLED["traits"][0], "methods": []}]}, CALLED, "additive",
+                 None),
+                ("26.3-0.2.0", ADDITIVE, {**ADDITIVE, "unsealed": True}, None,
+                 "cannot read the signed surface.json for 26.3-0.2.0: these hashes"),
+                # Whatever it holds, a file the parent's reader refuses is refused.
+                ("26.3-0.1.11", SURFACE, {**SURFACE, "unreadable": True}, None,
+                 "the parent's tool cannot read the signed surface.json for 26.3-0.1.11: .*twice"),
+                ("26.3-0.2.0", ADDITIVE, {**newer, "unreadable": True}, None, "cannot read the signed surface.json"),
+                # The file itself, before any reader: refused naming the release and the asset.
+                ("26.3-0.2.0", ADDITIVE, b"{not json", None, ["26.3-0.2.0", "surface.json"]),
+                ("26.3-0.2.0", ADDITIVE, b"null", None, ["26.3-0.2.0", "surface.json"]),
+                ("26.3-0.2.0", ADDITIVE, b"[]", None, ["26.3-0.2.0", "surface.json"])):
+            assets = {OLD: sdk_assets(OLD, SURFACE, "1", {}), HEAD: sdk_assets(HEAD, signed, "1", {})}
+            with self.subTest(tag=tag, signed=signed), \
+                    mock.patch.object(nightly.train, "gh_json", return_value=[[release(PREVIOUS)]]), \
+                    mock.patch.object(nightly.train, "origin_tags", return_value={tag: HEAD, PREVIOUS: OLD}), \
+                    mock.patch.object(nightly, "git"), mock.patch.object(nightly, "require_stable_lineage"), \
+                    mock.patch.object(nightly, "require_unchanged_content_schema"), \
+                    mock.patch.object(nightly, "released_assets", side_effect=lambda sha, *names: assets[sha]), \
+                    mock.patch.object(nightly.subprocess, "run",
+                                      side_effect=self.judge(SURFACE, export, "identical" if tag == "26.3-0.1.11"
+                                                             else "additive", read_as=read_as)):
+                self.notes.write_text("Existing notes.\n")
+                if isinstance(error, list):
+                    with self.assertRaises(SystemExit) as refused:
+                        nightly.stable_mod_api(HEAD, tag, self.notes)
+                    for name in error:
+                        self.assertIn(name, str(refused.exception))
+                    self.assertEqual(self.notes.read_text(), "Existing notes.\n")
+                elif error:
+                    with self.assertRaisesRegex(SystemExit, error):
+                        nightly.stable_mod_api(HEAD, tag, self.notes)
+                    self.assertEqual(self.notes.read_text(), "Existing notes.\n")
+                else:
+                    nightly.stable_mod_api(HEAD, tag, self.notes)
+
+    def test_a_signed_surface_naming_a_key_twice_or_nested_too_deep_is_refused(self):
+        self.assertEqual(nightly.signed_surface("26.3-0.2.0", b'{"later": {"a": 1}}'), {"later": {"a": 1}})
+        for data, reason in ((b'{"later": [], "later": "note"}', "names .'later'. twice"),
+                             (b'{"later": [{"id": "a", "id": "b"}]}', "names .'id'. twice"),
+                             (b'{"later": ' + b"[" * 100_000 + b"]" * 100_000 + b"}", "RecursionError"),
+                             (b"[]", "not a JSON object")):
+            with self.subTest(reason), self.assertRaisesRegex(SystemExit, f"26.3-0.2.0's signed .*{reason}"):
+                nightly.signed_surface("26.3-0.2.0", data)
+
+    def test_the_parents_export_is_compared_whatever_the_order_of_its_lists(self):
+        # The parent's tool may export its own tree's lists in another order than its signed file: the same
+        # comparison as a patch's, so a surface that passed as a patch is the parent the next release reproduces.
+        two = {**ADDITIVE, "extension_tags": [{"registry": "item", "id": "tag:a"}, {"registry": "item", "id": "tag:b"}]}
+        reordered = {**two, "behaviours": two["behaviours"][::-1], "extension_tags": two["extension_tags"][::-1]}
+        for export, error in ((reordered, None), ({**two, "extension_tags": []}, "does not export its published"),
+                              ({key: value for key, value in two.items() if key != "extension_tags"},
+                               "does not export its published")):
+            assets = {OLD: sdk_assets(OLD, two, "1", {}), HEAD: sdk_assets(HEAD, two, "1", {})}
+            with self.subTest(export=export), \
+                    mock.patch.object(nightly.train, "gh_json", return_value=[[release(PREVIOUS)]]), \
+                    mock.patch.object(nightly.train, "origin_tags", return_value={"26.3-0.1.11": HEAD, PREVIOUS: OLD}), \
+                    mock.patch.object(nightly, "git"), mock.patch.object(nightly, "require_stable_lineage"), \
+                    mock.patch.object(nightly, "require_unchanged_content_schema"), \
+                    mock.patch.object(nightly, "released_assets", side_effect=lambda sha, *names: assets[sha]), \
+                    mock.patch.object(nightly.subprocess, "run", side_effect=self.judge(export, two)):
+                if error:
+                    with self.assertRaisesRegex(SystemExit, error):
+                        nightly.stable_mod_api(HEAD, "26.3-0.1.11", self.notes)
+                else:
+                    nightly.stable_mod_api(HEAD, "26.3-0.1.11", self.notes)
+
     def test_a_moved_parent_tag_or_a_version_that_skips_a_step_is_refused(self):
         tags = {PREVIOUS: OLD}
         with mock.patch.object(nightly.train, "gh_json", return_value=[[release(PREVIOUS)]]), \
@@ -223,7 +393,7 @@ class StableModApiTests(unittest.TestCase):
         for parent, tag in ((None, "26.3-0.1.0"), (PREVIOUS, "26.3-0.1.11"), (PREVIOUS, "26.3-0.1.15"),
                             (PREVIOUS, "26.3-0.2.0"), (PREVIOUS, "26.3-1.0.0")):
             with self.subTest(parent=parent, tag=tag):
-                found = nightly.train.Release(parent, OLD, "") if parent else None
+                found = nightly.train.Release(parent, OLD, nightly.train.github_time("2026-11-01T00:00:00Z")) if parent else None
                 self.assertEqual(nightly.stable_step(tag, found), "")
 
     def test_a_break_glass_release_needs_a_published_parent_on_its_line(self):
@@ -270,6 +440,16 @@ class StableModApiTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, f"the published release {PREVIOUS} has no tag"):
                 nightly.stable_mod_api(HEAD, "26.3-0.1.11", self.notes)
 
+    def test_a_parent_without_a_publication_time_refuses(self):
+        # The break-glass rules need the parent's own daily run after it: with no time, none could be told apart.
+        for published in (None, "", "2026-11-20 10:00:00", "yesterday"):
+            with self.subTest(published=published), \
+                    mock.patch.object(nightly.train, "gh_json",
+                                      return_value=[[{**release(PREVIOUS), "published_at": published}]]), \
+                    mock.patch.object(nightly.train, "origin_tags", return_value={PREVIOUS: OLD}), \
+                    mock.patch.object(nightly, "git"), self.assertRaisesRegex(SystemExit, "not a GitHub timestamp"):
+                nightly.stable_parent("26.3-0.1.11", verify=False)
+
     def test_the_parent_is_the_newest_published_release_and_an_orphan_tag_above_it_refuses(self):
         pages = [[release("26.3-0.1.9"), release(PREVIOUS, body=f"x\n{nightly.BREAK_GLASS_SECTION}\ny"),
                   release("26.3-0.2.0", draft=True), release("26.4-0.1.0"), release("26.3-0.1.11")]]
@@ -278,7 +458,8 @@ class StableModApiTests(unittest.TestCase):
             with mock.patch.object(nightly.train, "origin_tags", return_value=tags):
                 parent = nightly.stable_parent("26.3-0.1.11")
                 # Its notes say nothing to the checks: the parent is its tag, commit and publication time.
-                self.assertEqual(parent, nightly.train.Release(PREVIOUS, OLD, "2026-11-20T10:00:00Z"))
+                self.assertEqual(parent, nightly.train.Release(PREVIOUS, OLD,
+                                                               nightly.train.github_time("2026-11-20T10:00:00Z")))
                 git.assert_called_once_with("fetch", "--quiet", "--no-tags", "origin", OLD)
                 self.assertEqual(nightly.stable_parent().tag, "26.3-0.1.11", "no bound: the newest")
                 self.assertEqual(nightly.stable_parent("26.3-0.1.10").tag, "26.3-0.1.9")
@@ -429,7 +610,8 @@ class StableModApiTests(unittest.TestCase):
             with mock.patch.dict(nightly.os.environ, {"BREAK_GLASS": "false", "GITHUB_RUN_ID": "7",
                                                       "GITHUB_RUN_ATTEMPT": "1", **environment}), \
                     mock.patch.object(nightly, "stable_parent",
-                                      return_value=nightly.train.Release(PREVIOUS, parent, "")):
+                                      return_value=nightly.train.Release(
+                                          PREVIOUS, parent, nightly.train.github_time("2026-11-01T00:00:00Z"))):
                 nightly.stable_mod_api(sha, tag, self.notes)
             return self.notes.read_text()
 

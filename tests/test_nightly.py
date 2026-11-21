@@ -6,6 +6,7 @@ import io
 import json
 import os
 import shutil
+import string
 import subprocess
 import sys
 import tempfile
@@ -645,8 +646,7 @@ class SdkPairTests(unittest.TestCase):
             nightly.require_sdk("a" * 40)
             sdk.assert_not_called()
 
-    def test_the_sdk_index_must_name_this_build_format_and_assets_and_match_its_sums(self):
-        import hashlib
+    def test_the_sdk_index_must_name_this_build_format_and_assets(self):
         sha = "a" * 40
         good = {"build": {"commit": sha}, "package_format": nightly.package_format(),
                 "assets": {name: {} for name in nightly.SDK_ARCHIVES}}
@@ -658,11 +658,6 @@ class SdkPairTests(unittest.TestCase):
                 ("not an SDK index", {"build": {}})):
             with self.subTest(why), self.assertRaisesRegex(SystemExit, why):
                 nightly.checked_index(sha, json.dumps(document).encode())
-        sums = f"{hashlib.sha256(b'index').hexdigest()}  sdk.json\n{'0' * 64} *surface.json\n"
-        self.assertTrue(nightly.listed("sdk.json", b"index", sums))
-        self.assertFalse(nightly.listed("sdk.json", b"other", sums))
-        self.assertFalse(nightly.listed("surface.json", b"index", sums))
-        self.assertFalse(nightly.listed("SHA256SUMS", b"index", sums))
 
     def test_the_previous_sdk_is_the_nearest_published_one_behind_the_build(self):
         a, b, c, d = ("a" * 40, "b" * 40, "c" * 40, "d" * 40)
@@ -725,19 +720,25 @@ class VerifySumsTests(unittest.TestCase):
                              capture_output=True).stdout
         return private, base64.b64encode(der[-32:]).decode()
 
-    def release(self, tag, files, signed_for=None, key=None):
-        """A folder with `files`, their SHA256SUMS, and SHA256SUMS.sig signed for `signed_for` (default `tag`)."""
+    def signature(self, tag, sums, key=None):
+        """The base64 signature of `sums` for `tag`, as sign_release.sh writes it."""
+        message = self.work / "message"
+        message.write_bytes(f"horizon release {tag}\n".encode() + sums)
+        signature = subprocess.run(["openssl", "pkeyutl", "-sign", "-inkey", str(key or self.key), "-rawin", "-in",
+                                    str(message)], check=True, capture_output=True).stdout
+        return base64.b64encode(signature).decode()
+
+    def release(self, tag, files, signed_for=None, key=None, sums=None):
+        """A folder with `files`, their SHA256SUMS (or `sums`), and SHA256SUMS.sig signed for `signed_for` (default
+        `tag`)."""
         folder = self.work / f"release-{len(list(self.work.glob('release-*')))}"
         folder.mkdir()
         for name, data in files.items():
             (folder / name).write_bytes(data)
-        sums = "".join(f"{hashlib.sha256(data).hexdigest()}  {name}\n" for name, data in files.items()).encode()
+        if sums is None:
+            sums = "".join(f"{hashlib.sha256(data).hexdigest()}  {name}\n" for name, data in files.items()).encode()
         (folder / "SHA256SUMS").write_bytes(sums)
-        message = self.work / "message"
-        message.write_bytes(f"horizon release {signed_for or tag}\n".encode() + sums)
-        signature = subprocess.run(["openssl", "pkeyutl", "-sign", "-inkey", str(key or self.key), "-rawin", "-in",
-                                    str(message)], check=True, capture_output=True).stdout
-        (folder / "SHA256SUMS.sig").write_text(base64.b64encode(signature).decode() + "\n")
+        (folder / "SHA256SUMS.sig").write_text(self.signature(signed_for or tag, sums, key) + "\n")
         return folder
 
     def verify(self, folder, tag, **kwargs):
@@ -775,37 +776,73 @@ class VerifySumsTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "isn't signed"):
             self.verify(folder, "26.3-0.1.0")
 
-    def test_a_malformed_row_or_signature_line_refuses_and_every_repeated_row_is_checked(self):
-        files = {"a.tar.gz": b"a"}
-        folder = self.release("26.3-0.1.0", files)
-        sums = (folder / "SHA256SUMS").read_text()
-        for text, error in ((sums + "not a row\n", "row 'not a row' is not"),
-                            (sums + f"{'0' * 64}  a.tar.gz\n", "a.tar.gz does not match")):
-            with self.subTest(error=error):
-                broken = self.release("26.3-0.1.0", files)
-                (broken / "SHA256SUMS").write_text(text)
-                message = self.work / "message"
-                message.write_bytes(b"horizon release 26.3-0.1.0\n" + text.encode())
-                signature = subprocess.run(["openssl", "pkeyutl", "-sign", "-inkey", str(self.key), "-rawin", "-in",
-                                            str(message)], check=True, capture_output=True).stdout
-                (broken / "SHA256SUMS.sig").write_text(base64.b64encode(signature).decode() + "\n")
-                with self.assertRaisesRegex(SystemExit, error):
-                    self.verify(broken, "26.3-0.1.0", only=["a.tar.gz"])
-        (folder / "SHA256SUMS.sig").write_text((folder / "SHA256SUMS.sig").read_text() + "not-base64!\n")
-        with self.assertRaisesRegex(SystemExit, "line 'not-base64!' is not a base64 Ed25519 signature"):
-            self.verify(folder, "26.3-0.1.0")
+    def test_checksum_rows_are_read_as_the_native_verifier_reads_them(self):
+        # Every list here is signed: only its format decides.
+        a = hashlib.sha256(b"a").hexdigest()
+        for sums in (f"{a}  a.tar.gz\n", f"{a} *a.tar.gz\n", f"{a} a.tar.gz\n", f"{a.upper()}  a.tar.gz\r\n",
+                     f"\n{a}  a.tar.gz\n  \n"):
+            with self.subTest(sums=sums):
+                self.verify(self.release("26.3-0.1.0", {"a.tar.gz": b"a"}, sums=sums.encode()), "26.3-0.1.0")
+        for sums, error in ((b"not a row\n", "row 'not a row' is not"),
+                            (f"{a[1:]}  a.tar.gz\n".encode(), "is not `<sha256>  <file>`"),
+                            (f"{a}\ta.tar.gz\n".encode(), "is not `<sha256>  <file>`"),
+                            (f"{a}  \n".encode(), "is not `<sha256>  <file>`"),
+                            (f"{a}  ../a.tar.gz\n".encode(), "row .*\\.\\./a.tar.gz.* is not"),
+                            (f"{a}  sub\\a.tar.gz\n".encode(), "is not `<sha256>  <file>`"),
+                            (f"{a}  ..\n".encode(), "is not `<sha256>  <file>`"),
+                            (f"{a}  a\xff.tar.gz\n".encode("latin-1"), "is not UTF-8 text"),
+                            # One marker is stripped, not two: the file ` a.tar.gz` is not in the folder.
+                            (f"{a}   a.tar.gz\n".encode(), "No such file"),
+                            # A bare carriage return ends no line: here it is part of the file's name.
+                            (f"{a}  a.tar.gz\r".encode(), "No such file"),
+                            (f"\n \n".encode(), "lists no file"),
+                            # Rust's trim keeps U+001F, so this line is a row, and no row.
+                            (f"{a}  a.tar.gz\n\x1f\n".encode(), "is not `<sha256>  <file>`"),
+                            # A repeated name is checked against each of its rows.
+                            (f"{a}  a.tar.gz\n{'0' * 64}  a.tar.gz\n".encode(), "a.tar.gz does not match")):
+            with self.subTest(sums=sums), self.assertRaisesRegex((SystemExit, FileNotFoundError), error):
+                self.verify(self.release("26.3-0.1.0", {"a.tar.gz": b"a"}, sums=sums), "26.3-0.1.0")
+
+    def test_one_signature_line_that_verifies_is_enough_as_for_the_native_verifier(self):
+        folder = self.release("26.3-0.1.0", {"a.tar.gz": b"a"})
+        good = (folder / "SHA256SUMS.sig").read_text().strip()
+        other = self.signature("26.3-0.1.1", (folder / "SHA256SUMS").read_bytes())
+        for text in (f"not-base64!\n{good}\n", f"{other}\n{good}\n", f"  {good}\r\n", f"{good}"):
+            with self.subTest(text=text):
+                (folder / "SHA256SUMS.sig").write_text(text)
+                self.verify(folder, "26.3-0.1.0")
+        # Two signatures on one line, or the good one with the unused bits of its last digit set (the same bytes,
+        # which the native verifier's strict decoder refuses), are not signed.
+        alphabet = string.ascii_uppercase + string.ascii_lowercase + string.digits + "+/"
+        loose = good[:-3] + alphabet[alphabet.index(good[-3]) ^ 1] + good[-2:]
+        self.assertEqual(base64.b64decode(loose), base64.b64decode(good))
+        for text in (f"{other} {good}\n", f"{loose}\n", "not-base64!\n", f"{other}\r{good}\n", f"\x1c{good}\n"):
+            with self.subTest(text=text), self.assertRaisesRegex(SystemExit, "isn't signed"):
+                (folder / "SHA256SUMS.sig").write_text(text)
+                self.verify(folder, "26.3-0.1.0")
+        for name in ("../SHA256SUMS.sig", ".", "..", ""):
+            with self.subTest(signature=name), self.assertRaisesRegex(SystemExit, "names a file of the folder"):
+                self.verify(folder, "26.3-0.1.0", signature=name)
 
     def test_sdk_previous_prints_only_the_build_it_found(self):
-        # sdk-publish.yml reads its stdout as one SHA: the verifier's own report goes to stderr.
+        # sdk-publish.yml reads its stdout as one SHA: the verifier's own report goes to stderr. The release is a
+        # real signed one, checked by the real verifier; only the download and main's keys are stubbed.
         build = "b" * 40
+        published = self.release(f"sdk-{build}", {nightly.SDK_SURFACE: b'{"schema": 3}'})
+
+        def download(*args):
+            self.assertEqual(args[:3], ("release", "download", f"sdk-{build}"))
+            directory = Path(args[args.index("--dir") + 1])
+            for path in published.iterdir():
+                shutil.copy(path, directory / path.name)
         with mock.patch.object(nightly, "previous_sdk", return_value=build), \
-                mock.patch.object(nightly, "release_assets",
-                                  side_effect=lambda tag, *names: print("26.3: 1 files match", file=sys.stderr)
-                                  or {nightly.SDK_SURFACE: b"{}"}), \
+                mock.patch.object(nightly, "gh", side_effect=download), \
+                mock.patch.object(nightly, "release_keys", return_value=[self.public]), \
                 mock.patch("sys.argv", ["nightly.py", "sdk-previous", "c" * 40, str(self.work / "previous.json")]), \
                 contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()):
             nightly.main()
         self.assertEqual(out.getvalue(), build + "\n")
+        self.assertEqual((self.work / "previous.json").read_bytes(), b'{"schema": 3}')
 
     def test_publishing_before_any_key_warns_and_unsigned_never_passes_once_one_is_listed(self):
         folder = self.release("nightly", {"a.tar.gz": b"a"})
@@ -815,6 +852,17 @@ class VerifySumsTests(unittest.TestCase):
         self.assertIn("::warning::nightly: published with SHA256SUMS but unsigned", out.getvalue())
         with self.assertRaisesRegex(SystemExit, "has no SHA256SUMS.sig"):
             self.verify(folder, "nightly", publishing=True)
+        # Only Sunrise's own releases: a fork has no keys either, and publishes nothing unchecked, signed or not.
+        signed = self.release("nightly", {"a.tar.gz": b"a"})
+        for release in (folder, signed):
+            with self.subTest(release=release.name), \
+                    mock.patch.dict(nightly.os.environ, {"GITHUB_REPOSITORY": "someone/sunrise"}), \
+                    self.assertRaisesRegex(SystemExit, "has no SHA256SUMS.sig|no key to check"):
+                nightly.verify_sums(release, "nightly", keys=[], publishing=True)
+        with mock.patch.dict(nightly.os.environ, {"GITHUB_REPOSITORY": "sunrise-org/sunrise"}), \
+                contextlib.redirect_stderr(io.StringIO()) as out:
+            nightly.verify_sums(signed, "nightly", keys=[], publishing=True)
+        self.assertIn("signed, but release-keys.txt lists no key yet", out.getvalue())
 
     def test_the_keys_are_mains_never_the_checkouts(self):
         origin, clone = self.work / "origin", self.work / "clone"
@@ -832,3 +880,26 @@ class VerifySumsTests(unittest.TestCase):
             self.assertEqual(nightly.release_keys(), [self.public])
         with mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": "someone/fork"}):
             self.assertEqual(nightly.release_keys(), [], "another repository's releases are trusted by no key")
+        # A line the native verifier can't read makes launchers trust no key at all: refused, never skipped. Its
+        # whitespace and comments are read as it reads them.
+        alphabet = string.ascii_uppercase + string.ascii_lowercase + string.digits + "+/"
+        loose = self.public[:-2] + alphabet[alphabet.index(self.public[-2]) ^ 1] + "="  # an unused bit set
+        for text, keys in ((f" {self.public}\u3000\r\n\n# a comment\n", [self.public]),
+                           (f"{self.public}\nnot-a-key\n", None), (f"{self.public[:-4]}\n", None),
+                           (f"{base64.b64encode(bytes(31)).decode()}\n", None), (f"{loose}\n", None),
+                           (f"\x1c{self.public}\n", None),
+                           # A bare carriage return ends no line for the native reader: one line, and no key.
+                           (f"{self.public}\r{self.public}\n", None)):
+            subprocess.run(["git", "checkout", "-q", "main"], cwd=clone, check=True)
+            keys_file = clone / nightly.KEYS_FILE
+            keys_file.write_text(text)
+            for command in (["add", "-A"], ["-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit",
+                                            "-q", "--allow-empty", "-m", "keys"], ["push", "-q", "origin", "main"]):
+                subprocess.run(["git", *command], cwd=clone, check=True)
+            with self.subTest(text=text), mock.patch.object(nightly, "REPOSITORY", clone), \
+                    mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": "sunrise-org/sunrise"}):
+                if keys:
+                    self.assertEqual(nightly.release_keys(), keys)
+                else:
+                    with self.assertRaisesRegex(SystemExit, "is no Ed25519 public key"):
+                        nightly.release_keys()
