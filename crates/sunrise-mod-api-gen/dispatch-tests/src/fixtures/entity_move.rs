@@ -190,6 +190,18 @@ mod root {
             }
         }
 
+        pub(super) fn discard_registration<T>(
+            (hook, name): (super::HookId, &'static str),
+            owner: Option<&'static str>,
+            entry: T,
+        ) {
+            if let DispatchOutcome::Refused(refusal) =
+                invoke(hook, name, owner.unwrap(), outside_world(), || drop(entry))
+            {
+                refusal.report();
+            }
+        }
+
         pub(super) fn listening_kind_owner(
             hook: super::HookId,
             kind: &str,

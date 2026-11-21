@@ -63,9 +63,10 @@ operations, such as adding blocks to a block entity type, expose methods for tho
 The game accepts a listener's pending registrations in call order when the callback completes.
 Where the registrar supports replacement or relative placement, later calls in that callback can
 use its pending edits. A panic or phase refusal discards the failed callback's whole batch;
-installed entries stand and later listeners can register. Only a panic disables the callback for
-the session; an ordinary refusal is reported on each call. A normal registration method returning
-an error still follows that registrar's contract. For example, a duplicate can reject one entry
+installed entries stand and later listeners can register, even if dropping one of the failed
+callback's entries panics. A panic disables that mod's callback for the session and names the mod
+in the log and error toast. An ordinary refusal is reported each time and does not disable it.
+A normal registration method returning an error still follows that registrar's contract. For example, a duplicate can reject one entry
 or reject the whole resource candidate, depending on the registrar. Handle the returned error;
 it is not a callback panic.
 

@@ -247,3 +247,97 @@ fn a_phase_refusal_is_reported_each_time_and_never_disables_the_listener() {
     assert_eq!(before.load(Ordering::Relaxed), 2);
     assert_eq!(after.load(Ordering::Relaxed), 0);
 }
+
+#[test]
+fn panicking_registration_discards_owned_renderers_even_if_cleanup_panics() {
+    use crate::__private::game::RegistrationContextNew;
+    use mod_vocab::__private::{HookPanicReport, take_hook_panics};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Healthy(&'static str);
+    #[crate::__subscriptions]
+    impl Hooks for Healthy {
+        fn register_debug_renderers(
+            &self,
+            _: &RegistrationContext,
+            event: &mut RegisterDebugRenderersEvent<'_>,
+        ) {
+            event.register(DebugRenderer::new(self.0.into(), |_, _, _| {}));
+        }
+    }
+
+    struct Capture {
+        drops: Arc<Mutex<Vec<&'static str>>>,
+        name: &'static str,
+        panic: bool,
+    }
+    impl Drop for Capture {
+        fn drop(&mut self) {
+            self.drops.lock().unwrap().push(self.name);
+            assert!(!self.panic, "registration cleanup failed");
+        }
+    }
+
+    struct Broken {
+        calls: Arc<AtomicUsize>,
+        drops: Arc<Mutex<Vec<&'static str>>>,
+    }
+    #[crate::__subscriptions]
+    impl Hooks for Broken {
+        fn register_debug_renderers(
+            &self,
+            _: &RegistrationContext,
+            event: &mut RegisterDebugRenderersEvent<'_>,
+        ) {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            for (name, panic) in [("broken:one", true), ("broken:two", false)] {
+                let capture = Capture {
+                    drops: self.drops.clone(),
+                    name,
+                    panic,
+                };
+                event.register(DebugRenderer::new(name.into(), move |_, _, _| {
+                    let _ = &capture;
+                }));
+            }
+            panic!("registration failed");
+        }
+    }
+
+    let _phase = PhaseOwner::scope(ModPhase::Registration);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let drops = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![
+        ModEntry::new("first", Box::new(Healthy("switches:first"))),
+        ModEntry::new(
+            "broken",
+            Box::new(Broken {
+                calls: calls.clone(),
+                drops: drops.clone(),
+            }),
+        ),
+        ModEntry::new("last", Box::new(Healthy("switches:last"))),
+    ];
+    testing::with_mods(mods.into(), || {
+        for _ in 0..2 {
+            let mut renderers = Vec::new();
+            dispatch_register_debug_renderers(&RegistrationContext::new(), &mut renderers);
+            assert_eq!(
+                renderers
+                    .iter()
+                    .map(|entry| (entry.mod_id, entry.answer.id()))
+                    .collect::<Vec<_>>(),
+                [("first", "switches:first"), ("last", "switches:last")]
+            );
+        }
+        assert_eq!(
+            take_hook_panics(),
+            [HookPanicReport {
+                mod_id: "broken",
+                hook: "register_debug_renderers",
+            }]
+        );
+    });
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(*drops.lock().unwrap(), ["broken:one", "broken:two"]);
+}

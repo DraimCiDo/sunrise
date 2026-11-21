@@ -954,7 +954,7 @@ pub(super) fn emit<'a>(
             let entry = entry.to_token_stream();
             dispatch.push_str(&format!(
                 "impl{impl_params} {event_type}{event_params} {{\n\
-                 /// Stage one entry for registration. If the phase gate refuses this listener,\n\
+                 /// Stage one entry for registration. If this listener panics or is refused,\n\
                  /// its entries are discarded and earlier registrations stand.\n\
                  pub fn register(&mut self, entry: {entry}) {{ self.{out}.push(entry); }}\n}}\n"
             ));
@@ -1026,23 +1026,28 @@ pub(super) fn emit<'a>(
         let mut restores: Vec<String> = Vec::new();
         let answered_collect_batch =
             answered && contract == Contract::Collect && declaration.is_none();
+        let owns_batch = hook.owned_answer_batch || answered_collect_batch;
+        let registration_output = registration_append.and(out);
+        let mut registration_range = registration_output
+            .filter(|_| owns_batch)
+            .map(|_| "..".to_owned());
         // Trait-object fields have no whole value to copy. For a staged registrar the
         // owning sink handles publication; drawing and other live views are not registrars.
         for (field, by_reference) in rollback
             .iter()
             .filter(|(field, _)| !surfaces.contains(field))
         {
-            if (hook.owned_answer_batch || answered_collect_batch) && Some(field.as_str()) == out {
+            if owns_batch && Some(field.as_str()) == out {
                 continue;
             }
             if stack_outputs.iter().any(|(name, _)| *name == field) {
                 continue;
             }
             let index = snaps.len();
-            if registration_append.is_some() && Some(field.as_str()) == out {
+            if Some(field.as_str()) == registration_output {
                 // Only the tail is writable; never clone or restore earlier registrations.
                 snaps.push(format!("{event}.{field}.len()"));
-                restores.push(format!("{event}.{field}.truncate({saved}.{index});"));
+                registration_range = Some(format!("{saved}.{index}.."));
                 continue;
             }
             snaps.push(if cloned.contains(field) {
@@ -1079,9 +1084,9 @@ pub(super) fn emit<'a>(
         } else {
             format!("{} ", restores.join(" "))
         };
-        // Answered collectors drain this private batch after each mod. A refused or panicked mod
-        // has no earlier entries to restore, and its entries must not leak to the next mod.
-        let clear_batch = if hook.owned_answer_batch || answered_collect_batch {
+        // Other answered collectors drain this private batch after each mod. A refused or
+        // panicked mod has no earlier entries to restore.
+        let clear_batch = if owns_batch && registration_output.is_none() {
             format!("{event}.{}.clear(); ", out.unwrap())
         } else {
             String::new()
@@ -1094,8 +1099,19 @@ pub(super) fn emit<'a>(
                         on_abort: &str,
                         extra_restore: &str,
                         expression: &str| {
+            let discard = if let Some((field, range)) =
+                registration_output.zip(registration_range.as_deref())
+            {
+                // Values can own mod callbacks. Isolate each destructor after leaving the
+                // invocation fence, so it cannot interrupt rollback or the next listener.
+                format!(
+                    "for entry in {event}.{field}.drain({range}) {{ super::runtime::discard_registration((HookId::{hook_id}, \"{name}\"), Some({mod_id_expr}), entry); }} "
+                )
+            } else {
+                String::new()
+            };
             format!(
-                "match super::runtime::invoke(HookId::{hook_id}, \"{name}\", {mod_id_expr}, contained, || {expression}) {{ super::runtime::DispatchOutcome::Ok(answer) => answer, super::runtime::DispatchOutcome::Refused(refusal) => {{ {restore_statement}{clear_batch}{stack_restore}{extra_restore}refusal.report(); {on_abort} }} super::runtime::DispatchOutcome::Panicked => {{ {restore_statement}{clear_batch}{stack_restore}{extra_restore}{on_abort} }} }}"
+                "match super::runtime::invoke(HookId::{hook_id}, \"{name}\", {mod_id_expr}, contained, || {expression}) {{ super::runtime::DispatchOutcome::Ok(answer) => answer, super::runtime::DispatchOutcome::Refused(refusal) => {{ {restore_statement}{clear_batch}{stack_restore}{extra_restore}refusal.report(); {discard}{on_abort} }} super::runtime::DispatchOutcome::Panicked => {{ {restore_statement}{clear_batch}{stack_restore}{extra_restore}{discard}{on_abort} }} }}"
             )
         };
         let run = |mod_id_expr: &str, on_abort: &str, expression: &str| {

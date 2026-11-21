@@ -26,6 +26,7 @@
 //! | `side` | `"server"`, `"client"` or `"both"`; required |
 //! | `contract` | `"listen"`, `"cancel"`, `"collect"` or `"replace"`; required |
 //! | `out` | the event field a cancel, collect or replace hook writes; not for `"listen"` |
+//! | `registration_append` | On an append-only registration collection, `"register"` generates `event.register(entry)` and `"custom"` lets vocabulary implement specialized event methods. The collection stays private; a failed listener's entries are discarded without changing earlier ones. |
 //! | `staged_surface` | Engine-only marker naming the one mutable registrar field of a flat global listen hook. The fire adapter hands the owning registrar one listener thunk at a time, under that listener's mod scope. Only an accepted callback publishes the batch. This is not a draw surface or a mod-facing parameter. |
 //! | `scope`, `key` | a Part method: the kind of Part (`"block"`, `"block_entity"`, `"item"`, `"menu"`, `"fluid"`, `"entity"`) and the hook argument naming what it is attached to |
 //! | `answered_by` | `"mod"`: a global replace hook whose output also names the mod that answered, or a global collect hook whose output is `Vec<Answered<T>>`: each mod pushes `T`s into its own empty batch and dispatch names that mod on each entry |

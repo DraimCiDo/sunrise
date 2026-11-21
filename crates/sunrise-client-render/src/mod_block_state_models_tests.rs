@@ -71,7 +71,7 @@ fn a_malformed_answer_refuses_the_file_with_a_reason() {
 }
 
 #[test]
-fn scoped_model_registration_keeps_other_listeners_entries_on_refusal() {
+fn scoped_model_registration_rolls_back_and_reports_each_refusal() {
     use mod_api::__private::game::RegistrationContextNew;
     use mod_api::__private::{LoadAccess, ModPhase, PhaseOwner, check_access};
 
@@ -99,12 +99,27 @@ fn scoped_model_registration_keeps_other_listeners_entries_on_refusal() {
     .map(|(owner, id, refuse)| mod_api::ModEntry::new(owner, Box::new(Registers(id, refuse))))
     .collect::<Vec<_>>()
     .into();
-    mod_platform::testing::with_mods(mods, || {
-        let _phase = PhaseOwner::scope(ModPhase::Registration);
-        let mut ids = vec![String::from("before:one")];
-        mod_api::dispatch_register_block_state_models(&RegistrationContext::new(), &mut ids);
-        assert_eq!(ids, ["before:one", "first:one", "last:one"]);
+    let ((), warnings) = crate::test_log::capture(|| {
+        mod_platform::testing::with_mods(mods, || {
+            let _phase = PhaseOwner::scope(ModPhase::Registration);
+            for _ in 0..2 {
+                let mut ids = vec![String::from("before:one")];
+                mod_api::dispatch_register_block_state_models(
+                    &RegistrationContext::new(),
+                    &mut ids,
+                );
+                assert_eq!(ids, ["before:one", "first:one", "last:one"]);
+            }
+            assert!(mod_api::__private::take_hook_panics().is_empty());
+        });
     });
+    assert_eq!(
+        warnings
+            .iter()
+            .filter(|line| line.as_str() == "native refusal: refused hook register_block_state_models: mod API block_state is unavailable during Registration")
+            .count(),
+        2
+    );
 }
 
 /// A lamp's definition type: state by state, `on` when `powered` is true, else `off`.
