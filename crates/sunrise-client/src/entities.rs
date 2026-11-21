@@ -483,9 +483,8 @@ impl ItemEntity {
 }
 impl ItemEntity {
     pub const WIDTH: f64 = 0.25;
-    /// `EntityType.ITEM` declares `eyeHeight(0.2125)`: an item is lit from the
-    /// block its eye is in, most of a block above the one its base rests in.
-    pub const EYE_HEIGHT: f64 = 0.2125;
+    /// `EntityTypes.ITEM` declares a float eye height, widened by `Entity.getEyeY`.
+    pub const EYE_HEIGHT: f64 = 0.2125_f32 as f64;
     /// `Entity.getLightProbePosition(partialTick)` for a dropped item: the eye
     /// position (`getEyePosition`) over the position drawn this frame
     /// (`getPosition(partialTick)`), not this tick's own.
@@ -4938,23 +4937,19 @@ mod dropped_item_light_tests {
         }
     }
 
-    /// `Entity.getLightProbePosition` is the eye position, and `EntityType.ITEM`
-    /// declares `eyeHeight(0.2125)`. The item used to be lit from the cell of
-    /// `base + 0.1`, so a falling item at y = 64.85 read the cell at 64 (block
-    /// light of the floor) while its eye at 65.0625 is in the cell at 65.
+    /// `Entity.getLightProbePosition` reads the block at the item's eye, so
+    /// a falling item just below y = 65 reads the cell at 65, not the floor.
     #[test]
     fn a_dropped_item_is_lit_from_the_block_its_eye_is_in() {
+        let eye_height = f64::from(0.2125_f32);
         let falling = item(64.85, 64.85);
         let probe = falling.light_probe(1.0);
-        assert!((probe[1] - 65.062_5).abs() < 1e-9);
+        assert_eq!(probe[1], 64.85 + eye_height);
         assert_eq!(probe[1].floor(), 65.0);
-        // The old probe, `(y + 0.1).floor()`, and the base cell itself.
-        assert_eq!((64.85_f64 + 0.1).floor(), 64.0);
-        assert_eq!(64.85_f64.floor(), 64.0);
-        // Resting on a block top the two agree: the eye is 0.2125 up.
         let resting = item(64.0, 64.0);
-        assert_eq!(resting.light_probe(1.0)[1].floor(), 64.0);
-        assert!((resting.light_probe(1.0)[1] - 64.212_5).abs() < 1e-9);
+        let probe = resting.light_probe(1.0);
+        assert_eq!(probe[1], 64.0 + eye_height);
+        assert_eq!(probe[1].floor(), 64.0);
     }
 
     /// `Entity.getLightProbePosition(partialTick)` follows `getPosition(partialTick)`:
@@ -4965,7 +4960,7 @@ mod dropped_item_light_tests {
     fn an_item_probe_follows_the_frame() {
         let falling = item(64.0, 65.0);
         let mid = falling.light_probe(0.5);
-        assert!((mid[1] - 64.712_5).abs() < 1e-9);
+        assert_eq!(mid[1], 64.5 + f64::from(0.2125_f32));
         assert_eq!(mid[1].floor(), 64.0);
         assert_eq!(falling.light_probe(1.0)[1].floor(), 65.0);
         // Across x and z too, not just down.
