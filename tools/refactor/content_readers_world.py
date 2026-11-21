@@ -6,6 +6,7 @@ indent. Keep the item and its doc comments/attributes byte-for-byte; imports,
 module wiring, visibility and markers are added after this move.
 """
 
+import argparse
 from pathlib import Path
 import re
 
@@ -130,4 +131,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--matter-phase", action="store_true",
+                        help="run the separate matter-phase move from 62c072d7f15")
+    if parser.parse_args().matter_phase:
+        split("worldgen/rule_test.rs", "worldgen/rule_test/declarations.rs", [
+            ("impl MatterPhase {", ["fn decode("]),
+        ])
+    else:
+        main()
