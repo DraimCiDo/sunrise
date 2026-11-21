@@ -270,7 +270,7 @@ EDITS = {
                  "    let gem = menu.with_view(&game, |view| view.slot(0)).flatten().flatten()\n"
                  '        .expect("the chest\'s first slot");\n'
                  '    assert_eq!((gem.item().id(&game).as_str(), gem.count()), ("minecraft:diamond", 2));\n'
-                 '    assert_eq!(gem.components().and_then(|patch| patch.as_nbt().get("minecraft:custom_name")),\n'
+                 '    assert_eq!(gem.components().and_then(|patch| patch.as_nbt().get(&"minecraft:custom_name".into())),\n'
                  '        Some(&Tag::String("Gem".into())));\n'
                  "    assert_eq!(menu.with_view(&game, |view| view.slot(1)).flatten(), Some(None));\n"
                  "    let stone = menu.with_view(&game, |view| view.slot(36)).flatten().flatten()\n"

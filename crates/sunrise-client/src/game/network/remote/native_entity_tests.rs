@@ -246,7 +246,7 @@ fn a_client_reads_the_entities_and_menu_the_server_shows_it() {
     );
     assert_eq!(
         gem.components()
-            .and_then(|patch| patch.as_nbt().get("minecraft:custom_name")),
+            .and_then(|patch| patch.as_nbt().get(&"minecraft:custom_name".into())),
         Some(&Tag::String("Gem".into()))
     );
     assert_eq!(
