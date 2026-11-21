@@ -318,6 +318,7 @@ pub fn check_start(
     Ok(Some(native.unwrap_or(program)))
 }
 
+mod client_pack;
 mod manage;
 mod native;
 mod toolchain;

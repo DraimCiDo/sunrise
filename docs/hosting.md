@@ -228,8 +228,8 @@ loads and, where the world hasn't been generated yet, generates the chunks it se
 ### Managed mods
 
 Leave `[mods]` out of a manually configured server. If the table is present, even if empty, `start` and `run`
-require `mods.lock` beside `server.toml`. The managed setup and repair commands described in
-[Host a modded server](hosting-mods.md) are coming; the supervisor only reads and checks the files.
+require `mods.lock` beside `server.toml`. The setup, change, and repair commands in
+[Host a modded server](hosting-mods.md) keep the settings, lock, and files in sync.
 
 ```toml
 [mods]
@@ -252,7 +252,7 @@ id = "coords_hud"
 version = "1.4.0"
 sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 url = "https://example.com/coords_hud-1.4.0.smod"
-file = "sunrise-mods/coords_hud-1.4.0.smod"
+file = "sunrise-mods/coords_hud.smod"
 reason = "requested"                              # requested, pack or required
 on = true
 ```
@@ -262,16 +262,9 @@ The optional `pack`, `list`, `off` and `trust_native_code` fields in `input` hav
 `required` row and empty or omitted otherwise. `file` is relative to the server folder, with `/` separators,
 no `..`, and no symlinks that lead outside the folder. SHA-256 values and commits use lowercase hex.
 
-A native row's `file` names its library. `native = { prebuilt = "<descriptor sha256>" }` names a prebuilt
-library, or `native = { built = "<SDK commit>" }` a source build. The sibling `<stem>.identity.json` must agree
-with the library and the lock's build, even for a mod that is off. The enabled native libraries must agree
-with the `native-mods.json` next to the selected engine, including its `sunrise` commit.
+A native row's `file` is the verified source `.smod` under `native/sources/`. `native = { prebuilt = "<archive sha256>" }` names a signed prebuilt mod, or `native = { built = "<SDK commit>" }` names a build made here. A disabled native mod has `native = "inactive"` and no loaded library. The lock hashes every active runtime file, and the supervisor compares `native-mods.json` and the SDK identity with the lock.
 
-`sunrise-server mods list [--json]` lists the lock without checking what the game actually loaded. `start` and
-`run` check the input and each file's hash before starting. If a release is named, they compare it with the
-installer's selected release when known. With an unmanaged executable (for example, `engine.path`), the release
-may be unknown; that alone does not stop a start. Missing files or mismatches stop startup with exit status 2
-and a repair command. The check neither downloads anything nor changes mods.
+`sunrise-server mods list [--json]` lists the lock, not what the running engine actually loaded. `start` and `run` check the input and file hashes before starting, and compare the lock with the installed release when known. Native mods need an installed release with a matching SDK runtime; content-only mods can also run on a custom engine. Missing files or mismatches stop startup with exit status 2 and a repair command. The check neither downloads anything nor changes mods.
 
 ### Operators' commands: `admin_feedback_to_ops`
 

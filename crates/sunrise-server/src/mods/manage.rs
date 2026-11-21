@@ -4,7 +4,7 @@ use super::{Lock, check_files, check_native, native, warn_takedowns, write_list}
 use std::{
     fs,
     io::{self, IsTerminal, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 use sunrise_mod_install::{
     Side,
@@ -21,8 +21,7 @@ use sunrise_server_launch::{
 };
 
 const GAME: &str = sunrise_platform::version::VERSION_ID;
-const HELP: &str =
-    "sunrise-server mods <add|remove|disable|enable|update|list|search|rollback> [--json]";
+const HELP: &str = "sunrise-server mods <add|remove|disable|enable|update|list|search|rollback|client-pack> [--json]";
 
 pub enum Action {
     Add(Vec<ModRequest>, Option<PackSource>),
@@ -32,6 +31,7 @@ pub enum Action {
     Update(Vec<ModId>),
     List,
     Search(String),
+    ClientPack(PathBuf),
     Rollback,
 }
 
@@ -57,6 +57,7 @@ impl Command {
         };
         let mut operands = Vec::new();
         let mut pack = None;
+        let mut out = None;
         let mut args = rest.iter();
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -66,6 +67,11 @@ impl Command {
                     cmd.trust_native = true
                 }
                 "--yes" | "-y" if matches!(verb.as_str(), "update" | "rollback") => cmd.yes = true,
+                "--out" if verb == "client-pack" && out.is_none() => {
+                    out = Some(PathBuf::from(
+                        args.next().ok_or("--out needs a new .spack path")?,
+                    ));
+                }
                 "--pack" if verb == "add" && pack.is_none() => {
                     let raw = args
                         .next()
@@ -100,6 +106,9 @@ impl Command {
             "list" if operands.is_empty() => Action::List,
             "search" if !operands.is_empty() => Action::Search(operands.join(" ")),
             "rollback" if operands.is_empty() => Action::Rollback,
+            "client-pack" if operands.is_empty() => {
+                Action::ClientPack(out.ok_or("client-pack needs --out FILE.spack")?)
+            }
             _ => return Err(format!("mods {verb}: wrong arguments")),
         };
         Ok(cmd)
@@ -270,7 +279,7 @@ pub fn carry_release(
 pub fn command(dir: &Path, args: &[String]) -> Result<(), String> {
     if args == ["--help"] || args == ["-h"] {
         println!(
-            "{HELP}\n  add ID[@RANGE]… | --pack ID[@VERSION]|FILE.spack|URL\n  remove|disable|enable ID…\n  update [ID…] [--check] [--yes]\n  search TEXT…\n  list\n  rollback [--yes]\n  add|enable|update may take --trust-native-code"
+            "{HELP}\n  add ID[@RANGE]… | --pack ID[@VERSION]|FILE.spack|URL\n  remove|disable|enable ID…\n  update [ID…] [--check] [--yes]\n  search TEXT…\n  list\n  rollback [--yes]\n  client-pack --out FILE.spack\n  add|enable|update may take --trust-native-code"
         );
         return Ok(());
     }
@@ -293,6 +302,7 @@ pub fn command(dir: &Path, args: &[String]) -> Result<(), String> {
             }
             write_list(&lock, io::stdout().lock(), cmd.json).map_err(|e| e.to_string())
         }
+        Action::ClientPack(out) => super::client_pack::write(dir, &out, cmd.json),
         Action::Search(query) => {
             let index = registry::load(&index_location(), &Https::default())?;
             let root = dir.canonicalize().map_err(|e| e.to_string())?;
@@ -536,7 +546,7 @@ fn make_change(
                 Refresh::Only(&targeted)
             };
         }
-        Action::List | Action::Search(_) | Action::Rollback => {
+        Action::List | Action::Search(_) | Action::ClientPack(_) | Action::Rollback => {
             unreachable!("read commands do not stage an install")
         }
     }

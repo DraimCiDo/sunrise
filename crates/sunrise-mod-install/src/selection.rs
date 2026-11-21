@@ -188,10 +188,14 @@ pub fn plan<'a>(
             .project(&member.id)
             .filter(|p| matches!(p.kind, Kind::Mod | Kind::NativeMod))
             .ok_or_else(|| format!("{}: pack member is not in the registry", member.id))?;
+        let pinned = parse_version(&member.version).map_err(|e| format!("{}: {e}", member.id))?;
         let exact = project
             .versions
             .iter()
-            .find(|v| v.version == member.version && v.file.sha256 == member.sha256)
+            .find(|v| {
+                v.file.sha256 == member.sha256
+                    && parse_version(&v.version).is_ok_and(|version| version == pinned)
+            })
             .ok_or_else(|| {
                 format!(
                     "{} {}: pack member's exact version and hash are not in the registry",
@@ -210,7 +214,7 @@ pub fn plan<'a>(
         from_pack.insert(member.id.as_str());
         requests.push(resolve::Request {
             id: member.id.clone(),
-            version: Some(member.version.clone()),
+            version: Some(exact.version.clone()),
         });
     }
     let prefer: Vec<_> = old

@@ -155,6 +155,43 @@ fn server_resolves_ranges_and_skips_client_pack_members() {
 }
 
 #[test]
+fn canonical_pack_pins_select_the_same_package_as_an_abbreviated_registry_label() {
+    let (index, _) = registry(&[("rails", "1.2", "both", "")]);
+    let hash = &index.projects[0].versions[0].file.sha256;
+    let mut pack = crate::modpack::Manifest {
+        format: 1,
+        id: "server_mods".into(),
+        name: "Server mods".into(),
+        version: "1.0.0".into(),
+        game: "26.3".into(),
+        authors: vec![],
+        description: String::new(),
+        mods: vec![crate::modpack::PackMod {
+            id: "rails".into(),
+            version: "1.2.0".into(),
+            sha256: hash.clone(),
+            on: true,
+        }],
+    };
+    let plan = |pack: &crate::modpack::Manifest| {
+        selection::plan(
+            &index,
+            &target(),
+            Mods::default(),
+            Some(pack),
+            None,
+            Refresh::None,
+            |_, _| None,
+        )
+    };
+    let lock = plan(&pack).unwrap().lock;
+    assert_eq!(lock.mods[0].version.to_string(), "1.2.0");
+    assert_eq!(lock.mods[0].sha256.as_str(), hash);
+    pack.mods[0].sha256 = "0".repeat(64);
+    assert!(plan(&pack).is_err());
+}
+
+#[test]
 fn failed_download_leaves_previous_selection_and_undo_keeps_unrelated_settings() {
     let (registry, mut fetch) = registry(&[
         ("rails", "1.0.0", "both", ""),
