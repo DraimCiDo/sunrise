@@ -856,8 +856,8 @@ CONTENT_FOLDERS = (
 
 
 # What decoding looks like: a serde derive or impl, a parse call, or picking a key out of a JSON or TOML value.
-CONTENT_DECODING = (r"Deserialize\|from_str(\|from_slice(\|from_value(\|from_reader(\|serde_json::Value\|toml::Value"
-                    r"\|toml::Table")
+CONTENT_DECODING = (r"Deserialize\|::from_str(\|::from_slice(\|::from_value(\|::from_reader(\|serde_json::Value"
+                    r"\|toml::Value\|toml::Table")
 
 
 def files_matching(sha: str, pattern: str, *paths: str) -> set[str]:
