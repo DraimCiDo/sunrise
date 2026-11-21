@@ -25,6 +25,10 @@ pub struct AttachmentDescriptor<T: 'static> {
 impl<T: 'static> AttachmentDescriptor<T> {
     /// Start a descriptor for the namespaced attachment `id` (`"namespace:name"`) with its
     /// default value constructor.
+    ///
+    /// Any valid lowercase `namespace:name` not already registered is accepted when submitted to
+    /// [`Registrar::register_attachment_type`]; the registering package is recorded as the
+    /// attachment's owner.
     pub const fn new(id: &'static str, default: fn() -> T) -> Self {
         Self {
             id,
@@ -529,9 +533,11 @@ impl dyn Registrar + '_ {
     /// Register a typed attachment descriptor and return its issued [`AttachmentKey<T>`].
     ///
     /// Mirrors NeoForge's `RegisterEvent.register` for `NeoForgeRegistries.Keys.ATTACHMENT_TYPES`:
-    /// any valid lowercase `namespace:name` not already registered is accepted. Keep the returned
-    /// key on the mod or Part; keys from prior installations are rejected with
-    /// [`AttachmentError::StaleKey`]. A refusal fails installation even when ignored.
+    /// any valid lowercase `namespace:name` not already registered is accepted, regardless of
+    /// whether `namespace` matches this package's ID, and this package is recorded as the
+    /// attachment's owner. Keep the returned key on the mod or Part; keys from prior
+    /// installations are rejected with [`AttachmentError::StaleKey`]. A refusal fails
+    /// installation even when ignored.
     pub fn register_attachment_type<T: Send + Sync + 'static>(
         &mut self,
         descriptor: AttachmentDescriptor<T>,

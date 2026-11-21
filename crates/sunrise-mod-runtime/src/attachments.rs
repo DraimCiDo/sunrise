@@ -221,8 +221,8 @@ pub enum AttachmentWrite {
     Set,
 }
 
-/// The current server's holders' values, erased to what crosses any boundary: the typed
-/// [`AttachmentType`] methods are built on it, for mods.
+/// The current server's holders' values, erased to what crosses any boundary: typed
+/// attachment key methods (`AttachmentKey`) are built on it, for mods.
 pub trait AttachmentStore {
     /// Validate an attachment type against the loaded declarations.
     fn validate_attachment(

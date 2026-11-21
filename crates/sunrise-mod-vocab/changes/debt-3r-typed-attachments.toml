@@ -1,0 +1,126 @@
+# Consolidated 1.0 change note for debt item 3r (Register typed attachment descriptors once).
+# Call-only traits (AttachmentStore, AttachmentTypesRegistrar, AttachmentQueries,
+# AttachmentQueriesMut) and opaque structs with only private field changes
+# (AttachmentQueryMut, AttachmentRowMut) have unchanged container records in the
+# surface export, so only their changed method records are listed here.
+# AttachmentDeclarations and AttachmentEntry were #[doc(hidden)] and unnamed in
+# public signatures, so they have no exported surface IDs.
+ids = [
+    # Decoupled sync codec and AttachmentStore
+    "type:AttachmentCodec",
+    "type:AttachmentForm",
+    "type:AttachmentForm.synced",
+    "method:AttachmentStore::synced_raw",
+    # Retired AttachmentType
+    "type:AttachmentType",
+    "type:AttachmentType.namespace",
+    "type:AttachmentType.name",
+    "type:AttachmentType.default",
+    "type:AttachmentType.codec",
+    "type:AttachmentType.copy_on_death",
+    "type:AttachmentType.sync",
+    "handle:AttachmentType::get",
+    "handle:AttachmentType::has",
+    "handle:AttachmentType::get_existing",
+    "handle:AttachmentType::with_decoded",
+    "handle:AttachmentType::set",
+    "handle:AttachmentType::remove",
+    "handle:AttachmentType::sync_data",
+    # Typed attachment descriptors, registration records, issued keys, and errors
+    "method:AttachmentTypesRegistrar::register_attachment_type",
+    "method:AttachmentTypesRegistrar::submit_attachment",
+    "method:AttachmentTypesRegistrar::lookup_attachment",
+    "handle:Registrar::register_attachment_type",
+    "handle:Registrar::attachment_key",
+    "type:AttachmentDescriptor",
+    "handle:AttachmentDescriptor::new",
+    "handle:AttachmentDescriptor::serialize",
+    "handle:AttachmentDescriptor::sync",
+    "handle:AttachmentDescriptor::copy_on_death",
+    "handle:AttachmentDescriptor::id",
+    "handle:AttachmentDescriptor::has_codec",
+    "handle:AttachmentDescriptor::is_synced",
+    "handle:AttachmentDescriptor::copy_on_death_enabled",
+    "type:ErasedAttachmentDescriptor",
+    "handle:ErasedAttachmentDescriptor::id",
+    "handle:ErasedAttachmentDescriptor::has_codec",
+    "handle:ErasedAttachmentDescriptor::is_synced",
+    "handle:ErasedAttachmentDescriptor::copy_on_death_enabled",
+    "type:RegisteredAttachment",
+    "handle:RegisteredAttachment::id",
+    "handle:RegisteredAttachment::namespace",
+    "handle:RegisteredAttachment::name",
+    "handle:RegisteredAttachment::owner",
+    "handle:RegisteredAttachment::has_codec",
+    "handle:RegisteredAttachment::is_synced",
+    "handle:RegisteredAttachment::policy",
+    "type:AttachmentKey",
+    "handle:AttachmentKey::id",
+    "handle:AttachmentKey::namespace",
+    "handle:AttachmentKey::name",
+    "handle:AttachmentKey::owner",
+    "handle:AttachmentKey::has_codec",
+    "handle:AttachmentKey::is_synced",
+    "handle:AttachmentKey::policy",
+    "handle:AttachmentKey::is_live",
+    "handle:AttachmentKey::get",
+    "handle:AttachmentKey::has",
+    "handle:AttachmentKey::get_existing",
+    "handle:AttachmentKey::set",
+    "handle:AttachmentKey::remove",
+    "handle:AttachmentKey::sync_data",
+    "handle:AttachmentKey::get_in",
+    "handle:AttachmentKey::has_in",
+    "handle:AttachmentKey::get_existing_in",
+    "handle:AttachmentKey::set_in",
+    "handle:AttachmentKey::remove_in",
+    "handle:AttachmentKey::sync_data_in",
+    "type:AttachmentError",
+    "type:AttachmentError.StaleKey",
+    # Block-entity and entity Part state
+    "trait:BlockEntityPartState",
+    "assoc:BlockEntityPartState::DATA",
+    "method:BlockEntityPartState::state_key",
+    "method:BlockEntityPartState::state",
+    "method:BlockEntityPartState::state_existing",
+    "method:BlockEntityPartState::state_in",
+    "method:BlockEntityPartState::state_existing_in",
+    "method:BlockEntityPartState::edit_state",
+    "trait:EntityPartState",
+    "assoc:EntityPartState::DATA",
+    "method:EntityPartState::state_key",
+    "method:EntityPartState::state",
+    "method:EntityPartState::state_existing",
+    "method:EntityPartState::edit_state",
+    "type:PartStateRefusal",
+    "type:PartStateRefusal.Incompatible",
+    "type:PartStateRefusal.StaleKey",
+    "type:PartStateDeclaration",
+    "handle:PartStateDeclaration::of",
+    "fn:read_state",
+    "fn:edit_part_state",
+    # Worldless and attached-storage consumers
+    "handle:EntityRenderAttachments::get",
+    "handle:ChunkDiskData::get",
+    "handle:ChunkDiskData::set",
+    "handle:ChunkDiskData::remove",
+    "handle:OriginalPlayerRef::attachment",
+    "handle:AttachedStacks::new",
+    "handle:AttachedStacks::single",
+    "handle:AttachedEnergy::new",
+    # Attachment queries
+    "method:AttachmentQueries::query",
+    "method:AttachmentQueriesMut::query_mut",
+    "handle:AttachmentBatch::query",
+]
+why = "Register typed attachment descriptors once during Hooks::register and operate through the issued AttachmentKey<T> everywhere, retiring AttachmentType, AttachmentEntry, and the doc-hidden AttachmentDeclarations trait. Mirrors NeoForge's AttachmentType.Builder (net.neoforged.neoforge.attachment.AttachmentType), RegisterEvent.register for NeoForgeRegistries.Keys.ATTACHMENT_TYPES, ChunkDataEvent, PlayerEvent.Clone, ResourceStacksResourceHandler, and SimpleEnergyHandler. Client synchronization (.sync(sync_codec)) is decoupled from disk persistence (.serialize(codec)) via AttachmentCodec: Copy, AttachmentForm.synced, and AttachmentStore::synced_raw; only .copy_on_death() requires .serialize(codec). Any valid lowercase namespace:name not already registered is accepted regardless of registering package ID, while the registering package is recorded as owner on RegisteredAttachment and AttachmentKey for duplicate diagnostics and side = \"server\" synced-attachment admission. Issued keys carry active-installation identity so keys from prior installations are refused with AttachmentError::StaleKey (and PartStateRefusal::StaleKey at Part registration), making incompatible Rust types on the same ID impossible at key issuance."
+migrate = '''
+- Replace `static KEY: AttachmentType<T>` and `r.register_attachment_type("ns:name", sync)` with a single registration in `Hooks::register`:
+  `let key: AttachmentKey<T> = r.register_attachment_type(AttachmentDescriptor::new("ns:name", default))?;`
+  Chain `.serialize(codec)`, `.sync(sync_codec)` (independent of `.serialize`; `AttachmentCodec` is `Copy`), and `.copy_on_death()` (requires `.serialize`) as needed.
+- To read or write another package's attachment, declare a dependency on its owner and call `r.attachment_key::<T>("ns:name")?` during `Hooks::register`.
+- Store the issued `AttachmentKey<T>` on your mod, hook listener, renderer, or Part (cloning is cheap) and pass `&key` to `key.{get,has,get_existing,set,remove,sync_data}(host, holder)` (or `*_in(level, holder)` on `LevelRandomHost`), `host.query(&key)`, `host.query_mut(&key)`, `AttachmentBatch::query(&key)`, `EntityRenderAttachments::get(&key)`, `ChunkDiskData::{get,set,remove}(&key, ...)`, `OriginalPlayerRef::attachment(host, &key)`, `AttachedStacks::{new,single}(&key, ...)`, `AttachedEnergy::new(&key, ...)`, `read_state`, `edit_part_state`, and `PartStateDeclaration::of`.
+- On `BlockEntityPartState` and `EntityPartState`, replace `const DATA: &'static AttachmentType<Self::Data>` with `fn state_key(&self) -> &AttachmentKey<Self::Data>` and call `self.state(...)`, `self.state_existing(...)`, `self.state_in(...)`, `self.state_existing_in(...)`, and `self.edit_state(...)` on `&self`. Replace matches on `PartStateRefusal::Incompatible { .. }` with `PartStateRefusal::StaleKey`.
+- Handle `AttachmentError::StaleKey` if a key or retained `AttachmentRowMut` can outlive a registration reinstall (and `ChunkDiskData` failure reason `"StaleKey"` / `"missing persistence codec"`, or `EntityRenderAttachments::get` returning `AttachmentError::InvalidSyncPolicy` for unsynced keys).
+- Custom `AttachmentStore` implementations must add `fn synced_raw(&mut self, holder: Holder, namespace: &str, name: &str) -> Result<Option<Compound>, AttachmentError>`, `AttachmentForm` literals must include `synced: Option<Compound>`, and custom `AttachmentTypesRegistrar` implementations must implement `submit_attachment` and `lookup_attachment` in place of `register_attachment_type`.
+'''

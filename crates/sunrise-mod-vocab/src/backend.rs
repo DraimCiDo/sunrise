@@ -251,7 +251,7 @@ pub fn client_backend_mut_of(host: &mut dyn ClientHost) -> Option<&mut dyn Clien
     host.client_backend_mut().map(|wrapper| wrapper.open())
 }
 
-/// A host is the store of its holders' attachments, so `TYPE.get(host, holder)` reads one.
+/// A host is the store of its holders' attachments, so `key.get(host, holder)` reads one.
 macro_rules! host_attachment_store {
     ($($host:ident),+) => { $(
         impl AttachmentStore for dyn $host + '_ {

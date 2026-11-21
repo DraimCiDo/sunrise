@@ -1654,7 +1654,7 @@ pub trait LevelRandomHost: LevelHost {
     fn container_signal(&mut self, _pos: [i32; 3]) -> Option<i32> {
         None
     }
-    /// The holders' server-owned attachments; `TYPE.get(host, holder)` reads one through it.
+    /// The holders' server-owned attachments; `key.get_in(level, holder)` reads one through it.
     fn attachments(&mut self) -> &mut dyn AttachmentStore {
         unimplemented!("LevelRandomHost::attachments")
     }

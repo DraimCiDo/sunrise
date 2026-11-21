@@ -19,9 +19,7 @@ For example, register a counter descriptor and sum it across its holders:
 ```rust,ignore
 use mod_api::*;
 
-fn register_counter(
-    registrar: &mut dyn Registrar,
-) -> Result<AttachmentKey<u32>, AttachmentRegistrationError> {
+fn register_counter(registrar: &mut dyn Registrar) -> Result<AttachmentKey<u32>, String> {
     registrar.register_attachment_type(AttachmentDescriptor::new("example:value", || 0u32))
 }
 

@@ -58,12 +58,14 @@ Block entity types can only be declared by a package's code, not by content file
 A `side = "server"` package whose Part on such a type listens to a client hook is refused like any other
 client-side Part.
 
-The Part's state (`block_entity_part_with_state`) is a key the attaching package declared with
-`register_attachment_type`, which accepts only that package's own namespace. It is saved in the block entity's
-attachment compound under that package's id, not under the owner's. A Part reaches the owner's state only through an
-attachment the owner declared (the public attachment API); a key nobody declared is refused at load, naming the
-package. When the attaching package is removed, what it saved stays in the block entity, unread (the saved
-attachment compound keeps entries it does not know on save), and is read again if the package comes back.
+The Part's state (`block_entity_part_with_state`) is an issued `AttachmentKey<T>` registered with
+`register_attachment_type` (or looked up from another package via `attachment_key`). Any valid
+lowercase `namespace:name` not already registered is accepted, and the value is saved in the block
+entity's attachment compound under that key's `(namespace, name)`. A Part reaches the owner's state
+through an attachment the owner declared (the public attachment API); a key not issued in the active
+registration pass is refused at load with `PartStateRefusal::StaleKey`. When the attaching package
+is removed, what it saved stays in the block entity, unread (the saved attachment compound keeps
+entries it does not know on save), and is read again if the package comes back.
 
 ## Removal side effects
 

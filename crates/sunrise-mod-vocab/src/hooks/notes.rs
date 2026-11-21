@@ -2659,8 +2659,8 @@ registration path.
 
 - A player's damaging melee hit on a living target: `critical_hit(target_kind, vanilla_critical, critical, damage_multiplier)` may force or deny the critical hit and change its multiplier (1.5 for a vanilla crit, else 1.0); the sweep, sound and particles follow the decided result. Not fired for a dragon part or a hit that does no damage.
 
-- Attachment reads that never insert the default: `AttachmentType::has` says whether a holder carries a value, saved or set,
-  even before it decodes (NeoForge's `hasData`), and `AttachmentType::get_existing` returns `None` instead of the default
+- Attachment reads that never insert the default: `AttachmentKey::has` says whether a holder carries a value, saved or set,
+  even before it decodes (NeoForge's `hasData`), and `AttachmentKey::get_existing` returns `None` instead of the default
   (NeoForge's `getExistingData`). Neither adds anything to the holder's saved data.
 
 - A player releases a bow: `arrow_loose(stack, has_ammo, charge, canceled)` may change held-tick `charge` or cancel the shot; negative charge also prevents it. Unlike `living_entity_use_item_stop`, it does not skip the whole item release; `entity_shoot_bow` reports the spawned arrow afterward with read-only force. Fires on the Game running the bow release, including LAN guests; a remote client's own release path, crossbows, and ArrowNockEvent are not covered.
