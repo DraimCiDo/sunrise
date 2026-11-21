@@ -1222,7 +1222,7 @@ impl Game<'_> {
         }
         log("INFO", &startup_done(level_load_time));
         // DedicatedServer.initServer ends with saveEverything(false, true, true).
-        if self.save_dedicated_checkpoint("server startup")?.is_none() {
+        if self.save_dedicated_checkpoint("server startup")? == 0 {
             self.log_saved_levels();
         }
         if let Some(host) = self.lan.as_mut() {
@@ -2389,17 +2389,15 @@ fn console_level(active: super::Dim, spawn: super::Dim) -> Option<super::Dim> {
 }
 
 impl Game<'_> {
-    /// A partial checkpoint returns its diagnostic; only hard failures stop the lifecycle.
-    fn save_dedicated_checkpoint(&mut self, phase: &str) -> Result<Option<String>> {
+    /// The count is diagnostic; only hard failures stop the lifecycle.
+    fn save_dedicated_checkpoint(&mut self, phase: &str) -> Result<u64> {
         let before = self.save.record_save_failures();
         self.save_game()?;
         let failed = self.save.record_save_failures() - before;
-        if failed == 0 {
-            return Ok(None);
+        if failed != 0 {
+            log::warn!("Partial save during {phase}: {failed} chunk records could not be saved");
         }
-        let diagnostic = format!("{failed} chunk records could not be saved");
-        log::warn!("Partial save during {phase}: {diagnostic}");
-        Ok(Some(diagnostic))
+        Ok(failed)
     }
 
     pub(super) fn stop_after_crash(&mut self, message: &str) -> Result<()> {
@@ -2421,15 +2419,24 @@ impl Game<'_> {
         self.exclude_interrupted_players(true, warn);
         if integrated {
             // `IntegratedServer.stopServer`'s steps; `save_guest` skips the guest unplaced above.
-            return self.stop_integrated(true);
+            let result = self.stop_integrated(true);
+            if let Err(error) = &result {
+                self.native_lifecycle_close_failed(&error.to_string());
+            }
+            return result;
         }
         self.native_lifecycle.begin_close();
         log("INFO", "Saving worlds");
-        match self.save_dedicated_checkpoint("crash shutdown")? {
-            Some(diagnostic) => self.native_lifecycle_close_failed(&diagnostic),
-            None => {
-                self.log_saved_levels();
+        match self.save_dedicated_checkpoint("crash shutdown") {
+            Ok(failed) => {
+                if failed == 0 {
+                    self.log_saved_levels();
+                }
                 self.native_lifecycle_world_closed();
+            }
+            Err(error) => {
+                log::error!("Exception saving during crash shutdown: {error}");
+                self.native_lifecycle_close_failed(&error.to_string());
             }
         }
         self.lan_close(false);
@@ -2484,10 +2491,9 @@ mod tests {
                     LevelShape::OVERWORLD,
                     Some(Default::default()),
                 ));
-                assert!(
-                    game.save_dedicated_checkpoint("startup fixture")
-                        .unwrap()
-                        .is_none()
+                assert_eq!(
+                    game.save_dedicated_checkpoint("startup fixture").unwrap(),
+                    0
                 );
                 let fail_next_save = |game: &mut crate::game::Game<'_>| {
                     let key = (2, 0);
@@ -2506,25 +2512,19 @@ mod tests {
                 };
                 for phase in ["startup fixture", "pause fixture"] {
                     fail_next_save(game);
-                    assert!(game.save_dedicated_checkpoint(phase).unwrap().is_some());
+                    assert_eq!(game.save_dedicated_checkpoint(phase).unwrap(), 1);
                 }
                 assert_eq!(game.save.record_save_failures(), 2);
-                assert!(
-                    game.save_dedicated_checkpoint("no new edits")
-                        .unwrap()
-                        .is_none()
-                );
+                assert_eq!(game.save_dedicated_checkpoint("no new edits").unwrap(), 0);
 
                 fail_next_save(game);
-                let error = game.stop_after_crash("fixture panic").unwrap_err();
+                let cause = "injected dedicated crash";
+                let error = game.stop_after_crash(cause).unwrap_err();
+                assert!(error.to_string().contains(cause));
                 assert_eq!(
-                    error.to_string(),
-                    "the server thread panicked: fixture panic"
+                    *events.lock().unwrap(),
+                    [(WorldPhase::WorldCloseFinal, String::new())]
                 );
-                let events = events.lock().unwrap();
-                assert_eq!(events.len(), 1);
-                assert_eq!(events[0].0, WorldPhase::WorldCloseFailed);
-                assert!(!events[0].1.is_empty());
                 assert_eq!(game.save.record_save_failures(), 3);
 
                 let blocked = dir.path().join("level.dat_new");
@@ -2535,6 +2535,11 @@ mod tests {
                     error.downcast_ref::<std::io::Error>().unwrap().kind(),
                     expected.kind()
                 );
+                game.native_lifecycle.begin_open(Authority::DedicatedServer);
+                game.native_lifecycle.world_open_ready().unwrap();
+                let error = game.stop_after_crash(cause).unwrap_err();
+                assert!(error.to_string().contains(cause));
+                assert_eq!(events.lock().unwrap()[1].0, WorldPhase::WorldCloseFailed);
             });
         });
     }

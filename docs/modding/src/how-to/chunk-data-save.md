@@ -32,7 +32,8 @@ Attachment values over 65536 encoded bytes, nesting over 64 or total data over
 Every record the writer processes runs the callback exactly once, for full saves (explicit,
 forced, late, unload and closing) and proto saves alike. Saves are refused, with
 no callback, while an action savepoint is open, and chunk unloading waits for
-it to close. A record that cannot be encoded or written is reported with its
-coordinates and storage type. A flush waits for all attempts to finish;
-a failed record does not fail the command, timer save or shutdown. The server
+it to close. A record that cannot be encoded or written, including a record
+whose listener panics, is reported with its coordinates and storage type. A flush
+waits for all attempts to finish. An individual record failure does not fail the
+command, timer save or shutdown, but a failed region sync fails the flush. The server
 does not retry the failed snapshot. A later edit can be saved in a new snapshot.

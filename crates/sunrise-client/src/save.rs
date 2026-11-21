@@ -2063,12 +2063,21 @@ fn write_region_records(
     cache: &RegionCache,
     folder: &str,
     records: &[((i32, i32), &Record)],
-) -> BTreeMap<(i32, i32), std::io::Error> {
+    sync_data: &impl Fn(&fs::File) -> std::io::Result<()>,
+) -> RegionWriteOutcome {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as u32);
     let compressed = compress_records(records, timestamp);
-    write_prepared_region_records(root, cache, folder, timestamp, records, compressed)
+    write_prepared_region_records(
+        root, cache, folder, timestamp, records, compressed, sync_data,
+    )
+}
+
+#[derive(Default)]
+struct RegionWriteOutcome {
+    failed_records: BTreeMap<(i32, i32), std::io::Error>,
+    sync_error: Option<std::io::Error>,
 }
 
 fn write_prepared_region_records(
@@ -2078,10 +2087,12 @@ fn write_prepared_region_records(
     timestamp: u32,
     records: &[((i32, i32), &Record)],
     compressed: Vec<compression_pool::Prepared>,
-) -> BTreeMap<(i32, i32), std::io::Error> {
+    sync_data: &impl Fn(&fs::File) -> std::io::Result<()>,
+) -> RegionWriteOutcome {
     type RegionWrite<'a> = (ChunkPos, &'a Record, Option<CompressedWrite>);
     let mut by_region: BTreeMap<(i32, i32), Vec<RegionWrite<'_>>> = BTreeMap::new();
-    let mut failed = BTreeMap::new();
+    let mut outcome = RegionWriteOutcome::default();
+    let failed = &mut outcome.failed_records;
     for (&((x, z), source), record) in records.iter().zip(compressed) {
         match record {
             Ok(record) => by_region.entry((x >> 5, z >> 5)).or_default().push((
@@ -2094,11 +2105,10 @@ fn write_prepared_region_records(
             }
         }
     }
-    for ((rx, rz), list) in by_region {
+    for ((rx, rz), mut list) in by_region {
         let path = region_path(root, folder, rx, rz);
         // Clearing chunks of a region that doesn't exist changes nothing.
         let create = list.iter().any(|(_, _, r)| r.is_some());
-        let mut to_sync: Vec<_> = list.iter().map(|(pos, _, _)| *pos).collect();
         let result = (|| {
             let Some(region) = cached_region(cache, (rx, rz), &path, create)? else {
                 return Ok(());
@@ -2108,39 +2118,41 @@ fn write_prepared_region_records(
             let mut region = region
                 .lock()
                 .map_err(|_| std::io::Error::other("region file poisoned"))?;
-            to_sync.clear();
-            for (pos, source, record) in list {
-                let changed = match record {
+            let mut needs_sync = false;
+            for (pos, source, record) in &mut list {
+                let changed = match record.take() {
                     Some(record) => {
-                        write_chunk_record(&mut region, pos, source, record).map(|()| true)
+                        write_chunk_record(&mut region, *pos, source, record).map(|()| true)
                     }
-                    None => region.clear(pos, timestamp),
+                    None => region.clear(*pos, timestamp),
                 };
                 match changed {
-                    Ok(true) => to_sync.push(pos),
-                    Ok(false) => (),
+                    Ok(changed) => needs_sync |= changed,
                     Err(error) => {
                         failed.insert((pos.x, pos.z), error);
                     }
                 }
             }
-            if to_sync.is_empty() {
-                return Ok(());
-            }
-            match region.sync_handle() {
-                Ok(handle) => {
-                    drop(region);
-                    handle.sync_data()
+            if needs_sync {
+                let synced = match region.sync_handle() {
+                    Ok(handle) => {
+                        drop(region);
+                        sync_data(&handle)
+                    }
+                    // Out of descriptors: flush under the lock rather than skip durability.
+                    Err(_) => region.sync(),
+                };
+                if let Err(error) = synced {
+                    log::warn!("Failed to synchronize {folder} region [{rx}, {rz}]: {error}");
+                    outcome.sync_error.get_or_insert(error);
                 }
-                // Out of descriptors: flush under the lock rather than skip durability.
-                Err(_) => region.sync(),
             }
+            Ok(())
         })();
         if let Err(error) = result {
-            // Open/lock failed before any record, or sync failed for the writes
-            // that reached the file. Preserve the same cause on each affected record.
+            // Open or lock failed before any record reached this region.
             let error = Arc::new(error);
-            for pos in to_sync {
+            for (pos, _, _) in list {
                 failed.insert(
                     (pos.x, pos.z),
                     std::io::Error::new(error.kind(), error.clone()),
@@ -2148,7 +2160,7 @@ fn write_prepared_region_records(
             }
         }
     }
-    failed
+    outcome
 }
 
 fn write_chunk_record(
@@ -9997,9 +10009,14 @@ mod tests {
             Folder::Entities => &save.entity_regions,
             Folder::Poi => &save.poi_regions,
         };
-        assert!(
-            super::write_region_records(&save.root, cache, folder, &[((0, 0), &record)]).is_empty()
+        let result = super::write_region_records(
+            &save.root,
+            cache,
+            folder,
+            &[((0, 0), &record)],
+            &fs::File::sync_data,
         );
+        assert!(result.failed_records.is_empty() && result.sync_error.is_none());
     }
 
     #[test]
@@ -10143,15 +10160,14 @@ mod tests {
                 ("sections", Tag::List(Vec::new())),
             ]),
         }));
-        assert!(
-            super::write_region_records(
-                &nether.root,
-                &nether.regions,
-                "region",
-                &[((1, 0), &current)],
-            )
-            .is_empty()
+        let result = super::write_region_records(
+            &nether.root,
+            &nether.regions,
+            "region",
+            &[((1, 0), &current)],
+            &fs::File::sync_data,
         );
+        assert!(result.failed_records.is_empty() && result.sync_error.is_none());
         assert!(nether.is_old_chunk(0, 0));
         assert!(!nether.is_old_chunk(1, 0));
         assert!(!nether.is_old_chunk(2, 0));

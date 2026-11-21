@@ -225,14 +225,17 @@ fn a_compressed_size_rejection_does_not_skip_healthy_records_in_either_region() 
             .iter()
             .map(|(_, record)| compress_record(record, Compression::None, 0, Limits::saved()))
             .collect();
-        let failed = write_prepared_region_records(
+        let outcome = write_prepared_region_records(
             &save.root,
             &save.regions,
             "region",
             0,
             &records,
             prepared,
+            &fs::File::sync_data,
         );
+        assert!(outcome.sync_error.is_none());
+        let failed = outcome.failed_records;
         let disk = open();
         assert_eq!(
             disk.raw_chunk(0, 0).unwrap().tag.get("xPos"),

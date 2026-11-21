@@ -93,6 +93,8 @@ pub(super) struct Outstanding {
     count: Mutex<usize>,
     chunks: AtomicUsize,
     pub(super) error: Mutex<Option<String>>,
+    // If storage failed to sync, subsequent barriers cannot attest to its durability.
+    sync_error: Mutex<Option<Arc<std::io::Error>>>,
     done: Condvar,
     /// What the folder's writes make stale: the portal blocks a search read from saved chunks.
     portals: saved_portals::SavedPortals,
@@ -145,8 +147,8 @@ impl SaveDir {
         self.save_reporting.report(folder, key, error);
     }
 
-    /// Queue `records` for the writer thread; with `wait`, return once
-    /// they and every earlier write are on disk.
+    /// Queue `records` for the writer thread. With `wait`, wait for these and all earlier
+    /// write attempts. Individual failures are reported; a failed sync fails the wait.
     pub(super) fn write_records(
         &self,
         folder: &str,
@@ -179,7 +181,7 @@ impl SaveDir {
             } else {
                 records
             };
-            let writer = writer.get_or_insert_with(|| self.start_writer());
+            let writer = writer.get_or_insert_with(|| self.start_writer(fs::File::sync_data));
             let mut batch = Vec::with_capacity(records.len());
             {
                 let mut pending = self.pending.lock().map_err(|_| "pending writes poisoned")?;
@@ -231,7 +233,10 @@ impl SaveDir {
         }
         Ok(())
     }
-    fn start_writer(&self) -> Writer {
+    fn start_writer(
+        &self,
+        sync_data: impl Fn(&fs::File) -> std::io::Result<()> + Send + 'static,
+    ) -> Writer {
         let (send, receive) = mpsc::channel::<WriteBatch>();
         let root = self.root.clone();
         let reporting = self.save_reporting.clone();
@@ -241,6 +246,7 @@ impl SaveDir {
             self.poi_regions.clone(),
         );
         let pending = self.pending.clone();
+        let outstanding = self.outstanding.clone();
         // The writer runs chunk_data_save callbacks before handing records to compression.
         let thread = sunrise_guest_stack::builder()
             .name("sunrise-region-writer".into())
@@ -319,8 +325,17 @@ impl SaveDir {
                             })
                             .collect();
                         let records: Vec<_> = resolved.iter().map(|(k, r)| (*k, r)).collect();
-                        for (key, error) in write_region_records(&root, cache, folder, &records) {
+                        let outcome =
+                            write_region_records(&root, cache, folder, &records, &sync_data);
+                        for (key, error) in outcome.failed_records {
                             reporting.report(kind, key, &error);
+                        }
+                        if let Some(error) = outcome.sync_error {
+                            outstanding
+                                .sync_error
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .get_or_insert_with(|| Arc::new(error));
                         }
                         if let Ok(mut pending) = pending.lock() {
                             for job in batch {
@@ -344,8 +359,8 @@ impl SaveDir {
         self.save_failure_reporter().reported_failures()
     }
 
-    /// Wait until every queued write finishes. Individual failures are reported by the
-    /// writer; only a failure of the writer itself fails this barrier.
+    /// Wait until every queued write attempt finishes. Individual record failures are reported
+    /// by the writer; a storage sync failure or a writer failure fails this barrier.
     pub fn flush(&self) -> Result<()> {
         let mut count = self
             .outstanding
@@ -359,7 +374,7 @@ impl SaveDir {
                 .wait(count)
                 .map_err(|_| "writer poisoned")?;
         }
-        self.write_result()
+        self.write_result(true)
     }
     /// Wait until at most `low` chunk records are still queued, without waiting
     /// for all of them; a save pass resuming at half the cap keeps the writer fed
@@ -383,23 +398,25 @@ impl SaveDir {
                 .wait(count)
                 .map_err(|_| "writer poisoned")?;
         }
-        self.write_result()
+        // Backpressure is not a durability barrier; continue submitting independent work.
+        self.write_result(false)
     }
     /// `ChunkMap.activeChunkWrites`: chunk records, excluding entity/POI IO.
     pub fn active_chunk_writes(&self) -> usize {
         self.outstanding.chunks.load(Ordering::Relaxed)
     }
-    /// Poll durability without holding up the event loop.
+    /// Poll completion of queued write attempts without blocking the event loop. Once drained,
+    /// return a hard sync error, if any; individual record failures do not fail the poll.
     pub fn writes_finished(&self) -> Result<bool> {
         let count = self
             .outstanding
             .count
             .lock()
             .map_err(|_| "writer poisoned")?;
-        self.write_result()?;
+        self.write_result(*count == 0)?;
         Ok(*count == 0)
     }
-    fn write_result(&self) -> Result<()> {
+    fn write_result(&self, drained: bool) -> Result<()> {
         if let Some(error) = &*self
             .outstanding
             .error
@@ -407,6 +424,15 @@ impl SaveDir {
             .map_err(|_| "writer poisoned")?
         {
             return Err(error.clone().into());
+        }
+        if drained
+            && let Some(error) = &*self
+                .outstanding
+                .sync_error
+                .lock()
+                .map_err(|_| "writer poisoned")?
+        {
+            return Err(std::io::Error::new(error.kind(), error.clone()).into());
         }
         Ok(())
     }
@@ -461,6 +487,39 @@ mod tests {
             Some(good.as_ref())
         );
         assert!(disk.read_record_raw("poi", key.0, key.1).is_none());
+    }
+
+    #[test]
+    fn a_region_sync_failure_fails_the_barrier_but_siblings_still_sync() {
+        let dir = tempfile::tempdir().unwrap();
+        let open = || SaveDir::new(dir.path().to_path_buf(), LevelShape::OVERWORLD, None);
+        let save = open();
+        let sync_attempts = Arc::new(AtomicUsize::new(0));
+        let attempts = sync_attempts.clone();
+        let kind = std::io::ErrorKind::PermissionDenied;
+        *save.writer.lock().unwrap() = Some(save.start_writer(move |file| {
+            if attempts.fetch_add(1, Ordering::Relaxed) == 0 {
+                return Err(kind.into());
+            }
+            file.sync_data()
+        }));
+        let record = || NamedTag {
+            name: "".into(),
+            tag: Tag::compound([("marker", Tag::Int(3))]),
+        };
+        let error = save
+            .write_records(
+                "region",
+                vec![((0, 0), Some(record())), ((32, 0), Some(record()))],
+                true,
+            )
+            .unwrap_err();
+        assert_eq!(error.downcast_ref::<std::io::Error>().unwrap().kind(), kind);
+        assert!(save.writes_finished().is_err());
+        assert_eq!(save.record_save_failures(), 0);
+        assert_eq!(sync_attempts.load(Ordering::Relaxed), 2);
+        drop(save);
+        assert_eq!(open().read_record_raw("region", 32, 0), Some(record()));
     }
 
     #[test]

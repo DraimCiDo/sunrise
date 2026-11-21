@@ -137,7 +137,10 @@ fn integrated_stop_propagates_metadata_errors_even_after_a_record_failure() {
                         Ok(())
                     })
                     .unwrap_err();
-                assert_eq!(error.to_string(), expected.to_string());
+                assert_eq!(
+                    error.downcast_ref::<std::io::Error>().unwrap().kind(),
+                    expected.kind()
+                );
                 assert!(game.session_lock.is_none());
             }
         });

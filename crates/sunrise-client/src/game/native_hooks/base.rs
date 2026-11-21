@@ -514,8 +514,9 @@ impl Game<'_> {
         self.fire_emissive(layers);
     }
     /// The world's phases, read-only; `error_text` carries the engine's
-    /// own open-failure text, empty otherwise. Server-side. A server loop or final
-    /// save failure fires `WorldCloseFailed` with the error text.
+    /// own open or close failure text, empty otherwise. Server-side. A hard close
+    /// failure fires `WorldCloseFailed`; individually reported record failures do
+    /// not prevent `WorldCloseFinal`, even when closing after a crash.
     pub(in crate::game) fn native_world_lifecycle(
         &mut self,
         context: &LifecycleContext,
