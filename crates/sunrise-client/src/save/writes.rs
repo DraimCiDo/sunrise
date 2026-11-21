@@ -321,6 +321,7 @@ impl SaveDir {
                         let records: Vec<_> = resolved.iter().map(|(k, r)| (*k, r)).collect();
                         match write_region_records(&root, cache, folder, &records) {
                             Ok(failed) => {
+                                let mut errors = outstanding.record_errors.lock().unwrap();
                                 if let Ok(mut pending) = pending.lock() {
                                     let mut retry = (kind == Folder::Region)
                                         .then(|| outstanding.failed_saves.lock().unwrap());
@@ -336,6 +337,9 @@ impl SaveDir {
                                             }
                                         } else {
                                             pending.remove(&key);
+                                            // A POI job can resolve to no necessary write and still
+                                            // supersede a prior failure for this key.
+                                            errors.remove(&(folder, job.key.0, job.key.1));
                                             if let Some(retry) = &mut retry
                                                 && retry
                                                     .get(&job.key)
@@ -345,10 +349,6 @@ impl SaveDir {
                                             }
                                         }
                                     }
-                                }
-                                let mut errors = outstanding.record_errors.lock().unwrap();
-                                for &((x, z), _) in &records {
-                                    errors.remove(&(folder, x, z));
                                 }
                                 errors.extend(
                                     failed
@@ -497,6 +497,52 @@ impl SaveDir {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_noop_poi_job_clears_an_older_record_refusal() {
+        let dir = tempfile::tempdir().unwrap();
+        let save = SaveDir::new(dir.path().to_path_buf(), LevelShape::OVERWORLD, None);
+        let key = (2, 0);
+        let invalid = (0..=sunrise_core::nbt::DISK_WRITE_NESTING_GUARD)
+            .fold(Tag::Int(0), |nested, _| Tag::List(vec![nested]));
+        let refused = save
+            .write_records(
+                "poi",
+                vec![(
+                    key,
+                    Some(NamedTag {
+                        name: "".into(),
+                        tag: invalid,
+                    }),
+                )],
+                true,
+            )
+            .unwrap_err();
+        assert!(
+            refused
+                .downcast::<RecordSaveFailures>()
+                .unwrap()
+                .to_string()
+                .contains("poi 2,0:")
+        );
+        let tables = Arc::new(SaveTables {
+            block_names: Vec::new(),
+            block_ids: HashMap::new(),
+            default_state: Vec::new(),
+            block_entity: Vec::new(),
+            heightmaps: crate::assets::Properties::for_tests(&[]),
+            air: 0,
+            poi: Vec::new(),
+        });
+        let empty = Record::Poi(Arc::new(Chunk::empty(key.0, key.1)), tables, None);
+        save.queue(Folder::Poi, vec![(key, empty)], true).unwrap();
+        assert!(!dir.path().join("poi/r.0.0.mca").exists());
     }
 }
 
