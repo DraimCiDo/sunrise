@@ -1451,8 +1451,11 @@ impl Game<'_> {
             .get(&o.id)
             .cloned()
             .unwrap_or_else(|| Tag::Compound(Default::default()));
-        if let Some(state) = &o.interaction {
-            write_static_entity_fields(&mut tag);
+        let marker = matches!(o.kind.as_str(), "minecraft:marker" | "marker");
+        if marker || o.interaction.is_some() {
+            if !marker {
+                write_static_entity_fields(&mut tag);
+            }
             let base = entity_nbt::Base {
                 id: &o.kind,
                 uuid,
@@ -1464,7 +1467,10 @@ impl Game<'_> {
             };
             let mut out = entity_nbt::EntityTagWriter::from_saved(tag);
             base.write(&mut out, include_id);
-            state.write(&mut out);
+            // Marker.addAdditionalSaveData is empty.
+            if let Some(state) = &o.interaction {
+                state.write(&mut out);
+            }
             return out.finish();
         }
         if let Tag::Compound(c) = &mut tag {
@@ -1518,14 +1524,9 @@ impl Game<'_> {
             );
             c.entry("Fire".into()).or_insert(Tag::Short(0));
         }
-        // Marker, LeashFenceKnotEntity and EyeOfEnder still use
-        // Entity.saveWithoutId's common fields, which their own saves leave out.
-        if o.eye.is_some()
-            || matches!(
-                o.kind.as_str(),
-                "minecraft:marker" | "marker" | "minecraft:leash_knot"
-            )
-        {
+        // LeashFenceKnotEntity and EyeOfEnder still use the common fields
+        // of Entity.saveWithoutId, which their own saves leave out.
+        if o.eye.is_some() || o.kind == "minecraft:leash_knot" {
             entity_nbt::fill_common_defaults(&mut tag);
         }
         with_raw(tag, None) // Entity.saveWithoutId's flags, as booleans.
