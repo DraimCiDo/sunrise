@@ -587,7 +587,7 @@ pub(crate) fn in_turn<P>(
     parts: impl IntoIterator<Item = P>,
     ask: impl FnMut(&mut dyn ServerHost, &TransactionContext, &P, u32) -> Result<u32, Overanswered>,
 ) -> Result<u32, Overanswered> {
-    if amount == 0 || host.transaction_current().as_ref() != Some(tx) {
+    if amount == 0 || !host.transaction_matches(Some(tx)) {
         return Ok(0);
     }
     match host.transaction(|host, tx| try_in_turn(host, tx, amount, parts, ask)) {

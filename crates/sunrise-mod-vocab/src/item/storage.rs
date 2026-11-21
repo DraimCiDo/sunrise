@@ -771,7 +771,7 @@ mod tests {
                 kind: &ItemResource,
                 amount: u64,
             ) -> u64 {
-                assert_eq!(host.transaction_current().as_ref(), Some(tx));
+                assert!(host.transaction_matches(Some(tx)));
                 let amount = amount.min(self.space_for(host, kind).unwrap());
                 if amount > 0 {
                     self.entries.borrow_mut().push((kind.clone(), amount));
@@ -785,7 +785,7 @@ mod tests {
                 kind: &ItemResource,
                 amount: u64,
             ) -> u64 {
-                assert_eq!(host.transaction_current().as_ref(), Some(tx));
+                assert!(host.transaction_matches(Some(tx)));
                 let mut entries = self.entries.borrow_mut();
                 let Some(index) = entries.iter().position(|(held, _)| held == kind) else {
                     return 0;

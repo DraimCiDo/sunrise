@@ -724,14 +724,14 @@ fn a_mod_reads_the_open_transaction_its_depth_and_the_root_commits_phase() {
             );
             let host: &mut dyn ServerHost = game;
             assert_eq!(host.transaction_lifecycle(), TransactionLifecycle::None);
-            assert_eq!(host.transaction_current(), None);
+            assert!(host.transaction_matches(None));
             // A helper joins the open action; the opener's abort undoes its write.
             let aborted = host.transaction(|host, outer| {
                 assert_eq!(host.transaction_lifecycle(), TransactionLifecycle::Open);
-                assert_eq!(host.transaction_depth(outer), Some(0));
+                assert_eq!(outer.depth(), 0);
                 host.transaction(|host, inner| {
-                    assert_eq!(host.transaction_depth(inner), Some(1));
-                    assert_eq!(host.transaction_current().as_ref(), Some(inner));
+                    assert_eq!(inner.depth(), 1);
+                    assert!(host.transaction_matches(Some(inner)));
                     assert_eq!(
                         host.join_transaction(|host, tx| {
                             assert_eq!(tx, inner);

@@ -127,7 +127,7 @@ fn trade(host: &mut dyn ServerHost, event: &mut TradeWithVillagerEvent<'_>) {
     {
         let call = CALLS.get() + 1;
         CALLS.set(call);
-        IN_ACTION.with(|a| a.borrow_mut().push(host.transaction_current().is_some()));
+        IN_ACTION.with(|a| a.borrow_mut().push(!host.transaction_matches(None)));
         assert_eq!(event.merchant, 40);
         USES.with(|uses| uses.borrow_mut().push(event.offer.uses));
         let s = SCRIPT.with(|s| s.borrow().clone());

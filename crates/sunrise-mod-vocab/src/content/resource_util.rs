@@ -605,7 +605,7 @@ fn probe_extractable<R>(
 
 /// Validates an optional enclosing transaction before opening any new journal.
 fn can_open(host: &dyn ServerHost, tx: Option<&TransactionContext>) -> bool {
-    host.transaction_current().as_ref() == tx
+    host.transaction_matches(tx)
 }
 
 /// A borrowed move endpoint. Pass a capability reference to retain its provider's name in

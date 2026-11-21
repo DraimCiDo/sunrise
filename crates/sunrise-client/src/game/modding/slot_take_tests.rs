@@ -109,7 +109,7 @@ impl BlockEntityPart for Pot {
             player: event.player,
             slot: 8,
         };
-        assert!(host.transaction_current().is_some(), "a take is tentative");
+        assert!(!host.transaction_matches(None), "a take is tentative");
         match SCRIPT.get() {
             TakeScript::Hear => {}
             TakeScript::PanicWithoutReward => panic!("a broken craft listener"),

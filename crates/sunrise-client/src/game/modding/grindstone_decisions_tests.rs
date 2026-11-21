@@ -91,7 +91,7 @@ impl Hooks for Mod {
         event: &mut GrindstonePlaceEvent,
     ) -> mod_api::Flow {
         DISPATCHES.set(DISPATCHES.get() + 1);
-        assert!(host.transaction_current().is_some());
+        assert!(!host.transaction_matches(None));
         let s = SCRIPT.with(|s| s.borrow().clone());
         if s.replace_backing {
             replace_backing(host);
@@ -122,7 +122,7 @@ impl Hooks for Mod {
     ) -> mod_api::Flow {
         DISPATCHES.set(DISPATCHES.get() + 1);
         TAKE_XP.set(Some(event.take.xp));
-        assert!(host.transaction_current().is_some());
+        assert!(!host.transaction_matches(None));
         let s = SCRIPT.with(|s| s.borrow().clone());
         if s.replace_backing {
             replace_backing(host);

@@ -88,7 +88,7 @@ impl BlockEntityPart for Part {
         event: &mut MenuQuickMoveEvent<'_>,
     ) -> Flow {
         DISPATCHES.set(DISPATCHES.get() + 1);
-        IN_ACTION.with(|a| a.borrow_mut().push(host.transaction_current().is_some()));
+        IN_ACTION.with(|a| a.borrow_mut().push(!host.transaction_matches(None)));
         let s = SCRIPT.with(|s| s.borrow().clone());
         let stone = |count| {
             mod_api::ItemStack::new(
@@ -204,7 +204,7 @@ impl Hooks for Mod {
     }
     fn menu_clicked(&self, host: &mut dyn ServerHost, event: &mut MenuClickedEvent) {
         DISPATCHES.set(DISPATCHES.get() + 1);
-        IN_ACTION.with(|a| a.borrow_mut().push(host.transaction_current().is_some()));
+        IN_ACTION.with(|a| a.borrow_mut().push(!host.transaction_matches(None)));
         // Guest 12's menu from `open_native_menu`.
         assert_eq!((event.uuid, event.window), (12, 5));
         let s = SCRIPT.with(|s| s.borrow().clone());
