@@ -476,12 +476,34 @@ own folder and target, no inherited compiler wrapper or job token), it exports b
 must equal the parent's signed `surface.json`, and it diffs the two exports. A tree it cannot read is refused. A patch requires an identical mod API; a
 minor allows only changes the SDK classifies as additive. Conditional changes can break some existing mods, so a
 minor refuses them too. For content mods, the SDK's `content_api` version string must stay the same within a line.
-Until [#3817](https://github.com/sunrise-org/sunrise/issues/3817) exports the declarations for comparison, the check
-also refuses any patch or minor whose tree changes the manifest or mod-content readers listed in
-`tools/ci/nightly.py` (`CONTENT_SCHEMA_PATHS`). The refusal names every changed file. Even a legitimate fix in one
-of those files cannot ship in a patch or minor until #3817. The first release of a line has no API restriction.
-No label, change note or dispatch option overrides the check. The mod API surface comparison judges declarations,
-not behaviour: a vanilla parity fix that leaves the surface and these content files alone can ship in a patch.
+The first release of a line has no API restriction. No label or dispatch option overrides the check. The mod API
+surface comparison judges declarations, not behaviour: a vanilla parity fix that leaves the surface alone can ship
+in a patch.
+
+Content mods are held by what loads, not by which files changed. `crates/sunrise-mod-package/tests/content-corpus/`
+holds manifests and declarations, one folder per entry, including ones that must be refused;
+`crates/sunrise-mod-package/tests/content-golden/<entry>.txt` holds what the readers make of each: the loaded
+manifest and content, or the refusal text. The `content_golden` test of `sunrise-mod-package` (in `verify`) re-reads
+the corpus and fails when a golden file is out of date, so a change in reading shows as a changed golden file in
+the pull request that makes it. A patch or minor refuses a candidate in which any file of an existing entry, or its
+golden file, changed or disappeared since the parent release; new entries may be added in either. A reader fix
+that leaves every golden file alone ships freely.
+
+- **A deliberate change** (a parity fix that changes how an existing declaration loads) ships in a patch or minor
+  only with a line in [`docs/content-declaration-changes.md`](content-declaration-changes.md) naming the release and
+  the entry. The check refuses a changed entry without its line and copies the lines into the release's notes under
+  "Changed content declarations". Aria and umceko decide these; nobody else adds a line.
+- **Adding a field changes every golden file.** The golden text is the `Debug` form of the loaded values, so a
+  minor that adds a declaration field changes the entries of that kind and goes through the same named lines. The
+  rule does not depend on the form of the golden text; a later form may leave defaults out.
+- **A new declaration key comes with its corpus entry**, in the pull request that adds the key. A key with no
+  entry is not held by the check.
+- **Not yet covered:** the corpus holds what `sunrise-mod-package` reads (the manifest and the typed declarations:
+  blocks, items, effects, creative tabs, fluids, fluid interactions, entity types, menus). What the game reads
+  from a content mod's other `data/` and `assets/` files (biome and structure modifiers, load conditions, global
+  loot modifiers, data maps, ingredient types, worldgen extensions, particles, connected textures) has no entries
+  yet, so a change in those readers is not caught. Their entries are added on the release branch before the
+  line's first patch.
 
 Within a line, the candidate must descend from its previous stable tag and may not bring in commits from
 `main`'s first-parent history that are absent from that tag. Backport fixes by cherry-pick; merging a backport PR

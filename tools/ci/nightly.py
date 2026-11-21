@@ -87,7 +87,7 @@ class Ref:
 
 
 def git(*args: str) -> str:
-    return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout.strip()
+    return subprocess.run(["git", *args], cwd=REPOSITORY, check=True, capture_output=True, text=True).stdout.strip()
 
 
 def gh(*args: str, check: bool = True) -> str:
@@ -98,7 +98,7 @@ def gh(*args: str, check: bool = True) -> str:
 
 
 def is_ancestor(a: str, b: str) -> bool:
-    return subprocess.run(["git", "merge-base", "--is-ancestor", a, b]).returncode == 0
+    return subprocess.run(["git", "merge-base", "--is-ancestor", a, b], cwd=REPOSITORY).returncode == 0
 
 
 def output(**values: str) -> None:
@@ -160,7 +160,7 @@ def notes(today: str, chosen: Ref, main: Ref, picked: list[dict], left_out: list
 
 def merged_since(previous: str | None, main: str) -> list[dict]:
     """The pull requests merged into main since the previous nightly (its commit holds the main it was built on)."""
-    if not previous or subprocess.run(["git", "cat-file", "-e", f"{previous}^{{commit}}"]).returncode != 0:
+    if not previous or subprocess.run(["git", "cat-file", "-e", f"{previous}^{{commit}}"], cwd=REPOSITORY).returncode != 0:
         return []
     return train.merged_between("game", previous, main)
 
@@ -836,33 +836,41 @@ def require_stable_lineage(sha: str, tag: str, old_sha: str, old_tag: str) -> No
                          "cherry-pick fixes on this line or use a new major")
 
 
-# Until #3817 exports the content declarations, guard the owning manifest and mod-content readers,
-# not the vanilla pack codecs or the native-only tables (which already pin an exact build).
-CONTENT_SCHEMA_PATHS = (
-    "crates/sunrise-mod-package/src/manifest.rs",
-    "crates/sunrise-mod-package/src/manifest/hash.rs",
-    "crates/sunrise-mod-package/src/manifest/jar.rs",
-    "crates/sunrise-mod-package/src/manifest/runtime_files.rs",
-    "crates/sunrise-mod-package/src/content.rs",
-    "crates/sunrise-mod-package/src/content/entity_sounds.rs",
-    "crates/sunrise-mod-package/src/content/entity_type.rs",
-    "crates/sunrise-mod-package/src/content/fluid_interaction.rs",
-    "crates/sunrise-client/src/mod_content.rs",
-    "crates/sunrise-client/src/mod_content/load_conditions.rs",
-    "crates/sunrise-client/src/mod_content_biomes.rs",
-    "crates/sunrise-client/src/mod_content_carvers.rs",
-    "crates/sunrise-client-render/src/connected/files.rs",
-    "crates/sunrise-world/src/conditions.rs",
-)
+# A line keeps loading the content mods it loaded: the corpus holds manifests and declarations, one folder per entry,
+# and the golden file of each entry holds what the readers make of it (kept true by the content_golden test of
+# sunrise-mod-package). Within a line an entry's files and golden file never change or go; new entries may come.
+CONTENT_CORPUS = "crates/sunrise-mod-package/tests/content-corpus/"
+CONTENT_GOLDEN = "crates/sunrise-mod-package/tests/content-golden/"
+# The one way a patch or minor changes an entry on purpose (a parity fix): a line here that names the release and the
+# entry, "- `<tag>` `<entry>`: <why>". It is copied into the release's notes.
+CONTENT_CHANGES = "docs/content-declaration-changes.md"
 
 
-def require_unchanged_content_schema(sha: str, tag: str, old_sha: str, old_tag: str) -> None:
-    changed = subprocess.run(["git", "diff", "--name-only", "-z", "--no-renames", old_sha, sha, "--",
-                              *CONTENT_SCHEMA_PATHS], cwd=REPOSITORY, check=True, capture_output=True, text=True).stdout
-    if changed:
-        paths = ", ".join(changed.removesuffix("\0").split("\0"))
-        raise SystemExit(f"::error::refused: {tag} changes content declaration files since {old_tag}: {paths}. "
-                         "Patches and minors cannot change these files until #3817.")
+def require_stable_content(sha: str, tag: str, old_sha: str, old_tag: str, notes: Path) -> None:
+    status = subprocess.run(["git", "diff", "--name-status", "-z", "--no-renames", old_sha, sha, "--",
+                             CONTENT_CORPUS, CONTENT_GOLDEN], cwd=REPOSITORY, check=True, capture_output=True,
+                            text=True).stdout.split("\0")
+    changed = set()
+    for kind, path in zip(status[::2], status[1::2]):
+        if kind != "A":
+            entry = path.removeprefix(CONTENT_CORPUS).split("/")[0] if path.startswith(CONTENT_CORPUS) else path
+            changed.add(entry.removeprefix(CONTENT_GOLDEN).removesuffix(".txt"))
+    if not changed:
+        return
+    listed = subprocess.run(["git", "show", f"{sha}:{CONTENT_CHANGES}"], cwd=REPOSITORY, capture_output=True, text=True)
+    declared = {}
+    for line in listed.stdout.splitlines():
+        if match := re.fullmatch(r"- `([^`]+)` `([^`]+)`: (\S.*)", line):
+            if match[1] == tag:
+                declared[match[2]] = line
+    if missing := sorted(changed - declared.keys()):
+        raise SystemExit(f"::error::refused: {tag} changes how content declarations load since {old_tag}: "
+                         f"{', '.join(missing)}. A patch or minor keeps every corpus entry and its golden file as they "
+                         f"were; a deliberate change needs its line in {CONTENT_CHANGES}: "
+                         f"- `{tag}` `<entry>`: <why>")
+    with notes.open("a", encoding="utf-8") as out:
+        out.write(f"\n### Changed content declarations\n\nCompared with `{old_tag}`:\n\n"
+                  + "".join(f"{declared[entry]}\n" for entry in sorted(changed)))
 
 
 def unpack(sha: str, into: Path) -> None:
@@ -909,7 +917,7 @@ def stable_mod_api(sha: str, tag: str, notes: Path) -> None:
         raise SystemExit(f"::error::refused: a break-glass release is a patch of {old_tag}, not {tag}")
     if same_line:
         require_stable_lineage(sha, tag, old_sha, old_tag)
-        require_unchanged_content_schema(sha, tag, old_sha, old_tag)
+        require_stable_content(sha, tag, old_sha, old_tag, notes)
     with tempfile.TemporaryDirectory() as directory:
         work = Path(directory)
         before, after = work / "before.json", work / "after.json"

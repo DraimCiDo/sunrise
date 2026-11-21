@@ -621,6 +621,7 @@ class SdkPairTests(unittest.TestCase):
                         mock.patch.object(nightly.ns, "push", return_value=True), \
                         mock.patch.object(nightly.ns, "update_state"), \
                         mock.patch.object(nightly, "sdk_ready", return_value=True), \
+                        mock.patch.object(nightly, "REPOSITORY", repo), \
                         mock.patch.object(nightly, "merged_since", return_value=[]) as since, \
                         mock.patch.object(nightly.train, "known_issues", return_value=[]), \
                         mock.patch("builtins.open", return_value=mock.MagicMock(__enter__=lambda _: io.StringIO())), \

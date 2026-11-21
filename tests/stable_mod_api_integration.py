@@ -62,7 +62,7 @@ class StableModApiIntegration(unittest.TestCase):
                         mock.patch.dict(os.environ, {"BREAK_GLASS": "false"}), \
                         mock.patch.object(nightly, "stable_parent", return_value=parent), \
                         mock.patch.object(nightly, "require_stable_lineage"), \
-                        mock.patch.object(nightly, "require_unchanged_content_schema"), \
+                        mock.patch.object(nightly, "require_stable_content"), \
                         mock.patch.object(nightly, "released_assets", side_effect=lambda sha, *names: assets[sha]), \
                         mock.patch.object(nightly, "parent_stage", return_value=stage), \
                         mock.patch.object(nightly, "unpack", side_effect=unpack), \
