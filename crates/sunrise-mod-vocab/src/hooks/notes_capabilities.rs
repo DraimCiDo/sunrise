@@ -185,8 +185,9 @@ pub trait Notes {
   `ConfigPath::root()` lists the mod's own root; `limit` must be 1 through `CONFIG_LIST_MAX` (1024), otherwise `InvalidPage` ([config and bulk storage](../how-to/mod-settings.md)).
 
 - The player's hearts through `health_hud`: within the original `minecraft:player_health` body,
-  the hook receives `HealthInputs` and the screen's GUI size. An answer replaces just the hearts.
-  Armor, food, vehicle health and air have independent slots; no answer keeps the vanilla hearts.
+  the hook receives `HealthInputs` and the screen's GUI size. An answer replaces only the heart
+  paint, keeping the vanilla height reservation used by the armor layer. No answer keeps the vanilla
+  hearts. Canceling the slot or skipping its original body also skips the reservation.
 
 - Which hearts the player's health bar draws through `player_heart_type` (NeoForge's `PlayerHeartTypeEvent`):
   each frame the HUD draws the hearts, `kind` comes in as vanilla's pick (poisoned, withered, frozen or normal) and a mod

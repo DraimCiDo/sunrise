@@ -461,6 +461,7 @@ impl Game<'_> {
             rgba(0x10, 0x10, 0x10, 0xC0),
             rgba(0x10, 0x10, 0x10, 0xD0),
         );
+        self.draw_deferred_subtitles(batch);
         self.draw_screen_phase(batch, sunrise_client::screen_draw::RenderPhase::Background);
         let title = Text::translate("advMode.setCommand", &[]);
         let tw = atlas.font.width_text(&title);

@@ -4,9 +4,10 @@
 pub trait Hooks {
     /// In the original `minecraft:player_health` body, when the player's hearts draw.
     /// `inputs` carries the HUD state and `wi`/`hi` the GUI size. Setting `draws` replaces
-    /// just the hearts; armor, food, vehicle health and air draw in separate layers.
-    /// An unset answer draws vanilla hearts. This hook does not fire if the original
-    /// hearts body is skipped (for example, under F1 or after layer Pre cancels it).
+    /// just the heart paint. The original slot still reserves its vanilla column height,
+    /// so the separate armor layer stays above the hearts. An unset answer paints vanilla
+    /// hearts. Canceling the slot or replacing it without delegating skips this hook and
+    /// reserves no height; F1 also skips the original body.
     #[hook(
         target = "sunrise_client::game::native_hooks::base::Game<'_>::native_health_hud",
         dispatch = "flat",

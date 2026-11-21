@@ -61,8 +61,10 @@ veto: to keep the side effects, allow the body to run with its paint.
 screen, including under F1 and in in-world Options. Cancel whole-HUD Pre to skip the walk and
 whole-HUD Post; the screen still draws. `minecraft:chat` is a single HUD slot even when the chat
 screen is open. The screen draws focused chat separately, so changes to the HUD slot do not
-change focused chat. For drawing above screens, use the independent foreground `gui_render_post`
-hook.
+change focused chat. The `minecraft:subtitle_overlay` slot is also visited once: when its original
+body defers subtitles to an in-game screen's background, only the paint runs there, not the
+layer events again. F1 still allows those deferred subtitles. For drawing above screens, use the
+independent foreground `gui_render_post` hook.
 
 If a retained painter or wrapper panics or is refused, its paint is discarded. A wrapper's
 completed `draw_previous()` calls keep their paint in order, without being called again. A panic
@@ -74,9 +76,11 @@ Other failures are reported each time without disabling the callback.
 
 The status layers are `minecraft:player_health` (hearts), `minecraft:armor_level`,
 `minecraft:food_level`, `minecraft:vehicle_health` and `minecraft:air_level`, in that order.
-Cancel or replace the specific slot you want to change. `health_hud` only replaces the original
-hearts drawing; it leaves the other rows alone. To draw above all the status rows, insert your
-layer above `minecraft:air_level`.
+An answer from `health_hud` replaces only the heart paint: the original `minecraft:player_health`
+body still reserves its vanilla height, so `minecraft:armor_level` starts above it. Canceling
+`minecraft:player_health`, replacing its whole body, or wrapping it without calling
+`draw_previous()` skips that reservation. To change another row, cancel or replace its own slot;
+to draw above all the status rows, insert your layer above `minecraft:air_level`.
 
 Adding a taller status bar does not move the selected item name or the action bar. The name starts
 59 GUI pixels from the bottom (45 outside survival and adventure); the action bar is centred 68

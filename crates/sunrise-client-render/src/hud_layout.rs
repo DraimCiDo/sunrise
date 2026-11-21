@@ -661,14 +661,15 @@ fn heart(
 }
 
 impl HealthHud {
-    /// `Hud.extractHealthLevel`: draw and reserve the bottom of the left status column.
+    /// `Hud.extractHealthLevel`: reserve the bottom of the left status column.
+    /// A paint replacement supplies no draw list but still advances the original heart state.
     pub fn layout_hearts(
         &mut self,
         i: &HealthInputs,
         w: i32,
         h: i32,
         heights: &mut StatusBarHeights,
-        out: &mut Vec<GuiDraw>,
+        mut out: Option<&mut Vec<GuiDraw>>,
     ) {
         let tick = i64::from(i.tick);
         let current = ceil(i.health);
@@ -708,6 +709,9 @@ impl HealthHud {
             if current + absorption <= 4 {
                 y += self.random.next_int_bound(2).unwrap_or(0);
             }
+            let Some(out) = out.as_deref_mut() else {
+                continue;
+            };
             if c < containers && c == offset_index {
                 y -= 2;
             }
@@ -1109,7 +1113,7 @@ mod player_health_tests {
         let mut heights = StatusBarHeights::default();
         let (mut hearts, mut armor, mut food, mut air) =
             (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-        hud.layout_hearts(&inputs, w, h, &mut heights, &mut hearts);
+        hud.layout_hearts(&inputs, w, h, &mut heights, Some(&mut hearts));
         HealthHud::layout_armor(inputs.armor, w, h, &mut heights, &mut armor);
         hud.layout_food(&inputs, w, h, &mut heights, &mut food);
         hud.layout_air(&inputs, w, h, &mut heights, &mut air);
@@ -1132,7 +1136,7 @@ mod player_health_tests {
         armor.clear();
         food.clear();
         air.clear();
-        hud.layout_hearts(&inputs, w, h, &mut heights, &mut same_hearts);
+        hud.layout_hearts(&inputs, w, h, &mut heights, Some(&mut same_hearts));
         HealthHud::layout_armor(inputs.armor, w, h, &mut heights, &mut armor);
         hud.layout_food(&inputs, w, h, &mut heights, &mut food);
         vehicle_health(w, h, 11, 22.0, &mut heights, &mut vehicle);

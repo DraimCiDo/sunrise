@@ -7097,6 +7097,8 @@ impl Game<'_> {
         // Gui.extractRenderState: the debug overlay comes after the screen
         // and the toasts, so it is over everything, menus included.
         self.draw_debug_overlay(&mut batch, size);
+        // Gui.extractRenderState consumes any subtitles a screen background didn't draw.
+        self.draw_deferred_subtitles(&mut batch);
         // The layers crates registered to draw over everything (`sunrise_hooks::hud`).
         sunrise_client::extras_hud::draw_top_layers(
             sunrise_hooks::hud::engine::all(),
@@ -7118,6 +7120,7 @@ impl Game<'_> {
         use sunrise_client::gui_layers::VanillaGuiLayer;
 
         self.input_hud_begin();
+        self.subtitles.deferred.set(false);
         let mut batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         batch.glint_colour = self.pvp_glint_texel();
         // GlobalSettingsUniform's GameTime, for a resource pack's text shader.
@@ -7234,12 +7237,18 @@ impl Game<'_> {
         // F1 hides vanilla drawing; RenderGuiEvent.Pre instead cancels the layer walk.
         let hide_hud = self.ui.hide_gui || self.replay.playing();
         let show_hud = !hide_hud && !gui_canceled;
-        // Hud.extractRenderState asks `Screen.isInGameUi` twice: such a screen
-        // defers the subtitles over itself, and keeps them while F1 hides the
-        // rest of the HUD.
+        // A screen that keeps the in-game UI defers subtitles to its background,
+        // even under F1. With no screen, Gui draws them after the debug overlay.
+        let book_or_sign = self.book.is_some() || self.sign_edit.is_some();
         let subtitles = subtitles(
             show_hud,
-            in_game_ui(self.screen, self.book.is_some() || self.sign_edit.is_some()),
+            if self.server_packs.prompt.is_some() {
+                Some(false)
+            } else if self.screen != Screen::Playing || book_or_sign {
+                Some(in_game_ui(self.screen, book_or_sign))
+            } else {
+                None
+            },
         );
         self.hud_layer_next = (!gui_canceled).then_some(0);
         self.ui.room = self.hud_room(w, h, show_hud);
@@ -7444,11 +7453,10 @@ impl Game<'_> {
             self.gui_layer(
                 VanillaGuiLayer::SubtitleOverlay,
                 &mut batch,
-                &mut |g, batch| {
-                    // An in-game screen can still show deferred subtitles under F1.
-                    if subtitles != Subtitles::Hidden {
-                        g.draw_subtitles(batch);
-                    }
+                &mut |g, batch| match subtitles {
+                    Subtitles::Hidden => {}
+                    Subtitles::Now => g.draw_subtitles(batch),
+                    Subtitles::Deferred => g.subtitles.deferred.set(true),
                 },
             );
             let atlas = &self.gui.atlas;
@@ -7551,6 +7559,9 @@ impl Game<'_> {
         // prompts, books and sign editors drawn over gameplay keep it, draw
         // after this point and so over what a mod drew.
         self.draw_screen_with_post_hook(&mut batch);
+        if screen == Screen::Options {
+            self.draw_controller_notice(&mut batch);
+        }
         self.draw_saving_indicator(&mut batch);
         self.draw_every_toast(&mut batch, hide_hud, gui_canceled);
         if self.server_packs.prompt.is_none() {
@@ -7635,13 +7646,12 @@ impl Game<'_> {
             g.native_player_heart_type(&mut inputs.kind);
             let mut replacement = None;
             g.native_health_hud(inputs, w, h, &mut replacement);
-            if let Some(mut replacement) = replacement {
-                paint_status(g, batch, &mut replacement);
-            } else {
-                g.health_hud
-                    .layout_hearts(inputs, w, h, &mut heights, &mut draws);
-                paint_status(g, batch, &mut draws);
-            }
+            // A health_hud answer changes only paint. The original slot still
+            // advances heart state and reserves the vanilla left-column height.
+            let vanilla_draws = replacement.is_none().then_some(&mut draws);
+            g.health_hud
+                .layout_hearts(inputs, w, h, &mut heights, vanilla_draws);
+            paint_status(g, batch, replacement.as_mut().unwrap_or(&mut draws));
             inputs.kind = vanilla_kind;
         });
         self.gui_layer(VanillaGuiLayer::ArmorLevel, batch, &mut |g, batch| {

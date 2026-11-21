@@ -329,6 +329,7 @@ impl Game<'_> {
             rgba(0x10, 0x10, 0x10, 0xC0),
             rgba(0x10, 0x10, 0x10, 0xD0),
         );
+        self.draw_deferred_subtitles(batch);
         self.draw_screen_phase(batch, sunrise_client::screen_draw::RenderPhase::Background);
         let Some(mut screen) = self.block_editor.take() else {
             self.draw_screen_phase(batch, sunrise_client::screen_draw::RenderPhase::Foreground);

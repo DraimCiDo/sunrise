@@ -277,7 +277,7 @@ fn decorations(c: &Value, atlas: &HudAtlas) -> Vec<GuiDraw> {
         // vehicle hearts last. Use the same row painters as the layer walk, but emit in
         // the order the oracle captures.
         let mut hearts = Vec::new();
-        hud.layout_hearts(&inputs, w, h, &mut heights, &mut hearts);
+        hud.layout_hearts(&inputs, w, h, &mut heights, Some(&mut hearts));
         HealthHud::layout_armor(inputs.armor, w, h, &mut heights, &mut draws);
         draws.extend(hearts);
         hud.layout_food(&inputs, w, h, &mut heights, &mut draws);

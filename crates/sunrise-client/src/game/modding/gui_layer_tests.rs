@@ -471,6 +471,237 @@ fn f1_hides_vanilla_paint_without_skipping_the_hud_walk() {
 
 #[test]
 #[ignore = "daily"]
+fn f1_subtitles_paint_in_the_container_background_without_redispatch() {
+    use sunrise_client::{hud::rgba, options_file::V, sound_engine::Notification};
+
+    crate::game::in_own_process(
+        "game::gui_layer_tests::f1_subtitles_paint_in_the_container_background_without_redispatch",
+        || {
+            const MARKER: u32 = 0xFFAE_2818;
+            struct Observer;
+            #[mod_api::__subscriptions]
+            impl Hooks for Observer {
+                fn gui_layer_pre(
+                    &self,
+                    _: &dyn ClientHost,
+                    event: &mut GuiLayerPreEvent<'_>,
+                ) -> Flow {
+                    if event.layer == "minecraft:subtitle_overlay" {
+                        log("subtitle pre");
+                    }
+                    Flow::Continue
+                }
+                fn gui_layer_post(&self, _: &dyn ClientHost, event: &mut GuiLayerPostEvent<'_>) {
+                    if event.layer == "minecraft:subtitle_overlay" {
+                        log("subtitle post");
+                    }
+                }
+                fn screen_render_background(
+                    &self,
+                    _: &dyn ClientHost,
+                    event: &mut ScreenRenderBackgroundEvent<'_>,
+                ) {
+                    event.draw.fill([0.0, 0.0, 1.0, 1.0], MARKER);
+                }
+            }
+
+            with_client_game(|game| {
+                mod_platform::__private::install(
+                    vec![ModEntry::new("observer", Box::new(Observer))].into(),
+                );
+                enter_test_world(game);
+                game.settings.show_subtitles = true;
+                game.settings
+                    .file
+                    .set("backgroundForChatOnly", V::Bool(false));
+                game.settings.text_background_opacity = 0.4;
+                let size = [640, 480];
+                game.hud(size); // Start listening before the sound plays.
+                assert_eq!(take(), ["subtitle pre", "subtitle post"]);
+                game.audio.engine.notifications.push(Notification {
+                    identifier: "minecraft:entity.player.levelup".into(),
+                    subtitle: Some("subtitles.entity.player.levelup".into()),
+                    position: game.view.position,
+                    relative: false,
+                    looping: false,
+                    range: 16.0,
+                });
+                game.tick_subtitles();
+                game.ui.hide_gui = true;
+                let is_subtitle =
+                    |v: &sunrise_client::hud::HudVertex| v.color == rgba(0, 0, 0, 102);
+
+                let frame = game.hud(size);
+                assert!(
+                    !frame.vertices.iter().any(is_subtitle),
+                    "F1 without a screen"
+                );
+                assert_eq!(take(), ["subtitle pre", "subtitle post"]);
+
+                game.set_screen(Screen::Inventory);
+                let frame = game.hud(size);
+                let mut subtitle = frame
+                    .vertices
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, v)| is_subtitle(v));
+                let (first, v) = subtitle
+                    .next()
+                    .expect("F1 keeps subtitles in the inventory");
+                assert_eq!(v.pos[1], frame.height - 40.0);
+                assert_eq!(subtitle.count(), 5, "one subtitle backdrop quad");
+                let dim = frame
+                    .vertices
+                    .iter()
+                    .position(|v| v.color == rgba(16, 16, 16, 160))
+                    .unwrap();
+                let screen = frame
+                    .vertices
+                    .iter()
+                    .position(|v| v.color == sunrise_client::hud_layout::abgr(MARKER))
+                    .unwrap();
+                assert!(
+                    dim < first && first < screen,
+                    "subtitles draw over the dimming before screen widgets"
+                );
+                assert_eq!(take(), ["subtitle pre", "subtitle post"]);
+            });
+        },
+    );
+}
+
+#[test]
+#[ignore = "daily"]
+fn options_controller_notice_paints_after_screen_post_despite_hud_cancel() {
+    use sunrise_client::{controller_notice::Notice, hud::rgba, hud_layout::abgr};
+
+    crate::game::in_own_process(
+        "game::gui_layer_tests::options_controller_notice_paints_after_screen_post_despite_hud_cancel",
+        || {
+            const MARKER: u32 = 0xFFAE_2818;
+            struct CancelHud;
+            #[mod_api::__subscriptions]
+            impl Hooks for CancelHud {
+                fn render_gui_pre(&self, _: &dyn ClientHost, _: &mut RenderGuiPreEvent) -> Flow {
+                    Flow::Cancel
+                }
+                fn screen_render_post(
+                    &self,
+                    _: &dyn ClientHost,
+                    event: &mut ScreenRenderPostEvent<'_>,
+                ) {
+                    event.draw.fill([0.0, 0.0, 1.0, 1.0], MARKER);
+                }
+            }
+
+            with_client_game(|game| {
+                mod_platform::__private::install(
+                    vec![ModEntry::new("cancel_hud", Box::new(CancelHud))].into(),
+                );
+                enter_test_world(game);
+                game.set_screen(Screen::Paused);
+                game.open_options(false);
+                game.ui.hide_gui = true;
+                game.controller_notice
+                    .raise(Notice::new("Controller disconnected", "Use the keyboard"));
+                let frame = game.hud_layers([640, 480]);
+                let post = frame
+                    .vertices
+                    .iter()
+                    .position(|v| v.color == abgr(MARKER))
+                    .unwrap();
+                // The notice plate's 1px border is emitted even at the start of the slide.
+                let notice = frame
+                    .vertices
+                    .iter()
+                    .position(|v| v.color == rgba(255, 255, 255, 0x5A))
+                    .unwrap();
+                assert!(notice > post);
+            });
+        },
+    );
+}
+
+#[test]
+#[ignore = "daily"]
+fn heart_only_replacement_keeps_armor_above_the_original_heart_rows() {
+    use mod_api::{HealthHudEvent, client::hud_layout::GuiDraw};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use sunrise_client::hud_layout::abgr;
+
+    crate::game::in_own_process(
+        "game::gui_layer_tests::heart_only_replacement_keeps_armor_above_the_original_heart_rows",
+        || {
+            const HEART: u32 = 0xFFFF_0042;
+            static CANCEL_HEARTS: AtomicBool = AtomicBool::new(false);
+            struct Hearts;
+            #[mod_api::__subscriptions]
+            impl Hooks for Hearts {
+                fn health_hud(
+                    &self,
+                    _: &dyn ClientHost,
+                    event: &mut HealthHudEvent<'_>,
+                ) -> Option<Vec<GuiDraw>> {
+                    let x = event.wi / 2 - 91;
+                    let y = event.hi - 39;
+                    Some(vec![GuiDraw::Fill {
+                        x0: x,
+                        y0: y,
+                        x1: x + 9,
+                        y1: y + 9,
+                        color: HEART,
+                    }])
+                }
+                fn gui_layer_pre(
+                    &self,
+                    _: &dyn ClientHost,
+                    event: &mut GuiLayerPreEvent<'_>,
+                ) -> Flow {
+                    if event.layer == "minecraft:player_health"
+                        && CANCEL_HEARTS.load(Ordering::Relaxed)
+                    {
+                        Flow::Cancel
+                    } else {
+                        Flow::Continue
+                    }
+                }
+            }
+
+            with_client_game(|game| {
+                mod_platform::__private::install(
+                    vec![ModEntry::new("hearts", Box::new(Hearts))].into(),
+                );
+                enter_test_world(game);
+                game.creative = false;
+                let player = game.player.as_mut().unwrap();
+                for (name, value) in [("minecraft:armor", 2.0), ("minecraft:max_health", 40.0)] {
+                    let key = player.attributes.key(name).unwrap();
+                    let handle = player.attributes.get_instance(Some(key)).unwrap().unwrap();
+                    player
+                        .attributes
+                        .edit(&handle, |v, observer| v.set_base_value(value, observer))
+                        .unwrap();
+                }
+                let rect = game.gui.atlas.gui_rect("hud/armor_full").unwrap();
+                let armor_uv = [rect.u0, rect.v0];
+                for (canceled, armor_offset) in [(false, 59.0), (true, 39.0)] {
+                    CANCEL_HEARTS.store(canceled, Ordering::Relaxed);
+                    let frame = game.hud_layers([640, 480]);
+                    let armor = frame.vertices.iter().find(|v| v.uv == armor_uv).unwrap();
+                    assert_eq!(armor.pos[1], frame.height - armor_offset);
+                    let heart = frame.vertices.iter().find(|v| v.color == abgr(HEART));
+                    assert_eq!(
+                        heart.map(|v| v.pos[1]),
+                        (!canceled).then_some(frame.height - 39.0)
+                    );
+                }
+            });
+        },
+    );
+}
+
+#[test]
+#[ignore = "daily"]
 fn a_panicking_hud_painter_shows_its_error_toast_under_f1() {
     use std::time::{Duration, Instant};
     use sunrise_client::{text::Text, toasts::SystemToast};

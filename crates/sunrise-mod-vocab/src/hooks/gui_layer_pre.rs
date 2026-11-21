@@ -18,8 +18,9 @@ pub trait Hooks {
     /// `scoreboard_sidebar`, `subtitle_overlay`, `chat` and `tab_list`. Conditions like
     /// F1 or not riding a mount only skip the original vanilla drawing, not these hooks.
     /// The HUD chat slot is visited once, even while the chat screen is open. Focused
-    /// chat draws separately in that screen, without another layer event. Camera overlays
-    /// and the debug screen are not HUD layers. The selected item name and action bar keep vanilla's
+    /// chat draws separately in that screen, without another layer event. Deferred subtitle
+    /// paint also runs without another event; canceling its original slot prevents scheduling it.
+    /// Camera overlays and the debug screen are not HUD layers. The selected item name and action bar keep vanilla's
     /// fixed positions; adding bars doesn't move them. Cancel and redraw the
     /// corresponding layer if it needs to move.
     #[hook(

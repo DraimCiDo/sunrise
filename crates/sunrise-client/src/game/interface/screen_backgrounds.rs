@@ -131,6 +131,8 @@ impl Game<'_> {
                 rgba(16, 16, 16, 160),
             );
         }
+        // Screen.extractBackground draws deferred subtitles after its dimming and before widgets.
+        self.draw_deferred_subtitles(batch);
     }
     /// `LevelExtractor` / `LevelRenderer`: the world border wall this frame.
     pub(super) fn border_draw(
