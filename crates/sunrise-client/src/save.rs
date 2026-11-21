@@ -28,7 +28,7 @@ pub mod level_mods;
 mod respawn;
 mod writes;
 pub use writes::RecordSaveFailures;
-use writes::{Outstanding, QueuedWrite, Writer};
+use writes::{Outstanding, Writer};
 
 use crate::{
     Result,
@@ -2358,7 +2358,6 @@ fn upgrade_record<'a>(
 /// Chunk and entity records waiting for the writer thread, by (entities?,
 /// x, z): reads see them before the region files do.
 type PendingWrites = Mutex<HashMap<(Folder, i32, i32), (u64, Record)>>;
-type WriteBatch = (Folder, Vec<QueuedWrite>);
 /// The region folders of a dimension.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Folder {

@@ -175,6 +175,12 @@ pub(super) struct CompressedWrite {
 
 pub(super) type Prepared = io::Result<Option<CompressedWrite>>;
 
+/// A single encoder cannot unwind the writer or strand the compression pool's other jobs.
+pub(super) fn catch_encoding_panic<T>(encode: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(encode))
+        .unwrap_or_else(|_| Err(io::Error::other("chunk record encoding panicked")))
+}
+
 pub(super) fn compress_record(
     record: &Record,
     compression: Compression,
@@ -223,8 +229,9 @@ pub(super) fn compress_records_with_pool(
         return Vec::new();
     }
     let compression = Compression::selected();
-    let compress =
-        move |record: &Record| compress_record(record, compression, timestamp, Limits::saved());
+    let compress = move |record: &Record| {
+        catch_encoding_panic(|| compress_record(record, compression, timestamp, Limits::saved()))
+    };
     if count < MIN_PARALLEL_CHUNKS || pool.workers() == 0 {
         return records.iter().map(|(_, r)| compress(r)).collect();
     }
@@ -235,8 +242,7 @@ pub(super) fn compress_records_with_pool(
     let recs = Arc::clone(&records_arc);
     let res_lock = Arc::clone(&results);
     pool.run(count, move |i| {
-        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| compress(&recs[i])))
-            .unwrap_or_else(|_| Err(io::Error::other("chunk compression worker panicked")));
+        let res = compress(&recs[i]);
         res_lock.lock().unwrap_or_else(|e| e.into_inner())[i] = Some(res);
     });
 

@@ -65,13 +65,17 @@ impl DiskRecord {
     fn encode(&self) -> std::io::Result<Option<Arc<NamedTag>>> {
         self.encoded
             .get_or_init(|| {
-                let entries = self.runtime.run(&self.job).map_err(|e| e.to_string())?;
-                let mut tag = self
-                    .original
-                    .tag_for_write()
-                    .ok_or("captured chunk has no disk record")?;
-                replace_entries(Arc::make_mut(&mut tag), entries).map_err(|e| e.to_string())?;
-                Ok(Some(tag))
+                // The writer can encode a captured callback before the compression pool. Cache
+                // panics as refusals here too, so pending readers are released by OnceLock.
+                super::compression_pool::catch_encoding_panic(|| {
+                    let entries = self.runtime.run(&self.job)?;
+                    let mut tag = self.original.tag_for_write().ok_or_else(|| {
+                        std::io::Error::other("captured chunk has no disk record")
+                    })?;
+                    replace_entries(Arc::make_mut(&mut tag), entries)?;
+                    Ok(Some(tag))
+                })
+                .map_err(|e| e.to_string())
             })
             .clone()
             .map_err(std::io::Error::other)

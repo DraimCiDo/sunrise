@@ -7,12 +7,13 @@ use sunrise_core::{
 use sunrise_world::region::RegionFile;
 
 use super::{
-    Chunk, ChunkExtras, Compression, Encoding, LevelShape, QueuedWrite, Record,
+    Chunk, ChunkExtras, Compression, Encoding, LevelShape, Record,
     compression_pool::{
         CompressedWrite, CompressionPool, compress_record, compress_records,
         compress_records_with_pool,
     },
     write_chunk_record, write_prepared_region_records,
+    writes::QueuedWrite,
 };
 
 #[test]
@@ -100,6 +101,54 @@ fn full_record_overflow_discards_edits_without_losing_current_chunk_data() {
             entities[0].get("stored"),
             if admitted { None } else { Some(&Tag::Int(7)) }
         );
+    }
+}
+
+#[test]
+fn an_encoder_panic_does_not_strand_serial_or_parallel_writes() {
+    use super::{Folder, RecordSaveFailures, SaveDir};
+    use std::{sync::mpsc, time::Duration};
+
+    for count in [3, 4] {
+        let dir = tempfile::tempdir().unwrap();
+        let open = || SaveDir::new(dir.path().to_path_buf(), LevelShape::OVERWORLD, None);
+        let save = open();
+        save.write_records("region", vec![((1, 0), Some(sample_tag(10)))], true)
+            .unwrap();
+        let records = (0..count)
+            .map(|x| {
+                let record = if x == 1 {
+                    Record::TestEncode(Arc::new(|| panic!("injected encoding panic")))
+                } else {
+                    Record::Tag(Arc::new(sample_tag(20 + x)))
+                };
+                ((x, 0), record)
+            })
+            .collect();
+        let (send, receive) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            save.queue(Folder::Region, records, false).unwrap();
+            let error = save
+                .flush()
+                .unwrap_err()
+                .downcast::<RecordSaveFailures>()
+                .unwrap();
+            send.send((error, save.active_chunk_writes())).unwrap();
+        });
+        let (error, active) = receive
+            .recv_timeout(Duration::from_secs(1))
+            .expect("flush waited indefinitely for the panicking batch");
+        worker.join().unwrap();
+        assert!(error.to_string().contains("region 1,0:"), "{error}");
+        assert_eq!(active, 0);
+        let disk = open();
+        for x in 0..count {
+            let marker = if x == 1 { 10 } else { 20 + x };
+            assert_eq!(
+                disk.raw_chunk(x, 0).unwrap().tag.get("xPos"),
+                Some(&Tag::Int(marker))
+            );
+        }
     }
 }
 

@@ -47,6 +47,56 @@ pub(super) struct Writer {
     thread: std::thread::JoinHandle<()>,
 }
 
+struct WriteBatch {
+    folder: Folder,
+    jobs: Vec<QueuedWrite>,
+    completion: BatchCompletion,
+}
+
+#[derive(Default)]
+struct WriteGroup {
+    jobs: Vec<QueuedWrite>,
+    completion: Option<BatchCompletion>,
+}
+
+/// Owns a submission's contribution to both writer counts from send to completion.
+/// On unwind, this accounts for the current group, unprocessed groups and queued messages.
+struct BatchCompletion {
+    outstanding: Arc<Outstanding>,
+    chunks: usize,
+    batches: usize,
+}
+
+impl BatchCompletion {
+    fn merge(&mut self, mut other: Self) {
+        self.chunks += other.chunks;
+        self.batches += std::mem::take(&mut other.batches);
+    }
+}
+
+impl Drop for BatchCompletion {
+    fn drop(&mut self) {
+        if self.batches == 0 {
+            return;
+        }
+        let outstanding = &self.outstanding;
+        if std::thread::panicking() {
+            outstanding
+                .error
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get_or_insert_with(|| "the region writer panicked".into());
+        }
+        let mut count = outstanding
+            .count
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        outstanding.chunks.fetch_sub(self.chunks, Ordering::Relaxed);
+        *count -= self.batches;
+        outstanding.done.notify_all();
+    }
+}
+
 /// The sole owner of completion for a queued record. Pending readers borrow
 /// only the record; dropping this job releases them even on cancellation,
 /// coalescing, or an unwind before the record reaches the writer.
@@ -136,6 +186,7 @@ impl SaveDir {
             } else {
                 records
             };
+            let writer = writer.get_or_insert_with(|| self.start_writer());
             let mut batch = Vec::with_capacity(records.len());
             {
                 let mut pending = self.pending.lock().map_err(|_| "pending writes poisoned")?;
@@ -158,26 +209,27 @@ impl SaveDir {
                 .count
                 .lock()
                 .map_err(|_| "writer poisoned")? += 1;
-            let writer = writer.get_or_insert_with(|| self.start_writer());
             let chunks = if folder == Folder::Region {
                 batch.len()
             } else {
                 0
             };
             self.outstanding.chunks.fetch_add(chunks, Ordering::Relaxed);
-            if writer.send.send((folder, batch)).is_err() {
-                self.outstanding.chunks.fetch_sub(chunks, Ordering::Relaxed);
-                *self
-                    .outstanding
+            if let Err(unsent) = writer.send.send(WriteBatch {
+                folder,
+                jobs: batch,
+                completion: BatchCompletion {
+                    outstanding: self.outstanding.clone(),
+                    chunks,
+                    batches: 1,
+                },
+            }) {
+                self.outstanding
                     .error
                     .lock()
-                    .map_err(|_| "writer poisoned")? = Some("the region writer stopped".into());
-                *self
-                    .outstanding
-                    .count
-                    .lock()
-                    .map_err(|_| "writer poisoned")? -= 1;
-                self.outstanding.done.notify_all();
+                    .map_err(|_| "writer poisoned")?
+                    .get_or_insert_with(|| "the region writer stopped".into());
+                drop(unsent);
                 return Err("the region writer stopped".into());
             }
         }
@@ -208,20 +260,30 @@ impl SaveDir {
                     Folder::Poi => 2,
                 };
                 while let Ok(first) = receive.recv() {
-                    let mut groups: [(Vec<QueuedWrite>, usize); 3] = Default::default();
+                    let mut groups: [WriteGroup; 3] = Default::default();
                     let mut total = 0;
                     let mut next = Some(first);
-                    while let Some((kind, batch)) = next.take() {
-                        total += batch.len();
-                        let group = &mut groups[slot(kind)];
-                        group.0.extend(batch);
-                        group.1 += 1;
+                    while let Some(WriteBatch {
+                        folder,
+                        jobs,
+                        completion,
+                    }) = next.take()
+                    {
+                        total += jobs.len();
+                        let group = &mut groups[slot(folder)];
+                        group.jobs.extend(jobs);
+                        if let Some(group) = &mut group.completion {
+                            group.merge(completion);
+                        } else {
+                            group.completion = Some(completion);
+                        }
                         if total >= MAX_PASS_CHUNKS {
                             break;
                         }
                         next = receive.try_recv().ok();
                     }
-                    for (i, (batch, batch_count)) in groups.into_iter().enumerate() {
+                    for (i, group) in groups.into_iter().enumerate() {
+                        let batch = &group.jobs;
                         if batch.is_empty() {
                             continue;
                         }
@@ -262,7 +324,7 @@ impl SaveDir {
                                 if let Ok(mut pending) = pending.lock() {
                                     let mut retry = (kind == Folder::Region)
                                         .then(|| outstanding.failed_saves.lock().unwrap());
-                                    for job in &batch {
+                                    for job in batch {
                                         let key = (kind, job.key.0, job.key.1);
                                         if pending.get(&key).is_none_or(|p| p.0 != job.seq) {
                                             continue;
@@ -299,7 +361,7 @@ impl SaveDir {
                                     && let Ok(pending) = pending.lock()
                                 {
                                     let mut retry = outstanding.failed_saves.lock().unwrap();
-                                    for job in &batch {
+                                    for job in batch {
                                         let (x, z) = job.key;
                                         if pending
                                             .get(&(kind, x, z))
@@ -313,21 +375,12 @@ impl SaveDir {
                                 let message = format!("failed to write {folder} files: {e}");
                                 log::warn!("Sunrise: {message}");
                                 *outstanding.error.lock().unwrap() = Some(message);
-                                for job in &batch {
+                                for job in batch {
                                     crate::chunk_io::report_save_failure(
                                         &root, job.key.0, job.key.1, &e,
                                     );
                                 }
                             }
-                        }
-                        let chunk_count = batch.len();
-                        drop(batch);
-                        if kind == Folder::Region {
-                            outstanding.chunks.fetch_sub(chunk_count, Ordering::Relaxed);
-                        }
-                        if let Ok(mut count) = outstanding.count.lock() {
-                            *count -= batch_count;
-                            outstanding.done.notify_all();
                         }
                     }
                 }
