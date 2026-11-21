@@ -836,33 +836,28 @@ def require_stable_lineage(sha: str, tag: str, old_sha: str, old_tag: str) -> No
                          "cherry-pick fixes on this line or use a new major")
 
 
-# Until #3817 exports the content declarations, guard the owning manifest and mod-content readers,
-# not the vanilla pack codecs or the native-only tables (which already pin an exact build).
+# Until #3817 exports the content declarations, guard every file that reads a manifest or a mod-content
+# declaration, by folder and prefix so a new or moved reader is covered without an edit here. Left out: tests, the
+# native-only tables (which already pin an exact build) and the vanilla pack codecs.
 CONTENT_SCHEMA_PATHS = (
     "crates/sunrise-mod-package/src/manifest.rs",
-    "crates/sunrise-mod-package/src/manifest/hash.rs",
-    "crates/sunrise-mod-package/src/manifest/jar.rs",
-    "crates/sunrise-mod-package/src/manifest/runtime_files.rs",
+    "crates/sunrise-mod-package/src/manifest/",
     "crates/sunrise-mod-package/src/content.rs",
-    "crates/sunrise-mod-package/src/content/entity_sounds.rs",
-    "crates/sunrise-mod-package/src/content/entity_type.rs",
-    "crates/sunrise-mod-package/src/content/fluid_interaction.rs",
-    "crates/sunrise-client/src/mod_content.rs",
-    "crates/sunrise-client/src/mod_content/load_conditions.rs",
-    "crates/sunrise-client/src/mod_content_biomes.rs",
-    "crates/sunrise-client/src/mod_content_carvers.rs",
+    "crates/sunrise-mod-package/src/content/",
+    "crates/sunrise-client/src/mod_content*",
     "crates/sunrise-client-render/src/connected/files.rs",
     "crates/sunrise-world/src/conditions.rs",
+    ":(exclude)*_tests.rs",
+    ":(exclude)crates/sunrise-mod-package/src/manifest/loops.rs",
+    ":(exclude)crates/sunrise-mod-package/src/manifest/mixin.rs",
 )
 
 
 def require_unchanged_content_schema(sha: str, tag: str, old_sha: str, old_tag: str) -> None:
-    changed = subprocess.run(["git", "diff", "--name-only", "-z", "--no-renames", old_sha, sha, "--",
-                              *CONTENT_SCHEMA_PATHS], cwd=REPOSITORY, check=True, capture_output=True, text=True).stdout
+    changed = git("diff", "--name-only", "--no-renames", old_sha, sha, "--", *CONTENT_SCHEMA_PATHS)
     if changed:
-        paths = ", ".join(changed.removesuffix("\0").split("\0"))
-        raise SystemExit(f"::error::refused: {tag} changes content declaration files since {old_tag}: {paths}. "
-                         "Patches and minors cannot change these files until #3817.")
+        raise SystemExit(f"::error::refused: {tag} changes content declaration files since {old_tag}: "
+                         f"{', '.join(changed.splitlines())}. Patches and minors cannot change these files until #3817.")
 
 
 def unpack(sha: str, into: Path) -> None:

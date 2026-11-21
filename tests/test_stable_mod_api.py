@@ -379,22 +379,25 @@ class StableModApiTests(unittest.TestCase):
         repo = self.notes.with_name("repo")
         repo.mkdir()
         manifest = "crates/sunrise-mod-package/src/manifest.rs"
-        declaration = "crates/sunrise-mod-package/src/content/entity_type.rs"
+        # A reader file the guard has never heard of is covered by its folder or prefix.
+        declarations = ("crates/sunrise-mod-package/src/content/new_reader.rs",
+                        "crates/sunrise-client/src/mod_content_structures.rs")
         unrelated = "crates/sunrise-mod-package/src/content/entity_sounds_tests.rs"
+        native_only = "crates/sunrise-mod-package/src/manifest/mixin.rs"
         with chdir(repo):
             git("init", "--initial-branch=main")
             git("config", "user.name", "Release Test")
             git("config", "user.email", "release-test@example.invalid")
             git("commit", "--allow-empty", "-m", "previous stable")
             previous = git("rev-parse", "HEAD")
-            for name in (unrelated, manifest, declaration):
+            for name in (unrelated, native_only, manifest, *declarations):
                 Path(name).parent.mkdir(parents=True, exist_ok=True)
                 Path(name).touch()
                 git("add", name)
                 git("commit", "-m", name)
             schema_edit = git("rev-parse", "HEAD")
             # Keep the checkout at the unrelated edit to prove the diff uses the passed commits.
-            git("switch", "--detach", "HEAD~2")
+            git("switch", "--detach", "HEAD~3")
             unrelated_edit = git("rev-parse", "HEAD")
 
         parent = nightly.train.Release(PREVIOUS, previous, "")
@@ -417,8 +420,10 @@ class StableModApiTests(unittest.TestCase):
                     with self.assertRaisesRegex(SystemExit, "changes content declaration files") as refused:
                         nightly.stable_mod_api(schema_edit, tag, self.notes)
                     self.assertIn(manifest, str(refused.exception))
-                    self.assertIn(declaration, str(refused.exception))
-                    self.assertNotIn(unrelated, str(refused.exception))
+                    for declaration in declarations:
+                        self.assertIn(declaration, str(refused.exception))
+                    for allowed in (unrelated, native_only):
+                        self.assertNotIn(allowed, str(refused.exception))
             nightly.stable_mod_api(schema_edit, "26.3-1.0.0", self.notes)
 
     def test_stable_mod_api_command_requires_a_full_commit_sha(self):
