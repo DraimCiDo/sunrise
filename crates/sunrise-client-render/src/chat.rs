@@ -2098,8 +2098,26 @@ impl ChatScreen {
             self.history_pos = new;
         }
     }
+    /// Classify a live left click before passing it to [`Self::click`].
+    /// Suggestion clicks leave the clock alone; input misses still advance it.
+    pub fn live_double_click(&mut self, x: f64, y: f64) -> bool {
+        if self
+            .suggestions
+            .as_ref()
+            .is_some_and(|l| l.contains(x as i32, y as i32))
+        {
+            return false;
+        }
+        // MouseHandler.onButton: the same screen's click within 250 ms counts as double.
+        let now = std::time::Instant::now();
+        let double_click = self
+            .last_click
+            .is_some_and(|at| now.duration_since(at).as_millis() < 250);
+        self.last_click = Some(now);
+        double_click
+    }
     /// A left click (`ChatScreen.mouseClicked`): a suggestion, else the input.
-    pub fn click(&mut self, m: &Measure, c: &Commands, x: f64, y: f64) -> bool {
+    pub fn click(&mut self, m: &Measure, c: &Commands, x: f64, y: f64, double_click: bool) -> bool {
         if let Some(mut l) = self.suggestions.take() {
             let (xi, yi) = (x as i32, y as i32);
             if l.contains(xi, yi) {
@@ -2113,15 +2131,8 @@ impl ChatScreen {
             }
             self.suggestions = Some(l);
         }
-        // MouseHandler: the same screen's click within 250 ms is a double
-        // click, which selects the word under the pointer.
-        let now = std::time::Instant::now();
-        let double = self
-            .last_click
-            .is_some_and(|at| now.duration_since(at).as_millis() < 250);
-        self.last_click = Some(now);
         if self.input.contains(x, y) {
-            self.input.click(m, x, false, double);
+            self.input.click(m, x, false, double_click);
             return true;
         }
         false
