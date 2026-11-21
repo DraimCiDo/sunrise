@@ -1,5 +1,6 @@
 //! Prepared, data-enabled modifiers and their one-pass roll capability.
 #[cfg(test)]
+#[path = "global_modifiers_tests.rs"]
 mod tests;
 use super::{LootContext, LootStack};
 use crate::conditions::LoadConditions;
