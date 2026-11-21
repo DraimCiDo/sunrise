@@ -969,28 +969,62 @@ fn upgrade_saved_data(data: &Path, progress: &Progress) -> io::Result<()> {
 
 /// A JSON file of the player folders as NBT for the fixes (`JsonOps` and
 /// `NbtOps` see the same structure), booleans kept apart.
-fn json_to_tag(j: &Json) -> Tag {
+#[derive(Clone, Copy)]
+pub(super) enum AdvancementJson {
+    File,
+    Entry,
+    Criteria,
+    Other,
+}
+
+impl AdvancementJson {
+    fn child(self, key: &[u16]) -> Self {
+        match self {
+            Self::File => Self::Entry,
+            Self::Entry if key.iter().copied().eq("criteria".encode_utf16()) => Self::Criteria,
+            _ => Self::Other,
+        }
+    }
+}
+
+pub(super) fn json_to_tag(j: &Json, context: AdvancementJson) -> Tag {
+    if matches!(context, AdvancementJson::Criteria) {
+        return super::advancement_criteria::read(j);
+    }
     match j {
         Json::Bool(b) => Tag::compound([("\u{0}bool", Tag::Byte(i8::from(*b)))]),
-        Json::Arr(items) => Tag::List(items.iter().map(json_to_tag).collect()),
+        Json::Arr(items) => Tag::List(
+            items
+                .iter()
+                .map(|v| json_to_tag(v, AdvancementJson::Other))
+                .collect(),
+        ),
         Json::Obj(entries) => Tag::Compound(
             entries
                 .iter()
-                .map(|(k, v)| (JavaString(k.clone()), json_to_tag(v)))
+                .map(|(k, v)| (JavaString(k.clone()), json_to_tag(v, context.child(k))))
                 .collect(),
         ),
         other => json::to_nbt(other).unwrap_or(Tag::End),
     }
 }
-fn tag_to_json(t: &Tag) -> Json {
+pub(super) fn tag_to_json(t: &Tag, context: AdvancementJson) -> Json {
+    if matches!(context, AdvancementJson::Criteria) {
+        return super::advancement_criteria::write(t);
+    }
     match t {
         Tag::Compound(c) if c.len() == 1 && c.contains_key(&JavaString::from("\u{0}bool")) => {
             Json::Bool(as_int(t.get("\u{0}bool"), 0) != 0)
         }
-        Tag::List(items) => Json::Arr(items.iter().map(tag_to_json).collect()),
+        Tag::List(items) => Json::Arr(
+            items
+                .iter()
+                .map(|v| tag_to_json(v, AdvancementJson::Other))
+                .collect(),
+        ),
         Tag::Compound(c) => Json::Obj(
             c.iter()
-                .map(|(k, v)| (k.0.clone(), tag_to_json(v)))
+                .map(|(k, v)| (k.0.clone(), tag_to_json(v, context.child(&k.0))))
                 .collect(),
         ),
         other => json::from_nbt(other),
@@ -1006,7 +1040,12 @@ fn upgrade_json_to(path: &Path, ty: Ty, to: i32) -> io::Result<()> {
     let units: Vec<u16> = text.encode_utf16().collect();
     let parsed = json::parse_lenient(&units)
         .ok_or_else(|| invalid(format!("bad JSON in {}", path.display())))?;
-    let mut tag = json_to_tag(&parsed);
+    let context = if ty == Ty::Advancements {
+        AdvancementJson::File
+    } else {
+        AdvancementJson::Other
+    };
+    let mut tag = json_to_tag(&parsed, context);
     let from = super::dynamic::as_int(tag.get("DataVersion"), 1343);
     if ty == Ty::Advancements {
         // `PlayerAdvancements`: the version field is not part of the data.
@@ -1014,7 +1053,7 @@ fn upgrade_json_to(path: &Path, ty: Ty, to: i32) -> io::Result<()> {
     }
     update(ty, &mut tag, from, to);
     put(&mut tag, "DataVersion", Tag::Int(to));
-    let out = json::to_stable_string(&tag_to_json(&tag));
+    let out = json::to_stable_string(&tag_to_json(&tag, context));
     fs::write(path, String::from_utf16_lossy(&out))
 }
 
@@ -1198,6 +1237,36 @@ pub fn upgrade_world_with(base: &Path, progress: &UpgradeProgress) -> io::Result
 #[cfg(test)]
 mod upgrade_tests {
     use super::*;
+
+    #[test]
+    fn advancement_biome_rename_keeps_the_last_json_criterion() {
+        // CavesAndCliffsRenames folds wooded_hills into forest at 2838.
+        for (first, second) in [("forest", "wooded_hills"), ("wooded_hills", "forest")] {
+            let advancement = "minecraft:adventure/adventuring_time";
+            let input = Json::object(vec![(
+                advancement,
+                Json::object(vec![(
+                    "criteria",
+                    Json::object(vec![
+                        (&format!("minecraft:{first}"), Json::string("first")),
+                        (&format!("minecraft:{second}"), Json::string("last")),
+                    ]),
+                )]),
+            )]);
+            let mut data = json_to_tag(&input, AdvancementJson::File);
+            update(Ty::Advancements, &mut data, 2837, 2838);
+            assert_eq!(
+                tag_to_json(&data, AdvancementJson::File),
+                Json::object(vec![(
+                    advancement,
+                    Json::object(vec![(
+                        "criteria",
+                        Json::object(vec![("minecraft:forest", Json::string("last"))])
+                    )]),
+                )])
+            );
+        }
+    }
 
     fn level_version(base: &Path) -> i32 {
         let root = read_dat(&base.join("level.dat")).unwrap().unwrap();

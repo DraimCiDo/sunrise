@@ -10,6 +10,7 @@
 //! fix of the server data is ported ([`OLDEST_SUPPORTED`]). The fixes of client
 //! files (options, debug profiles) are not ported either (creative toolbars in
 //! `hotbar.nbt` are ported via [`update_hotbar`]).
+mod advancement_criteria;
 mod block_state_data;
 mod chunk_flatten;
 mod chunk_leaves;
