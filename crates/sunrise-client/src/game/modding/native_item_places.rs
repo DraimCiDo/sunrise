@@ -20,7 +20,7 @@ impl Game<'_> {
                 Some(*player)
             }
             ItemPlace::PlayerCursor { menu } => self
-                .menu_carried(*menu)
+                .resolve_server_menu(*menu)
                 .map(|_| menu.fields().player.uuid()),
             _ => None,
         }
@@ -229,13 +229,24 @@ impl Game<'_> {
             _ => return Err(CraftedByError::NotHeld),
         };
         let player = menu.fields().player;
-        let handler_stack = if slot.is_some_and(|slot| {
-            matches!(
-                self.menu_slot_backing(menu, slot),
-                Some(MenuSlotBacking::Place(_))
-            )
-        }) {
-            // The handler owns this stack, not the slot's display mirror.
+        let (handler_owned, engine_stack) = {
+            let view = self
+                .resolve_server_menu(menu)
+                .ok_or(CraftedByError::NotHeld)?;
+            match slot {
+                Some(slot) => {
+                    let backing = view.slot_backing(slot).ok_or(CraftedByError::NotHeld)?;
+                    if matches!(backing, MenuSlotBacking::Place(_)) {
+                        (true, None)
+                    } else {
+                        (false, view.slot_stack(slot, backing).flatten())
+                    }
+                }
+                None => (false, view.carried().clone()),
+            }
+        };
+        // Call a handler only after releasing the view; the display mirror does not own the item.
+        let handler_stack = if handler_owned {
             Some(place.stack(self).ok_or(CraftedByError::NotHeld)?)
         } else {
             None
@@ -243,14 +254,10 @@ impl Game<'_> {
         let mut held = if let Some(stack) = &handler_stack {
             super::api_values::stack_value(stack).map_err(|_| CraftedByError::Unavailable)?
         } else {
-            // Read engine storage directly: its API snapshot omits the transient directive.
-            match slot {
-                Some(slot) => self.menu_slot(menu, slot),
-                None => self.menu_carried(menu),
-            }
-            .flatten()
-            .filter(|stack| stack.count > 0 && stack.item.as_ref() != "minecraft:air")
-            .ok_or(CraftedByError::NotHeld)?
+            // Keep the engine stack: an API snapshot omits the transient post-processing directive.
+            engine_stack
+                .filter(|stack| stack.count > 0 && stack.item.as_ref() != "minecraft:air")
+                .ok_or(CraftedByError::NotHeld)?
         };
         let item = held.item.clone();
         if held.item.as_ref() == "minecraft:filled_map"
@@ -348,11 +355,14 @@ impl Game<'_> {
         let mut rest = stack.clone();
         if let ItemPlace::MenuSlot { menu, slot } = place {
             // The slot alone: what doesn't fit stays out.
-            if self.native_menu_storage(*menu, *slot).is_none() {
+            let Some((target, _)) = self
+                .resolve_server_menu(*menu)
+                .and_then(|view| view.storage(*slot))
+            else {
                 return 0;
-            }
+            };
             self.journal_menus(menu.fields().player);
-            if let Some(held) = self.native_menu_storage(*menu, *slot) {
+            if let Some(held) = self.menu_storage_mut(target) {
                 fill(held, &mut rest);
             }
             return stack.count - rest.count;
@@ -480,7 +490,10 @@ impl Game<'_> {
             ..held.clone()
         };
         if let ItemPlace::MenuSlot { menu, slot } = place {
-            let Some(held) = self.native_menu_storage(*menu, *slot) else {
+            let Some((target, held)) = self
+                .resolve_server_menu(*menu)
+                .and_then(|view| view.storage(*slot))
+            else {
                 return 0;
             };
             let took = taken(held.as_ref());
@@ -488,7 +501,7 @@ impl Game<'_> {
                 return 0;
             }
             self.journal_menus(menu.fields().player);
-            if let Some(held) = self.native_menu_storage(*menu, *slot) {
+            if let Some(held) = self.menu_storage_mut(target) {
                 *held = held.as_ref().map(|h| left(h, took)).filter(|h| h.count > 0);
             }
             return took;

@@ -193,9 +193,12 @@ impl Menu {
     }
 
     /// The container slot of a mod menu type's crafting result, and what it shows.
-    fn craft_result(&self) -> Option<(usize, Option<ItemStack>)> {
+    fn craft_result(&self) -> Option<(usize, Option<&ItemStack>)> {
         let c = self.mod_type?.crafting?;
-        Some((c.result, self.craft.as_ref().and_then(|c| c.result.clone())))
+        Some((
+            c.result,
+            self.craft.as_ref().and_then(|c| c.result.as_ref()),
+        ))
     }
 }
 
@@ -366,14 +369,14 @@ impl Slots {
         if let Some((slot, result)) = guest.menu.as_ref().and_then(Menu::craft_result)
             && slot == n
         {
-            return result;
+            return result.cloned();
         }
         if let Some((range, links)) = self.links_of(guest)
             && range.contains(&n)
         {
-            return read_links(world, links, range.len())
-                .into_iter()
+            return linked_items(world, links)
                 .nth(n - range.start)
+                .cloned()
                 .flatten();
         }
         for k in self.halves() {
@@ -435,7 +438,7 @@ impl Slots {
         if let Some((slot, result)) = guest.menu.as_ref().and_then(Menu::craft_result)
             && let Some(item) = items.get_mut(slot)
         {
-            *item = result;
+            *item = result.cloned();
         }
         if let Some((range, links)) = self.links_of(guest) {
             for (k, stack) in range.zip(read_links(world, links, usize::MAX)) {
@@ -517,11 +520,16 @@ pub fn read_links(
     links: &[(i32, i32, i32)],
     count: usize,
 ) -> Vec<Option<ItemStack>> {
+    linked_items(world, links).take(count).cloned().collect()
+}
+
+fn linked_items<'a>(
+    world: &'a World,
+    links: &'a [(i32, i32, i32)],
+) -> impl Iterator<Item = &'a Option<ItemStack>> {
     links
         .iter()
-        .flat_map(|&k| shown(world, k).unwrap_or_default().iter().cloned())
-        .take(count)
-        .collect()
+        .flat_map(move |&k| shown(world, k).unwrap_or_default())
 }
 
 /// Stores `stacks` in the linked containers `links`, their slots in order

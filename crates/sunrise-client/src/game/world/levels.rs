@@ -528,10 +528,7 @@ impl Levels {
     /// The world of the level not in place whose dimension is `dimension`
     /// (`minecraft:the_nether`), found without collecting the parked levels.
     pub(super) fn parked_world_of(&self, dimension: &str) -> Option<&World> {
-        self.parked
-            .iter()
-            .find(|(dim, _)| dim.id() == dimension)
-            .map(|(_, level)| &level.world)
+        Some(&self.parked_of(dimension)?.world)
     }
 
     /// The world of the level not in place whose dimension is `dimension`, to
@@ -632,10 +629,14 @@ impl Levels {
 
     /// A parked level by its exact dimension identity, without swapping it in.
     pub(super) fn parked_of(&self, dimension: &str) -> Option<&Parked> {
+        self.parked_entry_of(dimension).map(|(_, level)| level)
+    }
+
+    pub(super) fn parked_entry_of(&self, dimension: &str) -> Option<(Dim, &Parked)> {
         self.parked
             .iter()
             .find(|(dim, _)| dim.id() == dimension)
-            .map(|(_, level)| level)
+            .map(|(&dim, level)| (dim, level))
     }
     pub(super) fn parked_mut_of(&mut self, dimension: &str) -> Option<&mut Parked> {
         self.parked

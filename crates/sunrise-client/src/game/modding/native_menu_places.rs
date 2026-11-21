@@ -10,6 +10,7 @@
 //! work: `GuestMenus::slot_places` stays `None` and every path below returns first.
 use super::Game;
 use super::api_values::TryIntoEngine;
+use super::lan::LanHost;
 use super::native_menus::native_menu_inventory_slot;
 use mod_api::__private::game::*;
 use mod_api::{
@@ -48,6 +49,14 @@ fn held_identity(stack: &ItemStack) -> ItemStack {
     }
     stack.tidy();
     stack
+}
+
+impl LanHost {
+    /// What the container slots of `conn`'s menu `window` show, when a mod backed them.
+    pub(super) fn native_menu_places(&self, conn: u32, window: i32) -> Option<&[MenuSlotPlace]> {
+        let backed = self.menus.get(&conn)?.slot_places.as_ref()?;
+        (backed.window == window).then_some(backed.places.as_slice())
+    }
 }
 
 impl Game<'_> {
@@ -181,9 +190,11 @@ impl Game<'_> {
         window: i32,
         n: usize,
     ) -> Option<MenuSlotPlace> {
-        let backed = self.lan.as_ref()?.menus.get(&conn)?.slot_places.as_ref()?;
-        (backed.window == window).then_some(())?;
-        backed.places.get(n).copied()
+        self.lan
+            .as_ref()?
+            .native_menu_places(conn, window)?
+            .get(n)
+            .copied()
     }
 
     /// The backing of `conn`'s menu: its window, how many slots and the locked hotbar slot.

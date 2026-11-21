@@ -91,23 +91,28 @@ pub(super) fn machine_menu(
     entity: &BlockEntity,
     mod_type: Option<&'static sunrise_client::containers::ModMenuType>,
 ) -> Option<(Kind, Vec<Option<ItemStack>>)> {
+    let kind = machine_menu_kind(entity, mod_type)?;
+    let mut items = entity.slots().to_vec();
+    if let Kind::Mod(t) = kind {
+        items.resize(t.slots, None);
+    }
+    Some((kind, items))
+}
+
+/// The slot rules model of a block menu, without copying its container's stacks.
+pub(super) fn machine_menu_kind(
+    entity: &BlockEntity,
+    mod_type: Option<&'static sunrise_client::containers::ModMenuType>,
+) -> Option<Kind> {
     Some(match entity {
-        BlockEntity::Furnace(f) => {
-            let recipe = match f.kind.recipe_type() {
-                "minecraft:blasting" => "blasting",
-                "minecraft:smoking" => "smoking",
-                _ => "smelting",
-            };
-            (Kind::Furnace(recipe), f.items.to_vec())
-        }
-        BlockEntity::Brewing(b) => (Kind::Brewing, b.items.to_vec()),
-        BlockEntity::Crafter(c) => (Kind::CrafterBlock, c.items.to_vec()),
-        BlockEntity::Mod(m) => {
-            let t = mod_type?;
-            let mut items = m.items.clone();
-            items.resize(t.slots, None);
-            (Kind::Mod(t), items)
-        }
+        BlockEntity::Furnace(f) => Kind::Furnace(match f.kind.recipe_type() {
+            "minecraft:blasting" => "blasting",
+            "minecraft:smoking" => "smoking",
+            _ => "smelting",
+        }),
+        BlockEntity::Brewing(_) => Kind::Brewing,
+        BlockEntity::Crafter(_) => Kind::CrafterBlock,
+        BlockEntity::Mod(_) => Kind::Mod(mod_type?),
         _ => return None,
     })
 }
