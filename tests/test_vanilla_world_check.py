@@ -19,7 +19,20 @@ class VanillaWorldCheckTests(unittest.TestCase):
         ]
         failures = [
             '[12:00:02] [Server thread/ERROR]: Failed to save chunk',
-            unavailable,  # not part of a discovery warning
+            '[12:00:02] [Server thread/WARN]: Failed to connect',
+            '[12:00:03] [Server thread/WARN]: Failed to find a usable hardware address from the network interfaces; '
+            'using random bytes: 01:23:45:67:89:ab:cd:ef (network failure)',
             'login failed: disconnected',
         ]
         self.assertEqual(log_problems(startup + failures), failures)
+        other_host = 'Caused by: java.net.UnknownHostException: example.invalid'
+        self.assertEqual(log_problems([discovery, other_host]), [other_host])
+        continued = [
+            discovery,
+            unavailable,
+            '\tat java.base/java.net.UnknownHostException.example(Source.java:42)',
+            '\t... 2 more',
+            'background worker stopped',
+            unavailable,
+        ]
+        self.assertEqual(log_problems(continued), [unavailable])

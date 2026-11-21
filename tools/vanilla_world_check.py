@@ -42,6 +42,7 @@ DISCOVERY_DETAILS = {
     DISCOVERY_EXCEPTION + 'Services are unavailable',
     f'Caused by: java.net.UnknownHostException: {DISCOVERY_HOST}',
 }
+JAVA_STACK_LINE = re.compile(r'[ \t]+(?:at .+|\.\.\. \d+ more)')
 RANDOM_HARDWARE_ADDRESS = re.compile(
     r'\[Server thread/WARN\]: Failed to find a usable hardware address from the network interfaces; '
     r'using random bytes: (?:[0-9a-f]{2}:){7}[0-9a-f]{2}')
@@ -58,8 +59,10 @@ def log_problems(lines):
             # only identifies its channels; it cannot change the saved world.
             if discovery or RANDOM_HARDWARE_ADDRESS.fullmatch(message):
                 continue
-        elif discovery and line in DISCOVERY_DETAILS:
-            continue
+        elif discovery:
+            if line in DISCOVERY_DETAILS or JAVA_STACK_LINE.fullmatch(line):
+                continue
+            discovery = False
         if SUSPICIOUS.search(line) and not BENIGN.search(line):
             problems.append(line)
     return problems
