@@ -1258,7 +1258,7 @@ impl OriginalPlayerRef {
     pub fn attachment<T: Clone + Send + Sync + 'static>(
         self,
         host: &mut dyn crate::Host,
-        key: &crate::AttachmentType<T>,
+        key: &crate::AttachmentKey<T>,
     ) -> Result<T, crate::AttachmentError> {
         key.get(host, crate::Holder::OriginalPlayer(self.token))
     }

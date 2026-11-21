@@ -9,18 +9,24 @@ mod writer_stack;
 struct Listener {
     saves: Arc<AtomicUsize>,
     loads: Arc<AtomicUsize>,
+    value: Mutex<Option<mod_api::AttachmentKey<i32>>>,
 }
 #[mod_api::sunrise_mod]
 impl Hooks for Listener {
+    fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+        *self.value.lock().unwrap() = Some(fixture::register(r));
+    }
     fn chunk_data_save(&self, host: &dyn ChunkDiskHost, event: &mut ChunkDataSaveEvent<'_>) {
         self.saves.fetch_add(1, Ordering::Relaxed);
         let names: &[String] = host.registry("minecraft:block").unwrap();
         assert_eq!(names, ["minecraft:stone", "minecraft:dirt"]);
-        fixture::save(event.data);
+        let key = self.value.lock().unwrap().clone().unwrap();
+        fixture::save(&key, event.data);
     }
     fn chunk_data_load(&self, host: &dyn ChunkDiskHost, event: &mut ChunkDataLoadEvent<'_>) {
         self.loads.fetch_add(1, Ordering::Relaxed);
-        fixture::load(host, event.data);
+        let key = self.value.lock().unwrap().clone().unwrap();
+        fixture::load(&key, host, event.data);
     }
 }
 fn context(save: &SaveDir) {
@@ -45,14 +51,14 @@ fn context(save: &SaveDir) {
 fn chunk(value: i32) -> Chunk {
     let mut chunk = Chunk::empty(2, -3);
     let mut extras = ChunkExtras::default();
-    fixture::VALUE
+    fixture::raw_value()
         .set(&mut extras.attachments, mod_api::Holder::Level, value)
         .unwrap();
     chunk.saved = Some(Arc::new(extras));
     chunk
 }
 fn value(chunk: &mut Chunk) -> i32 {
-    fixture::VALUE
+    fixture::raw_value()
         .get(
             &mut Arc::make_mut(chunk.saved.as_mut().unwrap()).attachments,
             mod_api::Holder::Level,
@@ -70,15 +76,19 @@ fn root() -> PathBuf {
 fn with_listener(run: impl FnOnce(Arc<AtomicUsize>, Arc<AtomicUsize>)) {
     let saves = Arc::new(AtomicUsize::new(0));
     let loads = Arc::new(AtomicUsize::new(0));
-    let mods = vec![mod_api::ModEntry::new(
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
         "chunk_disk_fixture",
         Box::new(Listener {
             saves: saves.clone(),
             loads: loads.clone(),
+            value: Mutex::new(None),
         }),
     )]
     .into();
-    mod_platform::testing::with_mods(mods, || run(saves, loads));
+    mod_platform::testing::with_mods(mods.clone(), || {
+        mod_platform::__private::part_tests::install_parts_fixture(&mods).unwrap();
+        run(saves, loads);
+    });
 }
 
 #[test]
@@ -97,7 +107,7 @@ fn capture_7_callback_8_live_9_round_trips_through_region_writer() {
         let mut live = chunk(7);
         save.save_later(&[Arc::new(live.clone())], registry, &biomes)
             .unwrap();
-        fixture::VALUE
+        fixture::raw_value()
             .set(
                 &mut Arc::make_mut(live.saved.as_mut().unwrap()).attachments,
                 mod_api::Holder::Level,
@@ -191,13 +201,18 @@ mod echo {
     #[derive(Default)]
     pub struct Echo {
         pub seen: Arc<Mutex<Vec<(mod_api::ChunkDiskKind, i32)>>>,
+        pub value: Mutex<Option<mod_api::AttachmentKey<i32>>>,
     }
     #[mod_api::sunrise_mod]
     impl Hooks for Echo {
+        fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+            *self.value.lock().unwrap() = Some(fixture::register(r));
+        }
         fn chunk_data_save(&self, host: &dyn ChunkDiskHost, event: &mut ChunkDataSaveEvent<'_>) {
             // A worker callback has no live world: the old handle's path refuses.
             assert!(host.backend().is_none());
-            let value = event.data.get(&fixture::VALUE).unwrap();
+            let key = self.value.lock().unwrap().clone().unwrap();
+            let value = event.data.get(&key).unwrap();
             self.seen.lock().unwrap().push((host.job().kind, value));
         }
     }
@@ -205,12 +220,18 @@ mod echo {
 use echo::Echo;
 fn with_echo(run: impl FnOnce(Arc<Mutex<Vec<(mod_api::ChunkDiskKind, i32)>>>)) {
     let seen = Arc::new(Mutex::new(Vec::new()));
-    let mods = vec![mod_api::ModEntry::new(
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
         "chunk_disk_fixture",
-        Box::new(Echo { seen: seen.clone() }),
+        Box::new(Echo {
+            seen: seen.clone(),
+            value: Mutex::new(None),
+        }),
     )]
     .into();
-    mod_platform::testing::with_mods(mods, || run(seen));
+    mod_platform::testing::with_mods(mods.clone(), || {
+        mod_platform::__private::part_tests::install_parts_fixture(&mods).unwrap();
+        run(seen);
+    });
 }
 fn disk_value(path: &Path, registry: &BlockRegistry, biomes: &Biomes) -> Option<i32> {
     SaveDir::new(

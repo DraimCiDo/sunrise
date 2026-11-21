@@ -62,9 +62,10 @@ row's identity, age, pose and a frozen snapshot of its synced attachments
 ([attachments](../../concepts/attachments.md)).
 
 ```rust,ignore
-static FUEL: AttachmentType<i32> = /* declared with sync_codec: Some(...) */;
-
-struct Missile;
+// Registered in Hooks::register with AttachmentDescriptor::new("example:fuel", || 0i32).sync(FUEL_CODEC)
+struct Missile {
+    fuel: AttachmentKey<i32>,
+}
 impl EntityRenderer for Missile {
     fn submit(
         &self,
@@ -72,7 +73,7 @@ impl EntityRenderer for Missile {
         draw: &mut dyn BlockEntityDrawContext,
     ) -> Result<(), String> {
         let fuel = match &entity.attachments {
-            Some(snapshot) => snapshot.get(&FUEL).map_err(|error| format!("{error:?}"))?,
+            Some(snapshot) => snapshot.get(&self.fuel).map_err(|error| format!("{error:?}"))?,
             None => None,
         };
         draw.translate([0.0, fuel.copied().unwrap_or_default() as f32, 0.0]);

@@ -1,0 +1,17 @@
+ids = [
+    "handle:EntityRenderAttachments::get",
+    "handle:ChunkDiskData::get",
+    "handle:ChunkDiskData::set",
+    "handle:ChunkDiskData::remove",
+    "handle:OriginalPlayerRef::attachment",
+    "handle:AttachedStacks::new",
+    "handle:AttachedStacks::single",
+    "handle:AttachedEnergy::new",
+]
+why = "Migrate the worldless and stock attached-storage consumers to issued AttachmentKey<T> handles, following NeoForge's registered AttachmentType model (net.neoforged.neoforge.attachment.AttachmentType, ChunkDataEvent, PlayerEvent.Clone, ResourceStacksResourceHandler, SimpleEnergyHandler). EntityRenderAttachments keeps its shared whole-generation SyncedAttachmentSnapshot (no Wire projection) while checking key liveness and sync policy; ChunkDiskData preserves its full-job disk NBT budgets while rejecting stale keys and keys without a persistence codec; OriginalPlayerRef::attachment, AttachedStacks, and AttachedEnergy check key liveness through AttachmentKey<T>."
+migrate = '''
+- Pass `&AttachmentKey<T>` (returned by `Registrar::register_attachment_type` or `Registrar::attachment_key`) instead of `&AttachmentType<T>` to `EntityRenderAttachments::get`, `ChunkDiskData::{get, set, remove}`, `OriginalPlayerRef::attachment`, `AttachedStacks::{new, single}`, and `AttachedEnergy::new`.
+- On `EntityRenderAttachments::get`, keys without a sync codec return `Err(AttachmentError::InvalidSyncPolicy)`, and keys from an earlier installation return `Err(AttachmentError::StaleKey)`. Sync-only keys (`.sync(codec)` without `.serialize`) work directly.
+- On `ChunkDiskData::{get, set, remove}`, keys from an earlier installation fail and poison the job with reason `"StaleKey"`, and keys without a persistence codec fail with `"missing persistence codec"`.
+- Store registered `AttachmentKey`s on your renderer, hook listener, or capability provider; `AttachedStacks` and `AttachedEnergy` clone the cheap `Arc`-backed key internally.
+'''

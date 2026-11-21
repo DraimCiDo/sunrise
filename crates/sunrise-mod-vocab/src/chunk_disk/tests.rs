@@ -7,24 +7,29 @@ use std::sync::{
 use sunrise_core::nbt::{Limits, NamedTag, write_named};
 use sunrise_mod_runtime::attachments::ATTACHMENTS_KEY;
 
-const VALUE: AttachmentType<i32> = AttachmentType {
-    namespace: "disk_fixture",
-    name: "value",
-    default: || 0,
-    codec: Some(sunrise_mod_runtime::attachments::AttachmentCodec {
+fn value_codec() -> AttachmentCodec<i32> {
+    AttachmentCodec {
         encode: |value| Ok(Compound::from_iter([("value".into(), Tag::Int(*value))])),
         decode: |tag| match tag.get(&"value".into()) {
             Some(Tag::Int(value)) => Ok(*value),
             _ => Err(AttachmentError::Decode),
         },
-    }),
-    copy_on_death: false,
-    sync_codec: None,
-};
+    }
+}
 
-fn store(value: i32) -> Attachments {
+fn install_value() -> AttachmentKey<i32> {
+    crate::parts::install_attachment_fixture(
+        "disk_fixture",
+        AttachmentDescriptor::new("disk_fixture:value", || 0i32).serialize(value_codec()),
+    )
+}
+
+fn store(key: &AttachmentKey<i32>, value: i32) -> Attachments {
     let mut store = Attachments::default();
-    VALUE.set(&mut store, Holder::Level, value).unwrap();
+    key.live()
+        .unwrap()
+        .set(&mut store, Holder::Level, value)
+        .unwrap();
     store
 }
 fn context(phase: ChunkDiskPhase) -> ChunkDiskContext {
@@ -36,8 +41,9 @@ fn context(phase: ChunkDiskPhase) -> ChunkDiskContext {
         phase,
     )
 }
-fn read(entries: &Compound) -> i32 {
-    VALUE
+fn read(key: &AttachmentKey<i32>, entries: &Compound) -> i32 {
+    key.live()
+        .unwrap()
         .get(&mut Attachments::from_nbt(entries.clone()), Holder::Level)
         .unwrap()
 }
@@ -49,36 +55,39 @@ fn run(job: &ChunkDiskJob) -> Result<Compound, ChunkDiskFailure> {
 struct Listener {
     calls: Arc<AtomicUsize>,
     mode: u8,
+    value: AttachmentKey<i32>,
 }
 #[crate::__subscriptions]
 impl Hooks for Listener {
     fn chunk_data_save(&self, host: &dyn ChunkDiskHost, event: &mut ChunkDataSaveEvent<'_>) {
         self.calls.fetch_add(1, Ordering::Relaxed);
         assert!(host.backend().is_none());
-        assert_eq!(event.data.get(&VALUE).unwrap(), 7);
-        event.data.set(&VALUE, 8).unwrap();
+        assert_eq!(event.data.get(&self.value).unwrap(), 7);
+        event.data.set(&self.value, 8).unwrap();
         if self.mode == 1 {
             panic!("fixture unwind after tentative write");
         }
     }
     fn chunk_data_load(&self, _: &dyn ChunkDiskHost, event: &mut ChunkDataLoadEvent<'_>) {
         self.calls.fetch_add(1, Ordering::Relaxed);
-        let value = event.data.get(&VALUE).unwrap();
-        event.data.set(&VALUE, value + 1).unwrap();
+        let value = event.data.get(&self.value).unwrap();
+        event.data.set(&self.value, value + 1).unwrap();
     }
 }
-fn with_listener(mode: u8, apply: impl FnOnce(Arc<AtomicUsize>)) {
+fn with_listener(mode: u8, apply: impl FnOnce(Arc<AtomicUsize>, AttachmentKey<i32>)) {
     let calls = Arc::new(AtomicUsize::new(0));
+    let value = install_value();
     testing::with_dispatch(
         vec![ModEntry::new(
             "disk_fixture",
             Box::new(Listener {
                 calls: calls.clone(),
                 mode,
+                value: value.clone(),
             }),
         )]
         .into(),
-        || apply(calls),
+        || apply(calls, value),
     );
 }
 
@@ -93,47 +102,56 @@ fn host_borrows_the_captured_context() {
 
 #[test]
 fn capture_7_callback_8_live_9() {
-    with_listener(0, |calls| {
-        let mut live = store(7);
+    with_listener(0, |calls, value| {
+        let mut live = store(&value, 7);
         let job = ChunkDiskJob::capture(&context(ChunkDiskPhase::Save), &live).unwrap();
-        VALUE.set(&mut live, Holder::Level, 9).unwrap();
-        assert_eq!(read(&run(&job).unwrap()), 8);
-        assert_eq!(VALUE.get(&mut live, Holder::Level).unwrap(), 9);
-        assert_eq!(read(&run(&job).unwrap()), 8);
-        assert_eq!(read(job.captured()), 7);
+        value
+            .live()
+            .unwrap()
+            .set(&mut live, Holder::Level, 9)
+            .unwrap();
+        assert_eq!(read(&value, &run(&job).unwrap()), 8);
+        assert_eq!(
+            value.live().unwrap().get(&mut live, Holder::Level).unwrap(),
+            9
+        );
+        assert_eq!(read(&value, &run(&job).unwrap()), 8);
+        assert_eq!(read(&value, job.captured()), 7);
         assert_eq!(calls.load(Ordering::Relaxed), 1);
     });
 }
 
 #[test]
 fn load_disk_8_callback_increment_publishes_9_once() {
-    with_listener(0, |calls| {
-        let job = ChunkDiskJob::capture(&context(ChunkDiskPhase::Load), &store(8)).unwrap();
-        assert_eq!(read(&run(&job).unwrap()), 9);
-        assert_eq!(read(&run(&job).unwrap()), 9);
+    with_listener(0, |calls, value| {
+        let job = ChunkDiskJob::capture(&context(ChunkDiskPhase::Load), &store(&value, 8)).unwrap();
+        assert_eq!(read(&value, &run(&job).unwrap()), 9);
+        assert_eq!(read(&value, &run(&job).unwrap()), 9);
         assert_eq!(calls.load(Ordering::Relaxed), 1);
     });
 }
 
 #[test]
 fn codec_error_or_unwind_after_setting_8_refuses_partial_publication() {
-    with_listener(1, |calls| {
-        let job = ChunkDiskJob::capture(&context(ChunkDiskPhase::Save), &store(7)).unwrap();
+    with_listener(1, |calls, value| {
+        let job = ChunkDiskJob::capture(&context(ChunkDiskPhase::Save), &store(&value, 7)).unwrap();
         let refusal = run(&job).unwrap_err();
         assert_eq!(refusal.mod_id, "disk_fixture");
         assert_eq!(refusal.reason, "native listener unwound");
-        assert_eq!(read(job.captured()), 7);
+        assert_eq!(read(&value, job.captured()), 7);
         assert_eq!(run(&job).unwrap_err(), refusal);
         assert_eq!(calls.load(Ordering::Relaxed), 1);
     });
-    let broken = AttachmentType {
-        codec: Some(sunrise_mod_runtime::attachments::AttachmentCodec {
+    let initial = install_value();
+    let saved = store(&initial, 7).to_nbt();
+    let broken = crate::parts::install_attachment_fixture(
+        "disk_fixture",
+        AttachmentDescriptor::new("disk_fixture:value", || 0i32).serialize(AttachmentCodec {
             encode: |_| Err(AttachmentError::Encode),
             decode: |_| Ok(7),
         }),
-        ..VALUE
-    };
-    let mut data = ChunkDiskData::from_nbt(store(7).to_nbt()).unwrap();
+    );
+    let mut data = ChunkDiskData::from_nbt(saved).unwrap();
     assert!(data.set(&broken, 8).is_err());
     assert!(data.finish().is_err());
 }
@@ -223,8 +241,11 @@ fn chunk_budget_counts_framing_and_modified_utf8_for_empty_namespaces() {
 
 #[test]
 fn codec_output_that_would_truncate_on_disk_refuses_the_job() {
-    let long_string = AttachmentType {
-        codec: Some(sunrise_mod_runtime::attachments::AttachmentCodec {
+    let initial = install_value();
+    let saved = store(&initial, 7).to_nbt();
+    let long_string = crate::parts::install_attachment_fixture(
+        "disk_fixture",
+        AttachmentDescriptor::new("disk_fixture:value", || 0i32).serialize(AttachmentCodec {
             encode: |_| {
                 Ok(Compound::from_iter([(
                     "text".into(),
@@ -233,9 +254,8 @@ fn codec_output_that_would_truncate_on_disk_refuses_the_job() {
             },
             decode: |_| Ok(7),
         }),
-        ..VALUE
-    };
-    let mut data = ChunkDiskData::from_nbt(store(7).to_nbt()).unwrap();
+    );
+    let mut data = ChunkDiskData::from_nbt(saved).unwrap();
     let refusal = data.set(&long_string, 8).unwrap_err();
     assert_eq!(refusal.key, "disk_fixture:value");
     assert_eq!(refusal.reason, "modified UTF-8 exceeds 65535 bytes");
@@ -244,8 +264,9 @@ fn codec_output_that_would_truncate_on_disk_refuses_the_job() {
 
 #[test]
 fn unknown_attachment_survives_typed_edit() {
+    let value = install_value();
     let mut data = ChunkDiskData::from_nbt(opaque(Tag::Int(7))).unwrap();
-    data.set(&VALUE, 8).unwrap();
+    data.set(&value, 8).unwrap();
     let result = data.finish().unwrap();
     assert_eq!(
         result.get(&"unknown".into()),
@@ -255,8 +276,9 @@ fn unknown_attachment_survives_typed_edit() {
 
 #[test]
 fn zero_subscribers_over_100_saves_creates_no_jobs_or_callbacks() {
+    let value = install_value();
     testing::with_dispatch(Vec::new().into(), || {
-        let snapshot = store(7);
+        let snapshot = store(&value, 7);
         let context = context(ChunkDiskPhase::Save);
         for _ in 0..100 {
             assert!(ChunkDiskJob::capture(&context, &snapshot).is_none());
@@ -266,25 +288,47 @@ fn zero_subscribers_over_100_saves_creates_no_jobs_or_callbacks() {
 
 #[test]
 fn local_transaction_abort_preserves_prior_snapshot() {
-    let mut data = ChunkDiskData::from_nbt(store(7).to_nbt()).unwrap();
+    let value = install_value();
+    let mut data = ChunkDiskData::from_nbt(store(&value, 7).to_nbt()).unwrap();
     let result: Result<(), ()> = data.transaction(|data| {
-        data.set(&VALUE, 8).unwrap();
+        data.set(&value, 8).unwrap();
         Err(())
     });
     assert_eq!(result, Err(()));
-    assert_eq!(read(&data.finish().unwrap()), 7);
+    assert_eq!(read(&value, &data.finish().unwrap()), 7);
 }
 
 #[test]
 fn type_without_persistence_codec_refuses_naming_type_and_capability() {
-    let unsaved = AttachmentType {
-        codec: None,
-        ..VALUE
-    };
-    let mut data = ChunkDiskData::from_nbt(store(7).to_nbt()).unwrap();
+    let initial = install_value();
+    let saved = store(&initial, 7).to_nbt();
+    let unsaved = crate::parts::install_attachment_fixture(
+        "disk_fixture",
+        AttachmentDescriptor::new("disk_fixture:value", || 0i32),
+    );
+    let mut data = ChunkDiskData::from_nbt(saved).unwrap();
     let refusal = data.get(&unsaved).unwrap_err();
     assert_eq!(refusal.key, "disk_fixture:value");
     assert_eq!(refusal.reason, "missing persistence codec");
     // The refusal poisons the whole job even if the listener ignores it.
     assert_eq!(data.finish().unwrap_err(), refusal);
+}
+
+#[test]
+fn stale_key_refuses_and_poisons_chunk_disk_data() {
+    let first = install_value();
+    let saved = store(&first, 7).to_nbt();
+    let _second = install_value();
+
+    let mut data = ChunkDiskData::from_nbt(saved.clone()).unwrap();
+    let refusal = data.get(&first).unwrap_err();
+    assert_eq!(refusal.key, "disk_fixture:value");
+    assert_eq!(refusal.reason, "StaleKey");
+    assert_eq!(data.finish().unwrap_err(), refusal);
+
+    let mut data = ChunkDiskData::from_nbt(saved.clone()).unwrap();
+    assert_eq!(data.set(&first, 8).unwrap_err(), refusal);
+
+    let mut data = ChunkDiskData::from_nbt(saved).unwrap();
+    assert_eq!(data.remove(&first).unwrap_err(), refusal);
 }

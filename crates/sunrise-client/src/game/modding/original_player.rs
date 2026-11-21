@@ -161,56 +161,64 @@ impl Game<'_> {
 mod tests {
     use super::*;
     use crate::game::{Dim, native_guest_turn_tests::with_guests};
-    use mod_api::{AttachmentType, Holder, Hooks, PlayerCloneEvent, ServerHost};
+    use mod_api::{
+        AttachmentCodec, AttachmentDescriptor, AttachmentError, AttachmentKey, Holder, Hooks,
+        PlayerCloneEvent, ServerHost,
+    };
     use std::sync::{Arc, Mutex};
 
-    const VALUE: AttachmentType<i32> = AttachmentType {
-        namespace: "clone",
-        name: "unsaved",
-        default: || 0,
-        codec: None,
-        copy_on_death: false,
-        sync_codec: None,
-    };
-    const RETAINED: AttachmentType<i32> = AttachmentType {
-        namespace: "clone",
-        name: "retained",
-        default: || 0,
-        codec: Some(mod_api::AttachmentCodec {
+    fn i32_codec() -> AttachmentCodec<i32> {
+        AttachmentCodec {
             encode: |value| Ok([("value".into(), sunrise_core::nbt::Tag::Int(*value))].into()),
             decode: |value| match value.get(&sunrise_core::nbt::JavaString::from("value")) {
                 Some(sunrise_core::nbt::Tag::Int(value)) => Ok(*value),
-                _ => Err(mod_api::AttachmentError::Decode),
+                _ => Err(AttachmentError::Decode),
             },
-        }),
-        copy_on_death: true,
-        sync_codec: None,
-    };
+        }
+    }
 
-    const SAVED: AttachmentType<i32> = AttachmentType {
-        name: "saved",
-        copy_on_death: false,
-        ..RETAINED
-    };
+    #[derive(Clone)]
+    struct CloneKeys {
+        value: AttachmentKey<i32>,
+        retained: AttachmentKey<i32>,
+        saved: AttachmentKey<i32>,
+    }
 
     struct Listener {
         death: bool,
         keep: bool,
+        keys: Arc<Mutex<Option<CloneKeys>>>,
+        stale: AttachmentKey<i32>,
         heard: Arc<Mutex<Vec<OriginalPlayerRef>>>,
     }
 
     #[mod_api::__subscriptions]
     impl Hooks for Listener {
         fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-            r.register_attachment_type(mod_api::AttachmentDescriptor::new("clone:unsaved", || ()))
+            let value = r
+                .register_attachment_type(AttachmentDescriptor::new("clone:unsaved", || 0_i32))
                 .unwrap();
-            r.register_attachment_type(mod_api::AttachmentDescriptor::new("clone:retained", || ()))
+            let retained = r
+                .register_attachment_type(
+                    AttachmentDescriptor::new("clone:retained", || 0_i32)
+                        .serialize(i32_codec())
+                        .copy_on_death(),
+                )
                 .unwrap();
-            r.register_attachment_type(mod_api::AttachmentDescriptor::new("clone:saved", || ()))
+            let saved = r
+                .register_attachment_type(
+                    AttachmentDescriptor::new("clone:saved", || 0_i32).serialize(i32_codec()),
+                )
                 .unwrap();
+            *self.keys.lock().unwrap() = Some(CloneKeys {
+                value,
+                retained,
+                saved,
+            });
         }
         fn player_clone(&self, host: &mut dyn ServerHost, event: &mut PlayerCloneEvent<'_>) {
             assert_eq!(event.was_death, self.death);
+            let keys = self.keys.lock().unwrap().clone().unwrap();
             let original = event.original;
             let holder = Holder::OriginalPlayer(original.fields());
             assert_eq!(original.uuid(host), Some(12));
@@ -221,38 +229,34 @@ mod tests {
                 dimension.id()
             );
             assert_eq!(original.level(host).unwrap().dimension_id(), dimension.id());
-            assert_eq!(VALUE.get(host, holder), Ok(73));
-            const MISSING: AttachmentType<i32> = AttachmentType {
-                name: "missing",
-                ..VALUE
-            };
-            // Never declared, so refused by name (#1448), not read as its default.
+            assert_eq!(keys.value.get(host, holder), Ok(73));
+            // A key not belonging to this installation is refused rather than returning a default.
             assert_eq!(
-                original.attachment(host, &MISSING),
-                Err(mod_api::AttachmentError::Undeclared {
-                    package_id: "clone".into(),
-                    attachment_id: "clone:missing".into(),
-                })
+                original.attachment(host, &self.stale),
+                Err(AttachmentError::StaleKey)
             );
-            assert_eq!(original.attachment(host, &VALUE), Ok(73));
-            assert_eq!(original.attachment(host, &RETAINED), Ok(17));
-            assert_eq!(original.attachment(host, &SAVED), Ok(31));
+            assert_eq!(original.attachment(host, &keys.value), Ok(73));
+            assert_eq!(original.attachment(host, &keys.retained), Ok(17));
+            assert_eq!(original.attachment(host, &keys.saved), Ok(31));
             assert_eq!(
-                SAVED.get(host, Holder::Player(event.player)),
+                keys.saved.get(host, Holder::Player(event.player)),
                 Ok(if self.death { 0 } else { 31 })
             );
             assert_eq!(
-                VALUE.get(host, Holder::Player(event.player)),
+                keys.value.get(host, Holder::Player(event.player)),
                 Ok(if self.death { 0 } else { 73 })
             );
-            assert_eq!(RETAINED.get(host, Holder::Player(event.player)), Ok(17));
             assert_eq!(
-                VALUE.set(host, holder, 100),
-                Err(mod_api::AttachmentError::MissingHolder)
+                keys.retained.get(host, Holder::Player(event.player)),
+                Ok(17)
             );
             assert_eq!(
-                VALUE.remove(host, holder),
-                Err(mod_api::AttachmentError::MissingHolder)
+                keys.value.set(host, holder, 100),
+                Err(AttachmentError::MissingHolder)
+            );
+            assert_eq!(
+                keys.value.remove(host, holder),
+                Err(AttachmentError::MissingHolder)
             );
             if self.death && !self.keep {
                 assert_eq!(original.inventory_slot(host, 2), None);
@@ -279,19 +283,28 @@ mod tests {
             assert_eq!(replacement_effects.len(), usize::from(!self.death));
             assert_eq!(original.inventory_slot(host, 99), None);
             // Replacement writes cannot alter the captured old values.
-            VALUE.set(host, Holder::Player(event.player), 99).unwrap();
-            assert_eq!(original.attachment(host, &VALUE), Ok(73));
+            keys.value
+                .set(host, Holder::Player(event.player), 99)
+                .unwrap();
+            assert_eq!(original.attachment(host, &keys.value), Ok(73));
             self.heard.lock().unwrap().push(original);
         }
     }
 
     fn clone_case(death: bool, keep: bool) {
         let heard = Arc::new(Mutex::new(Vec::new()));
+        let keys = Arc::new(Mutex::new(None));
+        let (_, stale) = mod_api::testing::registered_attachment_fixture(
+            "clone",
+            AttachmentDescriptor::new("clone:missing", || 0_i32),
+        );
         let mods = vec![mod_api::ModEntry::new(
             "clone",
             Box::new(Listener {
                 death,
                 keep,
+                keys: keys.clone(),
+                stale,
                 heard: heard.clone(),
             }),
         )]
@@ -305,52 +318,62 @@ mod tests {
                     "keep_inventory",
                     sunrise_client::gamerules::Value::Bool(keep),
                 );
-                let host = game.lan.as_mut().unwrap();
-                host.hub.guests.update(0, |guest| {
-                    guest.dimension = dimension.id().to_owned();
-                    guest.position = [7.0, 64.0, -9.0];
-                    guest.dead = death;
-                    guest.health = if death { 0.0 } else { 13.0 };
-                    guest.xp_level = 7;
-                    guest
-                        .effects
-                        .list
-                        .push(sunrise_client::effects::EffectInstance::from_def(
-                            sunrise_client_core::potions::effect_by_index(
-                                mod_api::__private::effect_index(
-                                    mod_platform::__private::part_tests::effect_key(
-                                        "minecraft:speed",
-                                    ),
+                {
+                    let host = game.lan.as_mut().unwrap();
+                    host.hub.guests.update(0, |guest| {
+                        guest.dimension = dimension.id().to_owned();
+                        guest.position = [7.0, 64.0, -9.0];
+                        guest.dead = death;
+                        guest.health = if death { 0.0 } else { 13.0 };
+                        guest.xp_level = 7;
+                        guest
+                            .effects
+                            .list
+                            .push(sunrise_client::effects::EffectInstance::from_def(
+                                sunrise_client_core::potions::effect_by_index(
+                                    mod_api::__private::effect_index(
+                                        mod_platform::__private::part_tests::effect_key(
+                                            "minecraft:speed",
+                                        ),
+                                    )
+                                    .unwrap(),
                                 )
                                 .unwrap(),
-                            )
-                            .unwrap(),
-                            200,
-                            1,
-                        ));
-                    // Respawn starts after death drops; keep-inventory leaves these intact.
-                    if !death || keep {
-                        guest.inventory[2] =
-                            Some(sunrise_items::items::ItemStack::new("minecraft:diamond", 4));
-                        guest.armor[3] = Some(sunrise_items::items::ItemStack::new(
-                            "minecraft:diamond_boots",
-                            1,
-                        ));
-                        guest.offhand =
-                            Some(sunrise_items::items::ItemStack::new("minecraft:apple", 2));
-                    }
-                });
-                let attachments = host.hub.guests.attachments_mut(12).unwrap();
-                RETAINED.set(attachments, Holder::Level, 17).unwrap();
-                SAVED.set(attachments, Holder::Level, 31).unwrap();
+                                200,
+                                1,
+                            ));
+                        // Respawn starts after death drops; keep-inventory leaves these intact.
+                        if !death || keep {
+                            guest.inventory[2] =
+                                Some(sunrise_items::items::ItemStack::new("minecraft:diamond", 4));
+                            guest.armor[3] = Some(sunrise_items::items::ItemStack::new(
+                                "minecraft:diamond_boots",
+                                1,
+                            ));
+                            guest.offhand =
+                                Some(sunrise_items::items::ItemStack::new("minecraft:apple", 2));
+                        }
+                    });
+                }
+                let keys = keys.lock().unwrap().clone().expect("Listener registered");
+                keys.retained.set(game, Holder::Player(12), 17).unwrap();
+                keys.saved.set(game, Holder::Player(12), 31).unwrap();
                 // Keep codec-backed entries undecoded, beside an unserialized binding.
+                let attachments = game
+                    .lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .attachments_mut(12)
+                    .unwrap();
                 let saved = mod_api::Attachments::from_nbt(attachments.to_nbt());
                 attachments.replace_contents(saved);
-                VALUE.set(attachments, Holder::Level, 73).unwrap();
+                keys.value.set(game, Holder::Player(12), 73).unwrap();
                 if death {
                     game.guest_respawn(12);
                 } else {
-                    let play = host.play.entry(12).or_default();
+                    let play = game.lan.as_mut().unwrap().play.entry(12).or_default();
                     play.won_game = true;
                     play.respawn_requested = true;
                     game.handle_server_portal(12);
@@ -364,8 +387,8 @@ mod tests {
                 assert_eq!(original.experience(game), None);
                 assert_eq!(original.effects(game), None);
                 assert_eq!(
-                    original.attachment(game, &VALUE),
-                    Err(mod_api::AttachmentError::MissingHolder)
+                    original.attachment(game, &keys.value),
+                    Err(AttachmentError::MissingHolder)
                 );
             });
         });

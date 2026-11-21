@@ -8,8 +8,9 @@ cannot be written, the worker retries with stored block-entity payloads and keep
 
 `chunk_data_save` receives `&dyn ChunkDiskHost` and a `ChunkDataSaveEvent`.
 The event's `data` is a typed, job-local attachment store. Use its `get`, `set`
-and `remove` methods with an `AttachmentType<T>` that has a persistence codec.
-`T` does not need `Wire`. An ignored codec error still refuses the whole job.
+and `remove` methods with an issued `AttachmentKey<T>` whose descriptor has a
+persistence codec (`.serialize(codec)`).
+`T` does not need `Wire`. An ignored codec error or stale key still refuses the whole job.
 
 The callback runs on the persistence worker after capture and before encoding.
 For example, capturing 7, writing 8 in the callback and later writing 9 in the

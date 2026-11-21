@@ -1,10 +1,10 @@
 //! The callback's typed store: only encoded values cross the worker boundary.
 use super::*;
 use sunrise_core::nbt::{self, JavaString, Limits};
-use sunrise_mod_runtime::attachments::ATTACHMENTS_KEY;
+use sunrise_mod_runtime::attachments::{ATTACHMENTS_KEY, CheckedAttachmentType};
 
 /// A job-local attachment transaction. No decoded value is shared with live state.
-/// Use [`Self::get`] and [`Self::set`] with the ordinary typed attachment key.
+/// Use [`Self::get`] and [`Self::set`] with an issued [`AttachmentKey`].
 /// The uncompressed disk NBT budget is 65,536 bytes per named `value` tag,
 /// 64 container levels in that value, and 1,048,576 bytes for the entire
 /// named attachment compound, including unknown data. Anything that would
@@ -31,45 +31,50 @@ impl ChunkDiskData {
     /// Read the job's typed value, inserting its default if absent.
     pub fn get<T: Clone + Send + Sync + 'static>(
         &mut self,
-        key: &AttachmentType<T>,
+        key: &AttachmentKey<T>,
     ) -> Result<T, ChunkDiskFailure> {
-        self.edit(key, |store| key.get(store, Holder::Level))
+        self.edit(key, |checked, store| checked.get(store, Holder::Level))
     }
 
     /// Replace only the snapshot's value. Failed encoding leaves the original
     /// envelopes intact and refuses publication of the entire job.
     pub fn set<T: Clone + Send + Sync + 'static>(
         &mut self,
-        key: &AttachmentType<T>,
+        key: &AttachmentKey<T>,
         value: T,
     ) -> Result<(), ChunkDiskFailure> {
-        self.edit(key, |store| key.set(store, Holder::Level, value))
+        self.edit(key, |checked, store| {
+            checked.set(store, Holder::Level, value)
+        })
     }
 
     /// Remove a snapshot binding through its typed codec.
     pub fn remove<T: Clone + Send + Sync + 'static>(
         &mut self,
-        key: &AttachmentType<T>,
+        key: &AttachmentKey<T>,
     ) -> Result<Option<T>, ChunkDiskFailure> {
-        self.edit(key, |store| key.remove(store, Holder::Level))
+        self.edit(key, |checked, store| checked.remove(store, Holder::Level))
     }
 
-    fn edit<T, R>(
+    fn edit<T: 'static, R>(
         &mut self,
-        key: &AttachmentType<T>,
-        apply: impl FnOnce(&mut Attachments) -> Result<R, AttachmentError>,
+        key: &AttachmentKey<T>,
+        apply: impl FnOnce(&CheckedAttachmentType<T>, &mut Attachments) -> Result<R, AttachmentError>,
     ) -> Result<R, ChunkDiskFailure> {
         if let Some(failure) = &self.failure {
             return Err(failure.clone());
         }
-        let key_name = format!("{}:{}", key.namespace, key.name);
+        let key_name = key.id();
         let result = (|| {
-            if key.codec.is_none() {
-                return Err(failure(&key_name, "missing persistence codec"));
+            let checked = key
+                .live()
+                .map_err(|error| failure(key_name, &format!("{error:?}")))?;
+            if !checked.has_codec() {
+                return Err(failure(key_name, "missing persistence codec"));
             }
             let mut store = Attachments::from_nbt(self.entries.clone());
-            let value =
-                apply(&mut store).map_err(|error| failure(&key_name, &format!("{error:?}")))?;
+            let value = apply(checked, &mut store)
+                .map_err(|error| failure(key_name, &format!("{error:?}")))?;
             let encoded = store.to_nbt();
             validate(&encoded)?;
             self.entries = encoded;
