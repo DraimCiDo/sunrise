@@ -45,7 +45,7 @@ def main():
     dependencies=os.pathsep.join(map(str,[jars['client'],*libraries]))
     run(['javac','--release',lock['minecraft']['java_major'],'-proc:none','-sourcepath',str(lab.ROOT/'mods/sunrise/src/test/java'),'-cp',dependencies,'-d',classes,oracle],'compile-java')
     # Match the parity job's client_probe prebuild rather than compiling a second profile.
-    run(['cargo','build','--locked','--profile','fast','-p','sunrise-client-lib','--example','client_probe'],'compile-rust')
+    run(['cargo','build','--locked','--profile','fast','-p','sunrise-client-lib','--example', 'client_probe'],'compile-rust')
     metadata=json.loads(subprocess.check_output(['cargo','metadata','--locked','--no-deps','--format-version','1'],cwd=lab.ROOT))
     binary=Path(metadata['target_directory'])/'fast/examples'/('client_probe.exe' if os.name=='nt' else 'client_probe')
     run([binary,'input_probe',inputs,build/'rust.txt'],'rust')
