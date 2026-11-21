@@ -925,6 +925,12 @@ impl Game<'_> {
             _ => None,
         };
         self.write_leash(&mut retained, id);
+        // Keep the mod's AI pause after attachment projection but before the
+        // final passenger list, as in the persistent mob tree.
+        let paused = self.mob_at(object).ai.ai_paused;
+        entity_nbt::write_ai_paused(paused, &mut retained);
+        write_attachments(&mut retained, id, &self.entity_attachments);
+        entity_nbt::write_ai_paused(paused, &mut retained);
         let mut out = entity_nbt::EntityTagWriter::from_saved(retained);
         entity_nbt::write_mob(
             self.mob_at(object),
@@ -941,11 +947,7 @@ impl Game<'_> {
                 game_time: self.world.game_time,
             },
         );
-        let mut tag = out.finish();
-        write_attachments(&mut tag, id, &self.entity_attachments);
-        // A mod's AI pause beside the mods' attachments, whose map would drop it.
-        entity_nbt::write_ai_paused(self.mob_at(object).ai.ai_paused, &mut tag);
-        tag
+        out.finish()
     }
 
     /// Trace only edges touching off-level objects. A rejected leaf is owned

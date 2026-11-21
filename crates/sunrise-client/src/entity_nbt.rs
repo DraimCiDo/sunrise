@@ -678,7 +678,12 @@ pub fn mob_to_nbt(
     uuid_of: impl FnMut(u32) -> Option<[i32; 4]>,
     items: &crate::items::Items,
 ) -> Tag {
-    let mut out = EntityTagWriter::new(raw);
+    let mut retained = match raw {
+        Some(tag @ Tag::Compound(_)) => tag.clone(),
+        _ => Tag::Compound(Compound::new()),
+    };
+    ai_pause::write_ai_paused(m.ai.ai_paused, &mut retained);
+    let mut out = EntityTagWriter::from_saved(retained);
     write_mob(
         m,
         uuid,
@@ -688,9 +693,7 @@ pub fn mob_to_nbt(
         items,
         MobSave::default(),
     );
-    let mut tag = out.finish();
-    ai_pause::write_ai_paused(m.ai.ai_paused, &mut tag);
-    tag
+    out.finish()
 }
 
 /// Runtime state shared by chunk saving and inspecting a live mob.
