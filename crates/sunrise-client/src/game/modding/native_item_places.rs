@@ -2576,7 +2576,7 @@ pub(super) mod tests {
             let committed = host.transaction(|host, tx| {
                 assert_eq!(grid.insert(host, tx, &log, 1), 1);
                 // Not yet: the result is made once, at the commit.
-                Ok::<_, ()>(menu.slot(host, 0))
+                Ok::<_, ()>(menu.with_view(host, |view| view.slot(0)).flatten())
             });
             assert_eq!(committed, Ok(Some(None)));
             assert_eq!(
@@ -2668,11 +2668,27 @@ pub(super) mod tests {
             let bucket = ItemStack::new("minecraft:bucket", 1)
                 .try_into_api()
                 .unwrap();
-            assert_eq!(menu.slot_holds(host, 1, &bucket), Some(1));
-            assert_eq!(menu.slot_holds(host, 2, &bucket), Some(0));
+            assert_eq!(
+                menu.with_view(host, |view| view.slot_holds(1, &bucket))
+                    .flatten(),
+                Some(1)
+            );
+            assert_eq!(
+                menu.with_view(host, |view| view.slot_holds(2, &bucket))
+                    .flatten(),
+                Some(0)
+            );
             // The hotbar's last slot is plain; past it there is no slot.
-            assert_eq!(menu.slot_holds(host, 38, &bucket), Some(16));
-            assert_eq!(menu.slot_holds(host, 39, &bucket), None);
+            assert_eq!(
+                menu.with_view(host, |view| view.slot_holds(38, &bucket))
+                    .flatten(),
+                Some(16)
+            );
+            assert_eq!(
+                menu.with_view(host, |view| view.slot_holds(39, &bucket))
+                    .flatten(),
+                None
+            );
         });
     }
 
@@ -2690,7 +2706,7 @@ pub(super) mod tests {
                 let value = Some(ItemStack::new("minecraft:stick", 1));
                 hub.guests.update(0, |guest| guest.carried = value);
             }
-            assert_eq!(stale.carried(game), None);
+            assert_eq!(stale.with_view(game, |view| view.carried()).flatten(), None);
             assert_eq!(write(game, &stale.cursor(), "minecraft:stick", -1, true), 0);
             assert_eq!(write(game, &stale.cursor(), "minecraft:stick", 1, true), 0);
             let host: &mut dyn ServerHost = game;
@@ -2726,7 +2742,7 @@ pub(super) mod tests {
                 assert!(child.is_err());
                 assert_eq!((grid.amount(host), other.amount(host)), (1, 0));
                 assert_eq!(grid.insert(host, tx, &log, 1), 1);
-                Ok::<_, ()>(menu.slot(host, 0))
+                Ok::<_, ()>(menu.with_view(host, |view| view.slot(0)).flatten())
             });
             assert_eq!(committed, Ok(Some(None)));
             // Two logs in one slot: one craft's planks; the child's second log never landed.

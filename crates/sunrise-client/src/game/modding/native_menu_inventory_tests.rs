@@ -159,7 +159,11 @@ fn exercise(reopen: bool) {
                     })
                     .unwrap();
                 assert_ne!(
-                    player.container_menu(game).unwrap().container_id(game),
+                    player
+                        .container_menu(game)
+                        .unwrap()
+                        .with_view(game, |view| view.container_id())
+                        .flatten(),
                     Some(window)
                 );
                 assert_eq!(direct.stack(game).unwrap().count(), 6);

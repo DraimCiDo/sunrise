@@ -704,7 +704,10 @@ fn menu_slot_boxes_take_a_client_host(
     host: &dyn ClientHost,
     menu: MenuRef,
 ) -> Option<Vec<Option<[f32; 4]>>> {
-    menu.slot_boxes(host)
+    menu.with_client_view(host, |view| view.slot_boxes())
+        .ok()
+        .flatten()
+        .flatten()
 }
 
 /// Compile-only: the world data, tick, sky and sight queries as a mod calls them, the reads on any

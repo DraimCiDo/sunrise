@@ -26,16 +26,29 @@ fn client_menu_reads_follow_packets_and_lifetimes() {
             .local_player()
             .and_then(|player| game.player_container_menu(player))
             .unwrap();
-        assert_eq!(game.menu_slot_count(menu), Some(46));
-        assert_eq!(game.menu_slot(menu, 46), None);
-        assert_eq!(game.menu_slot(menu, 36), Some(None));
+        assert_eq!(
+            menu.with_view(game, |view| view.slot_count()).flatten(),
+            Some(46)
+        );
+        assert_eq!(menu.with_view(game, |view| view.slot(46)).flatten(), None);
+        assert_eq!(
+            menu.with_view(game, |view| view.slot(36)).flatten(),
+            Some(None)
+        );
         let stone = Some(Stack::new(game.item_id("minecraft:stone"), 3));
         game.handle_packet(C::SetPlayerInventory(play::SetPlayerInventory {
             slot: 0,
             item: stone.clone(),
         }))
         .unwrap();
-        assert_eq!(game.menu_slot(menu, 36).unwrap().unwrap().count, 3);
+        assert_eq!(
+            menu.with_view(game, |view| view.slot(36))
+                .flatten()
+                .unwrap()
+                .unwrap()
+                .count(),
+            3
+        );
         use mod_api::{DragKind, MenuClick, MouseButton, SwapWith};
         let pickup = |slot| MenuClick::Pickup {
             slot: Some(slot),
@@ -59,8 +72,18 @@ fn client_menu_reads_follow_packets_and_lifetimes() {
             },
         ] {
             assert!(!menu.click(game, &[invalid]));
-            assert_eq!(menu.slot(game, 36).unwrap().unwrap().count(), 3);
-            assert_eq!(menu.carried(game), Some(None));
+            assert_eq!(
+                menu.with_view(game, |view| view.slot(36))
+                    .flatten()
+                    .unwrap()
+                    .unwrap()
+                    .count(),
+                3
+            );
+            assert_eq!(
+                menu.with_view(game, |view| view.carried()).flatten(),
+                Some(None)
+            );
         }
         game.options.execution_role = ExecutionRole::IntegratedServer;
         assert!(!menu.click(game, &[pickup(36)]));
@@ -124,11 +147,31 @@ fn client_menu_reads_follow_packets_and_lifetimes() {
         assert_eq!(sent.changed[0].0, 36);
         assert!(sent.changed[0].1.is_none());
         assert_eq!(sent.carried.unwrap().count, 3);
-        assert_eq!(menu.slot(game, 36), Some(None));
-        assert_eq!(menu.carried(game).unwrap().unwrap().count(), 3);
+        assert_eq!(
+            menu.with_view(game, |view| view.slot(36)).flatten(),
+            Some(None)
+        );
+        assert_eq!(
+            menu.with_view(game, |view| view.carried())
+                .flatten()
+                .unwrap()
+                .unwrap()
+                .count(),
+            3
+        );
         assert!(!menu.click(game, &[pickup(36), pickup(usize::MAX),]));
-        assert_eq!(menu.slot(game, 36), Some(None));
-        assert_eq!(menu.carried(game).unwrap().unwrap().count(), 3);
+        assert_eq!(
+            menu.with_view(game, |view| view.slot(36)).flatten(),
+            Some(None)
+        );
+        assert_eq!(
+            menu.with_view(game, |view| view.carried())
+                .flatten()
+                .unwrap()
+                .unwrap()
+                .count(),
+            3
+        );
         assert!(menu.click(
             game,
             &[MenuClick::Drag {
@@ -136,21 +179,58 @@ fn client_menu_reads_follow_packets_and_lifetimes() {
                 slots: vec![37]
             },]
         ));
-        assert_eq!(menu.slot(game, 37).unwrap().unwrap().count(), 3);
-        assert_eq!(menu.carried(game), Some(None));
+        assert_eq!(
+            menu.with_view(game, |view| view.slot(37))
+                .flatten()
+                .unwrap()
+                .unwrap()
+                .count(),
+            3
+        );
+        assert_eq!(
+            menu.with_view(game, |view| view.carried()).flatten(),
+            Some(None)
+        );
         assert!(menu.click(game, &[pickup(37)]));
         assert!(menu.click(game, &[pickup(36)]));
-        assert_eq!(menu.carried(game), Some(None));
-        assert_eq!(menu.slot(game, 36).unwrap().unwrap().count(), 3);
+        assert_eq!(
+            menu.with_view(game, |view| view.carried()).flatten(),
+            Some(None)
+        );
+        assert_eq!(
+            menu.with_view(game, |view| view.slot(36))
+                .flatten()
+                .unwrap()
+                .unwrap()
+                .count(),
+            3
+        );
         game.handle_packet(C::SetPlayerInventory(play::SetPlayerInventory {
             slot: 0,
             item: Some(Stack::new(game.item_id("minecraft:stone"), 2)),
         }))
         .unwrap();
-        assert_eq!(menu.slot(game, 36).unwrap().unwrap().count(), 2);
+        assert_eq!(
+            menu.with_view(game, |view| view.slot(36))
+                .flatten()
+                .unwrap()
+                .unwrap()
+                .count(),
+            2
+        );
         assert!(menu.click(game, &[MenuClick::QuickMove { slot: 36 }]));
-        assert_eq!(menu.slot(game, 36), Some(None));
-        assert_eq!(menu.slot(game, 9).unwrap().unwrap().count(), 2);
+        assert_eq!(
+            menu.with_view(game, |view| view.slot(36)).flatten(),
+            Some(None)
+        );
+        assert_eq!(
+            menu.with_view(game, |view| view.slot(9))
+                .flatten()
+                .unwrap()
+                .unwrap()
+                .count(),
+            2
+        );
         assert!(menu.click(
             game,
             &[MenuClick::Swap {
@@ -158,8 +238,18 @@ fn client_menu_reads_follow_packets_and_lifetimes() {
                 with: SwapWith::Hotbar(1)
             }]
         ));
-        assert_eq!(menu.slot(game, 9), Some(None));
-        assert_eq!(menu.slot(game, 37).unwrap().unwrap().count(), 2);
+        assert_eq!(
+            menu.with_view(game, |view| view.slot(9)).flatten(),
+            Some(None)
+        );
+        assert_eq!(
+            menu.with_view(game, |view| view.slot(37))
+                .flatten()
+                .unwrap()
+                .unwrap()
+                .count(),
+            2
+        );
         assert!(menu.click(
             game,
             &[MenuClick::Throw {
@@ -167,12 +257,22 @@ fn client_menu_reads_follow_packets_and_lifetimes() {
                 whole_stack: true
             }]
         ));
-        assert_eq!(menu.slot(game, 37), Some(None));
+        assert_eq!(
+            menu.with_view(game, |view| view.slot(37)).flatten(),
+            Some(None)
+        );
         game.handle_packet(C::SetCursorItem(play::SetCursorItem {
             item: stone.clone(),
         }))
         .unwrap();
-        assert_eq!(game.menu_carried(menu).unwrap().unwrap().count, 3);
+        assert_eq!(
+            menu.with_view(game, |view| view.carried())
+                .flatten()
+                .unwrap()
+                .unwrap()
+                .count(),
+            3
+        );
         let crafting_id = game
             .remote
             .as_ref()
@@ -190,13 +290,19 @@ fn client_menu_reads_follow_packets_and_lifetimes() {
             })
         };
         game.handle_packet(open()).unwrap();
-        assert_eq!(game.menu_slot_count(menu), None);
+        assert_eq!(
+            menu.with_view(game, |view| view.slot_count()).flatten(),
+            None
+        );
         assert!(!menu.click(game, &[pickup(36)]));
         let crafting = game
             .local_player()
             .and_then(|player| game.player_container_menu(player))
             .unwrap();
-        assert_eq!(game.menu_slot_count(crafting), Some(46));
+        assert_eq!(
+            crafting.with_view(game, |view| view.slot_count()).flatten(),
+            Some(46)
+        );
         game.handle_packet(C::ContainerSetSlot(play::ContainerSetSlot {
             container: 7,
             state: 0,
@@ -204,7 +310,15 @@ fn client_menu_reads_follow_packets_and_lifetimes() {
             item: stone.clone(),
         }))
         .unwrap();
-        assert_eq!(game.menu_slot(crafting, 1).unwrap().unwrap().count, 3);
+        assert_eq!(
+            crafting
+                .with_view(game, |view| view.slot(1))
+                .flatten()
+                .unwrap()
+                .unwrap()
+                .count(),
+            3
+        );
         game.handle_packet(C::ContainerSetSlot(play::ContainerSetSlot {
             container: 7,
             state: 0,
@@ -212,9 +326,20 @@ fn client_menu_reads_follow_packets_and_lifetimes() {
             item: stone,
         }))
         .unwrap();
-        assert_eq!(game.menu_slot(crafting, 0).unwrap().unwrap().count, 3);
+        assert_eq!(
+            crafting
+                .with_view(game, |view| view.slot(0))
+                .flatten()
+                .unwrap()
+                .unwrap()
+                .count(),
+            3
+        );
         game.handle_packet(open()).unwrap();
-        assert_eq!(game.menu_slot_count(crafting), None);
+        assert_eq!(
+            crafting.with_view(game, |view| view.slot_count()).flatten(),
+            None
+        );
         assert!(!crafting.click(game, &[pickup(1)]));
         let crafting = game
             .local_player()
@@ -225,7 +350,10 @@ fn client_menu_reads_follow_packets_and_lifetimes() {
             keep: 0,
         }))
         .unwrap();
-        assert_eq!(game.menu_slot_count(crafting), None);
+        assert_eq!(
+            crafting.with_view(game, |view| view.slot_count()).flatten(),
+            None
+        );
         assert!(!crafting.click(game, &[pickup(1)]));
         let inventory = game
             .local_player()
@@ -251,7 +379,10 @@ fn client_menu_reads_follow_packets_and_lifetimes() {
             .local_player()
             .and_then(|player| game.player_container_menu(player))
             .unwrap();
-        assert_eq!(game.menu_slot_count(chest), Some(63));
+        assert_eq!(
+            chest.with_view(game, |view| view.slot_count()).flatten(),
+            Some(63)
+        );
         let stone = Some(Stack::new(game.item_id("minecraft:stone"), 4));
         game.handle_packet(C::ContainerSetSlot(play::ContainerSetSlot {
             container: 7,
@@ -260,16 +391,49 @@ fn client_menu_reads_follow_packets_and_lifetimes() {
             item: stone,
         }))
         .unwrap();
-        assert_eq!(game.menu_slot(chest, 2).unwrap().unwrap().count, 4);
-        assert_eq!(game.menu_slot(chest, 3), Some(None));
+        assert_eq!(
+            chest
+                .with_view(game, |view| view.slot(2))
+                .flatten()
+                .unwrap()
+                .unwrap()
+                .count(),
+            4
+        );
+        assert_eq!(
+            chest.with_view(game, |view| view.slot(3)).flatten(),
+            Some(None)
+        );
         game.handle_packet(C::SetCursorItem(play::SetCursorItem { item: None }))
             .unwrap();
         assert!(chest.click(game, &[pickup(2)]));
-        assert_eq!(chest.slot(game, 2), Some(None));
-        assert_eq!(chest.carried(game).unwrap().unwrap().count(), 4);
+        assert_eq!(
+            chest.with_view(game, |view| view.slot(2)).flatten(),
+            Some(None)
+        );
+        assert_eq!(
+            chest
+                .with_view(game, |view| view.carried())
+                .flatten()
+                .unwrap()
+                .unwrap()
+                .count(),
+            4
+        );
         assert!(chest.click(game, &[pickup(2)]));
-        assert_eq!(chest.slot(game, 2).unwrap().unwrap().count(), 4);
-        assert_eq!(chest.carried(game), Some(None));
+        assert_eq!(
+            chest
+                .with_view(game, |view| view.slot(2))
+                .flatten()
+                .unwrap()
+                .unwrap()
+                .count(),
+            4
+        );
+        assert_eq!(
+            chest.with_view(game, |view| view.carried()).flatten(),
+            Some(None)
+        );
         for expected in [
             (0, 17, -999, 0, 5),
             (0, 17, 37, 1, 5),
@@ -322,8 +486,16 @@ fn client_menu_reads_follow_packets_and_lifetimes() {
                 .and_then(|player| game.player_container_menu(player))
                 .is_none()
         );
-        assert_eq!(game.menu_slot_count(inventory), None);
-        assert_eq!(game.menu_slot_count(chest), None);
+        assert_eq!(
+            inventory
+                .with_view(game, |view| view.slot_count())
+                .flatten(),
+            None
+        );
+        assert_eq!(
+            chest.with_view(game, |view| view.slot_count()).flatten(),
+            None
+        );
         game.remote.as_mut().unwrap().menu.set(None);
         let before_replacement = game
             .local_player()
@@ -332,14 +504,24 @@ fn client_menu_reads_follow_packets_and_lifetimes() {
         let mut other = spawn;
         other.dimension = "test:other_overworld".into();
         game.enter_remote_dimension(&other, true, Reason::Other);
-        assert_eq!(game.menu_slot_count(before_replacement), None);
+        assert_eq!(
+            before_replacement
+                .with_view(game, |view| view.slot_count())
+                .flatten(),
+            None
+        );
         assert!(!before_replacement.click(game, &[pickup(36)]));
         let before_logout = game
             .local_player()
             .and_then(|player| game.player_container_menu(player))
             .unwrap();
         game.client_logging_out();
-        assert_eq!(game.menu_slot_count(before_logout), None);
+        assert_eq!(
+            before_logout
+                .with_view(game, |view| view.slot_count())
+                .flatten(),
+            None
+        );
         assert!(!before_logout.click(game, &[pickup(36)]));
         assert!(
             game.local_player()
@@ -357,8 +539,18 @@ fn client_menu_reads_follow_packets_and_lifetimes() {
             .local_player()
             .and_then(|player| game.player_container_menu(player))
             .unwrap();
-        assert_eq!(game.menu_slot_count(before_logout), None);
-        assert_eq!(game.menu_slot_count(reconnected), Some(46));
+        assert_eq!(
+            before_logout
+                .with_view(game, |view| view.slot_count())
+                .flatten(),
+            None
+        );
+        assert_eq!(
+            reconnected
+                .with_view(game, |view| view.slot_count())
+                .flatten(),
+            Some(46)
+        );
         assert_ne!(reconnected, before_logout);
     });
 }

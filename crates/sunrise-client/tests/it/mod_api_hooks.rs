@@ -15,9 +15,11 @@ impl Hooks for Keys {
             .local_player()
             .and_then(|player| player.container_menu(host))
         {
-            let _ = menu.slot_count(host);
-            let _ = menu.slot(host, 0);
-            let _ = menu.carried(host);
+            let _ = menu.with_view(host, |view| {
+                let _ = view.slot_count();
+                let _ = view.slot(0);
+                let _ = view.carried();
+            });
         }
     }
 }

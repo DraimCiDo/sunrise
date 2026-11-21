@@ -65,6 +65,16 @@ EDITS = {
         MODDING / "native_item_places.rs": (
             swap("            assert_eq!(`stale.carried(game)`, None);",
                  "stale.with_view(game, |view| view.carried()).flatten()", 1),
+            swap("                Ok::<_, ()>(`menu.slot(host, 0)`)",
+                 "menu.with_view(host, |view| view.slot(0)).flatten()", 2),
+            Edit("            assert_eq!(menu.slot_holds(host, 1, &bucket), Some(1));\n"
+                 "            assert_eq!(menu.slot_holds(host, 2, &bucket), Some(0));",
+                 "            assert_eq!(menu.with_view(host, |view| view.slot_holds(1, &bucket)).flatten(), Some(1));\n"
+                 "            assert_eq!(menu.with_view(host, |view| view.slot_holds(2, &bucket)).flatten(), Some(0));", 1),
+            swap("            assert_eq!(`menu.slot_holds(host, 38, &bucket)`, Some(16));",
+                 "menu.with_view(host, |view| view.slot_holds(38, &bucket)).flatten()", 1),
+            swap("            assert_eq!(`menu.slot_holds(host, 39, &bucket)`, None);",
+                 "menu.with_view(host, |view| view.slot_holds(39, &bucket)).flatten()", 1),
         ),
         MODDING / "native_menu_refs.rs": (
             swap("            assert_ne!(`menu.container_id(game)`, Some(0));",
@@ -93,6 +103,16 @@ EDITS = {
                  "                menu.with_view(game, |view| view.slot(0)).flatten(),\n                Some(Some(stone.try_into_api().unwrap()))", 2),
             Edit("            assert_eq!(inventory.kind(game), Some(None));",
                  "            assert_eq!(\n                inventory.with_view(game, |view| assert_eq!(view.kind(), Some(None))),\n                Some(())\n            );", 1),
+            swap("                let count = `menu.slot_count(host)`?;",
+                 "menu.with_view(host, |view| view.slot_count()).flatten()", 1),
+            *tuple(swap(f"                `game.menu_slot_backing({menu}, {slot})`,",
+                        f"{menu}.with_view(game, |view| view.slot_backing({slot})).flatten()", count)
+                   for menu, slot, count in [("inventory", 36, 1), ("inventory", 45, 1),
+                                             ("menu", 0, 2), ("menu", 2, 1), ("menu", 9, 1),
+                                             ("menu", 36, 1), ("overworld_menu", 0, 1),
+                                             ("nether_menu", 0, 1)]),
+            swap("            assert_eq!(`game.menu_slot_backing(menu, 45)`, None);",
+                 "menu.with_view(game, |view| view.slot_backing(45)).flatten()", 1),
         ),
         MODDING / "native_menus.rs": (
             swap("                        assert_eq!(`menu.carried(host)`, Some(None));",
@@ -107,6 +127,21 @@ EDITS = {
                  "menu.with_view(game, |view| view.slot_count()).flatten()", 1),
             swap("                        assert!(`menu.slot(game, 0)`.is_none());",
                  "menu.with_view(game, |view| view.slot(0)).flatten()", 1),
+            swap("                            assert!(`game.menu_slot_count(menu)`.is_some());",
+                 "menu.with_view(game, |view| view.slot_count()).flatten()", 1),
+            Edit("                            assert_eq!(game.menu_carried(menu), Some(cursor));",
+                 "                            assert_eq!(menu.with_view(game, |view| view.carried()).flatten(),\n"
+                 "                                Some(cursor.try_into_api().unwrap()));", 1),
+            *tuple(swap(f"                            assert_eq!(`game.menu_slot({menu}, 0)`, None);",
+                        f"{menu}.with_view(game, |view| view.slot(0)).flatten()", 1)
+                   for menu in ["stale", "wrong_window"]),
+            Edit("                        assert_eq!(\n"
+                 "                            game.menu_kind(game.menu(123, old).unwrap()),\n"
+                 '                            Some(Some("minecraft:generic_9x3".into()))\n'
+                 "                        );",
+                 "                        assert_eq!(game.menu(123, old).unwrap().with_view(game, |view| {\n"
+                 '                            assert_eq!(view.kind(), Some(Some("minecraft:generic_9x3")));\n'
+                 "                        }), Some(()));", 1),
         ),
         MODDING / "native_menu_places.rs": (
             swap("            assert_eq!(`menu.slot_backing(host, 0)`, Some(MenuSlotBacking::Native(0)));",
@@ -169,6 +204,16 @@ EDITS = {
                  "before_logout.with_view(game, |view| view.slot_count()).flatten()", 2),
             swap("        assert_eq!(`game.menu_slot_count(reconnected)`, Some(46));",
                  "reconnected.with_view(game, |view| view.slot_count()).flatten()", 1),
+            *tuple(swap(f"        assert_eq!(`game.menu_slot({menu}, {slot})`, {expected});",
+                        f"{menu}.with_view(game, |view| view.slot({slot})).flatten()", 1)
+                   for menu, slot, expected in [("menu", 46, "None"), ("menu", 36, "Some(None)"),
+                                                ("chest", 3, "Some(None)")]),
+            *tuple(Edit(f"        assert_eq!(game.menu_slot({menu}, {slot}).unwrap().unwrap().count, {count});",
+                        f"        assert_eq!({menu}.with_view(game, |view| view.slot({slot})).flatten().unwrap().unwrap().count(), {count});", 1)
+                   for menu, slot, count in [("menu", 36, 3), ("crafting", 1, 3),
+                                             ("crafting", 0, 3), ("chest", 2, 4)]),
+            Edit("        assert_eq!(game.menu_carried(menu).unwrap().unwrap().count, 3);",
+                 "        assert_eq!(menu.with_view(game, |view| view.carried()).flatten().unwrap().unwrap().count(), 3);", 1),
         ),
         MODDING / "native_small_reads_tests.rs": (
             swap("            assert_eq!(`inventory.merchant_offers(game)`, Ok(None));",
@@ -187,6 +232,21 @@ EDITS = {
                  "replacement.with_client_view(game, |view| view.merchant_offers()).and_then(|scope| scope.transpose()).map(Option::flatten)", 1),
             swap("            assert_eq!(`replacement.merchant_offers(game)`, Ok(None));",
                  "replacement.with_client_view(game, |view| view.merchant_offers()).and_then(|scope| scope.transpose()).map(Option::flatten)", 1),
+            *tuple(swap(f"            assert_eq!(`game.menu_slot_count({menu})`, {expected});",
+                        f"{menu}.with_view(game, |view| view.slot_count()).flatten()", 1)
+                   for menu, expected in [("inventory", "Some(46)"), ("inventory", "None"),
+                                          ("open", "Some(63)"), ("open", "None")]),
+            swap("                `game.menu_slot_count(game.player_container_menu(player).unwrap())`,",
+                 "game.player_container_menu(player).unwrap().with_view(game, |view| view.slot_count()).flatten()", 1),
+            Edit("            assert_eq!(game.menu_slot(inventory, 36), Some(Some(stack.clone())));\n"
+                 "            assert_eq!(game.menu_carried(inventory), Some(Some(stack.clone())));",
+                 "            assert_eq!(inventory.with_view(game, |view| view.slot(36)).flatten(),\n"
+                 "                Some(Some(stack.try_into_api().unwrap())));\n"
+                 "            assert_eq!(inventory.with_view(game, |view| view.carried()).flatten(),\n"
+                 "                Some(Some(stack.try_into_api().unwrap())));", 1),
+            Edit("            assert_eq!(game.menu_slot(open, 54), Some(Some(stack)));",
+                 "            assert_eq!(open.with_view(game, |view| view.slot(54)).flatten(),\n"
+                 "                Some(Some(stack.try_into_api().unwrap())));", 1),
         ),
         VOCAB / "hooks_tests.rs": (
             Edit("fn menu_slot_boxes_take_a_client_host(\n    host: &dyn ClientHost,\n    menu: MenuRef,\n) -> Option<Vec<Option<[f32; 4]>>> {\n    menu.slot_boxes(host)\n}",
@@ -199,6 +259,23 @@ EDITS = {
                  "inventory.with_view(&game, |view| view.slot_count()).flatten()", 1),
             swap("    assert_eq!(`game.menu_slot_count(menu)`, Some(45));",
                  "menu.with_view(&game, |view| view.slot_count()).flatten()", 1),
+            Edit("    let gem = game\n        .menu_slot(menu, 0)\n        .flatten()\n"
+                 '        .expect("the chest\'s first slot");\n'
+                 '    assert_eq!((&*gem.item, gem.count), ("minecraft:diamond", 2));\n'
+                 '    assert_eq!(gem.custom_name().as_deref(), Some("Gem"));\n'
+                 "    assert_eq!(game.menu_slot(menu, 1), Some(None));\n"
+                 "    let stone = game\n        .menu_slot(menu, 36)\n        .flatten()\n"
+                 '        .expect("the hotbar\'s first slot");\n'
+                 '    assert_eq!((&*stone.item, stone.count), ("minecraft:stone", 5));',
+                 "    let gem = menu.with_view(&game, |view| view.slot(0)).flatten().flatten()\n"
+                 '        .expect("the chest\'s first slot");\n'
+                 '    assert_eq!((gem.item().id(&game).as_str(), gem.count()), ("minecraft:diamond", 2));\n'
+                 '    assert_eq!(gem.components().and_then(|patch| patch.as_nbt().get("minecraft:custom_name")),\n'
+                 '        Some(&Tag::String("Gem".into())));\n'
+                 "    assert_eq!(menu.with_view(&game, |view| view.slot(1)).flatten(), Some(None));\n"
+                 "    let stone = menu.with_view(&game, |view| view.slot(36)).flatten().flatten()\n"
+                 '        .expect("the hotbar\'s first slot");\n'
+                 '    assert_eq!((stone.item().id(&game).as_str(), stone.count()), ("minecraft:stone", 5));', 1),
         ),
         MODDING / "native_menu_slot_kinds.rs": (
             swap("            assert_eq!(`game.menu_slot_kinds(menu)`, None);",

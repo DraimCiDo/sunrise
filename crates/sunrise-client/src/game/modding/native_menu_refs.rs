@@ -890,7 +890,7 @@ mod tests {
         ) -> Option<mod_api::ScreenOpening> {
             if event.current.id == "playing" && event.new.menu == Some(PANEL) {
                 let menu = host.local_player()?.container_menu(host)?;
-                let count = menu.slot_count(host)?;
+                let count = menu.with_view(host, |view| view.slot_count()).flatten()?;
                 *self.opening.lock().unwrap() = Some((menu, count));
             }
             None
@@ -1203,7 +1203,10 @@ mod tests {
                 )
                 .unwrap();
             let menu = game.player_container_menu(player).unwrap();
-            assert_ne!(menu.container_id(game), Some(0));
+            assert_ne!(
+                menu.with_view(game, |view| view.container_id()).flatten(),
+                Some(0)
+            );
             assert!(menu.close_container(game));
             let guest = &game.lan.as_ref().unwrap().hub.guests[0];
             assert!(guest.menu.is_none(), "the menu is gone");
@@ -1221,7 +1224,12 @@ mod tests {
             assert!(!menu.close_container(game), "a stale menu is refused");
             // The player's own inventory menu is never closed.
             let inventory = game.player_container_menu(player).unwrap();
-            assert_eq!(inventory.container_id(game), Some(0));
+            assert_eq!(
+                inventory
+                    .with_view(game, |view| view.container_id())
+                    .flatten(),
+                Some(0)
+            );
             assert!(!inventory.close_container(game));
         });
     }
@@ -1286,19 +1294,42 @@ mod tests {
             game.lan.as_mut().unwrap().hub.guests.push(guest());
             let player = game.player(123).unwrap();
             let inventory = game.player_container_menu(player).unwrap();
-            assert_eq!(inventory.container_id(game), Some(0));
-            assert_eq!(inventory.kind(game), Some(None));
-            assert_eq!(inventory.slot_count(game), Some(46));
-            assert_eq!(inventory.slot(game, 0), Some(None));
             assert_eq!(
-                game.menu_slot_backing(inventory, 36),
+                inventory
+                    .with_view(game, |view| view.container_id())
+                    .flatten(),
+                Some(0)
+            );
+            assert_eq!(
+                inventory.with_view(game, |view| assert_eq!(view.kind(), Some(None))),
+                Some(())
+            );
+            assert_eq!(
+                inventory
+                    .with_view(game, |view| view.slot_count())
+                    .flatten(),
+                Some(46)
+            );
+            assert_eq!(
+                inventory.with_view(game, |view| view.slot(0)).flatten(),
+                Some(None)
+            );
+            assert_eq!(
+                inventory
+                    .with_view(game, |view| view.slot_backing(36))
+                    .flatten(),
                 Some(MenuSlotBacking::Player(0))
             );
             assert_eq!(
-                game.menu_slot_backing(inventory, 45),
+                inventory
+                    .with_view(game, |view| view.slot_backing(45))
+                    .flatten(),
                 Some(MenuSlotBacking::Player(40))
             );
-            assert_eq!(inventory.slot(game, 46), None);
+            assert_eq!(
+                inventory.with_view(game, |view| view.slot(46)).flatten(),
+                None
+            );
             let stone = ItemStack::new("minecraft:stone", 4);
             let host = game.lan.as_mut().unwrap();
             {
@@ -1314,13 +1345,18 @@ mod tests {
                 .hub
                 .open_native_menu(1, 1, title.clone(), vec![Some(stone.clone())])
                 .unwrap();
-            assert_eq!(inventory.slot_count(game), None);
+            assert_eq!(
+                inventory
+                    .with_view(game, |view| view.slot_count())
+                    .flatten(),
+                None
+            );
             let menu = game.player_container_menu(player).unwrap();
             assert_eq!(menu.container_id(game), Some(window));
             assert_eq!(menu.kind(game), Some(Some("minecraft:generic_9x1".into())));
             assert_eq!(menu.slot_count(game), Some(45));
             assert_eq!(
-                menu.slot(game, 0),
+                menu.with_view(game, |view| view.slot(0)).flatten(),
                 Some(Some(stone.try_into_api().unwrap()))
             );
             assert_eq!(menu.slot(game, 1), Some(None));
@@ -1333,18 +1369,21 @@ mod tests {
                 Some(Some(stone.try_into_api().unwrap()))
             );
             assert_eq!(
-                game.menu_slot_backing(menu, 0),
+                menu.with_view(game, |view| view.slot_backing(0)).flatten(),
                 Some(MenuSlotBacking::Native(0))
             );
             assert_eq!(
-                game.menu_slot_backing(menu, 9),
+                menu.with_view(game, |view| view.slot_backing(9)).flatten(),
                 Some(MenuSlotBacking::Player(9))
             );
             assert_eq!(
-                game.menu_slot_backing(menu, 36),
+                menu.with_view(game, |view| view.slot_backing(36)).flatten(),
                 Some(MenuSlotBacking::Player(0))
             );
-            assert_eq!(game.menu_slot_backing(menu, 45), None);
+            assert_eq!(
+                menu.with_view(game, |view| view.slot_backing(45)).flatten(),
+                None
+            );
             let host = game.lan.as_mut().unwrap();
             for _ in 0..100 {
                 host.hub
@@ -1352,11 +1391,17 @@ mod tests {
                     .unwrap();
             }
             assert_eq!(host.hub.guests[0].menu.as_ref().unwrap().window, window);
-            assert_eq!(menu.slot_count(game), None);
+            assert_eq!(
+                menu.with_view(game, |view| view.slot_count()).flatten(),
+                None
+            );
             let newer = game.player_container_menu(player).unwrap();
             let host = game.lan.as_mut().unwrap();
             host.hub.close_container(1);
-            assert_eq!(newer.slot_count(game), None);
+            assert_eq!(
+                newer.with_view(game, |view| view.slot_count()).flatten(),
+                None
+            );
             let inventory = game.player_container_menu(player).unwrap();
             let host = game.lan.as_mut().unwrap();
             *host.menus.entry(1).or_default().crafting.table = Some((
@@ -1368,12 +1413,22 @@ mod tests {
                 [0; 3],
             ));
             assert_eq!(game.player_container_menu(player), None);
-            assert_eq!(inventory.slot_count(game), None);
+            assert_eq!(
+                inventory
+                    .with_view(game, |view| view.slot_count())
+                    .flatten(),
+                None
+            );
             let host = game.lan.as_mut().unwrap();
             host.play.clear();
             host.menus.clear();
             host.hub.guests.replace(0, guest());
-            assert_eq!(inventory.slot_count(game), None);
+            assert_eq!(
+                inventory
+                    .with_view(game, |view| view.slot_count())
+                    .flatten(),
+                None
+            );
 
             use sunrise_client::{containers::BlockEntity, lan::menu::Slots};
             let a = (1, 2, 3);
@@ -1396,7 +1451,7 @@ mod tests {
             );
             let menu = game.player_container_menu(player).unwrap();
             assert_eq!(
-                game.menu_slot_backing(menu, 2),
+                menu.with_view(game, |view| view.slot_backing(2)).flatten(),
                 Some(MenuSlotBacking::BlockEntity {
                     level: game.level("minecraft:overworld").unwrap(),
                     pos: [b.0, b.1, b.2],
@@ -1404,7 +1459,7 @@ mod tests {
                 })
             );
             assert_eq!(
-                menu.slot(game, 2),
+                menu.with_view(game, |view| view.slot(2)).flatten(),
                 Some(Some(stone.try_into_api().unwrap()))
             );
             let vehicle = (i32::MAX - 15, VEHICLE_KEY_Y, 42);
@@ -1422,14 +1477,14 @@ mod tests {
             );
             let menu = game.player_container_menu(player).unwrap();
             assert_eq!(
-                game.menu_slot_backing(menu, 0),
+                menu.with_view(game, |view| view.slot_backing(0)).flatten(),
                 Some(MenuSlotBacking::Entity {
                     entity: EntityRef::new(game.level("minecraft:overworld").unwrap().epoch(), 42),
                     slot: 0
                 })
             );
             assert_eq!(
-                menu.slot(game, 0),
+                menu.with_view(game, |view| view.slot(0)).flatten(),
                 Some(Some(stone.try_into_api().unwrap()))
             );
 
@@ -1477,11 +1532,15 @@ mod tests {
             let nether_menu = game.player_container_menu(other_player).unwrap();
             let nether = game.level("minecraft:the_nether").unwrap();
             assert_eq!(
-                overworld_menu.slot(game, 0),
+                overworld_menu
+                    .with_view(game, |view| view.slot(0))
+                    .flatten(),
                 Some(Some(gold.try_into_api().unwrap()))
             );
             assert_eq!(
-                game.menu_slot_backing(overworld_menu, 0),
+                overworld_menu
+                    .with_view(game, |view| view.slot_backing(0))
+                    .flatten(),
                 Some(MenuSlotBacking::BlockEntity {
                     level: overworld,
                     pos: [a.0, a.1, a.2],
@@ -1493,11 +1552,13 @@ mod tests {
                     .is_some()
             );
             assert_eq!(
-                nether_menu.slot(game, 0),
+                nether_menu.with_view(game, |view| view.slot(0)).flatten(),
                 Some(Some(emerald.try_into_api().unwrap()))
             );
             assert_eq!(
-                game.menu_slot_backing(nether_menu, 0),
+                nether_menu
+                    .with_view(game, |view| view.slot_backing(0))
+                    .flatten(),
                 Some(MenuSlotBacking::BlockEntity {
                     level: nether,
                     pos: [a.0, a.1, a.2],

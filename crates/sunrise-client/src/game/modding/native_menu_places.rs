@@ -601,7 +601,10 @@ mod tests {
             let host: &mut dyn ServerHost = game;
             let menu = host.menu(123, window).unwrap();
             // Unbacked, the menu is the mod's own, as before.
-            assert_eq!(menu.slot_backing(host, 0), Some(MenuSlotBacking::Native(0)));
+            assert_eq!(
+                menu.with_view(host, |view| view.slot_backing(0)).flatten(),
+                Some(MenuSlotBacking::Native(0))
+            );
             assert!(!game.place_menu_click(123, window, 27, 0, 1));
 
             let player = menu.fields().player;
@@ -621,7 +624,7 @@ mod tests {
             );
             let host: &mut dyn ServerHost = game;
             assert_eq!(
-                menu.slot_backing(host, 0),
+                menu.with_view(host, |view| view.slot_backing(0)).flatten(),
                 Some(MenuSlotBacking::Place(MenuSlotPlace::HeldItem {
                     hand: Hand::Main,
                     slot: 0
@@ -719,7 +722,10 @@ mod tests {
                 Ok(())
             );
             let host: &mut dyn ServerHost = game;
-            assert_eq!(menu.slot_backing(host, 0), Some(MenuSlotBacking::Native(0)));
+            assert_eq!(
+                menu.with_view(host, |view| view.slot_backing(0)).flatten(),
+                Some(MenuSlotBacking::Native(0))
+            );
             assert_eq!(ItemPlace::MenuSlot { menu, slot: 0 }.stack(host), None);
             assert_eq!(stone(game, menu), 64);
         });
@@ -753,10 +759,13 @@ mod tests {
             let host: &mut dyn ServerHost = game;
             let menu = host.menu(123, window).unwrap();
             assert!(matches!(
-                menu.slot_backing(host, 0),
+                menu.with_view(host, |view| view.slot_backing(0)).flatten(),
                 Some(MenuSlotBacking::Place(_))
             ));
-            assert_eq!(menu.slot_backing(host, 1), None);
+            assert_eq!(
+                menu.with_view(host, |view| view.slot_backing(1)).flatten(),
+                None
+            );
             assert_eq!(
                 game.as_guest(1, |game| back(game, held_places(Hand::Main, 0..1))),
                 Some(Ok(()))

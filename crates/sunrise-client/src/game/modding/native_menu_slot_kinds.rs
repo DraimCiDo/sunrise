@@ -279,19 +279,55 @@ mod tests {
             remote.profile = 42;
             let player = game.local_player().unwrap();
             let menu = game.player_container_menu(player).unwrap();
-            assert_eq!(game.menu_slot_kinds(menu), None);
+            assert_eq!(
+                menu.with_client_view(game, |view| view.slot_kinds())
+                    .ok()
+                    .flatten()
+                    .flatten(),
+                None
+            );
             game.screen = Screen::Inventory;
-            let inventory = game.menu_slot_kinds(menu).unwrap();
-            assert_eq!(inventory.len(), game.menu_slot_count(menu).unwrap());
+            let inventory = menu
+                .with_client_view(game, |view| view.slot_kinds())
+                .ok()
+                .flatten()
+                .flatten()
+                .unwrap();
+            assert_eq!(
+                inventory.len(),
+                menu.with_view(game, |view| view.slot_count())
+                    .flatten()
+                    .unwrap()
+            );
             game.screen = Screen::Creative;
-            assert_eq!(game.menu_slot_kinds(menu), Some(inventory));
+            assert_eq!(
+                menu.with_client_view(game, |view| view.slot_kinds())
+                    .ok()
+                    .flatten()
+                    .flatten(),
+                Some(inventory)
+            );
             let fields = menu.fields();
             let stale =
                 mod_api::__private::game::menu_ref(player, fields.window, fields.generation + 1);
-            assert_eq!(game.menu_slot_kinds(stale), None);
+            assert_eq!(
+                stale
+                    .with_client_view(game, |view| view.slot_kinds())
+                    .ok()
+                    .flatten()
+                    .flatten(),
+                None
+            );
             let other =
                 mod_api::__private::game::menu_ref(player, fields.window + 1, fields.generation);
-            assert_eq!(game.menu_slot_kinds(other), None);
+            assert_eq!(
+                other
+                    .with_client_view(game, |view| view.slot_kinds())
+                    .ok()
+                    .flatten()
+                    .flatten(),
+                None
+            );
             for (name, count) in [
                 ("minecraft:crafting", 46),
                 ("minecraft:furnace", 39),
@@ -305,9 +341,17 @@ mod tests {
                     .menu
                     .set(Some((3, name.into())));
                 let menu = game.player_container_menu(player).unwrap();
-                let kinds = game.menu_slot_kinds(menu).unwrap();
+                let kinds = menu
+                    .with_client_view(game, |view| view.slot_kinds())
+                    .ok()
+                    .flatten()
+                    .flatten()
+                    .unwrap();
                 assert_eq!(kinds.len(), count, "{name}");
-                assert_eq!(Some(kinds.len()), game.menu_slot_count(menu));
+                assert_eq!(
+                    Some(kinds.len()),
+                    menu.with_view(game, |view| view.slot_count()).flatten()
+                );
                 if name == "minecraft:anvil" {
                     assert_eq!(kinds, vec![Other; 39]);
                 }
@@ -319,10 +363,26 @@ mod tests {
                 .set(Some((4, "test:missing".into())));
             let remote = game.remote.as_ref().unwrap();
             let missing = mod_api::__private::game::menu_ref(player, 4, remote.menu.generation);
-            assert_eq!(game.menu_slot_kinds(missing), None);
-            assert_eq!(game.menu_slot_count(missing), None);
+            assert_eq!(
+                missing
+                    .with_client_view(game, |view| view.slot_kinds())
+                    .ok()
+                    .flatten()
+                    .flatten(),
+                None
+            );
+            assert_eq!(
+                missing.with_view(game, |view| view.slot_count()).flatten(),
+                None
+            );
             game.remote = None;
-            assert_eq!(game.menu_slot_kinds(menu), None);
+            assert_eq!(
+                menu.with_client_view(game, |view| view.slot_kinds())
+                    .ok()
+                    .flatten()
+                    .flatten(),
+                None
+            );
         });
     }
 }

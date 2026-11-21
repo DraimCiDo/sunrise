@@ -583,11 +583,17 @@ fn another_guests_menu_and_push_work_during_a_turn() {
             .unwrap();
         game.as_guest(12, |game| {
             assert_eq!(game.player_container_menu(a), Some(a_menu));
-            assert_eq!(a_menu.slot_count(game), Some(46));
-            assert_eq!(game.player_container_menu(b), Some(b_menu));
-            assert_eq!(b_menu.slot_count(game), Some(46));
             assert_eq!(
-                b_menu.slot(game, 36),
+                a_menu.with_view(game, |view| view.slot_count()).flatten(),
+                Some(46)
+            );
+            assert_eq!(game.player_container_menu(b), Some(b_menu));
+            assert_eq!(
+                b_menu.with_view(game, |view| view.slot_count()).flatten(),
+                Some(46)
+            );
+            assert_eq!(
+                b_menu.with_view(game, |view| view.slot(36)).flatten(),
                 Some(Some(crate::game::api_values::test_snapshot(&stone)))
             );
             assert!(game.entity_set_rotation(b.entity(), 90.0, 10.0));
@@ -602,7 +608,10 @@ fn another_guests_menu_and_push_work_during_a_turn() {
                 );
                 assert!(game.player_container_menu(a).is_none());
                 assert_eq!(game.player_container_menu(b), Some(b_menu));
-                assert_eq!(b_menu.slot_count(game), Some(46));
+                assert_eq!(
+                    b_menu.with_view(game, |view| view.slot_count()).flatten(),
+                    Some(46)
+                );
                 assert!(!game.entity_push(a.entity(), [1.0, 0.0, 0.0]));
             })
             .unwrap();
@@ -613,7 +622,7 @@ fn another_guests_menu_and_push_work_during_a_turn() {
         })
         .unwrap();
         assert_eq!(
-            b_menu.slot(game, 36),
+            b_menu.with_view(game, |view| view.slot(36)).flatten(),
             Some(Some(crate::game::api_values::test_snapshot(&stone)))
         );
         assert_eq!(

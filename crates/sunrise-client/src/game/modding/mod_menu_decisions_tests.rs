@@ -861,7 +861,11 @@ fn a_code_opened_menus_button_reaches_a_blocks_menu_button_only_for_its_menu_typ
                     .unwrap()
                     .unwrap();
                 assert_eq!(
-                    player.container_menu(game).unwrap().slot_count(game),
+                    player
+                        .container_menu(game)
+                        .unwrap()
+                        .with_view(game, |view| view.slot_count())
+                        .flatten(),
                     Some(0)
                 );
                 button(game, window, 3);
