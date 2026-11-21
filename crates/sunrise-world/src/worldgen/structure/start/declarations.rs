@@ -1,3 +1,6 @@
+//! stable-line: content-declarations
+//! Structure and structure set declarations, including carried placement rules.
+
 use super::{
     Avoid, AvoidBiomes, JigsawDef, ModType, Placement, Reduction, RingSections, STEPS,
     StructureDef, StructureKind, StructureRegistry, StructureSet,

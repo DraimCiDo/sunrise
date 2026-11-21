@@ -1,3 +1,6 @@
+//! stable-line: content-declarations
+//! Template pool declarations, including carried element types and fields.
+
 use super::{Limit, Pool, PoolElement, Pools, Projection, Rules};
 use crate::worldgen::{
     DecodeError,

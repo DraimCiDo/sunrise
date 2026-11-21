@@ -1,3 +1,6 @@
+//! stable-line: content-declarations
+//! Piece-count and placement declarations for the piece-limited assembler.
+
 use super::{Burying, Config, Counted, LandSearch, Layout, Library};
 use serde_json::Value;
 use sunrise_core::{identifier::Identifier, java_hash_map::JavaHashMap};

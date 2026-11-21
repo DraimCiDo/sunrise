@@ -1,3 +1,6 @@
+//! stable-line: content-declarations
+//! Extra start-check declarations for carried structures.
+
 use super::{LiquidCheck, Repurposed, StartChecks};
 use serde_json::Value;
 

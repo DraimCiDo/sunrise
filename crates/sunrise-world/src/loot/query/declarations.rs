@@ -1,3 +1,6 @@
+//! stable-line: content-declarations
+//! NeoForge's queried-table and item-ability loot predicates.
+
 use super::{LootQuery, LootStack, UNKNOWN_LOOT_TABLE};
 
 /// Recognise stock conditions before the mod-kind fallback, without drawing randomness.

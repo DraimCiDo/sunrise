@@ -1,3 +1,6 @@
+//! stable-line: content-declarations
+//! Declarations for carried pillar and fluid and air closure processors.
+
 /// Direction's serialized names, in Direction.values() order.
 use super::{
     Blocks, BottomPillar, CloseOffAirSources, CloseOffFluidSources, HeightRandomizer, Pillar,

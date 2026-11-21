@@ -1,3 +1,6 @@
+//! stable-line: content-declarations
+//! Condition predicates and conditional element lists in NeoForge data files.
+
 use super::{Condition, ConditionError, Context, Handlers, LoadConditions, Verdict};
 use serde_json::Value;
 use std::collections::BTreeSet;

@@ -1,3 +1,6 @@
+//! stable-line: content-declarations
+//! Data-enabled loot modifier files and their serializer selection.
+
 use super::{
     DecodedModifier, GlobalLootModifiers, ModifierDiagnostic, ModifierFile, PreparedModifier,
 };

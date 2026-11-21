@@ -1,3 +1,6 @@
+//! stable-line: content-declarations
+//! Carried enhanced terrain adaptation declarations on structures and pieces.
+
 use super::{Adaptation, Band, StructureAdaptation};
 use crate::worldgen::DecodeError;
 use serde_json::Value;

@@ -1,3 +1,6 @@
+//! stable-line: content-declarations
+//! Built-in loot type IDs, including the NeoForge loot predicate extensions.
+
 use super::shapes;
 
 pub(super) fn builtin(kind: &str, function: bool) -> bool {

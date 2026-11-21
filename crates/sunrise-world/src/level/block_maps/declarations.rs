@@ -1,3 +1,6 @@
+//! stable-line: content-declarations
+//! NeoForge's flammable, oxidizable and waxable data-map value shapes.
+
 use super::{BlockMaps, cycles, full, inverse};
 use serde_json::Value;
 

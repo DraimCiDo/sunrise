@@ -1,3 +1,6 @@
+//! stable-line: content-declarations
+//! Processor-list declarations, with the carried structure processor types.
+
 use super::{
     CountCap, Modifier, Outcome, Pick, PickedList, PosRule, Processor, ProcessorList, Rule,
     SpawnerMobs, json_to_nbt, litho, pillars, sea_level,

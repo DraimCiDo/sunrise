@@ -1,3 +1,6 @@
+//! stable-line: content-declarations
+//! The carried structure processor that keeps selected world blocks.
+
 use super::KeepWorldBlock;
 use crate::worldgen::DecodeError;
 use serde_json::Value;

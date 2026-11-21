@@ -1,3 +1,6 @@
+//! stable-line: content-declarations
+//! The Formations structure type and its optional jigsaw layout.
+
 use super::{Def, Placement};
 use crate::worldgen::DecodeError;
 use serde_json::Value;
