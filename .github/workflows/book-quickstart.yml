@@ -187,8 +187,8 @@ jobs:
       - name: Generated native release on this run's Linux SDK
         if: inputs.own_sdk
         run: >-
-          python3 tools/ci/mod_release_smoke.py --tool "${CARGO_TARGET_DIR:-target}/debug/cargo-sunrise-mod"
-          --scratch "$QS_SCRATCH" --commit "$(git rev-parse HEAD)"
+          cargo test --locked -p cargo-sunrise-mod --test release_smoke --
+          --ignored --exact tagged_source_release_checks_and_tests_a_required_library --nocapture
       - name: Clean private scratch
         if: always() && inputs.own_sdk
         run: |
