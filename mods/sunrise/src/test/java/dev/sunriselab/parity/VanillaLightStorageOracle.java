@@ -1,14 +1,19 @@
 package dev.sunriselab.parity;
 
+import io.netty.buffer.Unpooled;
+import it.unimi.dsi.fastutil.shorts.ShortList;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.protocol.game.ClientboundLightUpdatePacketData;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.BlockGetter;
@@ -16,9 +21,14 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LightChunk;
 import net.minecraft.world.level.chunk.LightChunkGetter;
+import net.minecraft.world.level.chunk.PalettedContainerFactory;
+import net.minecraft.world.level.chunk.UpgradeData;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
+import net.minecraft.world.level.chunk.storage.SerializableChunkData;
 import net.minecraft.world.level.lighting.ChunkSkyLightSources;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 
@@ -177,6 +187,78 @@ public final class VanillaLightStorageOracle {
         }
     }
 
+    private static void writeOrderedPadding(Path output) throws Exception {
+        ParityData.init();
+        var factory = PalettedContainerFactory.create(ParityData.access);
+        var center = new ChunkPos(0, 0);
+        var lowest = SectionPos.of(center, MIN_SECTION);
+        var pad = SectionPos.of(center, MIN_SECTION - 1);
+        var upperNeighbour = SectionPos.of(1, MIN_SECTION + 1, 0);
+        var lowerNeighbour = SectionPos.of(0, MIN_SECTION, 1);
+        var hex = HexFormat.of();
+        var out = new ArrayList<String>();
+        for (boolean arrayFirst : new boolean[] {false, true}) {
+            var engine = engine(true, null);
+            // Open the source section in both orders, but only the lower neighbour opens the pad.
+            engine.updateSectionStatus(upperNeighbour, false);
+            engine.runLightUpdates();
+            if (!arrayFirst) {
+                engine.updateSectionStatus(lowerNeighbour, false);
+                engine.runLightUpdates();
+            }
+            var sky = new DataLayer();
+            sky.set(0, 1, 0, 15); // A packed layer with a zero first row.
+            engine.queueSectionData(LightLayer.SKY, lowest, sky);
+            engine.runLightUpdates();
+            if (arrayFirst) {
+                engine.updateSectionStatus(lowerNeighbour, false);
+                engine.runLightUpdates();
+            }
+            var skyListener = engine.getLayerListener(LightLayer.SKY);
+            var lower = skyListener.getDataLayerData(pad);
+            if (lower == null || lower.isEmpty() == arrayFirst
+                || !Arrays.equals(lower.copy().getData(), new byte[2048])) {
+                throw new AssertionError("the dark pad must retain its source's representation at allocation");
+            }
+            out.add("== " + (arrayFirst ? "array-before-status" : "status-before-array"));
+            out.add("storage " + (lower.isEmpty() ? "empty" : "packed"));
+
+            // This oracle has no ServerLevel/save thread. Select the light layers as in
+            // SerializableChunkData.copyOf, then use the actual NBT writer for those sections.
+            var sections = new ArrayList<SerializableChunkData.SectionData>();
+            var blockListener = engine.getLayerListener(LightLayer.BLOCK);
+            for (int y = engine.getMinLightSection(); y < engine.getMaxLightSection(); y++) {
+                var at = SectionPos.of(center, y);
+                var s = skyListener.getDataLayerData(at);
+                var b = blockListener.getDataLayerData(at);
+                sections.add(new SerializableChunkData.SectionData(y, null,
+                    b == null || b.isEmpty() ? null : b.copy(), s == null || s.isEmpty() ? null : s.copy()));
+            }
+            var saved = new SerializableChunkData(factory, center, MIN_SECTION, 0, 0, ChunkStatus.FULL,
+                null, null, UpgradeData.EMPTY, Map.of(), new ChunkAccess.PackedTicks(List.of(), List.of()),
+                new ShortList[SECTIONS], true, sections, List.of(), List.of(), new CompoundTag()).write();
+            for (var entry : saved.getListOrEmpty("sections")) {
+                var section = (CompoundTag) entry;
+                int y = section.getByte("Y").orElseThrow();
+                for (String key : List.of("SkyLight", "BlockLight")) {
+                    section.getByteArray(key).ifPresent(bytes -> out.add("save " + y + " " + key + " " + hex.formatHex(bytes)));
+                }
+            }
+
+            var packet = new ClientboundLightUpdatePacketData(center, engine, null, null);
+            var buffer = Unpooled.buffer();
+            try {
+                ClientboundLightUpdatePacketData.STREAM_CODEC.encode(buffer, packet);
+                byte[] bytes = new byte[buffer.readableBytes()];
+                buffer.readBytes(bytes);
+                out.add("packet " + hex.formatHex(bytes));
+            } finally {
+                buffer.release();
+            }
+        }
+        Files.write(output, out);
+    }
+
     private static void checkMask(BitSet mask, int... bits) {
         var expected = new BitSet();
         for (int bit : bits) expected.set(bit);
@@ -233,5 +315,6 @@ public final class VanillaLightStorageOracle {
         }
         savedPadding();
         Files.write(Path.of(args[1]), out);
+        writeOrderedPadding(Path.of(args[2]));
     }
 }
