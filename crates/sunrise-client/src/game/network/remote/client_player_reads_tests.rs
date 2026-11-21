@@ -39,9 +39,18 @@ fn client_player_reads_answer_from_the_local_players_copy() {
         let player = game.local_player().unwrap();
 
         // Survival, as the login packet left it: building allowed, no flight.
-        assert_eq!(player.game_mode(game), Some(GameMode::Survival));
-        assert_eq!(player.may_build(game), Some(true));
-        assert_eq!(player.abilities(game).map(|a| a.may_fly), Some(false));
+        assert_eq!(
+            player.with_view(game, |view| view.game_mode()).flatten(),
+            Some(GameMode::Survival)
+        );
+        assert_eq!(player.with_view(game, |view| view.may_build()), Some(true));
+        assert_eq!(
+            player
+                .with_view(game, |view| view.abilities())
+                .flatten()
+                .map(|a| a.may_fly),
+            Some(false)
+        );
 
         // CHANGE_GAME_MODE to adventure: no building; then the abilities packet.
         game.handle_packet(C::GameEvent(play::GameEvent {
@@ -57,7 +66,11 @@ fn client_player_reads_answer_from_the_local_players_copy() {
         for (param, mode) in [(0.6, GameMode::Creative), (1.6, GameMode::Adventure)] {
             game.handle_packet(C::GameEvent(play::GameEvent { event: 3, param }))
                 .unwrap();
-            assert_eq!(player.game_mode(game), Some(mode), "{param}");
+            assert_eq!(
+                player.with_view(game, |view| view.game_mode()).flatten(),
+                Some(mode),
+                "{param}"
+            );
         }
         game.handle_packet(C::PlayerAbilities(play::PlayerAbilities {
             flags: 4 | 2,
@@ -78,7 +91,10 @@ fn client_player_reads_answer_from_the_local_players_copy() {
         .unwrap();
         assert_eq!(game.mode_id(), 0);
         assert_eq!(game.remote.as_ref().unwrap().game_mode, 0);
-        assert_eq!(player.game_mode(game), Some(GameMode::Survival));
+        assert_eq!(
+            player.with_view(game, |view| view.game_mode()).flatten(),
+            Some(GameMode::Survival)
+        );
 
         // Food from SetHealth; the client keeps no exhaustion.
         game.handle_packet(C::SetHealth(play::SetHealth {
@@ -87,13 +103,24 @@ fn client_player_reads_answer_from_the_local_players_copy() {
             saturation: 1.5,
         }))
         .unwrap();
-        let food = player.food(game).unwrap();
+        let food = player
+            .with_view(game, |view| view.food())
+            .flatten()
+            .unwrap();
         assert_eq!(
             (food.level, food.saturation, food.exhaustion),
             (5, 1.5, 0.0)
         );
-        assert_eq!(player.needs_food(game), Some(true));
-        assert_eq!(player.has_enough_food(game), Some(false));
+        assert_eq!(
+            player.with_view(game, |view| view.needs_food()).flatten(),
+            Some(true)
+        );
+        assert_eq!(
+            player
+                .with_view(game, |view| view.has_enough_food())
+                .flatten(),
+            Some(false)
+        );
 
         // The hotbar slot and the experience the server set.
         game.handle_packet(C::SetHeldSlot(play::SetHeldSlot { slot: 4 }))
@@ -105,9 +132,12 @@ fn client_player_reads_answer_from_the_local_players_copy() {
             total: 30,
         }))
         .unwrap();
-        let xp = player.experience(game).unwrap();
+        let xp = player.with_view(game, |view| view.experience()).unwrap();
         assert_eq!((xp.level, xp.progress, xp.total), (3, 0.25, 30));
-        assert_eq!(player.xp_needed_for_next_level(game), Some(13));
+        assert_eq!(
+            player.with_view(game, |view| view.xp_needed_for_next_level()),
+            Some(13)
+        );
 
         // The main inventory retains typed stacks and their damage, in slot order.
         let mut stack = sunrise_client::items::ItemStack::new("minecraft:diamond_pickaxe", 1);
@@ -130,8 +160,11 @@ fn client_player_reads_answer_from_the_local_players_copy() {
         // Another player: the client isn't sent their state.
         let epoch = player.entity().epoch();
         let other = mod_api::__private::game::player_ref(EntityRef::new(epoch, 8), 43);
-        assert_eq!(other.game_mode(game), None);
-        assert_eq!(other.food(game), None);
+        assert_eq!(
+            other.with_view(game, |view| view.game_mode()).flatten(),
+            None
+        );
+        assert_eq!(other.with_view(game, |view| view.food()).flatten(), None);
         assert_eq!(other.selected_slot(game), None);
         assert_eq!(other.inventory(game), None);
     });

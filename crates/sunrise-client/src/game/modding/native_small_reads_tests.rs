@@ -511,7 +511,10 @@ fn client_abilities_follow_predicted_flying_between_packets() {
             let local = game.local_player().unwrap();
             for flying in [true, false] {
                 game.player.as_mut().unwrap().flying = flying;
-                let abilities = local.abilities(&*game as &dyn mod_api::ClientHost).unwrap();
+                let abilities = local
+                    .with_view(&*game as &dyn mod_api::ClientHost, |view| view.abilities())
+                    .flatten()
+                    .unwrap();
                 assert_eq!(abilities.flying, flying);
                 assert!(abilities.may_fly);
                 assert!(!abilities.invulnerable);

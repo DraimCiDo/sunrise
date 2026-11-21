@@ -1324,7 +1324,12 @@ pub(super) mod interact_vibration_tests {
             ) -> Option<bool> {
                 assert_eq!(event.player.entity().id(), 41);
                 assert_eq!(
-                    event.player.food(host).unwrap().level,
+                    event
+                        .player
+                        .with_view(host, |view| view.food())
+                        .flatten()
+                        .unwrap()
+                        .level,
                     if self.0.load(Ordering::Relaxed) < 4 {
                         20
                     } else {

@@ -2864,9 +2864,15 @@ pub(super) mod tests {
             );
             let player = game.player(13).unwrap();
             assert_eq!(player.fields().entity, other);
-            assert_eq!(player.game_mode(game), Some(GameMode::Survival));
+            assert_eq!(
+                player.with_view(game, |view| view.game_mode()).flatten(),
+                Some(GameMode::Survival)
+            );
             assert!(game.player_set_game_mode(player, GameMode::Creative));
-            assert_eq!(player.game_mode(game), Some(GameMode::Creative));
+            assert_eq!(
+                player.with_view(game, |view| view.game_mode()).flatten(),
+                Some(GameMode::Creative)
+            );
             assert_eq!(game.lan_acting, Some(12));
             let acting = game.player(12).unwrap();
             assert!(game.player_set_game_mode(acting, GameMode::Adventure));

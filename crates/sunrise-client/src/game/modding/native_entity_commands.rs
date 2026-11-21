@@ -252,7 +252,10 @@ mod tests {
         with_guests(|game| {
             game.build_registries();
             let player = game.player(12).unwrap();
-            assert_eq!(player.game_mode(game), Some(GameMode::Survival));
+            assert_eq!(
+                player.with_view(game, |view| view.game_mode()).flatten(),
+                Some(GameMode::Survival)
+            );
             for permission in [0, 2] {
                 game.lan
                     .as_mut()
@@ -280,10 +283,16 @@ mod tests {
                                 "gamemode creative<--[HERE]",
                             ]
                         );
-                        assert_eq!(player.game_mode(game), Some(GameMode::Survival));
+                        assert_eq!(
+                            player.with_view(game, |view| view.game_mode()).flatten(),
+                            Some(GameMode::Survival)
+                        );
                     } else {
                         assert_eq!(result.feedback, ["Set own game mode to Creative Mode"]);
-                        assert_eq!(player.game_mode(game), Some(GameMode::Creative));
+                        assert_eq!(
+                            player.with_view(game, |view| view.game_mode()).flatten(),
+                            Some(GameMode::Creative)
+                        );
                     }
                     let chat: Vec<_> = game.guest_packets[before..]
                         .iter()
@@ -301,7 +310,10 @@ mod tests {
                 })
                 .unwrap();
             }
-            assert_eq!(player.game_mode(game), Some(GameMode::Creative));
+            assert_eq!(
+                player.with_view(game, |view| view.game_mode()).flatten(),
+                Some(GameMode::Creative)
+            );
         });
     }
 }
