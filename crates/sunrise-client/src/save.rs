@@ -2812,19 +2812,13 @@ impl SaveDir {
     }
     /// A record as saved: the pending write first, then the region file.
     fn read_record_raw(&self, folder: &str, x: i32, z: i32) -> Option<NamedTag> {
-        self.try_read_record_raw(folder, x, z, Record::tag_for_metadata)
+        self.try_read_record_raw(folder, x, z)
             .inspect_err(|e| self.chunk_reports.report_load_failure(&self.root, x, z, e))
             .ok()
             .flatten()
     }
     /// `read_record_raw`, telling a record that isn't there (`Ok(None)`) from a read that failed.
-    fn try_read_record_raw(
-        &self,
-        folder: &str,
-        x: i32,
-        z: i32,
-        read_pending: fn(&Record) -> Option<Arc<NamedTag>>,
-    ) -> Result<Option<NamedTag>> {
+    fn try_read_record_raw(&self, folder: &str, x: i32, z: i32) -> Result<Option<NamedTag>> {
         let pending = self
             .pending
             .lock()
@@ -2832,7 +2826,7 @@ impl SaveDir {
             .get(&(Folder::of(folder), x, z))
             .map(|(_, r)| r.clone());
         if let Some(record) = pending {
-            return Ok(read_pending(&record).map(|t| (*t).clone()));
+            return Ok(record.tag().map(|t| (*t).clone()));
         }
         let cache = match Folder::of(folder) {
             Folder::Region => &self.regions,
@@ -2849,14 +2843,8 @@ impl SaveDir {
         })
     }
     /// A record brought to the current version (`upgrade_record`); `Err` when that failed.
-    fn try_read_record(
-        &self,
-        folder: &str,
-        x: i32,
-        z: i32,
-        read_pending: fn(&Record) -> Option<Arc<NamedTag>>,
-    ) -> Result<Option<NamedTag>> {
-        let Some(mut record) = self.try_read_record_raw(folder, x, z, read_pending)? else {
+    fn try_read_record(&self, folder: &str, x: i32, z: i32) -> Result<Option<NamedTag>> {
+        let Some(mut record) = self.try_read_record_raw(folder, x, z)? else {
             return Ok(None);
         };
         self.upgrade_record(Folder::of(folder), &mut record)?;
@@ -2864,7 +2852,7 @@ impl SaveDir {
     }
     /// A record brought to the current version (`upgrade_record`).
     fn read_record(&self, folder: &str, x: i32, z: i32) -> Option<NamedTag> {
-        self.try_read_record(folder, x, z, Record::tag_for_metadata)
+        self.try_read_record(folder, x, z)
             .inspect_err(|e| self.chunk_reports.report_load_failure(&self.root, x, z, e))
             .ok()
             .flatten()
@@ -2889,7 +2877,7 @@ impl SaveDir {
         biomes: &Biomes,
     ) -> std::result::Result<Option<Chunk>, ()> {
         let Some(root) = self
-            .try_read_record("region", x, z, Record::tag)
+            .try_read_record("region", x, z)
             .map_err(|e| self.chunk_reports.report_load_failure(&self.root, x, z, &e))?
         else {
             return Ok(None);
@@ -2953,13 +2941,11 @@ impl SaveDir {
         if self.failed_entity_reads.lock().unwrap().contains(&(x, z)) {
             return Err("an earlier entity chunk read failed".into());
         }
-        let record = self
-            .try_read_record("entities", x, z, Record::tag_for_metadata)
-            .inspect_err(|e| {
-                self.failed_entity_reads.lock().unwrap().insert((x, z));
-                log::error!("Failed to load entity chunk {x},{z}: {e}");
-                self.chunk_reports.report_load_failure(&self.root, x, z, e);
-            })?;
+        let record = self.try_read_record("entities", x, z).inspect_err(|e| {
+            self.failed_entity_reads.lock().unwrap().insert((x, z));
+            log::error!("Failed to load entity chunk {x},{z}: {e}");
+            self.chunk_reports.report_load_failure(&self.root, x, z, e);
+        })?;
         let mut out = Vec::new();
         if let Some(root) = record
             && let Some(Tag::List(list)) = root.tag.get("Entities")

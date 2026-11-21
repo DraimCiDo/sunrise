@@ -107,14 +107,6 @@ impl Record {
         self.encode_tag(false)
     }
 
-    /// Metadata and far terrain do not consume a block entity's saved payload.
-    pub(super) fn tag_for_metadata(&self) -> Option<Arc<NamedTag>> {
-        if let Self::EditedChunk(record) = self {
-            return record.original.without_block_entity_edits();
-        }
-        self.tag()
-    }
-
     pub(super) fn tag_for_write(&self) -> Option<Arc<NamedTag>> {
         self.encode_tag(true)
     }
