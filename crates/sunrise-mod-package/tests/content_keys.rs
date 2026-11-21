@@ -1,6 +1,11 @@
 //! A schema walk over the admitted corpus. Unlike `content_golden`, this test
 //! uses the current reader's schema, not the previous release's.
 
+#[path = "content_keys/forms.rs"]
+mod forms;
+#[path = "content_keys/source_guard.rs"]
+mod source_guard;
+
 use serde::de::{
     Deserialize, DeserializeSeed, Deserializer, EnumAccess, IntoDeserializer, VariantAccess,
     Visitor,
@@ -10,48 +15,30 @@ use serde_json::Value;
 use std::{cell::RefCell, collections::BTreeSet, fs};
 use sunrise_mod_package::{
     Content, Manifest, Package,
-    content::{
-        DYE_COLORS, ENTITY_TEMPLATES, ShapeEntityKind, StewEffect, entity_sounds::Mute,
-        probe_declaration,
-    },
-    manifest::{DependencyDetails, JarRef, MANIFEST, RuleDetails},
+    content::{DECLARATION_KINDS, DYE_COLORS, ENTITY_TEMPLATES, probe_declaration},
+    extension_tags,
+    manifest::MANIFEST,
 };
+
+const CORPUS: &str = "tests/content-corpus";
 
 #[test]
 fn content_keys() {
     let coverage = RefCell::new(Coverage::default());
     let empty = Value::Object(Default::default());
-    let schema = Probe {
-        value: &empty,
-        coverage: &coverage,
-    };
     // The callbacks publish the top-level fields even when the empty object fails
     // to decode. A declaration kind's absence must not hide its entire schema.
-    for kind in [
-        "block",
-        "item",
-        "mob_effect",
-        "creative_tab",
-        "fluid",
-        "fluid_interaction",
-        "entity_type",
-        "menu",
-    ] {
-        drop(probe_declaration(kind, schema));
+    for &kind in DECLARATION_KINDS {
+        drop(probe_declaration(kind, Probe::new(kind, &empty, &coverage)));
     }
-    drop(JarRef::deserialize(schema));
-    drop(DependencyDetails::deserialize(schema));
-    drop(RuleDetails::deserialize(schema));
-    drop(StewEffect::deserialize(schema));
-    let unknown = Value::String(String::new());
-    let variants = Probe {
-        value: &unknown,
-        ..schema
-    };
-    let _ = ShapeEntityKind::deserialize(variants);
-    let _ = Mute::deserialize(variants);
+    drop(Manifest::deserialize(Probe::new(
+        "manifest", &empty, &coverage,
+    )));
 
-    for entry in fs::read_dir("tests/content-corpus").unwrap() {
+    let mut block_components = BTreeSet::new();
+    let mut item_removal = false;
+    let mut extension_files = BTreeSet::new();
+    for entry in fs::read_dir(CORPUS).unwrap() {
         let entry = entry.unwrap();
         if entry.file_name().to_str().unwrap().starts_with("refused_") {
             continue;
@@ -61,32 +48,12 @@ fn content_keys() {
         let toml: toml::Value =
             toml::from_str(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
         let value = serde_json::to_value(toml).unwrap();
-        let probe = Probe {
-            value: &value,
-            coverage: &coverage,
-        };
-        Manifest::deserialize(probe).unwrap_or_else(|e| panic!("{}: {e}", manifest_path.display()));
-
-        // Serde's untagged wrappers buffer through deserialize_any and replay
-        // internally. Probe the public detailed forms separately.
-        for table in ["dependencies", "incompatible", "discouraged"] {
-            if let Some(rows) = value.get(table).and_then(Value::as_object) {
-                for row in rows.values().filter(|row| row.is_object()) {
-                    let row = Probe {
-                        value: row,
-                        ..probe
-                    };
-                    if table == "dependencies" {
-                        DependencyDetails::deserialize(row).unwrap();
-                    } else {
-                        RuleDetails::deserialize(row).unwrap();
-                    }
-                }
-            }
-        }
+        Manifest::deserialize(Probe::new("manifest", &value, &coverage))
+            .unwrap_or_else(|e| panic!("{}: {e}", manifest_path.display()));
 
         let package = Package::read(&path).unwrap();
         let content = Content::read(&path, &package.manifest).unwrap();
+        assert_eq!(content.server_only_refusal(&package.manifest), None);
         let mut reader = content.reader().unwrap();
         for file in &content.files {
             let mut parts = file.splitn(5, '/');
@@ -102,76 +69,67 @@ fn content_keys() {
             let kind = parts.next().unwrap();
             let bytes = reader.read(file).unwrap();
             let value = serde_json::from_slice(&bytes).unwrap();
-            let probe = Probe {
-                value: &value,
-                coverage: &coverage,
-            };
-            probe_declaration(kind, probe).unwrap_or_else(|e| panic!("{file}: {e}"));
-            if kind == "block" {
-                // MapDeserializer hands map keys to Serde as plain strings.
-                for field in ["outline_context_shapes", "collision_context_shapes"] {
-                    if let Some(shapes) = value.get(field).and_then(Value::as_object) {
-                        for key in shapes.keys() {
-                            let key = Value::String(key.to_owned());
-                            ShapeEntityKind::deserialize(Probe {
-                                value: &key,
-                                ..probe
-                            })
-                            .unwrap();
-                        }
-                    }
-                }
-            }
-            if kind == "entity_type"
-                && let Some(sounds) = value.get("sounds").and_then(Value::as_object)
-            {
-                for value in sounds.values() {
-                    // Named sound IDs are the other, non-Mute branch of SoundOverride.
-                    let _ = Mute::deserialize(Probe { value, ..probe });
-                }
-            }
+            probe_declaration(kind, Probe::new(kind, &value, &coverage))
+                .unwrap_or_else(|e| panic!("{file}: {e}"));
         }
 
-        // These readers validate strings against their own finite vocabularies,
-        // not Serde enums. Their actual reader constants are the schema.
+        // These finite string vocabularies are not Serde enums. Use the reader's constants.
         let mut evidence = coverage.borrow_mut();
-        let instruments = content.blocks.iter().filter_map(|block| {
-            block
-                .properties
-                .instrument
-                .map(|instrument| instrument.name())
-        });
-        evidence.record(
-            "NoteInstrument",
-            mod_vocab::NoteInstrument::ALL
+        evidence.variants(
+            "block.properties.instrument",
+            mod_vocab::NoteInstrument::ALL.iter().map(|i| i.name()),
+            content
+                .blocks
                 .iter()
-                .map(|instrument| instrument.name()),
-            instruments,
+                .filter_map(|block| block.properties.instrument.map(|i| i.name())),
         );
-        let colors = content
-            .blocks
+        evidence.variants(
+            "block.sign_text_color",
+            DYE_COLORS.iter().copied(),
+            content
+                .blocks
+                .iter()
+                .filter_map(|block| block.sign_text_color.as_deref()),
+        );
+        evidence.variants(
+            "entity_type.template",
+            ENTITY_TEMPLATES.iter().copied(),
+            content
+                .entity_types
+                .iter()
+                .map(|entity| entity.template.as_str()),
+        );
+
+        for block in content.blocks {
+            block_components.extend(block.components.into_keys());
+        }
+        item_removal |= content
+            .items
             .iter()
-            .filter_map(|block| block.sign_text_color.as_deref());
-        evidence.record("DyeColor", DYE_COLORS, colors);
-        let templates = content
-            .entity_types
-            .iter()
-            .map(|entity| entity.template.as_str());
-        evidence.record("EntityType.template", ENTITY_TEMPLATES, templates);
+            .any(|item| item.components.keys().any(|k| k.starts_with('!')));
+        extension_files.extend(
+            content
+                .files
+                .into_iter()
+                .filter(|p| p.starts_with("data/sunrise/tags/")),
+        );
     }
 
     let coverage = coverage.into_inner();
     let missing: Vec<_> = coverage
-        .keys
+        .expected
         .difference(&coverage.seen)
-        .filter(|&&(name, key)| {
-            // The content-only reader explicitly rejects these tables without [native].
-            name != "Manifest" || !matches!(key, "native" | "runtime" | "internals")
+        .map(String::as_str)
+        // These three fields belong to exact-build native mods, not content mods.
+        .filter(|key| {
+            !matches!(
+                *key,
+                "manifest.native" | "manifest.runtime" | "manifest.internals"
+            )
         })
-        .map(|(name, key)| format!("{name}.{key}"))
         .collect();
     assert!(
-        !coverage.keys.is_empty(),
+        !coverage.expected.is_empty(),
         "no declaration schema was probed"
     );
     assert!(
@@ -179,38 +137,109 @@ fn content_keys() {
         "no admitted fixture for:\n{}",
         missing.join("\n")
     );
+    for key in ["minecraft:max_stack_size", "minecraft:rarity"] {
+        assert!(
+            block_components.contains(key),
+            "no admitted block component {key}"
+        );
+    }
+    assert!(
+        block_components.iter().any(|key| key.starts_with('!')),
+        "no admitted block component removal"
+    );
+    assert!(item_removal, "no admitted item component removal");
+    for tag in extension_tags::ALL {
+        let path = format!(
+            "data/sunrise/tags/{}/{}.json",
+            tag.registry,
+            tag.id.strip_prefix("sunrise:").unwrap()
+        );
+        assert!(
+            extension_files.contains(&path),
+            "no admitted extension tag fixture for {path}"
+        );
+    }
 }
 
 #[derive(Default)]
 struct Coverage {
-    keys: BTreeSet<(&'static str, &'static str)>,
-    seen: BTreeSet<(&'static str, &'static str)>,
+    expected: BTreeSet<String>,
+    seen: BTreeSet<String>,
 }
 
 impl Coverage {
-    fn record<'a>(
-        &mut self,
-        name: &'static str,
-        keys: impl IntoIterator<Item = &'static str>,
-        seen: impl IntoIterator<Item = &'a str>,
-    ) {
-        let seen: BTreeSet<_> = seen.into_iter().collect();
+    fn collection(&mut self, path: &str, segment: &str, nonempty: bool) {
+        let elements = format!("{path}{segment}");
+        self.expected.insert(elements.clone());
+        if nonempty {
+            self.seen.insert(elements);
+        }
+    }
+
+    fn keys(&mut self, path: &str, keys: &[&str], value: &serde_json::Map<String, Value>) {
         for key in keys {
-            self.keys.insert((name, key));
-            if seen.contains(key) {
-                self.seen.insert((name, key));
+            let field = format!("{path}.{key}");
+            self.expected.insert(field.clone());
+            // An empty container supplies no evidence about its elements. Keep looking
+            // for a fixture that can actually drive their deserialize callbacks.
+            if value.get(*key).is_some_and(|v| match v {
+                Value::Null => false,
+                Value::Array(values) => !values.is_empty(),
+                Value::Object(values) => !values.is_empty(),
+                _ => true,
+            }) {
+                self.seen.insert(field);
             }
         }
     }
+
+    fn variants<'a, 'b>(
+        &mut self,
+        path: &str,
+        variants: impl IntoIterator<Item = &'a str>,
+        seen: impl IntoIterator<Item = &'b str>,
+    ) {
+        self.expected.extend(
+            variants
+                .into_iter()
+                .map(|variant| format!("{path}::{variant}")),
+        );
+        self.seen
+            .extend(seen.into_iter().map(|variant| format!("{path}::{variant}")));
+    }
 }
 
-/// Replay the corpus through Serde, recording schema names before visiting
-/// their fixture values. Reusing admitted values lets the real validators run
-/// and reaches the nested shapes their authors actually use.
-#[derive(Clone, Copy)]
+/// Replay fixture values through the real Serde visitors. Struct fields and
+/// enum payloads add named path segments; collections use element/key/value
+/// segments so keys and values cannot satisfy each other's schema.
 struct Probe<'a> {
-    value: &'a Value,
+    input: Input<'a>,
+    path: String,
     coverage: &'a RefCell<Coverage>,
+}
+
+#[derive(Clone, Copy)]
+enum Input<'a> {
+    Value(&'a Value),
+    Key(&'a str),
+}
+
+impl<'a> Probe<'a> {
+    fn new(path: &str, value: &'a Value, coverage: &'a RefCell<Coverage>) -> Self {
+        Self {
+            input: Input::Value(value),
+            path: path.into(),
+            coverage,
+        }
+    }
+
+    fn at(&self, segment: &str, input: Input<'a>) -> Self {
+        Self {
+            input,
+            path: format!("{}{segment}", self.path),
+            coverage: self.coverage,
+        }
+    }
 }
 
 impl<'de> IntoDeserializer<'de, serde_json::Error> for Probe<'de> {
@@ -224,34 +253,61 @@ impl<'de> Deserializer<'de> for Probe<'de> {
     type Error = serde_json::Error;
 
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        match self.value {
-            Value::Object(map) => visitor.visit_map(MapDeserializer::new(
-                map.iter()
-                    .map(|(key, value)| (key.as_str(), Probe { value, ..self })),
-            )),
+        let value = match self.input {
+            Input::Value(value) => value,
+            Input::Key(key) => return visitor.visit_borrowed_str(key),
+        };
+        forms::probe(&self, value)?;
+        match value {
+            Value::Object(map) => {
+                visitor.visit_map(MapDeserializer::new(map.iter().map(|(key, value)| {
+                    (
+                        self.at("{key}", Input::Key(key)),
+                        self.at("{value}", Input::Value(value)),
+                    )
+                })))
+            }
             Value::Array(seq) => visitor.visit_seq(SeqDeserializer::new(
-                seq.iter().map(|value| Probe { value, ..self }),
+                seq.iter().map(|value| self.at("[]", Input::Value(value))),
             )),
             value => value.deserialize_any(visitor),
         }
     }
 
+    fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
+        if let Input::Value(Value::Object(map)) = self.input {
+            self.coverage
+                .borrow_mut()
+                .collection(&self.path, "{entries}", !map.is_empty());
+        }
+        self.deserialize_any(visitor)
+    }
+
+    fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
+        if let Input::Value(Value::Array(seq)) = self.input {
+            self.coverage
+                .borrow_mut()
+                .collection(&self.path, "[]", !seq.is_empty());
+        }
+        self.deserialize_any(visitor)
+    }
+
     fn deserialize_struct<V: Visitor<'de>>(
         self,
-        name: &'static str,
+        _: &'static str,
         fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Self::Error> {
-        if let Value::Object(map) = self.value {
-            self.coverage.borrow_mut().record(
-                name,
-                fields.iter().copied(),
-                map.iter()
-                    .filter(|(_, value)| !value.is_null())
-                    .map(|(key, _)| key.as_str()),
-            );
-        }
-        self.deserialize_any(visitor)
+        let Input::Value(Value::Object(map)) = self.input else {
+            return self.deserialize_any(visitor);
+        };
+        self.coverage.borrow_mut().keys(&self.path, fields, map);
+        visitor.visit_map(MapDeserializer::new(map.iter().map(|(key, value)| {
+            (
+                key.as_str(),
+                self.at(&format!(".{key}"), Input::Value(value)),
+            )
+        })))
     }
 
     fn deserialize_enum<V: Visitor<'de>>(
@@ -260,33 +316,42 @@ impl<'de> Deserializer<'de> for Probe<'de> {
         variants: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Self::Error> {
-        match self.value {
-            Value::String(variant) => {
-                self.coverage.borrow_mut().record(
-                    name,
+        let input = match self.input {
+            Input::Value(Value::String(variant)) => Input::Key(variant),
+            input => input,
+        };
+        match input {
+            Input::Key(variant) => {
+                self.coverage.borrow_mut().variants(
+                    &self.path,
                     variants.iter().copied(),
-                    [variant.as_str()],
+                    [variant],
                 );
-                visitor.visit_enum(variant.as_str().into_deserializer())
+                visitor.visit_enum(variant.into_deserializer())
             }
-            Value::Object(map) if map.len() == 1 => {
+            Input::Value(Value::Object(map)) if map.len() == 1 => {
                 let (variant, value) = map.iter().next().unwrap();
-                let variant = variant.as_str();
-                self.coverage
-                    .borrow_mut()
-                    .record(name, variants.iter().copied(), [variant]);
+                let variant = variants
+                    .iter()
+                    .copied()
+                    .find(|v| *v == variant)
+                    .ok_or_else(|| serde::de::Error::unknown_variant(variant, variants))?;
+                self.coverage.borrow_mut().variants(
+                    &self.path,
+                    variants.iter().copied(),
+                    [variant],
+                );
                 visitor.visit_enum(Tagged {
-                    name,
                     variant,
-                    payload: Probe { value, ..self },
+                    payload: self.at(&format!("::{variant}"), Input::Value(value)),
                 })
             }
-            value => value.deserialize_enum(name, variants, visitor),
+            Input::Value(value) => value.deserialize_enum(name, variants, visitor),
         }
     }
 
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        if self.value.is_null() {
+        if matches!(self.input, Input::Value(Value::Null)) {
             visitor.visit_none()
         } else {
             visitor.visit_some(self)
@@ -303,13 +368,12 @@ impl<'de> Deserializer<'de> for Probe<'de> {
 
     serde::forward_to_deserialize_any! {
         bool i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 char str string bytes byte_buf
-        unit unit_struct seq tuple tuple_struct map identifier ignored_any
+        unit unit_struct tuple tuple_struct identifier ignored_any
     }
 }
 
 struct Tagged<'de> {
-    name: &'static str,
-    variant: &'de str,
+    variant: &'static str,
     payload: Probe<'de>,
 }
 
@@ -352,6 +416,7 @@ impl<'de> VariantAccess<'de> for Tagged<'de> {
         fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Self::Error> {
-        self.payload.deserialize_struct(self.name, fields, visitor)
+        self.payload
+            .deserialize_struct(self.variant, fields, visitor)
     }
 }
