@@ -1,0 +1,11 @@
+ids = [
+    "handle:ChunkDiskData::from_nbt",
+    "handle:ChunkDiskData::finish",
+    "handle:ChunkDiskData::failure",
+    "handle:ChunkDiskData::transaction",
+    "hook:chunk_data_load",
+    "hook:chunk_data_save",
+    "hook:block_entity_save_additional",
+]
+why = "Vanilla's SerializableChunkData.write and RegionFileStorage.write use ordinary disk NBT, NbtIo.StringFallbackDataOutput writes overlong strings empty, and RegionFile.write sends oversized records to external files. IOWorker.runStore and ChunkMap.save report a failed chunk without retrying it or stopping other chunks. NeoForge's ChunkDataEvent.Load and Save and AttachmentHolder serialization do not impose per-entry budgets; bad attachments are reported without stopping other data. Sunrise now removes the extra attachment limits, chunk save gates, and fallback write. Only a panicking listener is disabled for the session; completed edits remain and the error is logged and shown in a toast naming the mod."
+migrate = "Replace `ChunkDiskData::from_nbt(entries)?` with `ChunkDiskData::from_nbt(entries)` and `data.finish()?` with `data.finish()`; neither returns a Result. Replace `data.transaction(|data| { ... })` with direct `data.get/set/remove` calls and handle each Result; if an edit needs application-level atomicity, compute the replacement value first and set it once. Remove `data.failure()` checks; `ChunkDiskData::get`, `ChunkDiskData::set`, and `ChunkDiskData::remove` keep their signatures but return `ChunkDiskFailure` for that operation only (`mod_id`, `key`, `reason`). A failed operation leaves its entry unchanged without canceling any other edit. Keep the load and save listener signatures, and rebuild against version 3 of both hooks. Keep the same `BlockEntityPart::block_entity_save_additional` method and rebuild against version 5; if a complete chunk cannot be written, it is reported and is not rewritten using older payloads."

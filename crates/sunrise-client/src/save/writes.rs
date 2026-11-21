@@ -10,29 +10,11 @@ pub(super) struct Writer {
     thread: std::thread::JoinHandle<()>,
 }
 
-/// The sole owner of completion for a queued record. Pending readers borrow
-/// only the record; dropping this job releases them even on cancellation,
-/// coalescing, or an unwind before the record reaches the writer.
+/// One submitted record. Its sequence identifies the matching pending read.
 pub(super) struct QueuedWrite {
     pub(super) key: (i32, i32),
     pub(super) record: Record,
     seq: u64,
-}
-
-impl QueuedWrite {
-    pub(super) fn new(key: (i32, i32), record: Record, seq: u64) -> Self {
-        Self {
-            key,
-            record: record.track_block_entity_edits(),
-            seq,
-        }
-    }
-}
-
-impl Drop for QueuedWrite {
-    fn drop(&mut self) {
-        self.record.resolve_block_entity_edits(false);
-    }
 }
 
 /// Writes still queued or running, with a condition to wait for none.
@@ -69,38 +51,21 @@ impl SaveDir {
     ) -> Result<()> {
         if !records.is_empty() {
             let mut writer = self.writer.lock().map_err(|_| "writer poisoned")?;
-            let records = if self.disk.get().is_some()
-                || mod_api::__private::listened(mod_api::HookId::ChunkDataSave)
-            {
-                let keys: Vec<_> = records.iter().map(|(key, _)| *key).collect();
-                match records
-                    .into_iter()
-                    .map(|(key, record)| {
-                        self.capture_disk_record(record).map(|record| (key, record))
-                    })
-                    .collect::<Result<Vec<_>>>()
-                {
-                    Ok(records) => records,
-                    Err(error) => {
-                        // A refused capture must leave its chunks dirty.
-                        self.note_refused_saves(folder, &keys);
-                        return Err(error);
-                    }
-                }
-            } else {
-                records
-            };
-            let mut batch = Vec::with_capacity(records.len());
+            let batch: Vec<_> = records
+                .into_iter()
+                .map(|(key, record)| QueuedWrite {
+                    key,
+                    record: self.capture_disk_record(record),
+                    seq: self.sequence.fetch_add(1, Ordering::Relaxed),
+                })
+                .collect();
             {
                 let mut pending = self.pending.lock().map_err(|_| "pending writes poisoned")?;
-                for (key, record) in records {
-                    let job = QueuedWrite::new(
-                        key,
-                        record,
-                        self.sequence.fetch_add(1, Ordering::Relaxed),
+                for job in &batch {
+                    pending.insert(
+                        (folder, job.key.0, job.key.1),
+                        (job.seq, job.record.clone()),
                     );
-                    pending.insert((folder, key.0, key.1), (job.seq, job.record.clone()));
-                    batch.push(job);
                 }
             }
             // After the pending writes: a search reads the new chunks from here on.
@@ -201,25 +166,25 @@ impl SaveDir {
                             })
                             .collect();
                         let records: Vec<_> = resolved.iter().map(|(k, r)| (*k, r)).collect();
-                        let result = (|| -> Result<()> {
-                            chunk_disk::prepare_batch(&batch)?;
-                            write_region_records(&root, cache, folder, &records)
-                        })();
-                        if let Err(e) = &result {
-                            chunk_disk::note_failed(&batch);
-                            let message = format!("failed to write {folder} files: {e}");
-                            log::warn!("Sunrise: {message}");
-                            *outstanding.error.lock().unwrap() = Some(message);
-                            for job in &batch {
-                                reports.report_save_failure(&root, job.key.0, job.key.1, e);
-                            }
+                        chunk_disk::prepare_batch(&batch);
+                        let failures = write_region_records(&root, cache, folder, &records);
+                        if let Some(((x, z), error)) = failures.first() {
+                            *outstanding.error.lock().unwrap() =
+                                Some(format!("failed to write {folder} chunk {x},{z}: {error}"));
                         }
-                        if result.is_ok()
-                            && let Ok(mut pending) = pending.lock()
-                        {
+                        let failed: HashSet<_> = failures
+                            .into_iter()
+                            .map(|((x, z), error)| {
+                                reports.report_save_failure(&root, x, z, &error);
+                                (x, z)
+                            })
+                            .collect();
+                        if let Ok(mut pending) = pending.lock() {
                             for job in &batch {
                                 let key = (kind, job.key.0, job.key.1);
-                                if pending.get(&key).is_some_and(|p| p.0 == job.seq) {
+                                if !failed.contains(&job.key)
+                                    && pending.get(&key).is_some_and(|p| p.0 == job.seq)
+                                {
                                     pending.remove(&key);
                                 }
                             }

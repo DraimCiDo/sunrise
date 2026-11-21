@@ -16,9 +16,8 @@ pub trait Hooks {
     /// without one.
     /// Malformed payloads, including overlong modified-UTF-8 names and
     /// strings, fall back to the stored payload before any output is used.
-    /// If the region writer cannot encode or
-    /// admit the complete chunk record, it retries that snapshot with stored
-    /// block-entity payloads instead of listener edits.
+    /// A failure to encode or write the complete chunk record is reported for
+    /// that chunk. The writer does not retry with stored block-entity payloads.
     ///
     /// Asked on the logical server thread for chunk saves (including unload),
     /// command reads, and copies into items, loot or templates. The read-only
@@ -37,7 +36,7 @@ pub trait Hooks {
         key = "id",
         target = "sunrise_client::game::native_hooks::block_entity_save_additional::GameLevel<'_>::native_block_entity_save_additional",
         neoforge = "none (vanilla BlockEntity.saveAdditional; NeoForge adds no event for this moment)",
-        version = 4
+        version = 5
     )]
     fn block_entity_save_additional(
         id: mod_api::BlockEntityTypeKey,

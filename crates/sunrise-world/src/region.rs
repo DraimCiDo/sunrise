@@ -11,17 +11,6 @@ use std::{
 };
 use sunrise_core::position::ChunkPos;
 
-/// A record exceeded the region format's compressed size admission limit.
-#[derive(Debug)]
-pub struct CompressedChunkLimit;
-
-impl std::fmt::Display for CompressedChunkLimit {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("compressed chunk limit exceeded")
-    }
-}
-
-impl std::error::Error for CompressedChunkLimit {}
 use {
     crate::compression::{Compression, invalid},
     sunrise_core::{
@@ -32,7 +21,6 @@ use {
 
 const SECTOR: usize = 4096;
 const HEADER: usize = SECTOR * 2;
-const MAX_COMPRESSED: usize = 64 * 1024 * 1024;
 
 thread_local! {
     /// Decompression storage retained by each region-reading worker.
@@ -64,15 +52,6 @@ impl ChunkRecord {
             compressed: compression.encode(&bytes)?,
             timestamp,
         })
-    }
-    fn check_compressed_size(&self) -> io::Result<()> {
-        if self.compressed.len() > MAX_COMPRESSED {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                CompressedChunkLimit,
-            ));
-        }
-        Ok(())
     }
     /// `RegionFileStorage.read`: the root read straight off the decompressing
     /// stream, so bytes after it, and a damaged stream past it, are never read.
@@ -214,14 +193,7 @@ fn read_record(
         if !path.is_file() {
             return Ok(None);
         }
-        let file = File::open(path)?;
-        let mut data = Vec::new();
-        file.take((MAX_COMPRESSED + 1) as u64)
-            .read_to_end(&mut data)?;
-        if data.len() > MAX_COMPRESSED {
-            return Err(invalid("external chunk compressed limit exceeded"));
-        }
-        data
+        fs::read(path)?
     } else {
         let mut data = vec![0; len - 1];
         match file.read_exact(&mut data) {
@@ -335,7 +307,6 @@ impl RegionFile {
     /// they are. A chunk's last sector is padded with zeros.
     pub fn write(&mut self, chunk: ChunkPos, record: &ChunkRecord) -> io::Result<()> {
         let i = slot(self.position, chunk)?;
-        record.check_compressed_size()?;
         let required = (record.compressed.len() + 5).div_ceil(SECTOR);
         let external = required >= 256;
         let sectors = if external { 1 } else { required };
@@ -619,7 +590,6 @@ impl RegionWriter {
         if self.offsets[i] != 0 {
             return Err(invalid("chunk already written"));
         }
-        record.check_compressed_size()?;
         let required = (record.compressed.len() + 5).div_ceil(SECTOR);
         let external = required >= 256;
         let sectors = if external { 1 } else { required as u32 };
@@ -695,6 +665,42 @@ impl Drop for RegionWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "daily"]
+    fn a_record_above_64_mib_round_trips_through_the_external_stream() {
+        let dir =
+            std::env::temp_dir().join(format!("sunrise-region-external-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("r.0.0.mca");
+        let pos = ChunkPos::new(0, 0);
+        let size = 64 * 1024 * 1024 + 1;
+        let mut record = ChunkRecord {
+            compression: Compression::None,
+            compressed: vec![17; size],
+            timestamp: 18,
+        };
+        record.compressed[size - 1] = 19;
+        let mut region = RegionFile::open_writable(&path, true).unwrap();
+        region.write(pos, &record).unwrap();
+        region.sync().unwrap();
+        drop((record, region));
+        assert_eq!(
+            fs::metadata(dir.join("c.0.0.mcc")).unwrap().len(),
+            size as u64
+        );
+        assert_eq!(fs::metadata(&path).unwrap().len(), (HEADER + SECTOR) as u64);
+
+        let mut region = RegionFile::open(&path).unwrap();
+        let actual = region.read(pos).unwrap().unwrap();
+        assert_eq!(actual.compression, Compression::None);
+        assert_eq!(actual.timestamp, 18);
+        let (last, body) = actual.compressed.split_last().unwrap();
+        assert_eq!((*last, body.len()), (19, size - 1));
+        assert!(body.iter().all(|byte| *byte == 17));
+        drop(region);
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     /// The pre-hint allocator: first fit from sector 0. The hint must keep
     /// producing exactly its placements.

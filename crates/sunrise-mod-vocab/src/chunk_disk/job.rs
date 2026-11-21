@@ -1,17 +1,14 @@
-//! Captured worker job and its once-only, recoverable completion.
+//! The encoded attachment capture consumed by one disk hook dispatch.
 use super::*;
-use std::sync::OnceLock;
 
-// no wire: engine-owned recovery snapshot and once-only worker completion.
-/// One captured disk record. The persistence owner retains this until a durable
-/// acknowledgement; callback completion alone does not permit dirty clearing.
-// hidden: engine-owned save job, built and retained by the persistence owner
+// no wire: engine-owned attachment capture for one disk callback dispatch.
+/// One captured disk hook job, consumed by its persistence owner.
+// hidden: engine-owned save job, built by the persistence owner
 #[doc(hidden)]
 #[non_exhaustive]
 pub struct ChunkDiskJob {
     context: ChunkDiskContext,
     captured: Compound,
-    completed: OnceLock<Result<Compound, ChunkDiskFailure>>,
     #[cfg(any(test, feature = "testing"))]
     installed: Option<&'static crate::runtime::Installed>,
     #[cfg(any(test, feature = "testing"))]
@@ -32,7 +29,6 @@ impl ChunkDiskJob {
         Some(Self {
             context: context.clone(),
             captured: store.to_nbt(),
-            completed: OnceLock::new(),
             #[cfg(any(test, feature = "testing"))]
             installed: crate::runtime::installed(),
             #[cfg(any(test, feature = "testing"))]
@@ -40,34 +36,20 @@ impl ChunkDiskJob {
         })
     }
 
-    /// Run once on the owning chunk worker. Repeated encoding or recovery
-    /// reads borrow the cached outcome and cannot invoke listeners again.
-    pub fn run(&self, resources: &dyn WorldgenHost) -> &Result<Compound, ChunkDiskFailure> {
-        self.completed.get_or_init(|| {
-            #[cfg(any(test, feature = "testing"))]
-            let _scope = TestScope(
-                crate::TEST_MODS.replace(self.installed),
-                crate::parts::TEST_PARTS.replace(self.parts),
-            );
-            let mut data = ChunkDiskData::from_nbt(self.captured.clone())?;
-            let context = OwningChunkDisk::new(&self.context, resources);
-            match self.context.phase {
-                ChunkDiskPhase::Load => native_chunk_data_load(&context, &mut data),
-                ChunkDiskPhase::Save => native_chunk_data_save(&context, &mut data),
-            }
-            data.finish()
-        })
-    }
-
-    /// Original encoded envelopes for explicit recovery after callback or IO
-    /// failure. Reading these bytes never runs mod code or repeats callbacks.
-    pub fn captured(&self) -> &Compound {
-        &self.captured
-    }
-
-    /// Inspect completion without starting work on a reader or server thread.
-    pub fn completed(&self) -> Option<&Result<Compound, ChunkDiskFailure>> {
-        self.completed.get()
+    /// Consume the capture on the owning persistence path and return the resulting store.
+    pub fn run(self, resources: &dyn WorldgenHost) -> Compound {
+        #[cfg(any(test, feature = "testing"))]
+        let _scope = TestScope(
+            crate::TEST_MODS.replace(self.installed),
+            crate::parts::TEST_PARTS.replace(self.parts),
+        );
+        let mut data = ChunkDiskData::from_nbt(self.captured);
+        let context = OwningChunkDisk::new(&self.context, resources);
+        match self.context.phase {
+            ChunkDiskPhase::Load => native_chunk_data_load(&context, &mut data),
+            ChunkDiskPhase::Save => native_chunk_data_save(&context, &mut data),
+        }
+        data.finish()
     }
 }
 

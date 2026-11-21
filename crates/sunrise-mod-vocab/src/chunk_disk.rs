@@ -64,14 +64,14 @@ impl ChunkDiskContext {
     }
 }
 
-// no wire: local refusal of an in-process chunk disk job.
-/// Why a chunk disk job refused, with the failing mod and attachment when known.
+// no wire: local refusal of an in-process attachment operation.
+/// Why a typed chunk disk attachment operation failed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ChunkDiskFailure {
-    /// The listener's owner; empty for input validation before dispatch.
+    /// The listener's owner, or empty if the operation ran outside a listener.
     pub mod_id: String,
-    /// The attachment key, or empty for a failure outside a typed operation.
+    /// The attachment key.
     pub key: String,
     /// The failed operation or missing capability.
     pub reason: String,
@@ -157,11 +157,19 @@ pub use job::ChunkDiskJob;
 #[path = "chunk_disk/tests.rs"]
 mod tests;
 
-/// Fence listener unwinds before publication.
-pub(crate) fn invoke(mod_id: &str, call: impl FnOnce()) -> Result<(), ChunkDiskFailure> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)).map_err(|_| ChunkDiskFailure {
-        mod_id: mod_id.into(),
-        key: String::new(),
-        reason: "native listener unwound".into(),
-    })
+/// Contain one disk listener without undoing completed attachment operations.
+pub(crate) fn invoke(hook: HookId, name: &'static str, mod_id: &'static str, call: impl FnOnce()) {
+    if crate::runtime::poisoned(hook, mod_id) {
+        return;
+    }
+    match crate::callback_owner::contain_unwind(|| {
+        crate::world::phase_refusal::contain_refusal(mod_id, call)
+    }) {
+        Ok(Ok(())) => {}
+        Ok(Err(refusal)) => refusal.report_each(),
+        Err(message) => {
+            crate::runtime::poison(hook, mod_id);
+            crate::callback_owner::report_callback_panic(mod_id, "chunk disk", name, message);
+        }
+    }
 }

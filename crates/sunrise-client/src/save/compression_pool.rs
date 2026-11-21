@@ -167,13 +167,7 @@ fn worker_loop(weak_inner: Weak<Inner>) {
     }
 }
 
-pub(super) struct CompressedWrite {
-    pub(super) record: ChunkRecord,
-    /// The first candidate, rather than a retry with stored block-entity payloads.
-    pub(super) primary: bool,
-}
-
-type Prepared = io::Result<Option<CompressedWrite>>;
+type Prepared = io::Result<Option<ChunkRecord>>;
 
 pub(super) fn compress_record(
     record: &Record,
@@ -181,36 +175,20 @@ pub(super) fn compress_record(
     timestamp: u32,
     limits: Limits,
 ) -> Prepared {
-    if let Record::Chunk(_, encoding, _) | Record::Proto(_, encoding) = record.source() {
+    let source = match record {
+        Record::Disk(disk) => &disk.original,
+        record => record,
+    };
+    if let Record::Chunk(_, encoding, _) | Record::Proto(_, encoding) = source {
         encoding
             .biomes
             .ensure_saveable()
             .map_err(io::Error::other)?;
     }
-    let Some(tag) = super::chunk_disk::encode_record(record)? else {
-        return Ok(None);
-    };
-    let error = match ChunkRecord::from_nbt(&tag, compression, timestamp, limits) {
-        Ok(record) => {
-            return Ok(Some(CompressedWrite {
-                record,
-                primary: true,
-            }));
-        }
-        Err(error) => error,
-    };
-    drop(tag);
-    let Some(stored) = record.without_block_entity_edits() else {
-        return Err(error);
-    };
-    log::warn!(
-        "block_entity_save_additional: discarding listener edits from the chunk record: {error}"
-    );
-    let record = ChunkRecord::from_nbt(&stored, compression, timestamp, limits)?;
-    Ok(Some(CompressedWrite {
-        record,
-        primary: false,
-    }))
+    record
+        .tag()
+        .map(|tag| ChunkRecord::from_nbt(&tag, compression, timestamp, limits))
+        .transpose()
 }
 
 pub(super) fn compress_records_with_pool(

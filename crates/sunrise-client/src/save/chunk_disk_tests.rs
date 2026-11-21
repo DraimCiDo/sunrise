@@ -293,55 +293,26 @@ fn every_save_kind_runs_exactly_one_callback_per_captured_record() {
 }
 
 #[test]
-#[ignore = "daily"]
-fn save_refused_during_open_action_savepoint_runs_no_callback_and_keeps_disk_7() {
-    // The savepoint signal is process-wide: hold it only in an isolated child.
-    const CHILD: &str = "SUNRISE_CHUNK_DISK_SAVEPOINT_CHILD";
-    if std::env::var_os(CHILD).is_none() {
-        let status = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--include-ignored",
-                "--exact",
-                "save::chunk_disk_tests::save_refused_during_open_action_savepoint_runs_no_callback_and_keeps_disk_7",
-            ])
-            .env(CHILD, "1")
-            .status()
-            .unwrap();
-        assert!(status.success());
-        return;
-    }
+fn unbound_chunk_context_does_not_prevent_sync_or_async_saves() {
     let (registry, biomes) = super::loot_tests::fixture();
     let registry = Box::leak(Box::new(registry));
     let biomes = Arc::new(biomes);
     let path = root();
-    mod_platform::testing::with_mods(Vec::new().into(), || {
-        SaveDir::new(
-            path.clone(),
-            LevelShape::OVERWORLD,
-            Some(Default::default()),
-        )
-        .save(&[Arc::new(chunk(7))], registry, &biomes)
-        .unwrap();
-    });
     with_echo(|seen| {
-        let save = SaveDir::new(
+        let mut save = SaveDir::new(
             path.clone(),
             LevelShape::OVERWORLD,
             Some(Default::default()),
         );
-        context(&save);
-        let savepoint = crate::join_seq::visibility::PassLease::enter();
-        // Tentative 9 is open: asynchronous and synchronous saves both refuse.
-        assert!(
-            save.save_later(&[Arc::new(chunk(9))], registry, &biomes)
-                .is_err()
-        );
-        assert_eq!(save.take_failed_chunk_saves(), [(2, -3)]);
-        assert!(save.save(&[Arc::new(chunk(9))], registry, &biomes).is_err());
-        drop(savepoint);
+        save.enable_trusted_fluid_load();
+        save.save_later(&[Arc::new(chunk(7))], registry, &biomes)
+            .unwrap();
+        save.flush().unwrap();
+        assert_eq!(disk_value(&path, registry, &biomes), Some(7));
+        save.save(&[Arc::new(chunk(8))], registry, &biomes).unwrap();
+        assert_eq!(disk_value(&path, registry, &biomes), Some(8));
         assert!(seen.lock().unwrap().is_empty());
     });
-    assert_eq!(disk_value(&path, registry, &biomes), Some(7));
     fs::remove_dir_all(path).unwrap();
 }
 
@@ -371,7 +342,7 @@ fn unload_then_reload_reads_saved_8_in_a_fresh_holder() {
 
 #[cfg(unix)]
 #[test]
-fn disk_write_failure_keeps_old_disk_7_and_snapshot_8_for_recovery() {
+fn a_failed_disk_write_does_not_stop_healthy_regions_in_the_same_batch() {
     use std::os::unix::fs::PermissionsExt;
     let (registry, biomes) = super::loot_tests::fixture();
     let registry = Box::leak(Box::new(registry));
@@ -396,13 +367,13 @@ fn disk_write_failure_keeps_old_disk_7_and_snapshot_8_for_recovery() {
             Some(Default::default()),
         );
         context(&save);
-        save.save_later(&[Arc::new(chunk(7))], registry, &biomes)
+        let mut healthy = chunk(7);
+        healthy.x = 34;
+        save.save_later(&[Arc::new(chunk(7)), Arc::new(healthy)], registry, &biomes)
             .unwrap();
         // The close path reports the failure instead of treating the save as durable.
         assert!(save.flush().is_err());
-        assert_eq!(saves.load(Ordering::Relaxed), 1);
-        // The chunk is marked for another attempt instead of silently clean.
-        assert_eq!(save.take_failed_chunk_saves(), [(2, -3)]);
+        assert_eq!(saves.load(Ordering::Relaxed), 2);
         // The unwritten snapshot (8) stays readable for recovery. Read it with no
         // listener installed, so no load callback adds to it.
         mod_platform::testing::with_mods(Vec::new().into(), || {
@@ -414,18 +385,18 @@ fn disk_write_failure_keeps_old_disk_7_and_snapshot_8_for_recovery() {
     // The old disk record is untouched.
     mod_platform::testing::with_mods(Vec::new().into(), || {
         assert_eq!(disk_value(&path, registry, &biomes), Some(7));
+        let disk = SaveDir::new(path.clone(), LevelShape::OVERWORLD, None);
+        assert_eq!(value(&mut disk.load(34, -3, registry, &biomes).unwrap()), 8);
     });
     fs::remove_dir_all(path).unwrap();
 }
 
-/// A chunk whose load listener failed loads with its stored attachments and is saved by every
-/// path with no save listener, so the stored value 8 is written back unchanged.
 #[test]
-fn failed_load_keeps_stored_8_and_runs_no_save_listener_for_every_save_path() {
+fn load_panic_keeps_the_chunk_loadable_and_its_save_listener_enabled() {
     let (registry, biomes) = super::loot_tests::fixture();
     let registry = Box::leak(Box::new(registry));
     let biomes = Arc::new(biomes);
-    for (load_only, sync) in [(true, true), (true, false), (false, true), (false, false)] {
+    for sync in [true, false] {
         let path = root();
         mod_platform::testing::with_mods(Vec::new().into(), || {
             SaveDir::new(
@@ -437,14 +408,15 @@ fn failed_load_keeps_stored_8_and_runs_no_save_listener_for_every_save_path() {
             .unwrap();
         });
         let saves = Arc::new(AtomicUsize::new(0));
-        let listener: Box<dyn Hooks> = if load_only {
-            Box::new(breaker::Breaker)
-        } else {
-            Box::new(breaker_both::BreakerBoth {
+        let loads = Arc::new(AtomicUsize::new(0));
+        let mods = vec![mod_api::ModEntry::new(
+            "chunk_disk_fixture",
+            Box::new(breaker::Breaker {
                 saves: saves.clone(),
-            })
-        };
-        let mods = vec![mod_api::ModEntry::new("chunk_disk_fixture", listener)].into();
+                loads: loads.clone(),
+            }),
+        )]
+        .into();
         mod_platform::testing::with_mods(mods, || {
             let save = SaveDir::new(
                 path.clone(),
@@ -455,10 +427,11 @@ fn failed_load_keeps_stored_8_and_runs_no_save_listener_for_every_save_path() {
             let mut loaded = save
                 .load(2, -3, registry, &biomes)
                 .expect("the chunk loads");
-            assert!(save.chunk_save_suppressed(2, -3));
-            assert!(!save.chunk_save_suppressed(0, 0));
-            // The failed job's edits were dropped: the stored value is still there.
             assert_eq!(value(&mut loaded), 8);
+            let mut loaded_again = save
+                .load(2, -3, registry, &biomes)
+                .expect("the chunk reloads");
+            assert_eq!(value(&mut loaded_again), 8);
             let chunks = [Arc::new(loaded)];
             if sync {
                 save.save(&chunks, registry, &biomes).unwrap();
@@ -466,12 +439,10 @@ fn failed_load_keeps_stored_8_and_runs_no_save_listener_for_every_save_path() {
                 save.save_later(&chunks, registry, &biomes).unwrap();
                 save.flush().unwrap();
             }
-            assert!(save.take_failed_chunk_saves().is_empty());
+            assert_eq!(disk_value(&path, registry, &biomes), Some(9));
         });
-        assert_eq!(saves.load(Ordering::Relaxed), 0);
-        mod_platform::testing::with_mods(Vec::new().into(), || {
-            assert_eq!(disk_value(&path, registry, &biomes), Some(8));
-        });
+        assert_eq!(loads.load(Ordering::Relaxed), 1);
+        assert_eq!(saves.load(Ordering::Relaxed), 1);
         fs::remove_dir_all(path).unwrap();
     }
 }
@@ -480,27 +451,19 @@ fn failed_load_keeps_stored_8_and_runs_no_save_listener_for_every_save_path() {
 mod breaker {
     use super::*;
     #[derive(Default)]
-    pub struct Breaker;
+    pub struct Breaker {
+        pub saves: Arc<AtomicUsize>,
+        pub loads: Arc<AtomicUsize>,
+    }
     #[mod_api::sunrise_mod]
     impl Hooks for Breaker {
         fn chunk_data_load(&self, _: &dyn ChunkDiskHost, _: &mut ChunkDataLoadEvent<'_>) {
+            self.loads.fetch_add(1, Ordering::Relaxed);
             panic!("load listener fails");
         }
-    }
-}
-mod breaker_both {
-    use super::*;
-    #[derive(Default)]
-    pub struct BreakerBoth {
-        pub saves: Arc<AtomicUsize>,
-    }
-    #[mod_api::sunrise_mod]
-    impl Hooks for BreakerBoth {
-        fn chunk_data_load(&self, _: &dyn ChunkDiskHost, _: &mut ChunkDataLoadEvent<'_>) {
-            panic!("load listener fails");
-        }
-        fn chunk_data_save(&self, _: &dyn ChunkDiskHost, _: &mut ChunkDataSaveEvent<'_>) {
+        fn chunk_data_save(&self, _: &dyn ChunkDiskHost, event: &mut ChunkDataSaveEvent<'_>) {
             self.saves.fetch_add(1, Ordering::Relaxed);
+            event.data.set(&fixture::VALUE, 9).unwrap();
         }
     }
 }

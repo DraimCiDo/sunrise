@@ -15,7 +15,7 @@
 //! `level.dat`) are migrated on open.
 use crate::mod_chunk_tickets::{ModTicket, ModTickets, TicketOwner};
 mod backpressure;
-use compression_pool::{CompressedWrite, compress_records};
+use compression_pool::compress_records;
 pub mod biome_regions;
 pub mod block_entity_encode;
 mod block_entity_order;
@@ -1296,18 +1296,6 @@ pub fn encode_with(
     shape: LevelShape,
     items: &crate::items::Items,
 ) -> NamedTag {
-    encode_full(chunk, registry, biomes, tables, shape, items, true)
-}
-
-fn encode_full(
-    chunk: &Chunk,
-    registry: &BlockRegistry,
-    biomes: &Biomes,
-    tables: Option<&SaveTables>,
-    shape: LevelShape,
-    items: &crate::items::Items,
-    apply_block_entity_edits: bool,
-) -> NamedTag {
     let sky_light = shape.sky_light;
     let mut sections = Vec::new();
     // Sky layers below the highest section with light other than 15 are
@@ -1464,13 +1452,7 @@ fn encode_full(
                     hopper_cooldown,
                 },
                 items,
-                |_| {
-                    if apply_block_entity_edits {
-                        extras?.block_entity_save_edits.as_ref()?.get(p).cloned()
-                    } else {
-                        None
-                    }
-                },
+                |_| extras?.block_entity_save_edits.as_ref()?.get(p).cloned(),
             );
             let mut saved = match source {
                 Some(original) => {
@@ -2079,96 +2061,78 @@ fn cached_region(
 /// then points to it; the region's other chunks are not touched. `None`
 /// clears a chunk. The chunks are encoded and compressed before their region
 /// is locked for the writes (`compress_records`), and each region is flushed
-/// to the disk once.
+/// to the disk once. An encode or write error affects only that chunk; a
+/// region open or sync error affects the records that needed that operation.
 fn write_region_records(
     root: &Path,
     cache: &RegionCache,
     folder: &str,
     records: &[((i32, i32), &Record)],
-) -> Result<()> {
+) -> Vec<((i32, i32), String)> {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as u32);
     let compressed = compress_records(records, timestamp);
-    type RegionWrite<'a> = (ChunkPos, &'a Record, Option<CompressedWrite>);
-    let mut by_region: BTreeMap<(i32, i32), Vec<RegionWrite<'_>>> = BTreeMap::new();
-    for (&((x, z), source), record) in records.iter().zip(compressed) {
-        let record = record?;
-        by_region
-            .entry((x >> 5, z >> 5))
-            .or_default()
-            .push((ChunkPos::new(x, z), source, record));
+    type RegionWrite = ((i32, i32), Option<ChunkRecord>);
+    let mut by_region: BTreeMap<(i32, i32), Vec<RegionWrite>> = BTreeMap::new();
+    let mut failures = Vec::new();
+    for (&(key @ (x, z), _), record) in records.iter().zip(compressed) {
+        match record {
+            Ok(record) => by_region
+                .entry((x >> 5, z >> 5))
+                .or_default()
+                .push((key, record)),
+            Err(error) => failures.push((key, error.to_string())),
+        }
     }
     for ((rx, rz), list) in by_region {
         let path = region_path(root, folder, rx, rz);
         // Clearing chunks of a region that doesn't exist changes nothing.
-        let create = list.iter().any(|(_, _, r)| r.is_some());
-        let Some(region) = cached_region(cache, (rx, rz), &path, create)? else {
-            continue;
-        };
-        // Keep far readers on the exact locked read path while writes and their
-        // flush are in progress, so they cannot use a stale kept header.
-        let _writing = far_regions::writing(cache, (rx, rz));
-        let mut region = region.lock().map_err(|_| "region file poisoned")?;
-        let mut changed = false;
-        for (pos, source, record) in list {
-            match record {
-                Some(record) => {
-                    write_chunk_record(&mut region, pos, source, record)?;
-                    changed = true;
+        let create = list.iter().any(|(_, r)| r.is_some());
+        let mut unattempted = list.into_iter();
+        let mut changed = Vec::new();
+        let result = (|| -> Result<()> {
+            let Some(region) = cached_region(cache, (rx, rz), &path, create)? else {
+                return Ok(());
+            };
+            // Keep far readers on the exact locked read path until the flush.
+            let _writing = far_regions::writing(cache, (rx, rz));
+            let mut region = region.lock().map_err(|_| "region file poisoned")?;
+            for (key @ (x, z), record) in unattempted.by_ref() {
+                let pos = ChunkPos::new(x, z);
+                let write = match record {
+                    Some(record) => region.write(pos, &record).map(|()| true),
+                    None => region.clear(pos, timestamp),
+                };
+                match write {
+                    Ok(true) => changed.push(key),
+                    Ok(false) => {}
+                    Err(error) => failures.push((key, error.to_string())),
                 }
-                None => changed |= region.clear(pos, timestamp)?,
             }
-        }
-        if changed {
-            match region.sync_handle() {
-                Ok(handle) => {
-                    drop(region);
-                    handle.sync_data()?;
+            if !changed.is_empty() {
+                match region.sync_handle() {
+                    Ok(handle) => {
+                        drop(region);
+                        handle.sync_data()?;
+                    }
+                    // If the descriptor cannot be cloned, sync under the lock.
+                    Err(_) => region.sync()?,
                 }
-                // Out of descriptors: flush under the lock as before rather than
-                // skip durability for this region and every region after it.
-                Err(_) => region.sync()?,
             }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            let error = error.to_string();
+            failures.extend(
+                changed
+                    .into_iter()
+                    .chain(unattempted.map(|(key, _)| key))
+                    .map(|key| (key, error.clone())),
+            );
         }
     }
-    Ok(())
-}
-
-fn write_chunk_record(
-    region: &mut RegionFile,
-    pos: ChunkPos,
-    source: &Record,
-    CompressedWrite { record, primary }: CompressedWrite,
-) -> std::io::Result<()> {
-    let error = match region.write(pos, &record) {
-        Ok(()) => {
-            if primary {
-                source.accept_block_entity_edits();
-            }
-            return Ok(());
-        }
-        Err(error) => error,
-    };
-    if !primary
-        || !error
-            .get_ref()
-            .is_some_and(|cause| cause.is::<sunrise_world::region::CompressedChunkLimit>())
-    {
-        return Err(error);
-    }
-    let (compression, timestamp) = (record.compression, record.timestamp);
-    drop(record);
-    let Some(stored) = source.without_block_entity_edits() else {
-        return Err(error);
-    };
-    log::warn!(
-        "block_entity_save_additional: discarding listener edits from chunk {},{}: {error}",
-        pos.x,
-        pos.z
-    );
-    let stored = ChunkRecord::from_nbt(&stored, compression, timestamp, Limits::saved())?;
-    region.write(pos, &stored)
+    failures
 }
 
 /// `job(i)` for every `i` below `count`, in order, shared between this thread
@@ -2889,9 +2853,7 @@ impl SaveDir {
         };
         load_light(&root.tag, &mut chunk, self.shape.sky_light);
         chunk.entities = sunrise_world::chunk::legacy_entities(&root.tag);
-        // A failing load listener does not fail the load: the chunk keeps its stored attachments.
-        self.load_disk_attachments(&mut chunk, mod_api::ChunkDiskKind::Full)
-            .map_err(|_| ())?;
+        self.load_disk_attachments(&mut chunk, mod_api::ChunkDiskKind::Full);
         Ok(Some(chunk))
     }
     /// A proto chunk saved before it became final (`decode_proto`).
@@ -2905,8 +2867,7 @@ impl SaveDir {
         let root = self.read_record("region", x, z)?;
         let tables = self.tables.get().map(|t| &**t);
         let mut proto = decode_proto(&root, registry, biomes, tables, self.shape.column())?;
-        self.load_disk_attachments(&mut proto.column, mod_api::ChunkDiskKind::Proto)
-            .ok()?;
+        self.load_disk_attachments(&mut proto.column, mod_api::ChunkDiskKind::Proto);
         Some(proto)
     }
     /// Queue proto chunks for the writer thread; loads see them meanwhile.
@@ -2985,8 +2946,9 @@ impl SaveDir {
                 )
             })
             .collect();
-        self.write_records("region", records, true)?;
-        self.save_poi(chunks, true)?;
+        self.write_records("region", records, false)?;
+        self.save_poi(chunks, false)?;
+        self.flush()?;
         Ok(chunks.len())
     }
     fn save_poi(&self, chunks: &[Arc<Chunk>], wait: bool) -> Result<()> {
@@ -10017,7 +9979,8 @@ mod tests {
             Folder::Entities => &save.entity_regions,
             Folder::Poi => &save.poi_regions,
         };
-        super::write_region_records(&save.root, cache, folder, &[((0, 0), &record)]).unwrap();
+        let failures = super::write_region_records(&save.root, cache, folder, &[((0, 0), &record)]);
+        assert!(failures.is_empty(), "{failures:?}");
     }
 
     #[test]
@@ -10161,13 +10124,13 @@ mod tests {
                 ("sections", Tag::List(Vec::new())),
             ]),
         }));
-        super::write_region_records(
+        let failures = super::write_region_records(
             &nether.root,
             &nether.regions,
             "region",
             &[((1, 0), &current)],
-        )
-        .unwrap();
+        );
+        assert!(failures.is_empty(), "{failures:?}");
         assert!(nether.is_old_chunk(0, 0));
         assert!(!nether.is_old_chunk(1, 0));
         assert!(!nether.is_old_chunk(2, 0));

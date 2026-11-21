@@ -1,19 +1,21 @@
 //! Chunk attachment snapshot encoding boundary.
 
 pub trait Hooks {
-    /// A committed chunk snapshot is about to encode on the chunk worker.
+    /// A captured chunk snapshot is about to be encoded for disk.
     /// `data` belongs only to that snapshot: typed edits change the disk record,
-    /// never the live chunk. Exactly once per captured record, for full and proto
-    /// chunks alike. The restricted Host cannot resolve live chunks or mutate the
-    /// world; `host.job()` borrows the captured metadata. A failed job, including
-    /// invalid or over-budget disk NBT, retains its snapshot and the prior disk record.
+    /// never the live chunk. Each enabled listener runs once per full or proto
+    /// capture. The restricted Host cannot resolve live chunks or mutate the world;
+    /// `host.job()` borrows the captured metadata. A failed attachment operation
+    /// leaves its entry unchanged. A panic is logged and shown in an error toast
+    /// naming the mod, and disables that listener for the session. Completed edits
+    /// stand and the remaining listeners still run. The chunk uses the normal disk NBT writer.
     #[hook(
         side = "server",
         contract = "listen",
         context = "chunk_disk",
         target = "mod_api::chunk_disk::native_chunk_data_save",
         neoforge = "ChunkDataEvent.Save",
-        version = 2
+        version = 3
     )]
     fn chunk_data_save(data: &mut ChunkDiskData);
 }

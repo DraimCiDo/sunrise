@@ -143,13 +143,6 @@ impl Game<'_> {
     /// `true` means the window can exit. The session lock stays in Game until
     /// every snapshot has been queued and every writer has synced its files.
     pub(super) fn poll_closing_save(&mut self) -> Result<bool> {
-        let defers = self.pending_save.as_ref().is_some_and(|save| {
-            !matches!(save.stage, Stage::Server | Stage::Quit)
-                && save.started.elapsed() < Duration::from_secs(30)
-        });
-        if defers && self.defer_chunk_disk_save() {
-            return Ok(false);
-        }
         let Some(mut save) = self.pending_save.take() else {
             return Ok(false);
         };
@@ -410,7 +403,6 @@ impl Game<'_> {
     /// Save the level in place: its changed chunks, its entities and its raids.
     pub(super) fn save_level(&mut self, wait: bool) -> Result<()> {
         self.admit_level_save()?;
-        self.requeue_failed_chunk_saves();
         // No save holds a player vehicle: a mob a mod seated on a player gets off first.
         self.eject_player_riders(None);
         self.save_border();

@@ -2,18 +2,19 @@
 
 pub trait Hooks {
     /// The disk record's attachments have decoded, before the chunk is published.
-    /// Runs on a chunk worker with a restricted Host. Read and edit `data` through
-    /// its typed methods; edits become the loaded store only if the entire job
-    /// succeeds. Missing records and proto-to-full promotion do not fire this hook.
-    /// Borrow the captured metadata from `host.job()`. A codec error, unwind,
-    /// or invalid or over-budget disk NBT refuses publication of the whole store.
+    /// Runs on the decoding thread with a restricted Host. Borrow the captured
+    /// metadata from `host.job()`. Missing records and proto-to-full promotion do
+    /// not fire this hook. A failed attachment operation leaves its entry unchanged.
+    /// A panic is logged and shown in an error toast naming the mod, and disables
+    /// that load listener for the session. Completed edits stand and the other
+    /// listeners, including later save listeners, still run.
     #[hook(
         side = "server",
         contract = "listen",
         context = "chunk_disk",
         target = "mod_api::chunk_disk::native_chunk_data_load",
         neoforge = "ChunkDataEvent.Load",
-        version = 2
+        version = 3
     )]
     fn chunk_data_load(data: &mut ChunkDiskData);
 }

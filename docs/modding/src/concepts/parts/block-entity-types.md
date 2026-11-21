@@ -156,9 +156,9 @@ Even canonical-looking item rows keep their saved list order instead of being re
 slot order. The listener can replace or remove that field. For a declared container, the game
 writes its inventory instead. Neither path changes the live entity or the separate client update tag.
 Malformed payloads, including names or strings too long for NBT, are refused before any copy uses
-that output. If the region writer cannot encode or admit the complete chunk
-record, it retries with the stored block-entity payloads from the same snapshot. Other changes in
-the snapshot are kept. The read-only level host cannot write to the world or request another save.
+that output. If encoding or writing the complete chunk record fails, the writer reports the chunk
+failure and continues with other chunks. It does not replace edits with older payloads and try again.
+The read-only level host cannot write to the world or request another save.
 During unload or a removed block's loot roll, the entity
 may no longer be readable through the host; the event still carries its payload, identity and its
 position and level (`event.pos`, `event.level`), so a mod that keeps live state per dimension and
