@@ -93,8 +93,8 @@ pub(super) struct Outstanding {
     count: Mutex<usize>,
     chunks: AtomicUsize,
     pub(super) error: Mutex<Option<String>>,
-    // If storage failed to sync, subsequent barriers cannot attest to its durability.
-    sync_error: Mutex<Option<Arc<std::io::Error>>>,
+    // A storage sync failure is consumed by the barrier that reports it.
+    sync_error: Mutex<Option<std::io::Error>>,
     done: Condvar,
     /// What the folder's writes make stale: the portal blocks a search read from saved chunks.
     portals: saved_portals::SavedPortals,
@@ -335,7 +335,7 @@ impl SaveDir {
                                 .sync_error
                                 .lock()
                                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                                .get_or_insert_with(|| Arc::new(error));
+                                .get_or_insert(error);
                         }
                         if let Ok(mut pending) = pending.lock() {
                             for job in batch {
@@ -360,7 +360,7 @@ impl SaveDir {
     }
 
     /// Wait until every queued write attempt finishes. Individual record failures are reported
-    /// by the writer; a storage sync failure or a writer failure fails this barrier.
+    /// by the writer. A storage sync failure fails this barrier once; a stopped writer remains an error.
     pub fn flush(&self) -> Result<()> {
         let mut count = self
             .outstanding
@@ -426,13 +426,14 @@ impl SaveDir {
             return Err(error.clone().into());
         }
         if drained
-            && let Some(error) = &*self
+            && let Some(error) = self
                 .outstanding
                 .sync_error
                 .lock()
                 .map_err(|_| "writer poisoned")?
+                .take()
         {
-            return Err(std::io::Error::new(error.kind(), error.clone()).into());
+            return Err(error.into());
         }
         Ok(())
     }
@@ -515,11 +516,16 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(error.downcast_ref::<std::io::Error>().unwrap().kind(), kind);
-        assert!(save.writes_finished().is_err());
         assert_eq!(save.record_save_failures(), 0);
         assert_eq!(sync_attempts.load(Ordering::Relaxed), 2);
+        assert!(save.writes_finished().unwrap());
+        save.write_records("region", vec![((64, 0), Some(record()))], true)
+            .unwrap();
+        assert_eq!(sync_attempts.load(Ordering::Relaxed), 3);
         drop(save);
-        assert_eq!(open().read_record_raw("region", 32, 0), Some(record()));
+        let disk = open();
+        assert_eq!(disk.read_record_raw("region", 32, 0), Some(record()));
+        assert_eq!(disk.read_record_raw("region", 64, 0), Some(record()));
     }
 
     #[test]
