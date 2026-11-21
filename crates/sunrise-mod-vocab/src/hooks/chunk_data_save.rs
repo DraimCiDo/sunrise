@@ -8,7 +8,8 @@ pub trait Hooks {
     /// `host.job()` borrows the captured metadata. A failed attachment operation
     /// leaves its entry unchanged. A panic is logged and shown in an error toast
     /// naming the mod, and disables that listener for the session. Completed edits
-    /// stand and the remaining listeners still run. The chunk uses the normal disk NBT writer.
+    /// stand and the remaining listeners still run. The normal disk NBT writer logs each
+    /// overlong modified UTF-8 name or string that it writes as empty.
     #[hook(
         side = "server",
         contract = "listen",

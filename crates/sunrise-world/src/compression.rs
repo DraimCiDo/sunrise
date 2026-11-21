@@ -1,7 +1,7 @@
 //! Region codecs, including lz4-java's block framing (not the LZ4 frame format).
 use flate2::{Decompress, FlushDecompress, Status};
 use std::{
-    io,
+    io::{self, BufRead, BufReader, Cursor, Read},
     sync::atomic::{AtomicU8, Ordering},
 };
 use sunrise_deflate::Deflater;
@@ -96,6 +96,27 @@ impl Compression {
         }
     }
 
+    /// Decode from a stream without draining it; the consumer can stop at the NBT root.
+    pub(crate) fn with_decoder<T>(
+        self,
+        mut input: impl BufRead,
+        read: impl FnOnce(&mut dyn Read) -> io::Result<T>,
+    ) -> io::Result<T> {
+        match self {
+            Self::None => read(&mut input),
+            Self::Gzip => read(&mut BufReader::new(GzipInput::new(input)?)),
+            Self::Zlib => read(&mut BufReader::new(flate2::bufread::ZlibDecoder::new(
+                input,
+            ))),
+            Self::Lz4 => read(&mut Lz4Input {
+                input,
+                buffer: vec![0; 21],
+                output: Cursor::new(Vec::new()),
+                finished: false,
+            }),
+        }
+    }
+
     /// Gzip and zlib write the bytes `GZIPOutputStream` and
     /// `DeflaterOutputStream` write at their defaults: zlib 1.3.2's, as the
     /// JDK bundles it.
@@ -154,31 +175,118 @@ enum GzipStream {
 
 /// `GZIPInputStream` recognizes optional fields and verifies FHCRC, but does
 /// not reject reserved FLG bits. Return the raw DEFLATE input, if recognized.
-fn gzip_body(bytes: &[u8]) -> Option<&[u8]> {
-    let (header, mut body) = bytes.split_at_checked(10)?;
+fn gzip_body(mut bytes: &[u8]) -> Option<&[u8]> {
+    read_gzip_header(&mut bytes).ok()?;
+    Some(bytes)
+}
+
+fn read_gzip_header(input: &mut impl BufRead) -> io::Result<()> {
+    let mut header = [0; 10];
+    input.read_exact(&mut header)?;
     if header[..3] != [0x1f, 0x8b, 8] {
-        return None;
+        return Err(invalid("invalid gzip header"));
     }
     let flags = header[3];
+    let mut crc = (flags & 2 != 0).then(crc32fast::Hasher::new);
+    if let Some(crc) = &mut crc {
+        crc.update(&header);
+    }
     if flags & 4 != 0 {
-        let (len, rest) = body.split_first_chunk::<2>()?;
-        body = rest.get(usize::from(u16::from_le_bytes(*len))..)?;
+        let mut len = [0; 2];
+        input.read_exact(&mut len)?;
+        if let Some(crc) = &mut crc {
+            crc.update(&len);
+        }
+        let mut left = usize::from(u16::from_le_bytes(len));
+        while left > 0 {
+            let bytes = input.fill_buf()?;
+            if bytes.is_empty() {
+                return Err(io::ErrorKind::UnexpectedEof.into());
+            }
+            let count = left.min(bytes.len());
+            if let Some(crc) = &mut crc {
+                crc.update(&bytes[..count]);
+            }
+            input.consume(count);
+            left -= count;
+        }
     }
     for flag in [8, 16] {
-        if flags & flag != 0 {
-            let end = body.iter().position(|&b| b == 0)?;
-            body = &body[end + 1..];
+        if flags & flag == 0 {
+            continue;
+        }
+        loop {
+            let bytes = input.fill_buf()?;
+            if bytes.is_empty() {
+                return Err(io::ErrorKind::UnexpectedEof.into());
+            }
+            let end = bytes.iter().position(|&b| b == 0);
+            let count = end.map_or(bytes.len(), |end| end + 1);
+            if let Some(crc) = &mut crc {
+                crc.update(&bytes[..count]);
+            }
+            input.consume(count);
+            if end.is_some() {
+                break;
+            }
         }
     }
-    if flags & 2 != 0 {
-        let (expected, rest) = body.split_first_chunk::<2>()?;
-        let actual = crc32fast::hash(&bytes[..bytes.len() - body.len()]);
-        if actual as u16 != u16::from_le_bytes(*expected) {
-            return None;
+    if let Some(crc) = crc {
+        let mut expected = [0; 2];
+        input.read_exact(&mut expected)?;
+        if crc.finalize() as u16 != u16::from_le_bytes(expected) {
+            return Err(invalid("gzip header checksum mismatch"));
         }
-        body = rest;
     }
-    Some(body)
+    Ok(())
+}
+
+struct GzipInput<R> {
+    member: Option<flate2::bufread::DeflateDecoder<R>>,
+    crc: crc32fast::Hasher,
+    size: u32,
+}
+
+impl<R: BufRead> GzipInput<R> {
+    fn new(mut input: R) -> io::Result<Self> {
+        read_gzip_header(&mut input)?;
+        Ok(Self {
+            member: Some(flate2::bufread::DeflateDecoder::new(input)),
+            crc: crc32fast::Hasher::new(),
+            size: 0,
+        })
+    }
+}
+
+impl<R: BufRead> Read for GzipInput<R> {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        if out.is_empty() {
+            return Ok(0);
+        }
+        while let Some(member) = &mut self.member {
+            let count = member.read(out)?;
+            if count != 0 {
+                self.crc.update(&out[..count]);
+                self.size = self.size.wrapping_add(count as u32);
+                return Ok(count);
+            }
+            let mut input = self.member.take().unwrap().into_inner();
+            let mut trailer = [0; 8];
+            input.read_exact(&mut trailer)?;
+            if u32::from_le_bytes(trailer[..4].try_into().unwrap())
+                != std::mem::take(&mut self.crc).finalize()
+                || u32::from_le_bytes(trailer[4..].try_into().unwrap()) != self.size
+            {
+                return Err(invalid("invalid gzip trailer"));
+            }
+            // Like GZIPInputStream, a suffix not recognized as a new header is EOF.
+            if read_gzip_header(&mut input).is_ok() {
+                self.member = Some(flate2::bufread::DeflateDecoder::new(input));
+                self.size = 0;
+            }
+        }
+        Ok(0)
+    }
 }
 
 fn gzip_into(
@@ -346,79 +454,120 @@ fn decode_lz4(
     output: &mut Vec<u8>,
     buffer: &mut Vec<u8>,
 ) -> io::Result<()> {
-    // `LZ4BlockInputStream.compressedBuffer`: each header is read into it,
-    // and a block's bytes over its start; it grows by half when too small.
-    // The decompressor may read up to its end, past the block.
-    // Each stream starts from 21 zero bytes, as a new buffer would: the
-    // decompressor may read past a short block into them, so the last
-    // stream's bytes must not be left there. The allocation is kept.
+    // Each stream starts with the 21 zero bytes a new Java buffer would have.
     buffer.clear();
     buffer.resize(21, 0);
-    loop {
-        let header = bytes
-            .get(..21)
-            .ok_or_else(|| invalid("truncated LZ4 header"))?;
-        if &header[..8] != MAGIC {
-            return Err(invalid("invalid LZ4 block magic"));
+    while read_lz4_block(&mut bytes, max_output, output, buffer)? {}
+    Ok(())
+}
+
+struct Lz4Input<R> {
+    input: R,
+    buffer: Vec<u8>,
+    output: Cursor<Vec<u8>>,
+    finished: bool,
+}
+
+impl<R: BufRead> Read for Lz4Input<R> {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        if out.is_empty() || self.finished {
+            return Ok(0);
         }
-        let method = header[8] & 0xf0;
-        if !matches!(method, 0x10 | 0x20) {
-            return Err(invalid("invalid LZ4 block method"));
+        if self.output.position() as usize == self.output.get_ref().len() {
+            self.output.set_position(0);
+            self.output.get_mut().clear();
+            self.finished = !read_lz4_block(
+                &mut self.input,
+                usize::MAX,
+                self.output.get_mut(),
+                &mut self.buffer,
+            )?;
         }
-        let compressed = u32::from_le_bytes(header[9..13].try_into().unwrap()) as usize;
-        let raw = u32::from_le_bytes(header[13..17].try_into().unwrap()) as usize;
-        let expected = u32::from_le_bytes(header[17..21].try_into().unwrap());
-        if raw > (1 << (10 + (header[8] & 15)))
-            || (raw == 0) != (compressed == 0)
-            || (method == 0x10 && raw != compressed)
-        {
-            return Err(invalid("invalid LZ4 block lengths"));
+        self.output.read(out)
+    }
+}
+
+/// Read and verify exactly one lz4-java block; `false` is its terminator.
+fn read_lz4_block(
+    input: &mut impl BufRead,
+    max_output: usize,
+    output: &mut Vec<u8>,
+    buffer: &mut Vec<u8>,
+) -> io::Result<bool> {
+    let mut header = [0; 21];
+    input.read_exact(&mut header)?;
+    if &header[..8] != MAGIC {
+        return Err(invalid("invalid LZ4 block magic"));
+    }
+    let method = header[8] & 0xf0;
+    if !matches!(method, 0x10 | 0x20) {
+        return Err(invalid("invalid LZ4 block method"));
+    }
+    let compressed = u32::from_le_bytes(header[9..13].try_into().unwrap()) as usize;
+    let raw = u32::from_le_bytes(header[13..17].try_into().unwrap()) as usize;
+    let expected = u32::from_le_bytes(header[17..21].try_into().unwrap());
+    if raw > (1 << (10 + (header[8] & 15)))
+        || (raw == 0) != (compressed == 0)
+        || (method == 0x10 && raw != compressed)
+    {
+        return Err(invalid("invalid LZ4 block lengths"));
+    }
+    if raw == 0 {
+        if expected != 0 {
+            return Err(invalid("invalid LZ4 terminator checksum"));
         }
-        buffer[..21].copy_from_slice(header);
-        bytes = &bytes[21..];
-        if raw == 0 {
-            if expected != 0 {
-                return Err(invalid("invalid LZ4 terminator checksum"));
+        return Ok(false);
+    }
+    let start = output.len();
+    if raw > max_output.saturating_sub(start) {
+        return Err(invalid("decompression limit exceeded"));
+    }
+    // Java reads the header into the compressed buffer and the payload over its
+    // start. A short compressed block can look ahead into the rest of that buffer.
+    buffer[..21].copy_from_slice(&header);
+    let decoded = if method == 0x10 {
+        output.resize(start + raw, 0);
+        input.read_exact(&mut output[start..])
+    } else {
+        let old_len = buffer.len();
+        let mut read = 0;
+        while read < compressed {
+            let bytes = input.fill_buf()?;
+            if bytes.is_empty() {
+                return Err(io::ErrorKind::UnexpectedEof.into());
             }
-            return Ok(());
+            let count = (compressed - read).min(bytes.len());
+            let end = read + count;
+            if end > buffer.len() {
+                buffer.resize(end, 0);
+            }
+            buffer[read..end].copy_from_slice(&bytes[..count]);
+            input.consume(count);
+            read = end;
         }
-        if raw > max_output.saturating_sub(output.len()) {
-            return Err(invalid("decompression limit exceeded"));
+        if compressed > old_len {
+            buffer.resize(compressed.max(old_len * 3 / 2), 0);
         }
-        let block = bytes
-            .get(..compressed)
-            .ok_or_else(|| invalid("truncated LZ4 payload"))?;
-        let start = output.len();
-        let decoded = if method == 0x10 {
-            output.extend_from_slice(block);
+        output.resize(start + raw, 0);
+        if decompress_lz4_java(buffer, &mut output[start..]) == Some(compressed) {
             Ok(())
         } else {
-            if buffer.len() < compressed {
-                buffer.resize(compressed.max(buffer.len() * 3 / 2), 0);
-            }
-            buffer[..compressed].copy_from_slice(block);
-            output.resize(start + raw, 0);
-            // `refill`: the block must be read to its last byte, no further.
-            if decompress_lz4_java(buffer, &mut output[start..]) == Some(compressed) {
-                Ok(())
-            } else {
-                Err(invalid("LZ4 stream is corrupted"))
-            }
+            Err(invalid("LZ4 stream is corrupted"))
         }
-        .and_then(|()| {
-            if checksum(&output[start..]) == expected {
-                Ok(())
-            } else {
-                Err(invalid("LZ4 checksum mismatch"))
-            }
-        });
-        // lz4-java hands out a block only once it has decoded and checked it.
-        if let Err(e) = decoded {
-            output.truncate(start);
-            return Err(e);
-        }
-        bytes = &bytes[compressed..];
     }
+    .and_then(|()| {
+        if checksum(&output[start..]) == expected {
+            Ok(())
+        } else {
+            Err(invalid("LZ4 checksum mismatch"))
+        }
+    });
+    // lz4-java hands out a block only once it has decoded and checked it.
+    if let Err(e) = decoded {
+        output.truncate(start);
+        return Err(e);
+    }
+    Ok(true)
 }
 
 /// lz4-java's `LZ4JavaSafeFastDecompressor.decompress`, which

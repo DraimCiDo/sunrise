@@ -22,6 +22,7 @@ pub(super) struct QueuedWrite {
 pub(super) struct Outstanding {
     count: Mutex<usize>,
     chunks: AtomicUsize,
+    /// First failure not yet returned by a durability barrier. Every failure is also reported.
     pub(super) error: Mutex<Option<String>>,
     done: Condvar,
     /// What the folder's writes make stale: the portal blocks a search read from saved chunks.
@@ -84,13 +85,9 @@ impl SaveDir {
                 0
             };
             self.outstanding.chunks.fetch_add(chunks, Ordering::Relaxed);
-            if writer.send.send((folder, batch)).is_err() {
+            if let Err(mpsc::SendError((_, batch))) = writer.send.send((folder, batch)) {
+                retire_pending(&self.pending, folder, &batch);
                 self.outstanding.chunks.fetch_sub(chunks, Ordering::Relaxed);
-                *self
-                    .outstanding
-                    .error
-                    .lock()
-                    .map_err(|_| "writer poisoned")? = Some("the region writer stopped".into());
                 *self
                     .outstanding
                     .count
@@ -168,26 +165,9 @@ impl SaveDir {
                         let records: Vec<_> = resolved.iter().map(|(k, r)| (*k, r)).collect();
                         chunk_disk::prepare_batch(&batch);
                         let failures = write_region_records(&root, cache, folder, &records);
-                        if let Some(((x, z), error)) = failures.first() {
-                            *outstanding.error.lock().unwrap() =
-                                Some(format!("failed to write {folder} chunk {x},{z}: {error}"));
-                        }
-                        let failed: HashSet<_> = failures
-                            .into_iter()
-                            .map(|((x, z), error)| {
-                                reports.report_save_failure(&root, x, z, &error);
-                                (x, z)
-                            })
-                            .collect();
-                        if let Ok(mut pending) = pending.lock() {
-                            for job in &batch {
-                                let key = (kind, job.key.0, job.key.1);
-                                if !failed.contains(&job.key)
-                                    && pending.get(&key).is_some_and(|p| p.0 == job.seq)
-                                {
-                                    pending.remove(&key);
-                                }
-                            }
+                        retire_pending(&pending, kind, &batch);
+                        for ((x, z), error) in &failures {
+                            reports.report_save_failure(&root, *x, *z, error);
                         }
                         let chunk_count = batch.len();
                         drop(batch);
@@ -195,6 +175,11 @@ impl SaveDir {
                             outstanding.chunks.fetch_sub(chunk_count, Ordering::Relaxed);
                         }
                         if let Ok(mut count) = outstanding.count.lock() {
+                            if let Some(((x, z), error)) = failures.first() {
+                                outstanding.error.lock().unwrap().get_or_insert_with(|| {
+                                    format!("failed to write {folder} chunk {x},{z}: {error}")
+                                });
+                            }
                             *count -= batch_count;
                             outstanding.done.notify_all();
                         }
@@ -242,32 +227,51 @@ impl SaveDir {
                 .wait(count)
                 .map_err(|_| "writer poisoned")?;
         }
-        self.write_result()
+        // This is backpressure, not a durability barrier. The writer reports completed
+        // failures separately; none should prevent submission of unrelated records.
+        Ok(())
     }
     /// `ChunkMap.activeChunkWrites`: chunk records, excluding entity/POI IO.
     pub fn active_chunk_writes(&self) -> usize {
         self.outstanding.chunks.load(Ordering::Relaxed)
     }
-    /// Poll durability without holding up the event loop. Errors remain visible
-    /// to every waiter, including a later synchronous shutdown.
+    /// Poll the current durability barrier without holding up the event loop.
+    /// A completed barrier reports accumulated failures once.
     pub fn writes_finished(&self) -> Result<bool> {
         let count = self
             .outstanding
             .count
             .lock()
             .map_err(|_| "writer poisoned")?;
+        if *count != 0 {
+            return Ok(false);
+        }
         self.write_result()?;
-        Ok(*count == 0)
+        Ok(true)
     }
     fn write_result(&self) -> Result<()> {
-        match &*self
+        match self
             .outstanding
             .error
             .lock()
             .map_err(|_| "writer poisoned")?
+            .take()
         {
-            Some(error) => Err(error.clone().into()),
+            Some(error) => Err(error.into()),
             None => Ok(()),
+        }
+    }
+}
+
+/// A completed snapshot no longer shadows disk, even if the write failed. Leave a newer
+/// submission at the same coordinates visible to readers.
+fn retire_pending(pending: &PendingWrites, folder: Folder, batch: &[QueuedWrite]) {
+    if let Ok(mut pending) = pending.lock() {
+        for job in batch {
+            let key = (folder, job.key.0, job.key.1);
+            if pending.get(&key).is_some_and(|p| p.0 == job.seq) {
+                pending.remove(&key);
+            }
         }
     }
 }

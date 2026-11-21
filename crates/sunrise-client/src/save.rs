@@ -2228,11 +2228,10 @@ fn read_region_record(
     let record = region
         .lock()
         .map_err(|_| "region file poisoned")?
-        .read(ChunkPos::new(x, z))?;
-    Ok(match record {
-        Some(r) => Some(r.nbt(Limits::saved())?),
-        None => None,
-    })
+        .open_chunk(ChunkPos::new(x, z))?;
+    Ok(record
+        .map(|record| record.nbt(Limits::saved()))
+        .transpose()?)
 }
 /// The `__context` the chunk fixes read: the dimension and its generator type
 /// (`ChunkMap.getChunkDataFixContextTag`).
@@ -7182,7 +7181,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_async_writes_are_readable_and_never_reported_durable() {
+    fn failed_async_entity_write_is_reported_by_only_one_barrier() {
         let dir = std::env::temp_dir().join(format!("sunrise-save-failure-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -7191,13 +7190,12 @@ mod tests {
         let save =
             super::SaveDir::new(dir.clone(), LevelShape::OVERWORLD, Some(Default::default()));
         let entity = Tag::compound([("version", Tag::Int(3))]);
-        save.save_entities_later(vec![((0, 0), vec![entity.clone()])])
+        save.save_entities_later(vec![((0, 0), vec![entity])])
             .unwrap();
         assert!(save.flush().is_err());
-        assert!(save.writes_finished().is_err());
-        assert_eq!(save.load_entities(0, 0).unwrap(), vec![entity]);
-        // The failure stays visible on subsequent barriers too.
-        assert!(save.flush().is_err());
+        assert!(save.writes_finished().unwrap());
+        std::fs::remove_file(dir.join("entities")).unwrap();
+        assert!(save.load_entities(0, 0).unwrap().is_empty());
         drop(save);
         let _ = std::fs::remove_dir_all(dir);
     }

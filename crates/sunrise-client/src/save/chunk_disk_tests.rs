@@ -340,10 +340,8 @@ fn unload_then_reload_reads_saved_8_in_a_fresh_holder() {
     fs::remove_dir_all(path).unwrap();
 }
 
-#[cfg(unix)]
 #[test]
-fn a_failed_disk_write_does_not_stop_healthy_regions_in_the_same_batch() {
-    use std::os::unix::fs::PermissionsExt;
+fn a_failed_disk_write_retires_its_snapshot_without_stopping_healthy_writes() {
     let (registry, biomes) = super::loot_tests::fixture();
     let registry = Box::leak(Box::new(registry));
     let biomes = Arc::new(biomes);
@@ -357,36 +355,44 @@ fn a_failed_disk_write_does_not_stop_healthy_regions_in_the_same_batch() {
         .save(&[Arc::new(chunk(7))], registry, &biomes)
         .unwrap();
     });
-    let region = path.join("region/r.0.-1.mca");
-    let writable = fs::metadata(&region).unwrap().permissions();
-    fs::set_permissions(&region, fs::Permissions::from_mode(0o444)).unwrap();
+    let region = RegionFile::open(path.join("region/r.0.-1.mca")).unwrap();
     with_listener(|saves, _| {
-        let save = SaveDir::new(
+        let mut save = SaveDir::new(
             path.clone(),
             LevelShape::OVERWORLD,
             Some(Default::default()),
         );
+        save.chunk_reports = Arc::default();
+        save.regions
+            .lock()
+            .unwrap()
+            .regions
+            .insert((0, -1), (Some(Arc::new(Mutex::new(region))), 0));
         context(&save);
         let mut healthy = chunk(7);
         healthy.x = 34;
         save.save_later(&[Arc::new(chunk(7)), Arc::new(healthy)], registry, &biomes)
             .unwrap();
-        // The close path reports the failure instead of treating the save as durable.
-        assert!(save.flush().is_err());
+        // Backpressure is not a durability barrier and cannot consume or return the error.
+        save.wait_for_chunk_writes_below(0).unwrap();
+        assert!(save.flush().unwrap_err().to_string().contains("chunk 2,-3"));
+        assert_eq!(save.chunk_reports.take().save_failure, Some((2, -3)));
         assert_eq!(saves.load(Ordering::Relaxed), 2);
-        // The unwritten snapshot (8) stays readable for recovery. Read it with no
-        // listener installed, so no load callback adds to it.
         mod_platform::testing::with_mods(Vec::new().into(), || {
-            let mut recovered = save.load(2, -3, registry, &biomes).unwrap();
-            assert_eq!(value(&mut recovered), 8);
+            // Neither the failed snapshot nor its completion shadows the disk record.
+            assert_eq!(value(&mut save.load(2, -3, registry, &biomes).unwrap()), 7);
+            assert_eq!(value(&mut save.load(34, -3, registry, &biomes).unwrap()), 8);
+            assert!(save.writes_finished().unwrap());
         });
+        save.regions.lock().unwrap().regions.remove(&(0, -1));
+        save.save_later(&[Arc::new(chunk(7))], registry, &biomes)
+            .unwrap();
+        save.flush().unwrap();
+        assert!(save.writes_finished().unwrap());
+        assert_eq!(save.chunk_reports.take().save_failure, None);
     });
-    fs::set_permissions(&region, writable).unwrap();
-    // The old disk record is untouched.
     mod_platform::testing::with_mods(Vec::new().into(), || {
-        assert_eq!(disk_value(&path, registry, &biomes), Some(7));
-        let disk = SaveDir::new(path.clone(), LevelShape::OVERWORLD, None);
-        assert_eq!(value(&mut disk.load(34, -3, registry, &biomes).unwrap()), 8);
+        assert_eq!(disk_value(&path, registry, &biomes), Some(8));
     });
     fs::remove_dir_all(path).unwrap();
 }

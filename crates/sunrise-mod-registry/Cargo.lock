@@ -1378,6 +1378,7 @@ dependencies = [
  "crc-fast",
  "crc32fast",
  "libm",
+ "log",
  "md-5",
  "rustc-hash 2.1.3",
  "safe_arch",

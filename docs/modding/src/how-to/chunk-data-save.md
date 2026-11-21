@@ -26,10 +26,11 @@ reads reuse the result; they do not call the listener again. A panic is logged a
 in an error toast naming the mod, and disables only that listener for the session.
 Completed edits stand, the other listeners still run, and the chunk continues to save.
 A chunk encode or write failure is reported for that chunk; other chunks still save.
+Once a failed write completes, the unwritten snapshot no longer shadows disk reads.
 
 ## Disk NBT
 
 Attachments use the same NBT reader and writer as the rest of the chunk. They have
-no separate byte or nesting limits. Names and strings too long for modified UTF-8 are
-written as empty strings by the disk writer. Use names and strings that fit in modified
-UTF-8 if they must round-trip without changing.
+no separate byte or nesting limits. The disk writer logs each name or string too long
+for modified UTF-8 and writes an empty string in its place. Use names and strings that
+fit in modified UTF-8 if they must round-trip without changing.

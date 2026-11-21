@@ -58,7 +58,7 @@ impl Drop for Writing<'_> {
 }
 
 impl FarRegions {
-    /// The chunk's record at the place the region's kept header gives it. The
+    /// The chunk's saved NBT at the place the region's kept header gives it. The
     /// header is read from `path` where none is kept, or the kept one is
     /// older than `HEADER_TTL` or was read under another stamp than `written`.
     fn read(
@@ -66,7 +66,7 @@ impl FarRegions {
         chunk: ChunkPos,
         written: u64,
         path: impl FnOnce() -> PathBuf,
-    ) -> Option<ChunkRecord> {
+    ) -> Option<NamedTag> {
         let region = (chunk.x >> 5, chunk.z >> 5);
         let header = {
             let mut regions = self.0.lock().unwrap();
@@ -89,7 +89,7 @@ impl FarRegions {
                 }
             }
         };
-        header?.read_chunk(chunk).ok()?
+        header?.read_nbt(chunk, Limits::saved()).ok()?
     }
 }
 
@@ -125,7 +125,7 @@ impl SaveDir {
             // The same stamp after the read: no write began since the header
             // was read, so the chunk was where the header says all along.
             if stamp()? == before {
-                return record?.nbt(Limits::default()).ok();
+                return record;
             }
         }
         // The region is being written, or was a moment ago. The writer's own
@@ -192,6 +192,47 @@ mod tests {
         assert_eq!(far(&save, c), Some((5, 5, 1)));
         assert_eq!(far(&save, b), Some((4, 5, 1)));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn cached_header_reads_a_chunk_above_the_generic_nbt_node_limit() {
+        let (dir, save) = save_dir("saved-limits");
+        let at = (3, 5);
+        let node_count = Limits::default().max_nodes + 1;
+        let Record::Tag(root) = record(at, 1) else {
+            unreachable!()
+        };
+        let mut root = Arc::unwrap_or_clone(root);
+        let Tag::Compound(fields) = &mut root.tag else {
+            unreachable!()
+        };
+        fields.insert(
+            "attachments".into(),
+            Tag::List(vec![Tag::Byte(3); node_count]),
+        );
+        write(&save, &[(at, &Record::Tag(Arc::new(root)))]);
+        // Install the header before the read so the current, cached-header branch is used.
+        let region = (0, 0);
+        let stamp = save.regions.lock().unwrap().written[&region];
+        save.far_regions.0.lock().unwrap().insert(
+            region,
+            FarRegion {
+                checked: Instant::now(),
+                written: stamp,
+                header: Some(Arc::new(
+                    RegionHeader::read(save.region_path("region", 0, 0)).unwrap(),
+                )),
+            },
+        );
+        let root = save.far_region_record(at.0, at.1).unwrap();
+        let Some(Tag::List(values)) = root.tag.get("attachments") else {
+            panic!("saved attachments list")
+        };
+        assert_eq!(values.len(), node_count);
+        assert_eq!(values.last(), Some(&Tag::Byte(3)));
+        drop(save);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     /// #6386: each far read opened the region file, and so read its 8 KiB

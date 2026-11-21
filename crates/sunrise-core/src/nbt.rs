@@ -4,8 +4,10 @@ use crate::{
     random::java_string_hash,
 };
 use std::{
+    borrow::Cow,
     cmp::Ordering,
     hash::{Hash, Hasher},
+    io::{self, Read},
 };
 
 /// Java strings can contain unpaired surrogates, which Rust UTF-8 strings cannot.
@@ -609,6 +611,7 @@ type Visit<'s> = &'s mut dyn FnMut(&mut ListElements<'_, '_, '_>) -> Result<(), 
 
 struct Reader<'a, 's> {
     bytes: &'a [u8],
+    input: Option<StreamInput<'a>>,
     offset: usize,
     limits: Limits,
     nodes: usize,
@@ -626,6 +629,11 @@ struct Reader<'a, 's> {
     /// Bounded entries left out.
     rejected: usize,
 }
+struct StreamInput<'a> {
+    reader: &'a mut dyn Read,
+    error: Option<io::Error>,
+}
+
 impl<'a> Reader<'a, '_> {
     // Vanilla 26.3 NbtAccounter.accountBytes; disabled for existing disk readers.
     fn charge(&mut self, bytes: u64) -> Result<(), Error> {
@@ -644,7 +652,7 @@ impl<'a> Reader<'a, '_> {
             reason,
         }
     }
-    fn take(&mut self, len: usize) -> Result<&'a [u8], Error> {
+    fn end(&self, len: usize) -> Result<usize, Error> {
         let end = self
             .offset
             .checked_add(len)
@@ -652,6 +660,10 @@ impl<'a> Reader<'a, '_> {
         if end > self.limits.max_bytes {
             return Err(self.error("byte limit exceeded"));
         }
+        Ok(end)
+    }
+    fn take(&mut self, len: usize) -> Result<&'a [u8], Error> {
+        let end = self.end(len)?;
         let value = self
             .bytes
             .get(self.offset..end)
@@ -659,11 +671,62 @@ impl<'a> Reader<'a, '_> {
         self.offset = end;
         Ok(value)
     }
+    fn read_input<T>(
+        &mut self,
+        len: usize,
+        read: impl FnOnce(&mut dyn Read) -> io::Result<T>,
+    ) -> Result<T, Error> {
+        let end = self.end(len)?;
+        let input = self.input.as_mut().unwrap();
+        match read(input.reader) {
+            Ok(value) => {
+                self.offset = end;
+                Ok(value)
+            }
+            Err(error) => {
+                input.error = Some(error);
+                Err(self.error("could not read input"))
+            }
+        }
+    }
+    fn read_bytes(&mut self, len: usize) -> Result<Cow<'a, [u8]>, Error> {
+        if self.input.is_none() {
+            return self.take(len).map(Cow::Borrowed);
+        }
+        self.read_input(len, |reader| {
+            // A declared length on a stream does not prove the data exists. Grow only
+            // as the bytes arrive, rather than allocating the declared size up front.
+            let mut bytes = Vec::new();
+            if reader.take(len as u64).read_to_end(&mut bytes)? != len {
+                return Err(io::ErrorKind::UnexpectedEof.into());
+            }
+            Ok(Cow::Owned(bytes))
+        })
+    }
     fn number<const N: usize>(&mut self) -> Result<[u8; N], Error> {
-        Ok(self.take(N)?.try_into().unwrap())
+        if self.input.is_none() {
+            return Ok(self.take(N)?.try_into().unwrap());
+        }
+        self.read_input(N, |reader| {
+            let mut bytes = [0; N];
+            reader.read_exact(&mut bytes)?;
+            Ok(bytes)
+        })
     }
     fn byte(&mut self) -> Result<u8, Error> {
-        Ok(self.take(1)?[0])
+        Ok(self.number::<1>()?[0])
+    }
+    fn remaining(&self) -> usize {
+        if self.input.is_some() {
+            usize::MAX // Actual remaining length is not known for a stream.
+        } else {
+            self.bytes.len().saturating_sub(self.offset)
+        }
+    }
+    fn collection<T>(&self, len: usize) -> Vec<T> {
+        // The slice's length was checked before allocation. For a stream, start
+        // small and grow from the elements actually read.
+        Vec::with_capacity(if self.input.is_some() { 0 } else { len })
     }
     fn count(&mut self, element_bytes: usize) -> Result<usize, Error> {
         let count = i32::from_be_bytes(self.number()?);
@@ -674,23 +737,21 @@ impl<'a> Reader<'a, '_> {
         let size = count
             .checked_mul(element_bytes)
             .ok_or_else(|| self.error("length overflow"))?;
-        if size > self.bytes.len().saturating_sub(self.offset)
-            || size > self.limits.max_bytes.saturating_sub(self.offset)
-        {
+        if size > self.remaining() || size > self.limits.max_bytes.saturating_sub(self.offset) {
             return Err(self.error("collection exceeds available bytes"));
         }
         Ok(count)
     }
     fn string(&mut self) -> Result<JavaString, Error> {
         let len = u16::from_be_bytes(self.number()?) as usize;
-        let bytes = self.take(len)?;
-        modified_utf8(bytes).ok_or_else(|| self.error("invalid Java modified UTF-8"))
+        let bytes = self.read_bytes(len)?;
+        modified_utf8(&bytes).ok_or_else(|| self.error("invalid Java modified UTF-8"))
     }
     /// `StringTag.skipString`: vanilla skips a file root's name unread, so a
     /// name that isn't modified UTF-8 is read as empty rather than refused.
     fn root_name(&mut self) -> Result<JavaString, Error> {
         let len = u16::from_be_bytes(self.number()?) as usize;
-        Ok(modified_utf8(self.take(len)?).unwrap_or_default())
+        Ok(modified_utf8(&self.read_bytes(len)?).unwrap_or_default())
     }
     fn entry(&mut self, id: u8, depth: usize) -> Result<(), Error> {
         if self.nodes >= self.limits.max_nodes {
@@ -752,7 +813,7 @@ impl<'a> Reader<'a, '_> {
             7 => {
                 let len = self.count(1)?;
                 self.charge(len as u64)?;
-                Tag::ByteArray(self.take(len)?.to_vec())
+                Tag::ByteArray(self.read_bytes(len)?.into_owned())
             }
             8 => {
                 let value = self.string()?;
@@ -763,7 +824,7 @@ impl<'a> Reader<'a, '_> {
             11 => {
                 let len = self.count(4)?;
                 self.charge(4 * len as u64)?;
-                let mut values = Vec::with_capacity(len);
+                let mut values = self.collection(len);
                 for _ in 0..len {
                     values.push(i32::from_be_bytes(self.number()?));
                 }
@@ -772,7 +833,7 @@ impl<'a> Reader<'a, '_> {
             12 => {
                 let len = self.count(8)?;
                 self.charge(8 * len as u64)?;
-                let mut values = Vec::with_capacity(len);
+                let mut values = self.collection(len);
                 for _ in 0..len {
                     values.push(i64::from_be_bytes(self.number()?));
                 }
@@ -784,7 +845,7 @@ impl<'a> Reader<'a, '_> {
     fn list_payload(&mut self, depth: usize) -> Result<Tag, Error> {
         let (element_id, len) = self.list_header()?;
         self.charge(4 * len as u64)?;
-        let mut values = Vec::with_capacity(len);
+        let mut values = self.collection(len);
         for _ in 0..len {
             let mut value = self.payload(element_id, depth + 1)?;
             if let Tag::Compound(map) = &mut value
@@ -867,7 +928,7 @@ impl<'a> Reader<'a, '_> {
             _ => 0,
         };
         let needs = len.saturating_mul(least);
-        if needs > self.bytes.len().saturating_sub(self.offset) {
+        if needs > self.remaining() {
             return Err(self.error("truncated list"));
         }
         if needs > self.limits.max_bytes.saturating_sub(self.offset) {
@@ -1075,6 +1136,33 @@ pub fn read_named_quota(
     read_named_with_heap(bytes, limits, Some(quota))
 }
 
+/// Read a disk NBT root directly from a stream, leaving bytes after the root unread.
+pub fn read_named_from(input: &mut dyn Read, limits: Limits) -> io::Result<NamedTag> {
+    let mut reader = Reader {
+        bytes: &[],
+        input: Some(StreamInput {
+            reader: input,
+            error: None,
+        }),
+        offset: 0,
+        limits,
+        nodes: 0,
+        heap: None,
+        stream: None,
+        bounded: None,
+        strict: false,
+        entering: 0,
+        rejected: 0,
+    };
+    read_named_root(&mut reader).map_err(|error| {
+        reader
+            .input
+            .unwrap()
+            .error
+            .unwrap_or_else(|| io::Error::new(io::ErrorKind::InvalidData, error))
+    })
+}
+
 fn read_named_with_heap(
     bytes: &[u8],
     limits: Limits,
@@ -1082,6 +1170,7 @@ fn read_named_with_heap(
 ) -> Result<(NamedTag, usize), Error> {
     let mut reader = Reader {
         bytes,
+        input: None,
         offset: 0,
         limits,
         nodes: 0,
@@ -1092,6 +1181,11 @@ fn read_named_with_heap(
         entering: 0,
         rejected: 0,
     };
+    let root = read_named_root(&mut reader)?;
+    Ok((root, reader.offset))
+}
+
+fn read_named_root(reader: &mut Reader<'_, '_>) -> Result<NamedTag, Error> {
     let id = reader.byte()?;
     let name = if id == 0 {
         JavaString::default()
@@ -1099,7 +1193,7 @@ fn read_named_with_heap(
         reader.root_name()?
     };
     let tag = reader.payload(id, 0)?;
-    Ok((NamedTag { name, tag }, reader.offset))
+    Ok(NamedTag { name, tag })
 }
 
 /// [`read_named`], except that the entry keyed `bounded.key` in each of the compounds
@@ -1126,15 +1220,10 @@ pub fn read_named_bounded(
         strict: false,
         entering: (1u32 << bounded.parents.len().min(MAX_BOUNDED_PARENTS)) - 1,
         rejected: 0,
+        input: None,
     };
-    let id = reader.byte()?;
-    let name = if id == 0 {
-        JavaString::default()
-    } else {
-        reader.root_name()?
-    };
-    let tag = reader.payload(id, 0)?;
-    Ok((NamedTag { name, tag }, reader.offset, reader.rejected))
+    let root = read_named_root(&mut reader)?;
+    Ok((root, reader.offset, reader.rejected))
 }
 
 /// [`read_named`], except that lists keyed `key` in the root compound or in
@@ -1159,21 +1248,17 @@ pub fn read_named_streaming(
         strict: false,
         entering: 0,
         rejected: 0,
+        input: None,
     };
-    let id = reader.byte()?;
-    let name = if id == 0 {
-        JavaString::default()
-    } else {
-        reader.root_name()?
-    };
-    let tag = reader.payload(id, 0)?;
-    Ok((NamedTag { name, tag }, reader.offset))
+    let root = read_named_root(&mut reader)?;
+    Ok((root, reader.offset))
 }
 
 /// Read a network root (type and payload, without the file name field).
 pub fn read_network(bytes: &[u8], limits: Limits) -> Result<(Tag, usize), Error> {
     let mut reader = Reader {
         bytes,
+        input: None,
         offset: 0,
         limits,
         nodes: 0,
@@ -1203,8 +1288,7 @@ struct Writer {
     limits: Limits,
     nodes: usize,
     /// `NbtIo.StringFallbackDataOutput`, the disk writer's: a string too long
-    /// for modified UTF-8 is written empty and the rest of the tree goes on.
-    /// shortcut: vanilla also logs "Failed to write NBT String"; this crate has no logger.
+    /// for modified UTF-8 is reported and written empty, and the rest of the tree goes on.
     empty_long_strings: bool,
     /// `DataOutputStream.writeFloat`/`writeDouble` (`floatToIntBits`): a NaN
     /// is written as the canonical one. The network writer keeps its bits.
@@ -1229,8 +1313,13 @@ impl Writer {
         self.put(&len.to_be_bytes())
     }
     fn string(&mut self, string: &JavaString) -> Result<(), Error> {
-        let Ok(len) = u16::try_from(string.modified_utf8_len()) else {
+        let encoded_len = string.modified_utf8_len();
+        let Ok(len) = u16::try_from(encoded_len) else {
             if self.empty_long_strings {
+                log::error!(
+                    "Failed to write NBT String at byte {}: modified UTF-8 is {encoded_len} bytes (maximum 65535); writing an empty string",
+                    self.bytes.len()
+                );
                 return self.put(&0u16.to_be_bytes());
             }
             return Err(self.error("modified UTF-8 exceeds 65535 bytes"));
@@ -1508,6 +1597,7 @@ impl Tag {
     pub fn from_network_bytes(bytes: &[u8], quota: Option<u64>) -> Result<(Self, usize), Error> {
         let mut reader = Reader {
             bytes,
+            input: None,
             offset: 0,
             limits: Limits {
                 max_bytes: usize::MAX,
@@ -1565,6 +1655,7 @@ impl<'a> Cursor<'a> {
     pub fn file(bytes: &'a [u8], limits: Limits) -> Result<Option<Self>, Error> {
         let mut reader = Reader {
             bytes,
+            input: None,
             offset: 0,
             limits,
             nodes: 0,
@@ -1749,8 +1840,32 @@ mod tests {
     /// modified UTF-8 empty and goes on (#5064); the network writer refuses
     /// it. Vanilla 26.3's bytes for `{s: 32768 x U+0000}` (65536 encoded).
     #[test]
-    fn the_disk_writer_empties_a_string_too_long_for_modified_utf8() {
-        let long = Tag::String(JavaString(vec![0; 32768]));
+    fn the_disk_writer_reports_and_empties_overlong_modified_utf8() {
+        thread_local! {
+            static REPORTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        }
+        struct FallbackLog;
+        impl log::Log for FallbackLog {
+            fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+                metadata.level() == log::Level::Error && metadata.target() == "sunrise_core::nbt"
+            }
+            fn log(&self, record: &log::Record<'_>) {
+                if self.enabled(record.metadata())
+                    && record
+                        .args()
+                        .to_string()
+                        .starts_with("Failed to write NBT String")
+                {
+                    REPORTS.with(|count| count.set(count.get() + 1));
+                }
+            }
+            fn flush(&self) {}
+        }
+        log::set_logger(&FallbackLog).unwrap();
+        log::set_max_level(log::LevelFilter::Error);
+
+        let overlong = JavaString(vec![0; 32768]);
+        let long = Tag::String(overlong.clone());
         let root = NamedTag {
             name: "".into(),
             tag: Tag::compound([("s", long.clone())]),
@@ -1774,6 +1889,16 @@ mod tests {
         assert_eq!(back.get("before"), Some(&Tag::String("kept".into())));
         assert_eq!(back.get("long"), Some(&Tag::String("".into())));
         assert_eq!(back.get("after"), Some(&Tag::Int(7)));
+        let root = NamedTag {
+            name: "".into(),
+            tag: Tag::Compound(Compound::from([(overlong.clone(), Tag::String(overlong))])),
+        };
+        assert_eq!(
+            write_named(&root, Limits::saved()).unwrap(),
+            [0x0a, 0, 0, 0x08, 0, 0, 0, 0, 0]
+        );
+        // Both earlier writes and the final name and value emitted a report.
+        REPORTS.with(|count| assert_eq!(count.get(), 4));
     }
     /// `NbtIo.readUnnamedTag` skips the root's name unread
     /// (`StringTag.skipString`), so a name that isn't modified UTF-8 still

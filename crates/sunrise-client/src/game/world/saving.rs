@@ -277,8 +277,8 @@ impl Game<'_> {
                     let _ =
                         reply.send(serde_json::json!({ "error": error.to_string() }).to_string());
                 }
-                // Keep ownership (and the lock) on errors too. Native shutdown
-                // sees the same durable-write failure instead of declaring success.
+                // Keep ownership (and the lock) on errors too, until the caller
+                // handles the failed save.
                 self.pending_save = Some(save);
                 other
             }

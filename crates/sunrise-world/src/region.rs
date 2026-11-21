@@ -5,7 +5,7 @@
 use std::{
     cell::RefCell,
     fs::{self, File, OpenOptions},
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self, BufReader, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU32, Ordering},
 };
@@ -157,6 +157,37 @@ fn read_header(file: &mut File) -> io::Result<([u32; 1024], [u32; 1024])> {
     }
     Ok((offsets, timestamps))
 }
+enum ChunkPayload {
+    Inline(Vec<u8>),
+    External(File),
+}
+
+/// A record opened under the region lock, with its own data or sidecar descriptor.
+pub struct ChunkInput {
+    compression: Compression,
+    payload: ChunkPayload,
+    timestamp: u32,
+}
+
+impl ChunkInput {
+    /// Decode one NBT root without reading a sidecar to its end.
+    pub fn nbt(self, limits: Limits) -> io::Result<NamedTag> {
+        match self.payload {
+            ChunkPayload::External(file) => self
+                .compression
+                .with_decoder(BufReader::new(file), |input| {
+                    nbt::read_named_from(input, limits)
+                }),
+            ChunkPayload::Inline(compressed) => ChunkRecord {
+                compression: self.compression,
+                compressed,
+                timestamp: self.timestamp,
+            }
+            .nbt(limits),
+        }
+    }
+}
+
 /// `RegionFile.getChunkDataInputStream` for the chunk the header puts at
 /// `offset`: a chunk the file cannot deliver is absent (`null`), not an
 /// error, so a reader skips it the way vanilla does instead of giving up on
@@ -167,7 +198,7 @@ fn read_record(
     chunk: ChunkPos,
     offset: u32,
     timestamp: u32,
-) -> io::Result<Option<ChunkRecord>> {
+) -> io::Result<Option<ChunkInput>> {
     if offset == 0 {
         return Ok(None);
     }
@@ -184,7 +215,7 @@ fn read_record(
         return Ok(None); // "Chunk stream is truncated"
     }
     let compression = Compression::try_from(header[4] & 127)?;
-    let compressed = if header[4] & 128 != 0 {
+    let payload = if header[4] & 128 != 0 {
         // `createExternalChunkInputStream`: the stub's length says nothing
         // about the stream in the `.mcc`, so a stub that also claims inline
         // data only warns; and a stub whose file is gone is a chunk that is
@@ -193,18 +224,18 @@ fn read_record(
         if !path.is_file() {
             return Ok(None);
         }
-        fs::read(path)?
+        ChunkPayload::External(File::open(path)?)
     } else {
         let mut data = vec![0; len - 1];
         match file.read_exact(&mut data) {
-            Ok(()) => data,
+            Ok(()) => ChunkPayload::Inline(data),
             Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
             Err(e) => return Err(e),
         }
     };
-    Ok(Some(ChunkRecord {
+    Ok(Some(ChunkInput {
         compression,
-        compressed,
+        payload,
         timestamp,
     }))
 }
@@ -418,9 +449,30 @@ impl RegionFile {
             .map(|(i, _)| (position(self.position, i), self.timestamps[i]))
     }
 
-    /// The chunk's record, `None` for a chunk the file does not hold or cannot
-    /// deliver (`read_record`).
+    /// The chunk's original compressed record, including all sidecar bytes, for raw
+    /// inspection or export. Gameplay reads one NBT root through [`Self::open_chunk`].
     pub fn read(&mut self, chunk: ChunkPos) -> io::Result<Option<ChunkRecord>> {
+        self.open_chunk(chunk)?
+            .map(|record| {
+                let compressed = match record.payload {
+                    ChunkPayload::Inline(bytes) => bytes,
+                    ChunkPayload::External(mut file) => {
+                        let mut bytes = Vec::new();
+                        file.read_to_end(&mut bytes)?;
+                        bytes
+                    }
+                };
+                Ok(ChunkRecord {
+                    compression: record.compression,
+                    compressed,
+                    timestamp: record.timestamp,
+                })
+            })
+            .transpose()
+    }
+
+    /// Open the record and return an input that can decode the NBT outside the region lock.
+    pub fn open_chunk(&mut self, chunk: ChunkPos) -> io::Result<Option<ChunkInput>> {
         let i = slot(self.position, chunk)?;
         let directory = self.path.parent().unwrap_or(Path::new("."));
         read_record(
@@ -492,9 +544,9 @@ impl RegionHeader {
             timestamps,
         })
     }
-    /// `RegionFile::read` at the place this header gives the chunk, with the
-    /// file opened for this one record.
-    pub fn read_chunk(&self, chunk: ChunkPos) -> io::Result<Option<ChunkRecord>> {
+    /// Decode the chunk at the place this header gives it, with the file opened
+    /// for this one record.
+    pub fn read_nbt(&self, chunk: ChunkPos, limits: Limits) -> io::Result<Option<NamedTag>> {
         let i = slot(self.position, chunk)?;
         if self.offsets[i] == 0 {
             return Ok(None);
@@ -506,7 +558,9 @@ impl RegionHeader {
             chunk,
             self.offsets[i],
             self.timestamps[i],
-        )
+        )?
+        .map(|record| record.nbt(limits))
+        .transpose()
     }
 }
 
@@ -776,10 +830,13 @@ mod tests {
             std::env::temp_dir().join(format!("sunrise-region-header-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("r.-1.2.mca");
-        let record = |fill: u8, len: usize| ChunkRecord {
-            compression: Compression::None,
-            compressed: vec![fill; len],
-            timestamp: u32::from(fill),
+        use sunrise_core::nbt::Tag;
+        let root = |fill: u8, len: usize| NamedTag {
+            name: "".into(),
+            tag: Tag::compound([("value", Tag::ByteArray(vec![fill; len]))]),
+        };
+        let record = |fill, len| {
+            ChunkRecord::from_nbt(&root(fill, len), Compression::None, 0, Limits::saved()).unwrap()
         };
         let (first, last) = (ChunkPos::new(-32, 64), ChunkPos::new(-1, 95));
         let missing = ChunkPos::new(-31, 64);
@@ -790,15 +847,83 @@ mod tests {
 
         let header = RegionHeader::read(&path).unwrap();
         for (chunk, fill, len) in [(first, 7, 100), (last, 9, 5000)] {
-            let read = header.read_chunk(chunk).unwrap().unwrap();
-            assert_eq!(read.compressed, vec![fill; len]);
-            assert_eq!(read.timestamp, u32::from(fill));
+            let read = header.read_nbt(chunk, Limits::saved()).unwrap().unwrap();
+            assert_eq!(read, root(fill, len));
         }
-        assert!(header.read_chunk(missing).unwrap().is_none());
+        assert!(header.read_nbt(missing, Limits::saved()).unwrap().is_none());
         // The next region's chunk.
-        assert!(header.read_chunk(ChunkPos::new(0, 64)).is_err());
+        assert!(
+            header
+                .read_nbt(ChunkPos::new(0, 64), Limits::saved())
+                .is_err()
+        );
         assert!(RegionHeader::read(dir.join("r.5.5.mca")).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sidecar_reads_stop_at_the_nbt_root_for_every_region_codec() {
+        use sunrise_core::nbt::Tag;
+
+        let bytes_read = || -> Option<u64> {
+            let io = fs::read_to_string("/proc/thread-self/io").ok()?;
+            io.lines()
+                .find_map(|line| line.strip_prefix("rchar:"))?
+                .trim()
+                .parse()
+                .ok()
+        };
+        let dir = std::env::temp_dir().join(format!(
+            "sunrise-region-sidecar-tail-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("r.0.0.mca");
+        let chunk = ChunkPos::new(0, 0);
+        let root = NamedTag {
+            name: "".into(),
+            tag: Tag::compound([("value", Tag::ByteArray(vec![42; 96 * 1024]))]),
+        };
+        let mut region = [0; HEADER + SECTOR];
+        region[..4].copy_from_slice(&[0, 0, 2, 1]);
+        region[HEADER..HEADER + 4].copy_from_slice(&1u32.to_be_bytes());
+        for codec in [
+            Compression::Gzip,
+            Compression::Zlib,
+            Compression::None,
+            Compression::Lz4,
+        ] {
+            region[HEADER + 4] = 128 | codec as u8;
+            fs::write(&path, region).unwrap();
+            let record = ChunkRecord::from_nbt(&root, codec, 0, Limits::saved()).unwrap();
+            let mut sidecar = File::create(external_path(&dir, chunk)).unwrap();
+            sidecar.write_all(&record.compressed).unwrap();
+            sidecar.set_len(64 * 1024 * 1024).unwrap();
+            drop(sidecar);
+
+            let before = bytes_read();
+            let read = RegionFile::open(&path)
+                .unwrap()
+                .open_chunk(chunk)
+                .unwrap()
+                .unwrap()
+                .nbt(Limits::saved())
+                .unwrap();
+            assert_eq!(read, root, "{codec:?}");
+            let read = RegionHeader::read(&path)
+                .unwrap()
+                .read_nbt(chunk, Limits::saved())
+                .unwrap();
+            assert_eq!(read.as_ref(), Some(&root), "{codec:?}");
+            if let (Some(before), Some(after)) = (before, bytes_read()) {
+                assert!(
+                    after - before < 1024 * 1024,
+                    "{codec:?}: read the unused sidecar tail"
+                );
+            }
+        }
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
