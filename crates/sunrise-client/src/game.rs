@@ -7234,14 +7234,14 @@ impl Game<'_> {
         let (wi, hi) = (w as i32, h as i32);
         let mut gui_canceled = false;
         let replaying = self.replay.playing();
-        // RenderGuiEvent.Pre can veto the status slots even when F1 hides their vanilla paint.
+        // GuiLayerManager posts RenderGuiEvent.Pre even when F1 hides vanilla paint.
         if !replaying || !self.ui.hide_gui {
             self.native_render_gui_pre(&mut gui_canceled);
         }
-        // The veto covers status slots even under F1, but not mandatory diagnostics.
-        let dispatch_status = !gui_canceled && !replaying;
+        // The veto covers the HUD pass, not mandatory diagnostics.
+        let dispatch_hud = !gui_canceled && !replaying;
         let presentation_hidden = self.ui.hide_gui || replaying;
-        let show_hud = dispatch_status && !self.ui.hide_gui;
+        let show_hud = dispatch_hud && !self.ui.hide_gui;
         // Hud.extractRenderState asks `Screen.isInGameUi` twice: such a screen
         // defers the subtitles over itself, and keeps them while F1 hides the
         // rest of the HUD.
@@ -7249,13 +7249,18 @@ impl Game<'_> {
             show_hud,
             in_game_ui(self.screen, self.book.is_some() || self.sign_edit.is_some()),
         );
-        // The mods' layers (`register_gui_layers`) draw among vanilla's while the HUD shows.
-        self.hud_layer_next = show_hud.then_some(0);
+        let draw_sleep = &mut |g: &mut Self, batch: &mut HudBatch| {
+            let draws = hud_overlays::sleep_overlay(wi, hi, g.sleep_timer as i32);
+            hud_layout::paint(batch, &g.gui.atlas, &draws);
+        };
         self.ui.room = self.hud_room(w, h, show_hud);
         let mut guide_from = 0;
         if show_hud {
             self.draw_spyglass(&mut batch);
             guide_from = batch.vertices.len();
+        }
+        if dispatch_hud {
+            self.hud_layer_next = Some(0);
             // Hud.extractCrosshair / extractItemHotbar / extractPlayerHealth /
             // extractVehicleHealth and the experience bar, laid out by hud_layout.
             // Combat feel Legacy hides the attack indicator unless the player keeps it.
@@ -7268,28 +7273,33 @@ impl Game<'_> {
             let strength = self.hand_strength.scale(0.0, self.main_hand_attack_speed());
             // The 3D crosshair (F3) takes the 2D one's place.
             // Hud.extractCrosshair: a spectator only sees it over something to open.
-            if self.camera_type.is_first_person()
-                && (!spectator || self.spectator_crosshair())
-                && !self.debug_crosshair()
-                && !self.overlay_holds_view()
-            {
+            self.gui_layer(VanillaGuiLayer::Crosshair, &mut batch, &mut |g, batch| {
+                if !show_hud
+                    || !g.camera_type.is_first_person()
+                    || (spectator && !g.spectator_crosshair())
+                    || g.debug_crosshair()
+                    || g.overlay_holds_view()
+                {
+                    return;
+                }
                 let attack = (indicator == 1).then_some(strength);
                 let full = attack.is_some_and(|a| {
-                    hud_layout::full_attack_indicator(a, delay, self.crosshair_living())
+                    hud_layout::full_attack_indicator(a, delay, g.crosshair_living())
                 });
                 let draws = hud_layout::crosshair(wi, hi, attack, full);
-                self.gui_layer(VanillaGuiLayer::Crosshair, &mut batch, &mut |g, batch| {
-                    // The custom crosshair takes the sprite's place (the first draw); the
-                    // attack indicator stays.
-                    if g.custom_crosshair() {
-                        g.draw_custom_crosshair(batch, wi, hi);
-                        hud_layout::paint(batch, &g.gui.atlas, &draws[1..]);
-                    } else {
-                        hud_layout::paint(batch, &g.gui.atlas, &draws);
-                    }
-                });
-            }
+                // The custom crosshair takes the sprite's place (the first draw); the
+                // attack indicator stays.
+                if g.custom_crosshair() {
+                    g.draw_custom_crosshair(batch, wi, hi);
+                    hud_layout::paint(batch, &g.gui.atlas, &draws[1..]);
+                } else {
+                    hud_layout::paint(batch, &g.gui.atlas, &draws);
+                }
+            });
             self.gui_layer(VanillaGuiLayer::Hotbar, &mut batch, &mut |g, batch| {
+                if !show_hud {
+                    return;
+                }
                 if spectator {
                     g.draw_spectator_hotbar(batch);
                 } else {
@@ -7314,17 +7324,19 @@ impl Game<'_> {
             });
             self.gui_layer(VanillaGuiLayer::Effects, &mut batch, &mut |g, batch| {
                 // The PvP & HUD effects widget takes the icons' place.
-                if !g.pvp_effects_shown() {
+                if show_hud && !g.pvp_effects_shown() {
                     g.draw_effect_icons(batch);
                 }
             });
             // Hud: the action bar and titles draw over the hotbar (nextStratum).
             self.gui_layer(VanillaGuiLayer::BossOverlay, &mut batch, &mut |g, batch| {
-                g.draw_boss_bars(batch);
+                if show_hud {
+                    g.draw_boss_bars(batch);
+                }
             });
-            self.draw_extras(&mut batch);
-        }
-        if dispatch_status {
+            if show_hud {
+                self.draw_extras(&mut batch);
+            }
             // NeoForge's Hud.registerVanillaLayers: each status row owns its own extraction.
             // The installed vanilla bodies share the column heights and a scratch draw list.
             let mut status_heights = hud_layout::StatusBarHeights::default();
@@ -7459,8 +7471,7 @@ impl Game<'_> {
                     g.audio.capture = capture;
                 }
             });
-        }
-        if show_hud {
+
             // Hud.nextContextualInfoState: the jump bar, the experience bar or
             // the locator bar above the hotbar.
             let has_experience = !self.creative && !spectator;
@@ -7477,6 +7488,9 @@ impl Game<'_> {
                 VanillaGuiLayer::ContextualInfoBar,
                 &mut batch,
                 &mut |g, batch| {
+                    if !show_hud {
+                        return;
+                    }
                     if contextual == ContextualBar::JumpableVehicle {
                         g.draw_jump_bar(batch, wi, hi);
                     }
@@ -7514,87 +7528,77 @@ impl Game<'_> {
                     }
                 },
             );
-            if !spectator {
-                self.gui_layer(
-                    VanillaGuiLayer::SelectedItemName,
-                    &mut batch,
-                    &mut |g, batch| {
+            self.gui_layer(
+                VanillaGuiLayer::SelectedItemName,
+                &mut batch,
+                &mut |g, batch| {
+                    if show_hud && !spectator {
                         g.draw_selected_name(batch, !g.creative);
-                    },
-                );
-            }
-        }
-        // Hud.extractSleepOverlay: over all health/food bars, under titles and chat.
-        let draws = hud_overlays::sleep_overlay(wi, hi, self.sleep_timer as i32);
-        self.gui_layer(
-            VanillaGuiLayer::SleepOverlay,
-            &mut batch,
-            &mut |g, batch| {
-                hud_layout::paint(batch, &g.gui.atlas, &draws);
-            },
-        );
-        if show_hud {
+                    }
+                },
+            );
+            // Hud.extractSleepOverlay paints even when F1 hides the other vanilla bodies.
+            self.gui_layer(VanillaGuiLayer::SleepOverlay, &mut batch, draw_sleep);
             self.gui_layer(
                 VanillaGuiLayer::OverlayMessage,
                 &mut batch,
                 &mut |g, batch| {
-                    g.draw_overlay_message(batch);
+                    if show_hud {
+                        g.draw_overlay_message(batch);
+                    }
                 },
             );
             self.gui_layer(VanillaGuiLayer::Title, &mut batch, &mut |g, batch| {
-                g.draw_title(batch);
+                if show_hud {
+                    g.draw_title(batch);
+                }
             });
             self.gui_layer(
                 VanillaGuiLayer::ScoreboardSidebar,
                 &mut batch,
                 &mut |g, batch| {
-                    g.draw_scoreboard(batch);
+                    if show_hud {
+                        g.draw_scoreboard(batch);
+                    }
                 },
             );
-            if subtitles != Subtitles::Hidden {
-                self.gui_layer(
-                    VanillaGuiLayer::SubtitleOverlay,
-                    &mut batch,
-                    &mut |g, batch| {
-                        g.draw_subtitles(batch);
-                    },
-                );
-            }
-        } else if subtitles == Subtitles::Deferred {
-            // F1 hid the HUD, but an in-game screen still shows the subtitles.
             self.gui_layer(
                 VanillaGuiLayer::SubtitleOverlay,
                 &mut batch,
                 &mut |g, batch| {
-                    g.draw_subtitles(batch);
+                    if subtitles != Subtitles::Hidden {
+                        g.draw_subtitles(batch);
+                    }
                 },
             );
-        }
-        let atlas = &self.gui.atlas;
-        if show_hud
-            && let Some((text, at)) = &self.message
-            && at.elapsed() < Duration::from_secs(3)
-        {
-            let tw = HudBatch::text_width(atlas, text);
-            batch.text(atlas, text, (w - tw) / 2.0, h - 59.0, u32::MAX, true);
-        }
-        // The chat screen draws the focused chat itself; F1 hides the rest.
-        if self.screen == Screen::Chat {
-            // The mod layers under the chat stay under the focused chat.
-            self.draw_mod_gui_layers(Some(VanillaGuiLayer::Chat), &mut batch);
-        } else if show_hud {
-            if !self.overlay_holds_view() {
-                self.gui_layer(VanillaGuiLayer::Chat, &mut batch, &mut |g, batch| {
-                    g.draw_chat(batch)
-                });
+            let atlas = &self.gui.atlas;
+            if show_hud
+                && let Some((text, at)) = &self.message
+                && at.elapsed() < Duration::from_secs(3)
+            {
+                let tw = HudBatch::text_width(atlas, text);
+                batch.text(atlas, text, (w - tw) / 2.0, h - 59.0, u32::MAX, true);
             }
-            self.gui_layer(VanillaGuiLayer::TabList, &mut batch, &mut |g, batch| {
-                g.draw_tab_list(batch);
+            // The chat screen draws focused chat; the background slot still dispatches.
+            self.gui_layer(VanillaGuiLayer::Chat, &mut batch, &mut |g, batch| {
+                if show_hud && g.screen != Screen::Chat && !g.overlay_holds_view() {
+                    g.draw_chat(batch);
+                }
             });
+            self.gui_layer(VanillaGuiLayer::TabList, &mut batch, &mut |g, batch| {
+                if show_hud && g.screen != Screen::Chat {
+                    g.draw_tab_list(batch);
+                }
+            });
+            self.draw_mod_gui_layers(None, &mut batch);
+            self.hud_layer_next = None;
+        } else if replaying {
+            // Replay's HUD-free view still draws the sleep tint and deferred screen subtitles.
+            draw_sleep(self, &mut batch);
+            if subtitles == Subtitles::Deferred {
+                self.draw_subtitles(&mut batch);
+            }
         }
-        // The mod layers above the last vanilla layer drawn.
-        self.draw_mod_gui_layers(None, &mut batch);
-        self.hud_layer_next = None;
         // Screen.extractBlurredBackground blurs the world and HUD, while the
         // screen's background, widgets, toasts and debug overlay stay sharp.
         batch.blur_at = batch.vertices.len() as u32;
