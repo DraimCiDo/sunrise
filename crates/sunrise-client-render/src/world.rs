@@ -89,6 +89,9 @@ pub struct World {
     pub border: crate::fast_hash::FxHashMap<(i32, i32), crate::light_border::Border>,
     /// Published section support of proto neighbours of saved columns.
     pub(crate) proto_light_support: crate::fast_hash::FxHashMap<(i32, i32), SectionMask>,
+    /// Saved columns between disk decode, INITIALIZE_LIGHT and FULL publication.
+    pub(crate) pending_saved_light:
+        crate::fast_hash::FxHashMap<(i32, i32), crate::light_border::PendingSavedLight>,
     pub random: LevelRandom,
     pub revision: u64,
     pub health_rules: HealthRules,
@@ -317,6 +320,7 @@ impl World {
             chunks: Default::default(),
             border: Default::default(),
             proto_light_support: Default::default(),
+            pending_saved_light: Default::default(),
             random: LevelRandom::for_level(LegacyRandom::new(seed)),
             revision: 0,
             health_rules: HealthRules::default(),

@@ -15,6 +15,11 @@ use crate::world::World;
 #[derive(Default)]
 pub struct Border(Vec<Layer>);
 
+pub(crate) struct PendingSavedLight {
+    pub chunk: Arc<Chunk>,
+    pub initialized: bool,
+}
+
 struct Layer {
     section: usize,
     sky: bool,
@@ -23,9 +28,9 @@ struct Layer {
     values: Light,
 }
 
-fn neighbours((x, z): (i32, i32)) -> impl Iterator<Item = (i32, i32)> {
-    (-1..=1).flat_map(move |dz| {
-        (-1..=1).filter_map(move |dx| ((dx, dz) != (0, 0)).then_some((x + dx, z + dz)))
+pub(crate) fn neighbours((x, z): (i32, i32)) -> impl Iterator<Item = (i32, i32)> {
+    (-1..=1).flat_map(move |dx| {
+        (-1..=1).filter_map(move |dz| ((dx, dz) != (0, 0)).then_some((x + dx, z + dz)))
     })
 }
 
@@ -51,6 +56,9 @@ impl World {
     /// `SkyLightSectionStorage.getLightValue`: an unstored section uses the bottom row of
     /// the nearest stored sky layer above it (15 if there isn't one). Block light does not inherit.
     pub(crate) fn border_light(&self, key: (i32, i32), x: i32, y: i32, z: i32) -> u8 {
+        if let Some(column) = self.pending_saved_light.get(&key).filter(|c| c.initialized) {
+            return column.chunk.light(x & 15, y, z & 15);
+        }
         let Some(border) = self.border.get(&key) else {
             return 0xF0;
         };
@@ -84,26 +92,41 @@ impl World {
     }
 
     pub(crate) fn install_light_column_initialized(&mut self, chunk: Chunk, status: SectionStatus) {
-        let key = (chunk.x, chunk.z);
-        let proto = self.proto_light_support.remove(&key).unwrap_or_default();
         let mut chunk = Arc::new(chunk);
         if chunk
             .light_layers
             .is_some_and(|light| light.saved_arrays.is_some())
         {
-            let earlier = self.border_support(key, None) | proto;
-            let support = chunk.light_support | earlier;
-            restore_saved_layers(
-                &mut chunk,
-                support,
-                Some(InitialSky {
-                    earlier,
-                    border: self.border.get(&key),
-                    occupied: status.occupied,
-                    fully_lit_from: status.fully_lit_from,
-                }),
-            );
+            self.initialize_saved_light(&mut chunk, status);
         }
+        self.publish_light_column(chunk);
+    }
+
+    pub(crate) fn initialize_saved_light(&self, chunk: &mut Arc<Chunk>, status: SectionStatus) {
+        let key = (chunk.x, chunk.z);
+        let earlier = self.border_support(key, None)
+            | self
+                .proto_light_support
+                .get(&key)
+                .copied()
+                .unwrap_or_default();
+        let support = chunk.light_support | earlier;
+        restore_saved_layers(
+            chunk,
+            support,
+            Some(InitialSky {
+                earlier,
+                border: self.border.get(&key),
+                occupied: status.occupied,
+                fully_lit_from: status.fully_lit_from,
+            }),
+        );
+    }
+
+    /// Promote INITIALIZE_LIGHT to FULL without creating the same layers again.
+    pub(crate) fn publish_light_column(&mut self, chunk: Arc<Chunk>) {
+        let key = (chunk.x, chunk.z);
+        let proto = self.proto_light_support.remove(&key).unwrap_or_default();
         let old = self.chunks.insert(key, chunk);
         self.publish_light_border(key, old.map_or(proto, |c| c.light_support));
     }
@@ -126,6 +149,14 @@ impl World {
             return;
         }
         for (x, z) in neighbours(key) {
+            if let Some(column) = self
+                .pending_saved_light
+                .get_mut(&(x, z))
+                .filter(|c| c.initialized)
+            {
+                restore_saved_layers(&mut column.chunk, added, None);
+                continue;
+            }
             let Some(chunk) = self.chunks.get_mut(&(x, z)) else {
                 continue;
             };
@@ -147,7 +178,11 @@ impl World {
             return;
         }
         for near in neighbours(key) {
-            let Some(chunk) = self.chunks.get(&near) else {
+            let pending = self
+                .pending_saved_light
+                .get(&near)
+                .filter(|c| c.initialized);
+            let Some(chunk) = pending.map(|c| &c.chunk).or_else(|| self.chunks.get(&near)) else {
                 continue;
             };
             let Some(StoredLight {
@@ -160,6 +195,14 @@ impl World {
             let removed =
                 lost & (sky | block) & !(chunk.light_support | self.border_support(near, None));
             if removed.is_empty() {
+                continue;
+            }
+            if let Some(column) = self
+                .pending_saved_light
+                .get_mut(&near)
+                .filter(|c| c.initialized)
+            {
+                remove_light_layers(Arc::make_mut(&mut column.chunk), removed);
                 continue;
             }
             let chunk = self.chunks.get_mut(&near).expect("resident saved column");
@@ -188,7 +231,13 @@ impl World {
         }
         self.publish_saved_neighbour_support(key, current & !before);
         self.expire_saved_neighbour_support(key, before & !current);
-        for near in neighbours(key).filter(|near| !self.chunks.contains_key(near)) {
+        for near in neighbours(key).filter(|near| {
+            !self.chunks.contains_key(near)
+                && !self
+                    .pending_saved_light
+                    .get(near)
+                    .is_some_and(|c| c.initialized)
+        }) {
             let other = self.border_support(near, Some(key));
             let added = current & !before;
             let supported = current | other;
@@ -208,11 +257,9 @@ impl World {
                 }
                 // `SkyLightSectionStorage.createDataLayer`: an unlit column starts dark, or
                 // copies the bottom row of an existing sky layer above the newly stored one.
-                let values = match border.0[i..]
-                    .iter()
-                    .find(|layer| layer.sky)
-                    .map(|layer| &layer.values)
-                {
+                let source = border.0[i..].iter().find(|layer| layer.sky);
+                let sky_array = source.is_some_and(|layer| layer.arrays[0]);
+                let values = match source.map(|layer| &layer.values) {
                     None => Light::Uniform(0),
                     Some(Light::Uniform(value)) => Light::Uniform(value & 0xF0),
                     Some(Light::Block(_, sky)) => Light::Uniform(sky << 4),
@@ -230,7 +277,7 @@ impl World {
                         section,
                         sky,
                         block: true,
-                        arrays: [false; 2],
+                        arrays: [sky_array, false],
                         values,
                     },
                 );
@@ -385,7 +432,11 @@ fn restore_saved_layers(
             .as_ref()
             .map_or_else(|| sky.from(b + 1).iter().next(), |sources| sources[b]);
         let source = source_section.and_then(|s| {
-            if sky.contains(s) {
+            // A queued array replaces an existing layer on reconciliation, not
+            // while createDataLayer is copying the still-active layer above.
+            if let Some(layer) = border.iter().find(|l| l.section == s && l.sky) {
+                Some((s, &layer.values, layer.arrays[0]))
+            } else if sky.contains(s) {
                 Some((
                     s,
                     &chunk
@@ -395,10 +446,7 @@ fn restore_saved_layers(
                     arrays[0].contains(s),
                 ))
             } else {
-                border
-                    .iter()
-                    .find(|l| l.section == s && l.sky)
-                    .map(|l| (s, &l.values, l.arrays[0]))
+                None
             }
         });
         let mut layer = Cow::Borrowed(if initializing.is_none() { OPEN } else { DARK });
@@ -444,8 +492,9 @@ mod tests {
 
     #[test]
     fn saved_padding_uses_initialization_and_already_stored_sky() {
-        // Same fixture as the saved-padding Java oracle: a proto has opened the
-        // target's lowest build section, but not its lower light pad.
+        // The packed source is copied when it is already active. A proto that
+        // opened the lowest build section before the save arrived instead leaves
+        // an active homogeneous source until the queued array is reconciled.
         use crate::{
             chunk::MIN_Y,
             light::{light_from_saved_layers, tests::tables},
@@ -469,6 +518,13 @@ mod tests {
         without_proto.install_light_column_initialized(chunk.clone(), status);
         assert_eq!(without_proto.light(0, MIN_Y - 1, 0), 0x70);
         assert_eq!(
+            without_proto.chunks[&(0, 0)]
+                .stored_light()
+                .unwrap()
+                .saved_arrays(0),
+            Some([true, false])
+        );
+        assert_eq!(
             without_proto.chunks[&(0, 0)].stored_light_layers(3),
             Some([false; 2])
         );
@@ -489,11 +545,50 @@ mod tests {
         world.install_light_column_initialized(chunk, status);
         let stored = world.chunks[&(0, 0)].stored_light().unwrap();
         assert_eq!(stored.presence(3), [true; 2]);
-        assert_eq!(stored.saved_arrays(0), Some([true, false]));
+        assert_eq!(stored.saved_arrays(0), Some([false, false]));
         assert_eq!(stored.saved_arrays(1), Some([true, true]));
         assert_eq!(world.light(0, top + 16, 0), 0xF0);
-        assert_eq!(world.light(0, MIN_Y - 1, 0), 0x70);
-        assert_eq!(world.light(1, MIN_Y - 16, 1), 0xA0);
+        assert_eq!(world.light(0, MIN_Y - 1, 0), 0);
+        assert_eq!(world.light(1, MIN_Y - 16, 1), 0);
+        assert_eq!(
+            world.light(1, MIN_Y, 1),
+            0xA0,
+            "the queued array still replaces its own layer"
+        );
+    }
+
+    #[test]
+    fn saved_pad_copies_the_active_source_representation() {
+        use crate::{
+            chunk::MIN_Y,
+            light::{light_from_saved_layers, tests::tables},
+        };
+        let tables = tables();
+        for packed_source in [false, true] {
+            let mut world = World::new(BlockStateId(0), 0);
+            world.set_proto_light_support((1, 0), SectionMask::from_iter([1, 2, 3]));
+            let mut array = vec![0; 2048];
+            array[128] = 15; // packed layer, but its first row is homogeneous dark
+            let layers = [(None, None), (Some(array), None)];
+            if packed_source {
+                let mut prior = Chunk::empty(0, 0);
+                prior.set(0, MIN_Y + 16, 0, 1);
+                light_from_saved_layers(&mut prior, &layers, true);
+                let status = tables.publish_section_status(&mut prior, world.shape);
+                world.install_light_column_initialized(prior, status);
+                world.unload_chunk((0, 0)).unwrap();
+            }
+            let mut saved = Chunk::empty(0, 0);
+            saved.set(0, MIN_Y, 0, 1);
+            light_from_saved_layers(&mut saved, &layers, true);
+            let status = tables.publish_section_status(&mut saved, world.shape);
+            world.install_light_column_initialized(saved, status);
+            let stored = world.chunks[&(0, 0)].stored_light().unwrap();
+            assert_eq!(stored.presence(0), [true, true]);
+            assert_eq!(stored.saved_arrays(0), Some([packed_source, false]));
+            assert_eq!(world.light(0, MIN_Y - 1, 0), 0);
+            assert_eq!(world.light(0, MIN_Y + 1, 0), 0xF0);
+        }
     }
 
     #[test]

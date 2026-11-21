@@ -10,6 +10,7 @@ use crate::{
     chunk_map::ChunkMembershipDelta,
     graphics::LeafCullingMode,
     light::{LightChanges, LightTables, light_chunk},
+    light_border::{PendingSavedLight, neighbours},
     mesher::{MeshScratch, MeshTables, Region, SectionMesh, borrow},
     world::World,
 };
@@ -768,6 +769,7 @@ struct GenerationInputs<'a> {
     ranges: Ranges<'a>,
     world: &'a World,
     generating: &'a FxHashSet<(i32, i32)>,
+    staged: usize,
     protos: &'a FxHashMap<(i32, i32), Option<Proto>>,
     finishing: &'a FxHashSet<(i32, i32)>,
     decorates: bool,
@@ -783,10 +785,9 @@ impl GenerationScan {
     ) -> Option<Vec<(i64, i32, i32)>> {
         // Generation (load or proto), closest first, bounded in flight.
         let (margin, reach) = Ranges::margins(input.decorates);
-        if input.remote
-            || input.generating.len() >= capacity
-            || self.unchanged(&input.ranges, input.world)
-        {
+        // Decoded columns keep their request membership, but not a disk worker slot.
+        let active = input.generating.len().saturating_sub(input.staged);
+        if input.remote || active >= capacity || self.unchanged(&input.ranges, input.world) {
             return None;
         }
         let missing = |&(_, x, z): &(i64, i32, i32)| {
@@ -799,7 +800,7 @@ impl GenerationScan {
             while self.next < self.plan.len() && !missing(&self.plan[self.next]) {
                 self.next += 1;
             }
-            let room = capacity - input.generating.len();
+            let room = capacity - active;
             let batch: Vec<_> = self.plan[self.next..]
                 .iter()
                 .filter(|c| missing(c))
@@ -896,7 +897,7 @@ impl GenerationScan {
             self.plan.clear();
             self.plan.extend_from_slice(&wanted);
             self.next = 0;
-            wanted.truncate(capacity - input.generating.len());
+            wanted.truncate(capacity - active);
             Some(wanted)
         }
     }
@@ -1504,7 +1505,171 @@ impl Streaming {
         }
         self.saving == 0
     }
-    fn receive_generated(&mut self, mut chunk: Chunk, world: &mut World) -> Option<Chunk> {
+    fn receive_generated(&mut self, chunk: Chunk, world: &mut World) -> Option<Chunk> {
+        let key = (chunk.x, chunk.z);
+        if chunk.light_loaded
+            && chunk
+                .light_layers
+                .is_some_and(|light| light.saved_arrays.is_some())
+        {
+            if self.shared.aborted.load(Ordering::Relaxed) {
+                return None;
+            }
+            if self.ranges().chunk_kept(key.0, key.1, self.decorates) {
+                world.pending_saved_light.insert(
+                    key,
+                    PendingSavedLight {
+                        chunk: Arc::new(chunk),
+                        initialized: false,
+                    },
+                );
+                return None;
+            }
+        }
+        self.publish_generated(chunk, world, false)
+    }
+
+    fn rank_light_and_decoration(&mut self, world: &World) {
+        if self.order_area != Some((self.center, self.radius)) {
+            let (decorated, chunks) = (&self.decorated, &world.chunks);
+            // The render distance is the server view distance in singleplayer.
+            self.decoration_order
+                .reassign(self.center, self.radius, |x, z| {
+                    decorated.contains(&(x, z)) || chunks.contains_key(&(x, z))
+                });
+            self.order_area = Some((self.center, self.radius));
+            let ranges = Ranges {
+                center: self.center,
+                radius: self.radius,
+                extra: &self.extra,
+                forced: &self.forced,
+                cover: ExtraCover::current(&self.cover, &self.extra, self.cover_current),
+                forced_cover: self.forced_cover.as_ref().filter(|_| self.cover_current),
+                band: self.band.as_ref(),
+            };
+            let (protos, generating) = (&self.protos, &self.generating);
+            self.decoration_order.retain(|x, z| {
+                ranges.in_range(x, z, 4)
+                    || ranges.near_finished(x, z, 2)
+                    || protos.contains_key(&(x, z))
+                    || generating.contains(&(x, z))
+            });
+        }
+    }
+
+    fn waiting_for_light_status(&self, world: &World, key: (i32, i32)) -> bool {
+        if let Some(column) = world.pending_saved_light.get(&key) {
+            return !column.initialized;
+        }
+        // A proto's status is published separately; checkout does not withdraw it.
+        !world.chunks.contains_key(&key)
+            && !self.protos.contains_key(&key)
+            && !self.finishing.contains(&key)
+            && (self.generating.contains(&key)
+                || self.ranges().requested(key.0, key.1, self.decorates))
+    }
+
+    fn publish_ready_saved_light(&mut self, world: &mut World) {
+        if world.pending_saved_light.is_empty() {
+            return;
+        }
+        let mut keys: Vec<_> = world.pending_saved_light.keys().copied().collect();
+        // Extra areas can hold saved chunks past the player ticket ranks.
+        keys.sort_unstable_by_key(|&(x, z)| (self.distance(x, z), x, z));
+        for &(x, z) in &keys {
+            if self.decoration_order.rank(x, z).is_none() {
+                self.rank_full_task(x, z);
+            }
+        }
+        keys.sort_unstable_by_key(|&(x, z)| self.decoration_order.rank(x, z));
+
+        let aborted = self.shared.aborted.load(Ordering::Relaxed);
+        keys.retain(|&key| {
+            if aborted || !self.ranges().chunk_kept(key.0, key.1, self.decorates) {
+                let column = world
+                    .pending_saved_light
+                    .remove(&key)
+                    .expect("staged saved column");
+                world.set_proto_light_support(key, SectionMask::EMPTY);
+                if column.initialized {
+                    world.retain_border(key, &column.chunk);
+                }
+                self.generating.remove(&key);
+                self.generation_scan.invalidate();
+                return false;
+            }
+            true
+        });
+        Self::initialize_saved_light_columns(
+            world,
+            &keys,
+            &self.light_tables,
+            &self.decoration_order,
+            |world, key| self.waiting_for_light_status(world, key),
+        );
+
+        // ChunkPyramid.LIGHT waits for its neighbours' INITIALIZE_LIGHT, not
+        // their FULL futures. A staged column can support another without
+        // being visible as terrain (or in a first chunk packet) yet.
+        for key in keys {
+            if world
+                .pending_saved_light
+                .get(&key)
+                .is_some_and(|column| column.initialized)
+                && !neighbours(key).any(|near| self.waiting_for_light_status(world, near))
+            {
+                let column = world
+                    .pending_saved_light
+                    .remove(&key)
+                    .expect("initialized saved column");
+                let chunk = Arc::unwrap_or_clone(column.chunk);
+                let late = self.publish_generated(chunk, world, true);
+                debug_assert!(late.is_none(), "staged column was kept this pass");
+            }
+        }
+    }
+
+    fn initialize_saved_light_columns(
+        world: &mut World,
+        keys: &[(i32, i32)],
+        tables: &LightTables,
+        order: &DecorationOrder,
+        waiting: impl Fn(&World, (i32, i32)) -> bool,
+    ) {
+        // ChunkGenerationTask schedules INITIALIZE_LIGHT in each task's square
+        // (x outer, z inner). Decode workers may finish in another order, but
+        // a later neighbour must not initialize light before an earlier one.
+        for &key in keys {
+            if world.pending_saved_light[&key].initialized {
+                continue;
+            }
+            let rank = order.rank(key.0, key.1).expect("ranked saved column");
+            if neighbours(key).any(|near| {
+                order.rank(near.0, near.1).is_some_and(|r| r < rank) && waiting(world, near)
+            }) {
+                continue;
+            }
+            let mut column = world
+                .pending_saved_light
+                .remove(&key)
+                .expect("staged saved column");
+            let status =
+                tables.publish_section_status(Arc::make_mut(&mut column.chunk), world.shape);
+            world.initialize_saved_light(&mut column.chunk, status);
+            let support = column.chunk.light_support;
+            column.initialized = true;
+            world.border.remove(&key);
+            world.pending_saved_light.insert(key, column);
+            world.set_proto_light_support(key, support);
+        }
+    }
+
+    fn publish_generated(
+        &mut self,
+        mut chunk: Chunk,
+        world: &mut World,
+        initialized: bool,
+    ) -> Option<Chunk> {
         self.generation_scan.exhausted = false;
         let key = (chunk.x, chunk.z);
         self.generating.remove(&key);
@@ -1545,24 +1710,25 @@ impl Streaming {
         let new = self.dropped_new.remove(&key) || chunk.generated;
         world.loaded_chunks.push((key.0, key.1, new));
         chunk.dynamic_pending = self.light_tables.holds_dynamic(&chunk);
-        let status = self
-            .light_tables
-            .publish_section_status(&mut chunk, world.shape);
         if loaded {
-            for dz in -1..=1 {
-                for dx in -1..=1 {
-                    let neighbour = (key.0 + dx, key.1 + dz);
-                    if neighbour != key && !world.chunks.contains_key(&neighbour) {
-                        Self::publish_proto_light_support(
-                            world,
-                            neighbour,
-                            self.proto_sections(neighbour.0, neighbour.1),
-                        );
-                    }
+            for neighbour in neighbours(key) {
+                if !world.chunks.contains_key(&neighbour) {
+                    Self::publish_proto_light_support(
+                        world,
+                        neighbour,
+                        self.proto_sections(neighbour.0, neighbour.1),
+                    );
                 }
             }
         }
-        world.install_light_column_initialized(chunk, status);
+        if initialized {
+            world.publish_light_column(Arc::new(chunk));
+        } else {
+            let status = self
+                .light_tables
+                .publish_section_status(&mut chunk, world.shape);
+            world.install_light_column_initialized(chunk, status);
+        }
         if loaded {
             self.lit.insert(key);
             for sy in 0..world.layout().sections() as i32 {
@@ -1932,6 +2098,10 @@ impl Streaming {
                 }
             }
         }
+        if !world.pending_saved_light.is_empty() {
+            self.rank_light_and_decoration(world);
+            self.publish_ready_saved_light(world);
+        }
         hz_laps.lap("st_results");
         self.free(resume.stale);
         let far = if resume.sweep {
@@ -2111,30 +2281,8 @@ impl Streaming {
         // vanilla's order: decoration is order dependent where write regions
         // overlap (see `DecorationOrder`).
         let workers = self.workers;
-        if self.decorates && self.order_area != Some((self.center, self.radius)) {
-            let (decorated, chunks) = (&self.decorated, &world.chunks);
-            // The render distance is the server view distance in singleplayer.
-            self.decoration_order
-                .reassign(self.center, self.radius, |x, z| {
-                    decorated.contains(&(x, z)) || chunks.contains_key(&(x, z))
-                });
-            self.order_area = Some((self.center, self.radius));
-            let ranges = Ranges {
-                center: self.center,
-                radius: self.radius,
-                extra: &self.extra,
-                forced: &self.forced,
-                cover: ExtraCover::current(&self.cover, &self.extra, self.cover_current),
-                forced_cover: self.forced_cover.as_ref().filter(|_| self.cover_current),
-                band: self.band.as_ref(),
-            };
-            let (protos, generating) = (&self.protos, &self.generating);
-            self.decoration_order.retain(|x, z| {
-                ranges.in_range(x, z, 4)
-                    || ranges.near_finished(x, z, 2)
-                    || protos.contains_key(&(x, z))
-                    || generating.contains(&(x, z))
-            });
+        if self.decorates {
+            self.rank_light_and_decoration(world);
         }
         if self.decorates && self.decorating < workers * 2 {
             let wants = |s: &Self, x: i32, z: i32| {
@@ -2442,6 +2590,7 @@ impl Streaming {
             },
             world,
             generating: &self.generating,
+            staged: world.pending_saved_light.len(),
             protos: &self.protos,
             finishing: &self.finishing,
             decorates: self.decorates,
@@ -3749,6 +3898,72 @@ mod tests {
     }
 
     #[test]
+    fn saved_light_initializes_in_task_order_after_reversed_worker_completions() {
+        use crate::{
+            chunk::MIN_Y,
+            light::{light_from_saved_layers, tests::tables},
+        };
+        use sunrise_world::registry::BlockStateId;
+
+        let first = (-1, 0);
+        let second = (0, 0);
+        let mut order = DecorationOrder::default();
+        order.rank_or_append(first.0, first.1);
+        order.rank_or_append(second.0, second.1);
+        let tables = tables();
+        let waiting = |world: &World, key| {
+            [first, second].contains(&key)
+                && !world
+                    .pending_saved_light
+                    .get(&key)
+                    .is_some_and(|c| c.initialized)
+        };
+        for arrivals in [[first, second], [second, first]] {
+            let mut world = World::new(BlockStateId(0), 0);
+            for (i, key) in arrivals.into_iter().enumerate() {
+                let mut chunk = Chunk::empty(key.0, key.1);
+                chunk.set(0, MIN_Y, 0, 1);
+                let mut sky = vec![0xFF; 2048];
+                sky[..128].fill(0);
+                light_from_saved_layers(&mut chunk, &[(None, None), (Some(sky), None)], true);
+                world.pending_saved_light.insert(
+                    key,
+                    PendingSavedLight {
+                        chunk: Arc::new(chunk),
+                        initialized: false,
+                    },
+                );
+                let ready: Vec<_> = order
+                    .ordered()
+                    .into_iter()
+                    .filter(|key| world.pending_saved_light.contains_key(key))
+                    .collect();
+                Streaming::initialize_saved_light_columns(
+                    &mut world, &ready, &tables, &order, waiting,
+                );
+                if i == 0 {
+                    assert_eq!(world.pending_saved_light[&key].initialized, key == first);
+                    assert!(
+                        world.chunks.is_empty(),
+                        "not FULL before the light halo completes"
+                    );
+                }
+            }
+            let stored = |key| {
+                world.pending_saved_light[&key]
+                    .chunk
+                    .stored_light()
+                    .unwrap()
+            };
+            assert_eq!(stored(first).saved_arrays(0), Some([true, false]));
+            assert_eq!(stored(second).presence(0), [true, true]);
+            assert_eq!(stored(second).saved_arrays(0), Some([false, false]));
+            assert_eq!(world.light(first.0 * 16, MIN_Y - 1, 0), 0);
+            assert_eq!(world.light(second.0 * 16, MIN_Y - 1, 0), 0);
+        }
+    }
+
+    #[test]
     fn taking_remote_columns_keeps_their_data_until_cleanup() {
         let mut world = World::new(sunrise_world::registry::BlockStateId(0), 0);
         world.chunks.insert((0, 0), Arc::new(Chunk::empty(0, 0)));
@@ -4429,6 +4644,7 @@ mod tests {
                 },
                 world: &self.world,
                 generating: &self.generating,
+                staged: 0,
                 protos: &self.protos,
                 finishing: &self.finishing,
                 decorates: self.decorates,

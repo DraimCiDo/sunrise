@@ -67,6 +67,7 @@ public final class VanillaLightStorageOracle {
         var obstructed = fixtureChunk(true);
         verifySavedPadding(obstructed, false);
         verifySavedPadding(obstructed, true);
+        verifyPadCopiesActiveRepresentation(obstructed);
         verifyVoidPadding(fixtureChunk(false));
     }
 
@@ -129,6 +130,33 @@ public final class VanillaLightStorageOracle {
         if (!Arrays.equals(initial.skyUpdates().getLast(), new DataLayer(15).getData())
             || !Arrays.equals(initial.blockUpdates().getFirst(), new byte[2048])) {
             throw new AssertionError("saved upper pad must carry full sky; saved zero array must carry bytes");
+        }
+    }
+
+    private static void verifyPadCopiesActiveRepresentation(LightChunk chunk) {
+        var center = new ChunkPos(0, 0);
+        var lowest = SectionPos.of(center, MIN_SECTION);
+        var pad = SectionPos.of(center, MIN_SECTION - 1);
+        for (boolean publishBeforePad : new boolean[] {false, true}) {
+            var engine = engine(true, chunk);
+            // Open the future source as homogeneous, but leave the pad unsupported.
+            engine.updateSectionStatus(SectionPos.of(1, MIN_SECTION + 1, 0), false);
+            engine.runLightUpdates();
+            var sky = new DataLayer();
+            sky.set(0, 1, 0, 15);
+            engine.queueSectionData(LightLayer.SKY, lowest, sky);
+            if (publishBeforePad) engine.runLightUpdates();
+            engine.updateSectionStatus(lowest, false);
+            engine.runLightUpdates();
+            var listener = engine.getLayerListener(LightLayer.SKY);
+            var lower = listener.getDataLayerData(pad);
+            if (lower == null || lower.isEmpty() == publishBeforePad
+                || !Arrays.equals(lower.copy().getData(), new byte[2048])) {
+                throw new AssertionError("the same dark pad must copy its source's active representation");
+            }
+            if (listener.getDataLayerData(lowest).get(0, 1, 0) != 15) {
+                throw new AssertionError("the queued array must still replace its own layer");
+            }
         }
     }
 
