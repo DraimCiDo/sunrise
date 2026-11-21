@@ -1177,6 +1177,15 @@ fn hydrate_light<L: AsRef<[u8]>>(
             section.compact();
         }
     }
+    if from_save
+        && sky_light
+        && crate::light_border::trace_sky_pad((chunk.x, chunk.z), chunk.min_y() >> 4)
+    {
+        eprintln!(
+            "sky-pad: queued ({}, {}) sky array indices (0=pad): {:?}",
+            chunk.x, chunk.z, stored[0]
+        );
+    }
     chunk.light_layers = Some(StoredLight {
         masks: stored,
         saved_arrays: from_save.then_some(stored),

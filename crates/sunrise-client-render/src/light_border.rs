@@ -23,6 +23,24 @@ struct Layer {
     values: Light,
 }
 
+pub(crate) fn trace_sky_pad((x, z): (i32, i32), min_section: i32) -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    min_section == -4
+        && (-1..=1).contains(&x)
+        && (0..=4).contains(&z)
+        && *ENABLED.get_or_init(|| std::env::var_os("SUNRISE_TRACE_SKYLIGHT_PAD").is_some())
+}
+
+fn trace_sky_repr(layer: &Layer) -> &'static str {
+    if layer.arrays[0] {
+        "array"
+    } else if layer.values.any(0xF0) {
+        "nonempty"
+    } else {
+        "homogeneous-empty"
+    }
+}
+
 fn neighbours((x, z): (i32, i32)) -> impl Iterator<Item = (i32, i32)> {
     (-1..=1).flat_map(move |dz| {
         (-1..=1).filter_map(move |dx| ((dx, dz) != (0, 0)).then_some((x + dx, z + dz)))
@@ -86,6 +104,21 @@ impl World {
     pub(crate) fn install_light_column_initialized(&mut self, chunk: Chunk, status: SectionStatus) {
         let key = (chunk.x, chunk.z);
         let proto = self.proto_light_support.remove(&key).unwrap_or_default();
+        if self.shape.sky_light && trace_sky_pad(key, self.shape.min_section()) {
+            let earlier: Vec<_> = neighbours(key)
+                .filter_map(|near| {
+                    let support = self.chunks.get(&near).map_or_else(
+                        || self.proto_light_support.get(&near).copied(),
+                        |chunk| Some(chunk.light_support),
+                    )?;
+                    Some((near, support))
+                })
+                .collect();
+            eprintln!(
+                "sky-pad: full status {key:?} occupied={:?} support={:?} earlier-own-proto={proto:?} earlier-neighbours={earlier:?}",
+                status.occupied, chunk.light_support
+            );
+        }
         let mut chunk = Arc::new(chunk);
         if chunk
             .light_layers
@@ -186,6 +219,15 @@ impl World {
         if current == before {
             return;
         }
+        let min_section = self.shape.min_section();
+        if self.shape.sky_light && trace_sky_pad(key, min_section) {
+            let kind = if self.chunks.contains_key(&key) {
+                "full"
+            } else {
+                "proto"
+            };
+            eprintln!("sky-pad: publish {kind} status {key:?} support {before:?} -> {current:?}");
+        }
         self.publish_saved_neighbour_support(key, current & !before);
         self.expire_saved_neighbour_support(key, before & !current);
         for near in neighbours(key).filter(|near| !self.chunks.contains_key(near)) {
@@ -208,11 +250,14 @@ impl World {
                 }
                 // `SkyLightSectionStorage.createDataLayer`: an unlit column starts dark, or
                 // copies the bottom row of an existing sky layer above the newly stored one.
-                let values = match border.0[i..]
-                    .iter()
-                    .find(|layer| layer.sky)
-                    .map(|layer| &layer.values)
-                {
+                let source = border.0[i..].iter().find(|layer| layer.sky);
+                if section == 0 && sky && trace_sky_pad(near, min_section) {
+                    let source = source.map(|layer| (layer.section, trace_sky_repr(layer)));
+                    eprintln!(
+                        "sky-pad: create border pad {near:?} from status {key:?} source(index,representation)={source:?}"
+                    );
+                }
+                let values = match source.map(|layer| &layer.values) {
                     None => Light::Uniform(0),
                     Some(Light::Uniform(value)) => Light::Uniform(value & 0xF0),
                     Some(Light::Block(_, sky)) => Light::Uniform(sky << 4),
@@ -422,6 +467,27 @@ fn restore_saved_layers(
             && layer.as_ref() == DARK
         {
             layer = Cow::Borrowed(OPEN);
+        }
+        if b == 0 && trace_sky_pad((chunk.x, chunk.z), chunk.min_y() >> 4) {
+            let selected = source_section.map(|s| {
+                let queued = sky.contains(s);
+                let active_border = border.iter().find(|l| l.section == s && l.sky);
+                (s, queued, active_border.map(trace_sky_repr))
+            });
+            let representation = if arrays[0].contains(b) {
+                "array"
+            } else if layer.as_ref() == DARK {
+                "homogeneous-empty"
+            } else {
+                "nonempty"
+            };
+            eprintln!(
+                "sky-pad: restore ({}, {}) initial={} earlier={:?} chosen(index,column-sky-present,border-representation)={selected:?} result={representation}",
+                chunk.x,
+                chunk.z,
+                initializing.is_some(),
+                initializing.map(|i| i.earlier)
+            );
         }
         layers[b].0 = Some(layer);
     }
