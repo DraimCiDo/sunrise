@@ -859,9 +859,7 @@ pub fn write_mob(
         }
         map.insert("attributes".into(), Tag::List(list));
     }
-    if let Some(Tag::List(list)) = map.fields.get_mut(&"attributes".into()) {
-        m.extra.live.save_into(list);
-    }
+    put_live_attributes(&mut map.fields, &m.extra.live);
     // LivingEntity.addAdditionalSaveData: `active_effects` only when there are
     // any (MobEffectInstance.CODEC), including their modeled weaker instances.
     if m.extra.effects.is_empty() {
