@@ -1,4 +1,5 @@
 use super::*;
+use sunrise_server_launch::config::ModRequest;
 
 const BUILD: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const HASH: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
@@ -17,9 +18,13 @@ fn checks_locked_bytes_even_for_a_disabled_mod() {
     assert!(check_files(&lock, &root, &lock.input).is_err());
     let path = root.join("rails.smod");
     fs::write(&path, b"abc").unwrap();
-    assert!(check_files(&lock, &root, &lock.input).is_ok());
-    let mut input = lock.input.clone();
-    input.list.push("windows".into());
+    let config =
+        Config::parse("[mods]\npack = 'pack@1'\nlist = ['ladders@^2']\noff = ['rails']").unwrap();
+    let mut input = config.mods.unwrap();
+    assert!(check_files(&lock, &root, &input).is_ok());
+    input
+        .list
+        .push(ModRequest::try_from("windows".to_owned()).unwrap());
     assert!(check_files(&lock, &root, &input).is_err());
     fs::write(path, b"bad").unwrap();
     assert!(check_files(&lock, &root, &lock.input).is_err());

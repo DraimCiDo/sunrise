@@ -183,7 +183,7 @@ pub struct Config {
 }
 
 mod mods;
-pub use mods::Mods;
+pub use mods::{ModId, ModRequest, Mods, Pack, Spelled};
 
 const EVENTS: [&str; 6] = ["chat", "join", "leave", "death", "kick", "announce"];
 
@@ -708,9 +708,6 @@ impl Config {
         self.transfer.check()?;
         self.discord.check()?;
         self.prune_chunks.check()?;
-        if let Some(mods) = &self.mods {
-            mods.check()?;
-        }
         if self.server.port == 0 {
             return Err("server.port must be a port number from 1 to 65535".into());
         }

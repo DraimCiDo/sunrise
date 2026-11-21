@@ -1,88 +1,246 @@
-//! The managed mod input copied verbatim in `mods.lock`.
+//! The managed mod input copied in `mods.lock`.
+use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
+use std::{fmt, path::PathBuf};
+use sunrise_mod_package::manifest::{parse_version, valid_mod_id};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Mods {
-    pub pack: Option<String>,
-    pub list: Vec<String>,
-    pub off: Vec<String>,
+    pub pack: Option<Pack>,
+    pub list: Vec<ModRequest>,
+    #[serde(deserialize_with = "off_ids")]
+    pub off: Vec<ModId>,
     pub trust_native_code: bool,
 }
 
-impl Mods {
-    /// Check mod input read from `server.toml` or from a lock's copy of it.
-    pub fn check(&self) -> Result<(), String> {
-        use sunrise_mod_package::manifest::{parse_version, valid_mod_id};
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct ModId(String);
 
-        if let Some(pack) = &self.pack
-            && !(pack.ends_with(".spack") && !pack.contains(['\0', '\n', '\r'])
-                || pack.split_once('@').is_some_and(|(id, version)| {
-                    valid_mod_id(id) && parse_version(version).is_ok()
-                }))
+impl TryFrom<String> for ModId {
+    type Error = String;
+
+    fn try_from(id: String) -> Result<Self, String> {
+        if valid_mod_id(&id) {
+            Ok(Self(id))
+        } else {
+            Err(format!("{id:?}: not a mod ID"))
+        }
+    }
+}
+
+impl From<ModId> for String {
+    fn from(id: ModId) -> Self {
+        id.0
+    }
+}
+
+impl ModId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ModId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+fn off_ids<'de, D: serde::Deserializer<'de>>(de: D) -> Result<Vec<ModId>, D::Error> {
+    Vec::<String>::deserialize(de)?
+        .into_iter()
+        .map(|id| {
+            ModId::try_from(id).map_err(|e| serde::de::Error::custom(format!("mods.off {e}")))
+        })
+        .collect()
+}
+
+/// Keep the author's spelling for round trips; only the parsed value contributes to lock equality.
+#[derive(Clone, Debug)]
+pub struct Spelled<T> {
+    value: T,
+    text: String,
+}
+
+impl<T> Spelled<T> {
+    pub fn value(&self) -> &T {
+        &self.value
+    }
+}
+
+impl<T: PartialEq> PartialEq for Spelled<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl<T: Eq> Eq for Spelled<T> {}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub enum Pack {
+    Registry {
+        id: ModId,
+        version: Spelled<Version>,
+    },
+    File(PathBuf),
+}
+
+impl TryFrom<String> for Pack {
+    type Error = String;
+
+    fn try_from(pack: String) -> Result<Self, String> {
+        if pack.ends_with(".spack") && !pack.contains(['\0', '\n', '\r']) {
+            return Ok(Self::File(pack.into()));
+        }
+        if let Some((id, text)) = pack.split_once('@')
+            && let Ok(id) = ModId::try_from(id.to_owned())
+            && let Ok(value) = parse_version(text)
         {
-            return Err(format!(
-                "mods.pack {pack:?}: use id@version or a .spack path"
-            ));
+            return Ok(Self::Registry {
+                id,
+                version: Spelled {
+                    value,
+                    text: text.to_owned(),
+                },
+            });
         }
-        for row in &self.list {
-            let (id, range) = row
-                .split_once('@')
-                .map_or((row.as_str(), None), |(id, range)| (id, Some(range)));
-            if !valid_mod_id(id)
-                || range.is_some_and(|range| semver::VersionReq::parse(range).is_err())
-            {
-                return Err(format!("mods.list {row:?}: use id or id@semver-range"));
-            }
+        Err(format!(
+            "mods.pack {pack:?}: use id@version or a .spack path"
+        ))
+    }
+}
+
+impl From<Pack> for String {
+    fn from(pack: Pack) -> Self {
+        match pack {
+            Pack::Registry { id, version } => format!("{id}@{}", version.text),
+            Pack::File(path) => path.to_string_lossy().into_owned(),
         }
-        if let Some(id) = self.off.iter().find(|id| !valid_mod_id(id)) {
-            return Err(format!("mods.off {id:?}: not a mod ID"));
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct ModRequest {
+    pub id: ModId,
+    range: Option<Spelled<VersionReq>>,
+}
+
+impl ModRequest {
+    pub fn range(&self) -> Option<&VersionReq> {
+        self.range.as_ref().map(Spelled::value)
+    }
+}
+
+impl TryFrom<String> for ModRequest {
+    type Error = String;
+
+    fn try_from(request: String) -> Result<Self, String> {
+        let error = || format!("mods.list {request:?}: use id or id@semver-range");
+        let (id, range) = request
+            .split_once('@')
+            .map_or((request.as_str(), None), |(id, text)| (id, Some(text)));
+        let id = ModId::try_from(id.to_owned()).map_err(|_| error())?;
+        let range = range
+            .map(|text| {
+                VersionReq::parse(text)
+                    .map(|value| Spelled {
+                        value,
+                        text: text.to_owned(),
+                    })
+                    .map_err(|_| error())
+            })
+            .transpose()?;
+        Ok(Self { id, range })
+    }
+}
+
+impl From<ModRequest> for String {
+    fn from(request: ModRequest) -> Self {
+        match request.range {
+            Some(range) => format!("{}@{}", request.id, range.text),
+            None => request.id.into(),
         }
-        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::config::Config;
 
     #[test]
     fn pack_can_have_extras_and_disabled_members() {
-        let config = Config::parse(
-            r#"
+        let source = r#"
 [mods]
-pack = "cozy@1.0.0"
-list = ["rails@^2", "windows"]
+pack = "cozy@1.0"
+list = ["rails@^2, <3", "windows"]
 off = ["pack_member"]
 trust_native_code = true
-"#,
-        )
-        .unwrap();
-        let mods = config.mods.unwrap();
-        assert_eq!(mods.pack.as_deref(), Some("cozy@1.0.0"));
-        assert_eq!(mods.list, ["rails@^2", "windows"]);
-        assert_eq!(mods.off, ["pack_member"]);
+"#;
+        let mods = Config::parse(source).unwrap().mods.unwrap();
+        let Some(Pack::Registry { id, version }) = &mods.pack else {
+            panic!("expected a registry pack");
+        };
+        assert_eq!(id.as_str(), "cozy");
+        assert_eq!(version.value(), &Version::new(1, 0, 0));
+        assert_eq!(mods.list[0].id.as_str(), "rails");
+        assert_eq!(
+            mods.list[0].range(),
+            Some(&VersionReq::parse("^2,<3").unwrap())
+        );
+        assert_eq!(mods.list[1].id.as_str(), "windows");
+        assert_eq!(mods.list[1].range(), None);
+        assert_eq!(mods.off[0].as_str(), "pack_member");
         assert!(mods.trust_native_code);
-        assert!(Config::parse("[mods]\npack = './local.sp aces.spack'").is_ok());
+
+        let saved = toml::to_string(&mods)
+            .unwrap()
+            .parse::<toml::Table>()
+            .unwrap();
+        let original = source.parse::<toml::Table>().unwrap();
+        assert_eq!(&saved, original["mods"].as_table().unwrap());
+        let restyled = source
+            .replace("cozy@1.0", "cozy@1.0.0")
+            .replace("^2, <3", "^2,<3");
+        assert_eq!(Config::parse(&restyled).unwrap().mods, Some(mods));
+
+        let local = Config::parse("[mods]\npack = './local.sp aces.spack'").unwrap();
+        assert!(
+            matches!(local.mods.unwrap().pack, Some(Pack::File(path)) if path == std::path::Path::new("./local.sp aces.spack"))
+        );
         assert!(Config::parse("[mods]").unwrap().mods.is_some());
         assert!(Config::parse("").unwrap().mods.is_none());
     }
 
     #[test]
     fn rejects_invalid_mod_settings() {
-        for field in [
-            "unknown = true",
-            "pack = 'cozy@bad'",
-            "list = ['bad/id']",
-            "list = ['rails@']",
-            "list = ['rails@not-a-range']",
-            "off = ['rails@2']",
-            "trust_native_code = 'true'",
+        for (field, message) in [
+            ("unknown = true", "unknown field"),
+            (
+                "pack = 'cozy@bad'",
+                "mods.pack \"cozy@bad\": use id@version or a .spack path",
+            ),
+            (
+                "list = ['bad/id']",
+                "mods.list \"bad/id\": use id or id@semver-range",
+            ),
+            (
+                "list = ['rails@']",
+                "mods.list \"rails@\": use id or id@semver-range",
+            ),
+            (
+                "list = ['rails@not-a-range']",
+                "mods.list \"rails@not-a-range\": use id or id@semver-range",
+            ),
+            ("off = ['rails@2']", "mods.off \"rails@2\": not a mod ID"),
+            ("trust_native_code = 'true'", "expected a boolean"),
         ] {
-            assert!(
-                Config::parse(&format!("[mods]\n{field}")).is_err(),
-                "{field}"
-            );
+            let error = Config::parse(&format!("[mods]\n{field}")).unwrap_err();
+            assert!(error.contains(message), "{error}");
         }
     }
 }

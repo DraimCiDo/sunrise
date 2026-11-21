@@ -8,10 +8,10 @@ use std::{
 };
 use sunrise_server_launch::{
     self as launch,
-    config::{Config, Mods},
+    config::{Config, ModId, Mods},
     mod_lock::{
-        LOCK, LockedMod, MAX_LOCK, ModLock as Lock, Native, Reason, local_file, read_text,
-        release_tag,
+        LOCK, LockedMod, MAX_LOCK, ModLock as Lock, Native, Reason, ReleaseTag, local_file,
+        read_text,
     },
 };
 
@@ -41,9 +41,9 @@ struct RuntimeLibrary {
 
 enum Repair<'a> {
     Mods,
-    Mod(&'a str),
+    Mod(&'a ModId),
     Engine,
-    Release(&'a str),
+    Release(&'a ReleaseTag),
 }
 
 fn refuse_mod(row: &LockedMod, cause: &str) -> Refusal {
@@ -62,13 +62,14 @@ fn check_files(lock: &Lock, root: &Path, input: &Mods) -> Result<(), Refusal> {
         );
     }
     for row in &lock.mods {
-        let file = local_file(root, &row.file).map_err(|e| refuse_mod(row, &e))?;
+        let path = row.file.as_path();
+        let file = local_file(root, path).map_err(|e| refuse_mod(row, &e))?;
         let hash = engine::sha256_file(&file)
-            .map_err(|e| refuse_mod(row, &format!("{}: {e}", row.file.display())))?;
-        if hash != row.sha256 {
+            .map_err(|e| refuse_mod(row, &format!("{}: {e}", path.display())))?;
+        if hash != row.sha256.as_str() {
             return Err(refuse_mod(
                 row,
-                &format!("{} has a different checksum.", row.file.display()),
+                &format!("{} has a different checksum.", path.display()),
             ));
         }
         if row.on && row.native.is_some() && !input.trust_native_code {
@@ -106,41 +107,46 @@ fn check_native(lock: &Lock, root: &Path, program: &Path) -> Result<(), Refusal>
     };
     for row in &lock.mods {
         let Some(native) = &row.native else { continue };
-        let stamp = row.file.with_extension("identity.json");
+        let path = row.file.as_path();
+        let stamp = path.with_extension("identity.json");
         let error = |cause| refuse_mod(row, &format!("{}: {cause}", stamp.display()));
         let file = local_file(root, &stamp).map_err(error)?;
         let text = read_text(&file, MAX_IDENTITY).map_err(error)?;
         let identity: Identity = serde_json::from_str(&text).map_err(|e| error(e.to_string()))?;
         let hash_matches = match native {
-            Native::Prebuilt(_) => identity.sha256 == row.sha256,
+            Native::Prebuilt(_) => identity.sha256 == row.sha256.as_str(),
             Native::Built(sdk) => {
-                sdk == build && (identity.sha256.is_empty() || identity.sha256 == row.sha256)
+                *sdk == lock.sunrise
+                    && (identity.sha256.is_empty() || identity.sha256 == row.sha256.as_str())
             }
         };
         let mut parts = identity.identity.split_ascii_whitespace();
         let version = row.version.to_string();
-        let identity_matches = parts.by_ref().take(3).eq([build, &row.id, &version])
+        let identity_matches = parts
+            .by_ref()
+            .take(3)
+            .eq([build, row.id.as_str(), &version])
             && parts
                 .next()
                 .is_some_and(|v| semver::Version::parse(v).is_ok())
             && parts.eq(["unwind"]);
-        if Some(identity.file.as_ref()) != row.file.file_name()
-            || !hash_matches
-            || !identity_matches
-        {
+        if Some(identity.file.as_ref()) != path.file_name() || !hash_matches || !identity_matches {
             return Err(error("does not match the library or engine build.".into()));
         }
         if let Some((exe, runtime)) = &runtime {
-            let mut entries = runtime.libraries.iter().filter(|lib| lib.id == row.id);
+            let mut entries = runtime
+                .libraries
+                .iter()
+                .filter(|lib| lib.id == row.id.as_str());
             let recorded = entries.next();
             let expected_place = exe.with_file_name(&identity.file);
             // The runtime reads the library beside the selected executable, not elsewhere in
             // the folder. Don't accept a lock that checks a different copy of the same file.
             let matches = recorded.is_some_and(|lib| {
                 lib.stamp.file == identity.file
-                    && lib.stamp.sha256 == row.sha256
+                    && lib.stamp.sha256 == row.sha256.as_str()
                     && lib.stamp.identity == identity.identity
-                    && fs::canonicalize(root.join(&row.file))
+                    && fs::canonicalize(root.join(path))
                         .is_ok_and(|actual| actual == expected_place)
             });
             if (row.on && (!matches || entries.next().is_some())) || (!row.on && recorded.is_some())
@@ -175,7 +181,10 @@ fn write_list(lock: &Lock, mut out: impl Write, as_json: bool) -> std::io::Resul
         let why = match row.reason {
             Reason::Requested => "requested".into(),
             Reason::Pack => "from the pack".into(),
-            Reason::Required => format!("needed by {}", row.required_by.join(", ")),
+            Reason::Required => {
+                let parents: Vec<_> = row.required_by.iter().map(|id| id.as_str()).collect();
+                format!("needed by {}", parents.join(", "))
+            }
         };
         writeln!(out, "  {} {}  {on}  {kind}  ({why})", row.id, row.version)?;
     }
@@ -232,14 +241,14 @@ pub fn check_start(
                     && program.parent() == Some(install.programs().as_path())
             })
             .and_then(launch::Install::current)
-            .filter(|tag| release_tag(tag));
-        match selected {
-            Some(tag) if tag != *expected => {
+            .and_then(|tag| ReleaseTag::try_from(tag).ok());
+        match selected.as_ref() {
+            Some(tag) if tag != expected => {
                 return Err(Refusal::new(
                     format!(
                         "the mods were set up for Sunrise {expected}, but this server now runs {tag}."
                     ),
-                    Repair::Release(&tag),
+                    Repair::Release(tag),
                 ));
             }
             None if !lock.mods.iter().any(|row| row.on && row.native.is_some()) => {

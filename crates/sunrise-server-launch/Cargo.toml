@@ -11,7 +11,7 @@ sunrise-platform = { path = "../sunrise-platform", features = ["server-files"] }
 sunrise-core = { path = "../sunrise-core" }
 sunrise-mod-package = { path = "../sunrise-mod-package", default-features = false }
 semver = { version = "1", features = ["serde"] }
-url = { version = "2", features = ["serde"] }
+url = "2"
 dunce = "1.0.5"
 serde = { version = "1", features = ["derive"] }
 toml = "1.1"
