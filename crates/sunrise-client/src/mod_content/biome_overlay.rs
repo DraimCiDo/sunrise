@@ -1,3 +1,6 @@
+//! Replay biome modifiers over the world's selected layers.
+use super::*;
+
 /// A world's data packs (`packs`) with the content root `root`'s biome
 /// modifiers applied over them. Modifiers apply once every data
 /// pack is in, to the final biomes and tags: a pack's file for a biome
@@ -50,7 +53,7 @@ pub fn biome_modifiers_over_packs(
             Some(J::Bool(true)) => None,
             _ => biome_tags.get(id).map(String::as_str),
         };
-        let layers = [load_conditions::TagLayers { values, remove }];
+        let layers = [TagLayers { values, remove }];
         let merged = merge_tag(
             old,
             &layers,

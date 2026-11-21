@@ -1,15 +1,19 @@
-pub(super) type ConditionTable =
+//! Native condition registration and reload lifecycle.
+use super::{candidate_registries, candidate_registry_files};
+use crate::game::{Game, functions, mods, server_reload};
+use mod_api::__private::game::RegistrationContextNew;
+use std::{collections::BTreeMap, sync::Arc};
+
+pub(in crate::game) type ConditionTable =
     Arc<BTreeMap<mod_api::Identifier, (String, Arc<dyn mod_api::LoadCondition>)>>;
 
 impl Game<'_> {
-    pub(super) fn begin_condition_reload(
+    pub(in crate::game) fn begin_condition_reload(
         &mut self,
-        stack: &super::functions::PackStack,
+        stack: &functions::PackStack,
         resources: &std::path::Path,
-    ) -> Result<
-        super::server_reload::PreparedServerReload,
-        mod_api::__private::reload::ReloadStageError,
-    > {
+    ) -> Result<server_reload::PreparedServerReload, mod_api::__private::reload::ReloadStageError>
+    {
         use mod_api::__private::reload::ReloadStageError;
         if self.mods.load_condition_candidate.is_none() {
             let inventory = sunrise_mod_package::enabled::EnabledMods::read(resources)
@@ -21,18 +25,16 @@ impl Game<'_> {
         }
         self.prepare_server_reload(stack)
     }
-    pub(super) fn prepare_pack_condition_reload(
+    pub(in crate::game) fn prepare_pack_condition_reload(
         &mut self,
-        stack: &super::functions::PackStack,
-    ) -> Result<
-        super::server_reload::PreparedServerReload,
-        mod_api::__private::reload::ReloadStageError,
-    > {
+        stack: &functions::PackStack,
+    ) -> Result<server_reload::PreparedServerReload, mod_api::__private::reload::ReloadStageError>
+    {
         self.mods.load_condition_candidate = None;
         self.begin_condition_reload(stack, &self.options.resources.clone())
     }
 
-    pub(super) fn stage_condition_inventory(
+    pub(in crate::game) fn stage_condition_inventory(
         &mut self,
     ) -> sunrise_client::Result<Option<sunrise_assets::resource_source::ResourceRoot>> {
         self.protect_condition_root();
@@ -42,13 +44,13 @@ impl Game<'_> {
         self.stage_enabled_inventory()
     }
 
-    pub(super) fn protect_condition_root(&mut self) {
+    pub(in crate::game) fn protect_condition_root(&mut self) {
         self.mods.active_condition_root = Some(sunrise_client::mod_content::retain_root(
             &self.options.resources,
         ));
     }
 
-    pub(super) fn condition_root_needs_reload(&self) -> bool {
+    pub(in crate::game) fn condition_root_needs_reload(&self) -> bool {
         self.mods
             .load_condition_candidate
             .as_ref()
@@ -59,10 +61,10 @@ impl Game<'_> {
     }
 
     /// The conditions of a load from `root` over the candidate pack `files`.
-    pub(super) fn registered_load_conditions(
+    pub(in crate::game) fn registered_load_conditions(
         &self,
         inventory: &sunrise_mod_package::enabled::EnabledMods,
-        stack: &super::functions::PackStack,
+        stack: &functions::PackStack,
         root: &std::path::Path,
         files: &[(String, Vec<Vec<u8>>)],
     ) -> Result<sunrise_world::conditions::LoadConditions, String> {
@@ -86,8 +88,8 @@ impl Game<'_> {
     }
 }
 
-pub(super) fn conditions_for_mods(
-    sources: &super::mods::ModsState,
+pub(in crate::game) fn conditions_for_mods(
+    sources: &mods::ModsState,
     inventory: &sunrise_mod_package::enabled::EnabledMods,
 ) -> Result<sunrise_world::conditions::LoadConditions, String> {
     if let Some(candidate) = &sources.load_condition_candidate {
@@ -145,13 +147,13 @@ pub(super) fn conditions_for_mods(
     )
 }
 
-pub(super) fn content_root_with_conditions(
+pub(in crate::game) fn content_root_with_conditions(
     root: &std::path::Path,
     jars: &std::path::Path,
     mods: &[sunrise_client::mod_content::ContentMod],
     cache: &std::path::Path,
     inventory: &sunrise_mod_package::enabled::EnabledMods,
-    sources: &super::mods::ModsState,
+    sources: &mods::ModsState,
 ) -> sunrise_client::Result<std::path::PathBuf> {
     let conditions = conditions_for_mods(sources, inventory)?;
     sunrise_client::mod_content::resource_root_with_conditions(

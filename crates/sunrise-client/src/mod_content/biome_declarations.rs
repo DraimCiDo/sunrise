@@ -1,8 +1,14 @@
+//! NeoForge and Sunrise biome modifier declaration codecs.
+use super::{Action, Changes, Modifier, Result, Selector, Spawner, full};
+use serde::Deserialize;
+use serde_json::Value;
+use sunrise_world::worldgen::structure::start::STEPS;
+
 /// The folders a biome modifier sits in, under `data/<ns>`.
 const FOLDERS: [&str; 2] = ["/neoforge/biome_modifier/", "/forge/biome_modifier/"];
 
 /// Whether a mod file is a biome modifier.
-pub(super) fn is_modifier(file: &str) -> bool {
+pub(in crate::mod_content) fn is_modifier(file: &str) -> bool {
     file.starts_with("data/") && file.ends_with(".json") && FOLDERS.iter().any(|f| file.contains(f))
 }
 
@@ -204,7 +210,7 @@ fn step(v: &Value) -> std::result::Result<usize, String> {
 }
 
 /// One NeoForge `SpawnerData` object from `spawners`.
-pub(super) fn spawner(v: &Value) -> std::result::Result<Spawner, String> {
+pub(in crate::mod_content) fn spawner(v: &Value) -> std::result::Result<Spawner, String> {
     let o = v.as_object().ok_or("spawner: not an object")?;
     let entity = o
         .get("type")
@@ -244,7 +250,7 @@ impl Modifier {
     /// serializer), which is skipped with a line in `warnings`: real mods ship
     /// those beside their feature and spawn modifiers, and one must not drop
     /// every content mod.
-    pub(super) fn read(
+    pub(in crate::mod_content) fn read(
         mod_id: &str,
         file: &str,
         text: &str,
@@ -341,11 +347,11 @@ impl Modifier {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Range {
+pub(super) struct Range {
     #[serde(default, deserialize_with = "present")]
-    min: Option<f64>,
+    pub(super) min: Option<f64>,
     #[serde(default, deserialize_with = "present")]
-    max: Option<f64>,
+    pub(super) max: Option<f64>,
 }
 
 fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
@@ -356,17 +362,17 @@ fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Climate {
+pub(super) struct Climate {
     #[serde(rename = "type")]
     _kind: String,
     #[serde(default, deserialize_with = "present")]
-    temperature: Option<Range>,
+    pub(super) temperature: Option<Range>,
     #[serde(default, deserialize_with = "present")]
-    downfall: Option<Range>,
+    pub(super) downfall: Option<Range>,
 }
 
 impl Selector {
-    fn read(mut set: Value, allow_climate: bool) -> std::result::Result<Self, String> {
+    pub(super) fn read(mut set: Value, allow_climate: bool) -> std::result::Result<Self, String> {
         let Value::Object(object) = &mut set else {
             return Ok(Self::Generic(set));
         };

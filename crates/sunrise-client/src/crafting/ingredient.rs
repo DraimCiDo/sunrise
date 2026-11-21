@@ -1,25 +1,23 @@
 //! Engine recipe ingredients and stack matching.
 #[path = "ingredient/components.rs"]
 mod components;
+#[path = "ingredient/declarations.rs"]
+mod declarations;
 #[path = "ingredient/display.rs"]
 mod display;
 #[path = "ingredient/matching.rs"]
 mod matching;
-use super::native_hooks::native_ingredient;
 use super::{ItemStack, Items};
 use crate::native_stack_hooks::ingredient_test as native_ingredient_test;
 use display::display_stacks;
-use mod_api::__private::{WalkedIngredient, dedup_keep_order, resolved_items};
+use mod_api::__private::{WalkedIngredient, resolved_items};
 pub use mod_api::item::crafting::{IngredientRule, Shape};
 use serde_json::Value;
 use std::collections::HashSet;
-use sunrise_world::native_load_context::LoadContext;
 /// Where `Ingredient::resolve` leaves the hook's answer inside the occurrence
 /// it resolved. Written and read only here; the loads that own the sources
 /// never send or save it.
 const RESOLVED_ITEMS: &str = "sunrise:resolved_items";
-
-
 
 /// A set of accepted items (expanded from an item, list or tag), and the
 /// items in its `HolderSet` order, with built-in component and display rules.
@@ -52,10 +50,10 @@ pub struct Ingredient {
 impl Ingredient {
     /// Reject malformed component patches before any part of a recipe is published.
     pub fn validate_recipe(value: &Value, items: &Items) -> Result<(), String> {
-        components::validate_recipe(value, items)
+        declarations::validate_recipe(value, items)
     }
     pub(crate) fn validate_persistence(value: &Value, recipe: &str) -> bool {
-        if let Err(error) = components::persistent_recipe(value) {
+        if let Err(error) = declarations::persistent_recipe(value) {
             let recipe = sunrise_items::recipe_sources::qualified(recipe);
             log::warn!("recipe {recipe} rejected: {error}");
             return false;
@@ -170,7 +168,7 @@ impl Ingredient {
                 )
             },
             &resolved_items,
-            &components::json_patch,
+            &declarations::json_patch,
         );
         let walked = walked?;
         // A mod kind's empty answer is warned about at load, with its recipe file.

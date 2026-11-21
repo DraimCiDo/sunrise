@@ -1,6 +1,11 @@
+//! File and entry shapes for mod data-map declarations.
+use super::{DataMapType, DataMaps, MapRegistries, MapValues, full_id};
+use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+
 /// The folder a registry's data maps are under (`DataMapLoader`): its path for
 /// a `minecraft` registry, `<namespace>/<path>` for another.
-fn folder(registry: &str) -> String {
+pub(super) fn folder(registry: &str) -> String {
     match registry.split_once(':') {
         Some(("minecraft", path)) => path.to_owned(),
         Some((namespace, path)) => format!("{namespace}/{path}"),

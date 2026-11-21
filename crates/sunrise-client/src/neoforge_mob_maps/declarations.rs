@@ -1,3 +1,7 @@
+//! Built-in NeoForge mob data-map names and value codecs.
+use super::{BuiltinMap, EMPTY_SOUND, Kind, VILLAGER_TYPES, full_id, local_id};
+use serde_json::Value;
+
 impl Kind {
     pub const fn field(self) -> &'static str {
         match self {

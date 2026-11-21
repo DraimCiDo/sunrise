@@ -12,14 +12,19 @@
 //! what mods contribute through `native_data_pack_files` (key
 //! `data_maps/<ns>:<registry folder>/<map path>`), merged each time the
 //! server's tables are built: a world's first open and every `/reload`.
+#[path = "native_data_maps/declarations.rs"]
+mod declarations;
 use super::Game;
 use super::data_map_json::to_tag;
+use declarations::folder;
+#[cfg(test)]
+#[path = "native_data_maps/native_data_maps_tests.rs"]
+mod tests;
 pub use mod_api::game::DataMapType;
 use serde_json::Value;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use sunrise_core::nbt::Tag;
-
 
 /// The registries mods read through a typed key (`DataMapEntry`): always
 /// known, even where the command registries list no ids.
@@ -171,8 +176,6 @@ fn full_id(id: &str) -> String {
         format!("minecraft:{id}")
     }
 }
-
-
 
 impl DataMaps {
     pub(crate) fn with_biome_keys(mut self, keys: mod_api::__private::BiomeKeys) -> Self {

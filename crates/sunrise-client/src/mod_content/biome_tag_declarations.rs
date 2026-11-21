@@ -1,3 +1,8 @@
+//! NeoForge removal entries while resolving biome modifier tags.
+use super::{Registry, extend, full};
+use serde_json::Value;
+use std::collections::BTreeSet;
+
 impl Registry<'_> {
     // Determine the edge to drop from the graph, not from traversal order.
     fn removal_reaches(&self, start: &str, goal: &str) -> bool {
@@ -34,7 +39,7 @@ impl Registry<'_> {
         false
     }
 
-    fn expand(
+    pub(super) fn expand(
         &self,
         tag: &str,
         out: &mut Vec<String>,

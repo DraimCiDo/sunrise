@@ -7,12 +7,14 @@
 use super::{
     J, Overlay, Result, TagMerge, biomes, modifier_entities, modifier_tags, out_path, read_json,
 };
+#[path = "mod_content/structure_declarations.rs"]
+mod declarations;
+pub(super) use declarations::is_modifier;
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
 };
-
 
 pub(super) struct Modifier {
     name: String,

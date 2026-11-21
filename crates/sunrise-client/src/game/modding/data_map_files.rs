@@ -4,6 +4,9 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, value::RawValue};
 use std::collections::{BTreeMap, HashMap, HashSet};
+#[path = "data_map_files/merge.rs"]
+mod merge;
+use merge::merge_versions;
 
 type Tags = HashMap<String, HashSet<String>>;
 
@@ -52,7 +55,6 @@ pub(super) struct File<T> {
     remove: Vec<Key>,
 }
 
-
 pub(super) fn entry_value(raw: &Value) -> Result<&Value, String> {
     if let Some(object) = raw.as_object()
         && let Some(value) = object.get("value")
@@ -100,7 +102,6 @@ fn decode<T>(
         remove,
     })
 }
-
 
 pub(super) fn load<T: Clone>(
     id: &str,

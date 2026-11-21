@@ -1,7 +1,10 @@
+//! Recipe ingredient shapes at the network projection's input boundary.
+use serde_json::Value;
+
 /// An ingredient object's flat item list: the shape NeoForge's standard
 /// kinds resolve to, or a brewing predicate's `item`. `None`: the object is
 /// a kind the loader does not know, a mod's own.
-fn flat(ing: &Value, items: &sunrise_client::items::Items) -> Option<Value> {
+pub(super) fn flat(ing: &Value, items: &sunrise_client::items::Items) -> Option<Value> {
     if !ing.is_object() {
         return None;
     }

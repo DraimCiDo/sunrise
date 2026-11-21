@@ -1,3 +1,6 @@
+//! Worldgen files that declare additions to other registry entries.
+use super::{Addition, J, Result};
+
 /// The key of a mod's structure set, template pool or processor list file
 /// that adds its entries to other sets, pools or lists (vanilla's, another
 /// mod's) instead of being one of its own. Vanilla data never has it.
@@ -16,7 +19,7 @@ const ADDABLE: [(&str, &str); 3] = [
 
 impl Addition {
     /// What a mod file of `bundle` adds, if it is an addition file.
-    fn read(bundle: &str, text: &str) -> Result<Option<Self>> {
+    pub(super) fn read(bundle: &str, text: &str) -> Result<Option<Self>> {
         let Some((_, list)) = ADDABLE.iter().find(|(b, _)| *b == bundle) else {
             return Ok(None);
         };

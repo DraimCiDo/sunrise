@@ -1,11 +1,14 @@
-pub(super) fn is_modifier(file: &str) -> bool {
+//! NeoForge structure modifier declaration codecs.
+use super::{Action, Modifier, Result, Value, biomes};
+
+pub(in crate::mod_content) fn is_modifier(file: &str) -> bool {
     file.strip_prefix("data/")
         .and_then(|s| s.split_once('/'))
         .is_some_and(|(_, s)| s.starts_with("neoforge/structure_modifier/") && s.ends_with(".json"))
 }
 
 impl Modifier {
-    pub(super) fn read(
+    pub(in crate::mod_content) fn read(
         mod_id: &str,
         file: &str,
         text: &str,

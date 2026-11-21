@@ -3,6 +3,9 @@
 //! table slot and brewing stand slot accepts) and the stonecutter's recipes,
 //! read from the data pack's recipe files.
 use super::data::SyncData;
+#[path = "recipes/declarations.rs"]
+mod declarations;
+use declarations::flat;
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -132,7 +135,6 @@ pub(super) fn network_recipes(
         .collect();
     Ok((all, groups))
 }
-
 
 /// Replace each of a recipe's ingredient objects with its flat item list,
 /// so `holder_set` writes the items instead of an empty list. `false`: the

@@ -1,3 +1,7 @@
+//! Application of validated data-map layers in pack order.
+use super::{File, Key, Tags};
+use std::collections::BTreeMap;
+
 impl Key {
     fn visit(&self, tags: &Tags, mut visit: impl FnMut(&str)) {
         match self {
@@ -44,7 +48,7 @@ impl<T: Clone> File<T> {
 /// Pack-order loading shared by raw mod maps and typed builtin codecs. Each
 /// value decodes before target membership, so even an unknown target cannot
 /// conceal a bad value and allow the rest of that file to apply.
-fn merge_versions<T: Clone>(
+pub(super) fn merge_versions<T: Clone>(
     id: &str,
     directory: &str,
     mut map: BTreeMap<String, T>,

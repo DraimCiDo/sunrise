@@ -1,7 +1,8 @@
 //! Load-scoped registration and per-candidate condition lookup.
-use super::Game;
-use mod_api::__private::game::RegistrationContextNew;
-use std::{collections::BTreeMap, sync::Arc};
+#[path = "load_conditions/reload.rs"]
+mod reload;
+pub(super) use reload::{ConditionTable, conditions_for_mods, content_root_with_conditions};
+use std::collections::BTreeMap;
 
 /// Read declared registry folders with the same scanner as the live registry loader.
 /// Convert its resource paths to the content keys candidate_registries consumes.
@@ -125,7 +126,6 @@ fn candidate_registries<'a>(
     registries
 }
 
-
 #[cfg(test)]
 #[path = "load_conditions/startup_tests.rs"]
 mod startup_tests;
@@ -133,7 +133,6 @@ mod startup_tests;
 #[cfg(test)]
 #[path = "load_conditions/tests.rs"]
 mod tests;
-
 
 #[cfg(test)]
 #[path = "load_conditions/reload_tests.rs"]

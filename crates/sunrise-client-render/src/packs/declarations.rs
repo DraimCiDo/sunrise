@@ -1,3 +1,6 @@
+//! The Sunrise blockstate-layer field shared by the pack overlay and loader.
+use serde_json::Value;
+
 /// The key of a stacked blockstate file: its definitions, bottom first, each
 /// as the pack wrote it.
 pub const BLOCKSTATE_LAYERS: &str = "sunrise:layers";
@@ -5,7 +8,7 @@ pub const BLOCKSTATE_LAYERS: &str = "sunrise:layers";
 /// The definitions a blockstate file holds, bottom first: the layers of a
 /// file the pack overlay stacked (`packs::BLOCKSTATE_LAYERS`), else the
 /// file itself.
-fn definition_layers(text: &str) -> std::result::Result<Vec<String>, String> {
+pub(crate) fn definition_layers(text: &str) -> std::result::Result<Vec<String>, String> {
     if !text.contains(crate::packs::BLOCKSTATE_LAYERS) {
         return Ok(vec![text.to_owned()]);
     }

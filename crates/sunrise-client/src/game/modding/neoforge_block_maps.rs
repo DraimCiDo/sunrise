@@ -6,7 +6,13 @@ use super::Game;
 use super::native_data_maps::{DataMapType, DataMaps, MapRegistries, WorldRegistries};
 use std::sync::Arc;
 use sunrise_world::level::BlockMaps;
+#[path = "neoforge_block_maps/declarations.rs"]
+mod declarations;
+use declarations::MAPS;
 
+#[cfg(test)]
+#[path = "neoforge_block_maps/neoforge_block_maps_tests.rs"]
+mod tests;
 
 /// The maps of a world's tables' files; none where no pack gives a value. `rank` is a block's
 /// registry id, which picks the block an inverse map gives back.

@@ -1,7 +1,10 @@
 //! Data packs (`<world>/datapacks`: folders and zips with `pack.mcmeta`) and
 //! the parts of them commands use: `.mcfunction` functions (with macros and
 //! line continuation), function tags and predicates.
+#[path = "datapack/declarations.rs"]
+mod declarations;
 use crate::resource_source::ResourceSource;
+use declarations::content_id;
 use sunrise_world::loot::RecipePriorityLayer;
 mod slot_sources;
 use crate::zip::Zip;

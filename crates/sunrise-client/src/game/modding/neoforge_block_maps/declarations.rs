@@ -1,5 +1,7 @@
+//! Built-in NeoForge block map declarations.
+
 /// The three maps' ids, all on `minecraft:block`.
-const MAPS: [&str; 3] = [
+pub(super) const MAPS: [&str; 3] = [
     "neoforge:flammable",
     "neoforge:oxidizables",
     "neoforge:waxables",

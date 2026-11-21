@@ -1,4 +1,6 @@
 //! Component patches are validated and decoded once, before publication.
+#[cfg(test)]
+pub(super) use super::declarations::{json_patch, validate_recipe_components};
 use super::*;
 use std::collections::HashMap;
 use sunrise_core::nbt::{Compound, Tag};

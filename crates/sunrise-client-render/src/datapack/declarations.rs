@@ -1,9 +1,12 @@
+//! Server pack declaration locations and resource ids.
+use super::resource_id;
+
 /// `<kind-dir>/<ns>:<path>` for a pack file the content tables read:
 /// `recipe/`, `recipe_filter/`, `loot_table/`, `advancement/`, `trade_set/`,
 /// `villager_trade/`, `dialog/`, `damage_type/`, `dimension_type/`, `data_maps/`, enchantments, songs,
 /// instruments, painting variants, banner patterns, predicates, item modifiers, `world_clock/`,
 /// `worldgen/biome/` or `tags/<sub>/`, where the id keeps the subpath for nested tag kinds.
-fn content_id(file: &str) -> Option<String> {
+pub(super) fn content_id(file: &str) -> Option<String> {
     let rest = file.strip_prefix("data/")?;
     let (ns, rest) = rest.split_once('/')?;
     let (kind, rest) = rest.split_once('/')?;

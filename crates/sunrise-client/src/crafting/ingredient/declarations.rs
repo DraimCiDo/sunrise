@@ -1,3 +1,11 @@
+//! NeoForge and native ingredient declaration codecs.
+use super::{Ingredient, IngredientRule, Items, RESOLVED_ITEMS, components::validate};
+use crate::crafting::native_hooks::native_ingredient;
+use mod_api::__private::{WalkedIngredient, dedup_keep_order, resolved_items};
+use serde_json::Value;
+use sunrise_core::nbt::Compound;
+use sunrise_world::native_load_context::LoadContext;
+
 /// The kind an ingredient object names: `neoforge:ingredient_type` in
 /// current NeoForge, `type` in older packs.
 fn ingredient_kind(o: &serde_json::Map<String, Value>) -> Option<&str> {

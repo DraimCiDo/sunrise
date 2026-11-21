@@ -1,5 +1,6 @@
-/// A tag file's accepted values with `more` appended (no repeats), and
-/// `remove` after its own `remove` entries (NeoForge's tag `remove` list).
+//! Tag layers collected during content-root assembly.
+use super::J;
+
 /// The mods' layers of one tag, in load order: each layer's `values` and,
 /// after them, its `remove` entries (`TagLoader`: a file adds, then removes).
 pub(super) struct TagLayers<'a> {
@@ -60,7 +61,7 @@ impl TagMerge {
         warning
     }
 
-    /// The layers' entries for [`merge_tag`].
+    /// The layers' entries for [`super::merge_tag`].
     pub(super) fn layers(&self) -> Vec<TagLayers<'_>> {
         self.layers
             .iter()

@@ -2960,7 +2960,6 @@ fn worldgen_entry(file: &str) -> Option<(&'static str, String)> {
     Some((bundle, format!("{ns}:{}", path.strip_suffix(".json")?)))
 }
 
-
 /// A mod file's additions (`sunrise:add_to`): its entries appended to the
 /// list of each set, pool or processor list it names, as Lithostitched's
 /// `add_structure_set_entries`, `add_template_pool_elements` and
@@ -3190,7 +3189,6 @@ impl SavedModifiers {
     }
 }
 
-
 #[path = "mod_content_carvers.rs"]
 mod carver_registry;
 
@@ -3313,9 +3311,17 @@ fn link_file(
 mod root_lifetime;
 use root_lifetime::prune_roots;
 pub use root_lifetime::retain_root;
+mod biome_overlay;
+mod declarations;
 mod load_conditions;
-use load_conditions::{TagLayers, TagMerge, merge_tag, tag_list};
-pub use load_conditions::{build_with_conditions, resource_root_with_conditions};
+mod resource_root;
+mod tag_declarations;
+mod tag_layers;
+pub use biome_overlay::biome_modifiers_over_packs;
+pub use load_conditions::build_with_conditions;
+pub use resource_root::resource_root_with_conditions;
+use tag_declarations::{merge_tag, tag_list};
+use tag_layers::{TagLayers, TagMerge};
 
 /// The block and item ids and tags a content root has, for tag entries.
 struct Known {

@@ -2,6 +2,12 @@
 //! simulation readers use exact registry identities and never parse JSON or lock
 //! a process-global current world. The common store owns each generation.
 use crate::mobs::{Species, parrot, render::VILLAGER_TYPES, species};
+#[path = "neoforge_mob_maps/declarations.rs"]
+mod declarations;
+pub use declarations::{
+    MAPS, decode_compostable, decode_distance, decode_frequency, decode_gift, decode_sound,
+    decode_villager_type,
+};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, LazyLock};

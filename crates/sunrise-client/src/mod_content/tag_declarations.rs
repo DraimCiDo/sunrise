@@ -1,3 +1,6 @@
+//! NeoForge tag removals and their layered representation.
+use super::{J, Known, Result, TagLayers};
+
 /// A tag file's `key` list (`values`, `remove`); empty where it has none.
 pub(super) fn tag_list<'a>(tag: &'a J, key: &str) -> &'a [J] {
     match tag.get(key) {
@@ -76,7 +79,7 @@ impl Known {
     /// for block, item and biome tags (other registries are kept as they
     /// are). The worldgen loader refuses a biome tag naming what it lacks
     /// (another mod's biomes, a loader's tags), so those entries go.
-    fn keeps(&self, file: &str, v: &J, warnings: &mut Vec<String>) -> bool {
+    pub(super) fn keeps(&self, file: &str, v: &J, warnings: &mut Vec<String>) -> bool {
         let id = match v {
             J::Str(s) => s.as_str(),
             J::Obj(_) => match v.get("id") {

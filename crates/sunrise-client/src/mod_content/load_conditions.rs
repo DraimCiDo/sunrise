@@ -2,11 +2,6 @@
 //! Content-root condition selection through the owning reload snapshot.
 use super::*;
 
-
-
-
-
-
 /// Build generated tables using the owning load's registered condition snapshot.
 /// Refuse invalid conditions before publishing the generated root.
 pub fn build_with_conditions(

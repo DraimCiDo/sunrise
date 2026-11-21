@@ -15,13 +15,16 @@
 //! modifiers keeps vanilla's bundle, so vanilla features keep their indices
 //! and their random seeds.
 use super::{J, Result};
-use serde::Deserialize;
+#[path = "mod_content/biome_declarations.rs"]
+mod declarations;
+#[path = "mod_content/biome_tag_declarations.rs"]
+mod tag_declarations;
+use declarations::Climate;
+pub(super) use declarations::{is_modifier, spawner};
 use serde_json::{Number, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use sunrise_world::worldgen::structure::start::STEPS;
-
-
 
 /// One mob spawner entry in an `add_spawns` modifier.
 #[derive(Debug, PartialEq)]
@@ -92,15 +95,6 @@ pub(super) struct Changes {
     attributes: Vec<(&'static str, Value)>,
 }
 
-
-
-
-
-
-
-
-
-
 impl Action {
     fn is_modify(&self) -> bool {
         matches!(self, Self::Modify(_))
@@ -128,9 +122,6 @@ pub(super) struct Modifier {
     /// modifier is applied again over a world's data packs (`over_packs`).
     pub source: [String; 3],
 }
-
-
-
 
 /// `ns:path` for an id that may leave out `minecraft:`.
 fn full(id: &str) -> String {
@@ -200,8 +191,6 @@ impl Registry<'_> {
     fn resolve_leaf(&self, set: &Value) -> std::result::Result<Vec<String>, String> {
         sunrise_world::holder_set::resolve(set, self)
     }
-
-
 }
 
 impl sunrise_world::holder_set::HolderLookup for Registry<'_> {
@@ -235,9 +224,6 @@ fn extend(out: &mut Vec<String>, ids: impl IntoIterator<Item = String>) {
     }
 }
 
-
-
-
 #[derive(Debug)]
 enum Selector {
     Generic(Value),
@@ -248,7 +234,6 @@ enum Selector {
 }
 
 impl Selector {
-
     fn resolve(
         &self,
         registry: &Registry<'_>,

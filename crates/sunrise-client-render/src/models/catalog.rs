@@ -1,7 +1,7 @@
 //! Bind prepared registry states to model choices; bake each transformed model
 //! once and share its geometry across positions. Resource failure recovery and
 //! resource-pack reloads remain separate work.
-use crate::{Result, sprites::Sprites};
+use crate::{Result, packs::definition_layers, sprites::Sprites};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},

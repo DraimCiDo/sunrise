@@ -1,3 +1,6 @@
+//! Cache acquisition and publication for the generated content root.
+use super::*;
+
 /// Takes the roots folder's lock, waiting (and saying so) while another process holds it. A
 /// filesystem that can't lock goes on without one, as starts did before the lock.
 fn lock_roots(roots: &Path) -> Result<Option<fs::File>> {

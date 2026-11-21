@@ -145,8 +145,7 @@ fn a_value_reads_as_nbt_and_a_map_no_mod_registered_is_refused() {
         }})],
     )]);
     let maps = load(&f);
-    let value =
-        |registry: &str, type_id: &str, entry: &str| maps.value(registry, type_id, entry);
+    let value = |registry: &str, type_id: &str, entry: &str| maps.value(registry, type_id, entry);
     assert_eq!(
         value("minecraft:item", "mymod:fuel", "minecraft:coal"),
         Ok(Some(Tag::Int(1600)))
@@ -249,10 +248,8 @@ fn a_declared_datapack_registry_rejects_unknown_ids() {
             sync: mod_api::DatapackRegistrySync::Required,
         },
     ]);
-    let set = mod_api::DatapackRegistrySet::with_entries_for_testing(
-        "example:spell",
-        &["example:fire"],
-    );
+    let set =
+        mod_api::DatapackRegistrySet::with_entries_for_testing("example:spell", &["example:fire"]);
     let items = sunrise_client::items::Items::empty();
     let registries = WorldRegistries::new(
         [],
