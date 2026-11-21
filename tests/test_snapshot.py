@@ -120,7 +120,7 @@ class NightlyBuildSnapshotTests(unittest.TestCase):
         self.assertEqual(complete["steps"][0]["with"]["name"], "build-complete")
         self.assertEqual(complete["outputs"]["complete"], "${{ steps.marker.outcome == 'success' }}")
         self.assertEqual(self.workflow["jobs"]["sign"]["needs"], ["pick", "build", "complete", "break-glass"])
-        self.assertEqual(self.workflow["jobs"]["publish"]["needs"], ["pick", "build", "complete", "sign", "break-glass"])
+        self.assertEqual(self.workflow["jobs"]["publish"]["needs"], ["pick", "build", "complete", "sign", "break-glass", "content"])
         for job in ("sign", "publish"):
             self.assertIn("needs.complete.outputs.complete == 'true'", self.workflow["jobs"][job]["if"])
 
