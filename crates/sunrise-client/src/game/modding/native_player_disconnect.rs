@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! `player_disconnect`: a server mod sends a player away with a reason, as `/kick` does.
 
 use super::Game;

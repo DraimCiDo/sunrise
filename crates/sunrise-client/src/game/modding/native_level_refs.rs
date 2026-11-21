@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! A level's blocks, height and time through a `LevelRef`
 //! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387). Server reads
 //! reach any loaded level; both-side reads also reach the client's current level.

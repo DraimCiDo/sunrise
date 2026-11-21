@@ -1,7 +1,7 @@
 //! Bind prepared registry states to model choices; bake each transformed model
 //! once and share its geometry across positions. Resource failure recovery and
 //! resource-pack reloads remain separate work.
-use crate::{Result, sprites::Sprites};
+use crate::{Result, packs::definition_layers, sprites::Sprites};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -236,19 +236,6 @@ fn bake_form(
             combined.cube = super::cube::cube_styles(&combined.faces);
             Ok(combined)
         }
-    }
-}
-/// The definitions a blockstate file holds, bottom first: the layers of a
-/// file the pack overlay stacked (`packs::BLOCKSTATE_LAYERS`), else the
-/// file itself.
-fn definition_layers(text: &str) -> std::result::Result<Vec<String>, String> {
-    if !text.contains(crate::packs::BLOCKSTATE_LAYERS) {
-        return Ok(vec![text.to_owned()]);
-    }
-    let value: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
-    match value.get(crate::packs::BLOCKSTATE_LAYERS) {
-        Some(Value::Array(layers)) => Ok(layers.iter().map(Value::to_string).collect()),
-        _ => Ok(vec![text.to_owned()]),
     }
 }
 /// One layer of block `block`'s blockstate file, read and bound to its `possible` states:

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Vehicles and passengers through an `EntityRef`: what an entity rides, who rides it,
 //! getting off, and who holds its lead. Basic topology reads also answer from the client's
 //! packet state; riding writes and the remaining reads are server-only.

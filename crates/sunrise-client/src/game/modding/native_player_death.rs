@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A server player's last death location for native mods, through a
 //! `PlayerRef` (docs/modding/src/how-to/native-mods.md): `Player.getLastDeathLocation` and
 //! `setLastDeathLocation`, as a `GlobalPos` (the dimension's key and the

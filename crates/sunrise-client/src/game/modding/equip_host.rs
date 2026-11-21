@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Read-only equipment host: cached target facts, ordinary game reads elsewhere.
 use super::Game;
 use mod_api::__private::game::BackendRefOf;

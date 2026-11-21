@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Entity-type key reads share the completed registry and never format a type name.
 use super::{Game, commands::Target};
 use mod_api::{EntityRef, EntityTypeKey, LevelReadError, PushReaction};

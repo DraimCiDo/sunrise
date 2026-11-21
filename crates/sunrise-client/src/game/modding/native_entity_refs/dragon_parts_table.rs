@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Integer part registry, following the public fastutil javadoc-level description
 //! of `Int2ObjectOpenHashMap` (https://fastutil.di.unimi.it/docs/).
 //! Keys use multiplicative mixing, linear probing, backward-shift deletion, and

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Block entity handles: storage writes join the journal; explicit world notifications happen
 //! immediately and survive abort. Raw mod storage writes and restores synthesize no notice.
 use super::Game;

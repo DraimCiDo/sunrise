@@ -1,4 +1,4 @@
-//! stable-line: no-content-declarations
+//! stable-line: decodes-other-data
 use super::EntityType;
 use std::collections::BTreeMap;
 

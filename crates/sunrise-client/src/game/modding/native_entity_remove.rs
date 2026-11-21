@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Removing an entity for native server mods, through an `EntityRef`
 //! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): `Entity.discard`
 //! and `Entity.remove` with a reason. Nothing dies and nothing drops loot.

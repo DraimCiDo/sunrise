@@ -1,4 +1,5 @@
 // game-module-visibility: pub
+//! stable-line: no-content-declarations
 //! Mod block entities drawn on the client: `native_block_entity_submit`
 //! (vanilla's `BlockEntityRenderer.submit`) gets a [`BlockEntityDraw`], whose
 //! pose stack (`PoseStack`) places what the helpers here add to the entity

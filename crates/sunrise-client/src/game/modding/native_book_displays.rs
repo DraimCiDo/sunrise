@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Validate the complete mod recipe-book generation before publishing any tab.
 use super::*;
 use sunrise_client::recipe_book::{DisplayResources, ModBookIndex};

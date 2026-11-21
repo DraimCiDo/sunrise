@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Local particle and firework requests from native client hooks.
 use super::Game;
 use mod_api::{FireworksRequest, client::particles::PositionSource};

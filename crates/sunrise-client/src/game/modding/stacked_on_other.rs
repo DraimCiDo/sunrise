@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! `item_stacked_on_other` on the game's side: a pickup click, decided, fired and applied as one
 //! action (the design's decide/fire/apply).
 //!

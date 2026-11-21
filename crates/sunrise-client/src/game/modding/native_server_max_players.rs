@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The player limit for server mods (`server_max_players`, Paper's `Server.getMaxPlayers`
 //! and `setMaxPlayers`).
 use super::Game;

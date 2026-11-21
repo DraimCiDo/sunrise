@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Published loops (`[[native.loop]]`): hot loops the game owns, with a slot a native mod's helper
 //! fills. Like every `[[native.*]]` table this is game code by another route, pinned to the exact
 //! build: a loop's slot trait and cursor live beside the loop (`block_entity_ticks.rs` for

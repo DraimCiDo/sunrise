@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! World-border writes for native server mods through a `LevelRef`, as `/worldborder` makes
 //! them: `WorldBorder.setCenter`, `setSize` / `lerpSizeBetween`, `setDamagePerBlock`,
 //! `setSafeZone`, `setWarningBlocks` and `setWarningTime`. Sunrise keeps one border for every

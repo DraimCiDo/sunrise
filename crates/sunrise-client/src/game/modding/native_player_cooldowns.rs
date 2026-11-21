@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A player's cooldowns for native server mods, through a `PlayerRef`: item
 //! cooldowns (`Player.getCooldowns()`, vanilla's `ItemCooldowns`), the
 //! experience orb pickup delay (`Player.takeXpDelay`) and the warden warning

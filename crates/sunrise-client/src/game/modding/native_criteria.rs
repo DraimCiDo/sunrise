@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! A mod's own advancement criteria triggers (docs/modding/src/how-to/native-mods.md,
 //! "Advancement triggers"). An advancement of a content mod or a world's data
 //! pack names a trigger of the mod's (`mymod:pipe_connected`); the tree keeps

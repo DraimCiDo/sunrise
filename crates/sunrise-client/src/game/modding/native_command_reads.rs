@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! What a server mod reads beyond a command's arguments (NeoForge's
 //! `ICommandSourceStackExtension`): where the command executes, a player's game profile and a
 //! loaded advancement.

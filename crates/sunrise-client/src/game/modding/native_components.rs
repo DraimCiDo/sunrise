@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! Native item data component helpers.
 use super::Game;
 use sunrise_client::items::ItemStack;

@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! Every item and recipe the game knows, made once for the mods that read
 //! them through `native_recipes`, and the recipe book's known displays; placing a
 //! recipe and creative gifts. The recipes are the window's own data — the

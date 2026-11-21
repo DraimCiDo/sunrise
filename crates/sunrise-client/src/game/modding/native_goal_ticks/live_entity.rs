@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Entity reads from mobs lent to an AI goal or target-change callback.
 //!
 //! These use the mob in hand or the disjoint live loan; a snapshot does not

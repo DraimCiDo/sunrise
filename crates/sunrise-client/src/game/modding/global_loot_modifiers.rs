@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Static serializer resources adapted to the owning server loot generation.
 #[path = "global_loot_modifiers/declarations.rs"]
 mod declarations;

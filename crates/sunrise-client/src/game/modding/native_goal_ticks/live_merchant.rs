@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Merchant handles for villagers temporarily lent to an AI tick.
 use super::GoalCx;
 use crate::mobs::{Mob, Species, render::VILLAGER_TYPES};

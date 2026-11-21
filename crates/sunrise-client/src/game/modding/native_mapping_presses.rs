@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A mod presses the vanilla gameplay mappings (`ClientHost::set_mapping_down`, `click_mapping`):
 //! it sets the held state a key or button gives a mapping (`KeyMapping.setDown`) or adds the click
 //! a press adds (`KeyMapping.click`), and nothing more. The client tick's key step acts on them

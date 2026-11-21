@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A server mod's respawn of a dead player (`PlayerRef::respawn`): the Respawn button, pressed
 //! for them.
 use super::{Game, native_server::PlayerRead};

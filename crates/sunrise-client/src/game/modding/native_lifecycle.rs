@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! World epochs for native handles, and lifecycle observations on authoritative servers.
 //! A paused pass
 //! observes nothing; a frozen world reports `world_running: false` except during a step.

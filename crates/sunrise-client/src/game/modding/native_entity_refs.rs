@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Entity and level handles for native server mods (docs/modding/src/how-to/native-mods.md,
 //! "Entity and level handles", #7387): `entity(id)` turns an event's
 //! entity id into an `EntityRef`, and each `native_entity_*` helper reads the

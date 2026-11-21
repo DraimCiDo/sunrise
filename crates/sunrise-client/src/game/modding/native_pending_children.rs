@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The pending-child collection adapter. The existing unspawned editor resolves the same
 //! arena objects. No resident entity ID, attachment holder or join is published here.
 

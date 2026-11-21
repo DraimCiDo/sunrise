@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Stack count admission at the mod API conversion boundary.
 use super::*;
 

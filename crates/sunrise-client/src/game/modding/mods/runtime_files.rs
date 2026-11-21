@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Each package's runtime data files, checked against their `[runtime]` hashes once when the
 //! package opens and handed to registration, which serves them to the mod that owns them.
 use super::ModsState;

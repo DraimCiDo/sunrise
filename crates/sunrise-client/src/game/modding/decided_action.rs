@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! One decision for a hook that is not a pickup click (`stacked_on_other.rs` is the pickup's): the
 //! mod menu's shift-click (`menu_quick_move`) and the click on a menu a mod opened
 //! (`menu_clicked`). The same coordinator, the same savepoint, the same refusal.

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Retain the live observer's two allocations across borrowed creature passes.
 use super::{EntitySections, LiveSectionObserver, Scope};
 use crate::mobs::living::section_writes::Observer;

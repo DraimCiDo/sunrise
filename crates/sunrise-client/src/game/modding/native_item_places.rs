@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The game's item places for native mods (`mod_api::ItemPlace`, arismoko/horizon#41 §7): a
 //! player's slots, hands and cursor, entities' slots, item entities and the guest storage a
 //! menu slot shows (ender chest, crafting grid, a mod's chest menu). Mods read and write

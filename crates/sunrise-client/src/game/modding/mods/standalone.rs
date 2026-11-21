@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Client-only standalone model registration.
 use super::{ExecutionRole, Game, RegistrationContext};
 use mod_api::__private::game::RegistrationContextNew;

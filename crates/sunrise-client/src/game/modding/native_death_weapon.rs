@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Live living-entity weapon reads for death loot.
 use super::{Game, commands::Target};
 use mod_api::{Hand, LivingRef};

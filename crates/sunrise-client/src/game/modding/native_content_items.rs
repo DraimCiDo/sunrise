@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Code item identities available while reading a package's content files.
 use std::collections::BTreeMap;
 use sunrise_client::mod_content::DeclaredContent;

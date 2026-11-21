@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A server player's ender chest (`Player.getEnderChestInventory`) by slot, for mods that copy
 //! or edit it whole (player data sync, `/endersee`), and its menu opened with no block.
 use super::{Game, commands::items::Slot, native_server::PlayerRead};

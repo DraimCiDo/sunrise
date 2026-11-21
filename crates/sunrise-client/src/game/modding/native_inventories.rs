@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Another player's inventories for server mods:
 //! what an operator's `/invsee` or `/endersee` needs. A player online is read
 //! and changed live; a player who isn't on the server is read from, and

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Checked landing writes. Vector conversion stages the entire batch before dispatch commits it.
 use super::{TryIntoApi, TryIntoEngine};
 use mod_api::{BlockState, BlockStateError, LandingWrite};

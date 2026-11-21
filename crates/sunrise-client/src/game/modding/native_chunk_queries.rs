@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Read-only chunk facts that never request residency.
 use super::Game;
 use mod_api::{BlockKey, ChunkRef};

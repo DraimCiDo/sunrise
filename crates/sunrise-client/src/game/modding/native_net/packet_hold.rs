@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Actor-owned holds. Overflow and partial publication are isolated in Holds.
 use super::Game;
 use mod_api::{HoldError, HoldId, SendPacketError, ServerboundPlayPacket};

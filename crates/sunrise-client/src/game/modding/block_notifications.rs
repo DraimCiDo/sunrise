@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A client block notification is not a save mutation.
 use super::Game;
 

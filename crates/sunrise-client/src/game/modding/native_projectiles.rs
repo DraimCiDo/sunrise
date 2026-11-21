@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Projectile impacts for native mods (`native_projectile_impact`, NeoForge's
 //! `ProjectileImpactEvent`). `tick_projectiles` flies every projectile first and
 //! collects the impacts; once its worlds are let go, the mods hear each one, and a

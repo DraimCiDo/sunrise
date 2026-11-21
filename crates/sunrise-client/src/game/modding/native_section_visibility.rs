@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Capture and dispatch terrain visibility on the client world thread. Workers receive only
 //! the checked plan and the same immutable section data used for the capture.
 

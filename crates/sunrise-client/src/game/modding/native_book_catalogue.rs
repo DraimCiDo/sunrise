@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Authoritative custom displays, with slot examples resolved in the server's context.
 use super::api_values::TryIntoApi;
 use super::*;

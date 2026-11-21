@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! Build a complete immutable builtin generation alongside its common-store values.
 use super::Game;
 use serde_json::Value;

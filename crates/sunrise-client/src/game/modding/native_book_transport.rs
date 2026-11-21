@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Dispatch placement intents only after the shared connection boundary admitted them.
 use super::*;
 use sunrise_client::recipe_book::placement_sync as sync;

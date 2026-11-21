@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Convert collected Part refusals into the normal startup error.
 pub(in crate::game) fn admit_parts(mods: &[mod_api::ModEntry]) -> crate::Result<()> {
     super::api_values::install_parts(mods)

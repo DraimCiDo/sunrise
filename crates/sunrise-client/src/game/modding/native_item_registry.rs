@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Item registry numbers shared by API metadata reads and the game's scatter seeds.
 use super::Game;
 

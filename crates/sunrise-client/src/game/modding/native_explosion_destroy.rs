@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Destroying a mod's own list of blocks as a blast would (`LevelRef::explosion_destroy_blocks`): the
 //! explosion's hooks and its block step, without its rays, its entity damage, its packet or its
 //! sound. A mod that casts its own rays breaks what they found with it, spread over ticks.

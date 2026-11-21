@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Owning-thread, load-bound numeric bridge. Workers receive prepared values instead.
 use super::{TryIntoApi, TryIntoEngine};
 use mod_api::{BlockState, BlockStateError};

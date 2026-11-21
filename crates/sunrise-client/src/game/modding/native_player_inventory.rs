@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A server player's inventory by vanilla's slot numbers (`Inventory.getItem`/`setItem`), for
 //! mods that copy or edit it whole: player data sync, `/invsee`.
 use super::{Game, commands::items::Slot, native_server::PlayerRead};

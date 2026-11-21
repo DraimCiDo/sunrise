@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A shift-click in a mod container's menu, routed by the mods
 //! (`native_menu_quick_move`, `AbstractContainerMenu.quickMoveStack`) before
 //! the game's own routing.

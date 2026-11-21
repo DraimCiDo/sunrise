@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A mod's `gui_paint` poses (`PoseOp`): a `Rotate` by a NaN or infinite angle is refused by
 //! `hud_layout::pose_apply`, which leaves the pose as it was, and named here in the log.
 use std::sync::atomic::{AtomicBool, Ordering};

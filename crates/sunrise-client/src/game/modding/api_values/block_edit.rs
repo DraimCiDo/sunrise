@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Cold, all-or-nothing preparation of typed bulk edit values.
 use super::{TryIntoApi, TryIntoEngine, block_metadata_table};
 use mod_api::BlockMetadata;

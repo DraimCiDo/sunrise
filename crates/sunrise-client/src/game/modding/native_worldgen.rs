@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Load-bound worker metadata. Each numeric registry retains its own immutable snapshot.
 use super::api_values::block_state::{self, Index};
 use mod_api::{BlockKey, BlockMetadata, BlockState};

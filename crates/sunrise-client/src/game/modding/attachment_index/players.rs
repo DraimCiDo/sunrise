@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 use super::{Dim, Game};
 use mod_api::{AttachmentHolder, EntityRef};
 

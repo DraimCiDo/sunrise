@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Owner-created rotational throws, distinct from generic entity summoning.
 use super::{Game, commands::Target};
 use mod_api::{Identifier, LivingRef, ProjectileRef};

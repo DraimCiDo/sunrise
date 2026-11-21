@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Structure templates read for server mods (vanilla's
 //! `StructureTemplateManager.get`, and what `StructureTemplate.placeInWorld`
 //! would place) without placing them: a builder reads a template once, then

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Read-only recipe inputs: resident inventory limits apply to writes, not predicates.
 use super::{ApiStack, EngineStack, StackWriteError, encode_stack};
 use sunrise_items::items::Items;

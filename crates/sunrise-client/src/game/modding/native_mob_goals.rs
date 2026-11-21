@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! AI goals of native mod mob handles.
 use super::native_namespaced_id::namespaced;
 use super::{Game, commands::Target};

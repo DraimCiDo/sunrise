@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Custom boss bar handles for native server mods: the `/bossbar` store.
 use super::Game;
 use mod_api::__private::game::*;

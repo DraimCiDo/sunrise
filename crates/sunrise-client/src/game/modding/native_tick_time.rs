@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The tick's spare time, as mods read it (`MinecraftServer.haveTime`).
 use super::Game;
 use std::time::Instant;

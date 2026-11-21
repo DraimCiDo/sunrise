@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Entity types drawn by mods' renderers on the client: `native_register_entity_renderers`
 //! (NeoForge's `EntityRenderersEvent.RegisterRenderers`) is asked once at start, before resources
 //! load, and every resource load resolves the registrations into the slots the draw routes read, so

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Scoreboard objective handles for native server mods, and the client's view of the board.
 //!
 //! Every write is made on the same `Scoreboard` the `/scoreboard` command writes, with the same

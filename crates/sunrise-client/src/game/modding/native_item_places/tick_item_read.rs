@@ -1,3 +1,4 @@
+// stable-line: no-content-declarations
 impl Game<'_> {
     pub(super) fn unscoped_game_stack(&mut self, place: &ItemPlace) -> Option<ItemStack> {
         if !self.places_simulated() {

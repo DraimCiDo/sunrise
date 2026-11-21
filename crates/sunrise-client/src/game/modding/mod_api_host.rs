@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 use super::Game;
 use super::api_values::{TryIntoApi, TryIntoEngine};
 use mod_api::{AttachmentAccess, BlockPos, Direction};

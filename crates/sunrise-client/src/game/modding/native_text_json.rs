@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! `text_from_json`: a text component read as `/tellraw` takes it.
 use super::Game;
 use mod_api::text::TextFormError;

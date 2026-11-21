@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Call-stack recursion boundary shared by ordinary and explicit consume effects.
 use std::cell::RefCell;
 

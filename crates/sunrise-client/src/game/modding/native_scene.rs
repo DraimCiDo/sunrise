@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A few blocks drawn in a screen as a small scene seen from an angle: what
 //! Create's Ponder shows its machines in (docs/native-mods.md, "Scenes in
 //! screens"). The blocks' models and their mod block entities' drawing are

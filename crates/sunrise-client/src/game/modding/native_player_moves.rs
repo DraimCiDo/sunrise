@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! `player_move`: the game's half of a movement report the hub holds for the mods.
 use super::Game;
 use sunrise_client::lan::hub::Hub;

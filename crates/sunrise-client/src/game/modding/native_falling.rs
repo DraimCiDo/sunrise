@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Falling blocks for native server mods (docs/modding/src/how-to/native-mods.md, "Falling
 //! blocks"): a mod throws a block as a `FallingBlockEntity` that flies, lands
 //! and places itself (or drops as an item) as sand does. It acts where the

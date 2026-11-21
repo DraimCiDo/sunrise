@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! Lossless conversion at the data-map JSON boundary.
 use mod_api::DataMapError;
 use serde_json::Value;

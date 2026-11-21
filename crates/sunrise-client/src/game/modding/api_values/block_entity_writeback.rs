@@ -1,3 +1,4 @@
+// stable-line: no-content-declarations
 #[derive(Debug, PartialEq, Eq)]
 pub(in crate::game) enum BlockEntitySnapshotError {
     InvalidRevision,

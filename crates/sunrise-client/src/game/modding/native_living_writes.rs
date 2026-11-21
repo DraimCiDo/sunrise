@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Writes to a living entity for native server mods, through a `LivingRef`
 //! (docs/modding/src/how-to/native-mods.md, "Entity and level handles"): `LivingEntity.swing`,
 //! the arrows and bee stingers stuck in a player or a mob (`setArrowCount`,

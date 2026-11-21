@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A player's attack strength for native server mods, through a `PlayerRef`:
 //! `Player.getAttackStrengthScale(partial)`, the charge `Player.attack` reads
 //! at its start (`attack_entity` fires before that, and before the swing

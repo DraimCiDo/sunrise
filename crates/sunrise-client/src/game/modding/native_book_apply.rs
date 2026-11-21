@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Authoritative placement: detached calculation, journaled writes, then publication.
 use super::api_values::TryIntoApi;
 use super::{

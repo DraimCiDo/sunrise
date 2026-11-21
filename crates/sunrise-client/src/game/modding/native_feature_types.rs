@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! Native worker adapter for API-owned feature behaviours: the engine's `ModFeatureType` around a
 //! mod's `FeatureType`, over the caller's own world and random.
 use super::native_worldgen::WorkerResources;

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 use super::Game;
 use sunrise_client::containers::ModBlockEntity;
 use sunrise_core::position::BlockPos;

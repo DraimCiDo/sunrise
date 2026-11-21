@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Client layout roles; never inspect stacks or server container identities.
 use super::{Game, Screen};
 use mod_api::{MenuRef, MenuSlotKind};

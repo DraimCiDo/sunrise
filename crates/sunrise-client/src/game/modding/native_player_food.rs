@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A player's food and experience for native server mods, through a
 //! `PlayerRef` (docs/modding/src/how-to/native-mods.md): the `FoodData` and `Player` reads the
 //! handle's `food()` doesn't give, the writes, and the experience give an

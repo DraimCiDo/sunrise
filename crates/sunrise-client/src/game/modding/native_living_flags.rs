@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! State flags of a living entity for native server mods, through a
 //! `LivingRef` (docs/modding/src/how-to/native-mods.md, "Entity and level
 //! handles"): the glide (`LivingEntity.isFallFlying` and `stopFallFlying`),

@@ -1,3 +1,4 @@
+// stable-line: no-content-declarations
 impl Game<'_> {
     pub(super) fn unscoped_item_entity_stack(&self, item: ItemEntityRef) -> Option<ItemStack> {
         Some(

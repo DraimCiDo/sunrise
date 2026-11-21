@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! An entity's `Entity.noPhysics` for native server mods, through an
 //! `EntityRef` (docs/modding/src/how-to/native-mods.md, "Entity and level
 //! handles"): whether its moves pass through blocks. Offered only for the

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A player's statistics and recipe book for native server mods, through a
 //! `PlayerRef` (docs/modding/src/how-to/native-mods.md): `ServerStatsCounter` and
 //! `ServerRecipeBook`. Reads return None for a stale handle or a player who

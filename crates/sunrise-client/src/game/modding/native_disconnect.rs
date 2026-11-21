@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A client mod leaving the world, NeoForge's `IClientCommonPacketListenerExtension.disconnect`.
 //! The server half is `native_player_disconnect`.
 use super::Game;

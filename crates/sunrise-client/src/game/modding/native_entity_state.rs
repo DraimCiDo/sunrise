@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! An entity's state flags for native server mods, through an `EntityRef`
 //! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): sneaking and
 //! sprinting, water and lava, fire and air, silence, invisibility and pose.

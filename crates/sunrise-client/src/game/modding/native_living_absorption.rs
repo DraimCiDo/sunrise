@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A living entity's absorption amount for native server mods, through a
 //! `LivingRef` (docs/modding/src/how-to/native-mods.md, "Entity and level
 //! handles"): `LivingEntity.getAbsorptionAmount` and `setAbsorptionAmount`.

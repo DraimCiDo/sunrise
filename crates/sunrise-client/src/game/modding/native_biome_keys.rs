@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Typed biome identities belong to the same installed snapshot as data maps.
 use super::Game;
 impl Game<'_> {

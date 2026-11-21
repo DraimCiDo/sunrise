@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Headless proof of the generated Host bridge and the ordinary particle queue.
 use super::{Game, execution_role::ExecutionRole};
 use mod_api::ClientHost;

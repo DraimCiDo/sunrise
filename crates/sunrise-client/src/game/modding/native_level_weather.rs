@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Weather writes for native server mods through a `LevelRef`, on the same path as
 //! `/weather`: `ServerLevel.setWeatherParameters` with the weather and thunder hooks, and
 //! `Level.setRainLevel` / `setThunderLevel` for how strong the rain and thunder are now. Like

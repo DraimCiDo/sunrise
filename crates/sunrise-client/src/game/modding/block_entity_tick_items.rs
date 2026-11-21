@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Engine-owned proposals; these never mutate world storage before tick acceptance.
 use super::Game;
 use sunrise_client::{

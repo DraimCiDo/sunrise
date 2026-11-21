@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Still-fluid boxes under a block entity's pose (`BlockEntityDrawContext::fluid_box`), drawn
 //! with their own sorted translucent material (`FLUID_OVERLAY`).
 use super::{Game, native_block_entity_draw::BlockEntityDraw};

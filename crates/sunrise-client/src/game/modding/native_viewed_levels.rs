@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A client mod's reads of the levels the server opened for viewing (#3981, gap 10), as Immersive
 //! Portals' `ClientWorldLoader.getWorld(dim)` hands out the far `ClientLevel`: on a client,
 //! `host.level(dim)` also names each level the server keeps open on `sunrise:levels`, and

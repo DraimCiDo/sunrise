@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Particle keys cross the game boundary through the load-resolved provider table.
 use super::{TryIntoApi, TryIntoEngine};
 use mod_api::{__private::ParticleKind, ParticleOptions as ApiOptions};

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! An entity's sounds, game events, entity events and spectator state for
 //! native server mods, through an `EntityRef` (docs/modding/src/how-to/native-mods.md, "Entity
 //! and level handles"): `Entity.playSound`, `gameEvent`,

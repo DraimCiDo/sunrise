@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Shared listener and resource fixture for independent projectile impact tests.
 use crate::game::{
     Game,

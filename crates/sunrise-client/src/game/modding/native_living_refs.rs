@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Living entities for native server mods, through a `LivingRef`
 //! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): the equipment
 //! of mobs, players and armor stands, throwing a stack, and whether a mob

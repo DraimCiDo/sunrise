@@ -1,4 +1,5 @@
 // game-module-visibility: pub
+//! stable-line: no-content-declarations
 //! Client draw operations through the existing GUI drawing context.
 
 use super::Game;

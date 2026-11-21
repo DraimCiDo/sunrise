@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Mod menu slots backed by storage that is not a block entity (arismoko/horizon#3385):
 //! NeoForge 26.3's `StackCopySlot` and `ResourceHandlerSlot`. A mod opens its menu with
 //! `player_open_mod_menu` (#3384) and backs its container slots with

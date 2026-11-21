@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! `GuiDraw::Item` for the hotbar and a mod's `gui_paint`: one path, `hud_layout::paint_items`,
 //! with the local player's hotbar slots drawn as `extractSlot` draws them (`item`, then
 //! `itemDecorations`). A mod's buffer is checked first and refused whole with the op it could

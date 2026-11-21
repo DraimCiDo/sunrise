@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Column reads for server mods, as helpers on the level being ticked: many columns' heights, and the blocks round
 //! them, in one call.
 use super::Game;

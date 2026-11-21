@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Determines which entity reads can use the ordinary game backend while a
 //! mob tick has its active and other mobs on loan.
 use super::{GoalCx, Resolved};

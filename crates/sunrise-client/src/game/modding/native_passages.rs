@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Passages within one level (#3775, docs/modding/src/how-to/passages.md): the server's
 //! registry a mod fills through `LevelRef::register_passage`, its sync to the Sunrise
 //! clients that hold each passage's chunk (`sunrise:passage_sync`, sent with the chunk

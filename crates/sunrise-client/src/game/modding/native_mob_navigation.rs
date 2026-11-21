@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Navigation helpers for native mod mob handles.
 use super::{Game, commands::Target};
 use mod_api::{MobRef, MoveToPathError, PathType};

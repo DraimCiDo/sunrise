@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The live player and menu witness used across mod callbacks.
 use super::*;
 use mod_api::__private::game::Fields;

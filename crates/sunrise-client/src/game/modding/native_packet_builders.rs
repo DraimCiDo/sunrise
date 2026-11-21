@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The client host builds hashed container clicks with its connection registries.
 use super::Game;
 use mod_api::{ContainerClickRequest, PacketBuildError, ServerboundPlayPacket};

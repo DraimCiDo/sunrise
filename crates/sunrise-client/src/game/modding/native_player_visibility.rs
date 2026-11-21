@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Whether one player's client is shown another, by the rules the entity tracker follows, and a
 //! block-change acknowledgement and a block shown to one player.
 use super::{Game, native_server::PlayerRead};

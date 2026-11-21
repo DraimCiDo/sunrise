@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Projectile handles for native server mods: owner, deflection, and an
 //! arrow's pickup, damage and critical flag. They cover the projectile list
 //! and the player-thrown tridents and firework rockets, which Sunrise keeps

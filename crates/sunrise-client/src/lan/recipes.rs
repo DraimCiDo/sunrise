@@ -3,6 +3,9 @@
 //! table slot and brewing stand slot accepts) and the stonecutter's recipes,
 //! read from the data pack's recipe files.
 use super::data::SyncData;
+#[path = "recipes/declarations.rs"]
+mod declarations;
+use declarations::flat;
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -131,33 +134,6 @@ pub(super) fn network_recipes(
         .map(|(id, r)| (id, r.to_string().into_boxed_str()))
         .collect();
     Ok((all, groups))
-}
-
-/// An ingredient object's flat item list: the shape NeoForge's standard
-/// kinds resolve to, or a brewing predicate's `item`. `None`: the object is
-/// a kind the loader does not know, a mod's own.
-fn flat(ing: &Value, items: &sunrise_client::items::Items) -> Option<Value> {
-    if !ing.is_object() {
-        return None;
-    }
-    let value = if ing
-        .get("type")
-        .or_else(|| ing.get("neoforge:ingredient_type"))
-        .is_some()
-    {
-        ing
-    } else {
-        // Only an untyped brewing wrapper gives `item` a structural meaning.
-        ing.get("item").unwrap_or(ing)
-    };
-    let parsed = sunrise_client::crafting::Ingredient::parse(value, items)?;
-    Some(Value::Array(
-        parsed
-            .order
-            .iter()
-            .map(|i| Value::String(i.clone()))
-            .collect(),
-    ))
 }
 
 /// Replace each of a recipe's ingredient objects with its flat item list,

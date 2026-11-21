@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The general entity renderer used by the integrated scene.
 use mod_api::{
     AttachmentCodec, AttachmentError, AttachmentType, BlockEntityDrawContext, EntityRenderState,

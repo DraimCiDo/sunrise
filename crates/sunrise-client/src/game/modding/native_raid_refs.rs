@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Raid handles for native server mods (`Raid`, `Raids`). Sunrise keeps the
 //! raids of current and parked server levels. Earlier opens, closed levels
 //! and client reads return `None` or `false`.

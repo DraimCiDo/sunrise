@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! `entity_size` (`EntityEvent.Size`): vanilla's `Entity.refreshDimensions` lets a listener
 //! change the size it just computed, whenever the pose changes and from the constructor; a
 //! player's standing, crouching and swimming candidates are also resolved before its motion, for

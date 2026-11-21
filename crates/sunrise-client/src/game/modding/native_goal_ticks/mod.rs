@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The mod goal context of a mob's tick (arismoko/horizon#1077): the reads a
 //! goal makes through `GoalContext::host` answer the ticking mob itself, the
 //! player the tick sees and the tick's snapshot of the other entities — the

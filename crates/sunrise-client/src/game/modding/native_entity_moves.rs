@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! Moving and turning an entity for native server mods, through an
 //! `EntityRef` (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387):
 //! teleport, collided moves, rotation, head and body yaw, facing, size and pushes. Writes move the

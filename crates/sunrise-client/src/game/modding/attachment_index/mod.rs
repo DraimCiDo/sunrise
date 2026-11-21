@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Per-dimension attachment indexes, retained independently of level swaps.
 
 use super::{Dim, Game};

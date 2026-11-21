@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The item panel beside container screens: the items a recipe viewer mod
 //! lists through `panel_items`, drawn as the game's own item slots
 //! in pages right of the screen's window, with a search box under them. The

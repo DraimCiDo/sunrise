@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Bulk block edits for server mods: a helper on the level being ticked, as `native_set_block` is, that makes many
 //! runs of blocks up columns at once, straight into the chunks.
 use super::Game;

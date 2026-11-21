@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Moving colliders for native mods (`EntityRef::set_collider`): the boxes an entity carries
 //! that every other entity collides with, kept on the server, saved with the entity, and sent
 //! to the Sunrise clients that track it.

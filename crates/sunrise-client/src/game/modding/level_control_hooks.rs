@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Which level-control hooks this thread is hearing, so a mod's setter called from inside its
 //! own hook is refused instead of firing that hook again without end: `weather_change` and
 //! `thunder_change` for `set_weather`, `world_border_center_changed` and

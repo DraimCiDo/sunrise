@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Hidden crafting recipe knowledge for /recipe, without recipe-book displays.
 use crate::game::Game;
 impl Game<'_> {

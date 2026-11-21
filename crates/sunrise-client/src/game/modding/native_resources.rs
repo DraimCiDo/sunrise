@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Resource reads for native mods through the game's selected pack stacks.
 use super::Game;
 use mod_api::{Identifier, PackType};

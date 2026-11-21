@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 use super::super::{TryIntoApi, TryIntoEngine};
 use mod_api::ArmPose as Api;
 use sunrise_core::arm_pose::ArmPose as Engine;

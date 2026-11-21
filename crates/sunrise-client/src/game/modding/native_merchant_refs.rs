@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Merchant handles for native server mods: villagers and wandering traders.
 use super::{Game, commands::Target};
 use mod_api::{EntityRef, MerchantRef, PlayerRef};

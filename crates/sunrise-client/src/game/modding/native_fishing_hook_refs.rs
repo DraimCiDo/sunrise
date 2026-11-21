@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Fishing-hook handles for native server mods. A cast hook lives with the
 //! player who cast it, not in a level list, so a handle finds it through them.
 use super::{Game, commands::Target};

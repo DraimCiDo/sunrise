@@ -1,3 +1,4 @@
+//! stable-line: decodes-other-data
 //! `RegistryAccess.lookup` and `HolderLookup.listElements` on the current side's actual tables.
 use super::Game;
 use mod_api::RegistryEntry;

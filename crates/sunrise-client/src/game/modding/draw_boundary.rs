@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Shared CPU submission limits. A quad uses four vertices and six u32 indices.
 //! This is the index-addressable maximum, not an arbitrary content limit.
 pub(super) const MAX_DRAW_VERTICES: usize = (u32::MAX as usize / 6) * 4;

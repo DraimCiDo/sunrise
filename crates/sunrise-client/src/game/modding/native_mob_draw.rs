@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Mobs and players drawn with the mods' render hooks on the client, the pair NeoForge has around
 //! a living entity's render: `render_player_pre` (a player's, `RenderPlayerEvent.Pre`) then
 //! `render_living_pre` (`RenderLivingEvent.Pre`) before its model, each with the entity's render

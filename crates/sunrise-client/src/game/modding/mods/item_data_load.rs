@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 use super::*;
 use sunrise_world::native_load_context::DataLoadOrigin;
 

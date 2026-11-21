@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The notices a side's freshly bound data gives mods, in NeoForge's order.
 use super::Game;
 

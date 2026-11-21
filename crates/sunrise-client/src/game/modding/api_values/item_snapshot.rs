@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Active item ownership retained across a mutable listener dispatch.
 use super::Items;
 use std::{ops::Deref, sync::Arc};

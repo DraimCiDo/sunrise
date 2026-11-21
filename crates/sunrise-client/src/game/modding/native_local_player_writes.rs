@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A client mod's writes to the player it moves itself, before the tick's own move.
 //! Nothing is sent; the server hears of the result in the normal position report.
 use super::Game;

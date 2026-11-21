@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Registered effect metadata reads.
 use super::Game;
 

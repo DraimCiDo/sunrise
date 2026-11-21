@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A block entity Part whose tick exercises the Part state accessors.
 use mod_api::*;
 

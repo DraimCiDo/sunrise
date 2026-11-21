@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Validate registered destination roles before publishing content menu types.
 use mod_api::RecipeBookLayout;
 use sunrise_client::recipe_book::{

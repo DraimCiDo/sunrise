@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Sounds and particles in a level for native server mods, through a
 //! `LevelRef` (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387).
 //! Every player in range hears or sees them, as `ServerLevel.playSound` and

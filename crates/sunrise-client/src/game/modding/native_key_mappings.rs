@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The keys mods register (`Registrar::register_key_mapping`) as plain `KeyMapping`s: held while
 //! their binding is down and counting its presses for `consume_click`. Keys reach them on one
 //! route with `input_key`, from the window and the control socket alike; mouse buttons from the

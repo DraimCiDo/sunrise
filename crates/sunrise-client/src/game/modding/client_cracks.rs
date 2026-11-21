@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Client crack state belongs to one level and expires independently of new updates.
 use super::{Game, Mining};
 

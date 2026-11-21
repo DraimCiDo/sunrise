@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! `entity_entering_section` (`EntityEvent.EnteringSection`): vanilla tells it from
 //! `Entity.setPosRaw`, whose `EntityInLevelCallback.onMove` (`PersistentEntitySectionManager`'s
 //! callback on a server, `TransientEntitySectionManager`'s on a client) compares the section the

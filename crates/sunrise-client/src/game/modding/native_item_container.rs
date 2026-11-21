@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Items held by item stacks for native mods (docs/modding/src/how-to/native-mods.md): a mod's
 //! backpacks, storage cells and toolboxes (`native_item_container`), read,
 //! filled and emptied. NeoForge's `Capabilities.Item.ITEM` is a

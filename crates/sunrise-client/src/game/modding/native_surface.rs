@@ -1,4 +1,5 @@
 // game-module-visibility: pub(crate)
+//! stable-line: no-content-declarations
 //! The `friction` Part method (`IBlockExtension.getFriction`). The client library asks through
 //! `native_client_hooks`; only a state whose block has a subscribing part is converted.
 use super::api_values::{TryIntoApi, TryIntoEngine, block_state};

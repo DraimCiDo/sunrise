@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Native biome source adapter: the mods' `BiomeSource`s as the engine's.
 use mod_api::BiomeSource;
 use std::sync::Arc;

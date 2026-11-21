@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 use super::Game;
 use mod_api::GameRuleReadError;
 use sunrise_client_core::gamerules::Value as GameRuleValue;

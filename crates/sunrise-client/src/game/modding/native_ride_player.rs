@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! A mob riding a server player (`Entity.startRiding` with a player as the
 //! vehicle), for `EntityRef::ride_player` only (#4456): Tinkers' Construct's
 //! piggyback pack seats a mob on its wearer. `EntityRef::start_riding` keeps
