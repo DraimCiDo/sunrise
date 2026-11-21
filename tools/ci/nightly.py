@@ -54,6 +54,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -836,41 +837,73 @@ def require_stable_lineage(sha: str, tag: str, old_sha: str, old_tag: str) -> No
                          "cherry-pick fixes on this line or use a new major")
 
 
-# A line keeps loading the content mods it loaded: the corpus holds manifests and declarations, one folder per entry,
-# and the golden file of each entry holds what the readers make of it (kept true by the content_golden test of
-# sunrise-mod-package). Within a line an entry's files and golden file never change or go; new entries may come.
-CONTENT_CORPUS = "crates/sunrise-mod-package/tests/content-corpus/"
-CONTENT_GOLDEN = "crates/sunrise-mod-package/tests/content-golden/"
-# The one way a patch or minor changes an entry on purpose (a parity fix): a line here that names the release and the
-# entry, "- `<tag>` `<entry>`: <why>". It is copied into the release's notes.
+# A line keeps loading the content mods it loaded. The corpus holds manifests and declarations, one folder per entry;
+# the golden file of each entry holds what the readers make of it; the driver (the content_golden test of
+# sunrise-mod-package) re-reads the corpus and compares. A candidate is judged by its parent release's corpus, golden
+# files and driver, laid over the candidate's tree, so nothing the candidate commits there can change the verdict:
+# only its reader crates run. The candidate's own additions to the corpus are not judged until it is a parent.
+CONTENT_CORPUS = "crates/sunrise-mod-package/tests/content-corpus"
+CONTENT_GOLDEN = "crates/sunrise-mod-package/tests/content-golden"
+CONTENT_DRIVER = "crates/sunrise-mod-package/tests/content_golden.rs"
+# The record of each deliberate change, "- `<tag>` `<entry>`: <why>", copied into the release's notes. A record,
+# not the permission: that is CONTENT_CHANGE with both break-glass environments' approvals.
 CONTENT_CHANGES = "docs/content-declaration-changes.md"
 
 
-def require_stable_content(sha: str, tag: str, old_sha: str, old_tag: str, notes: Path) -> None:
-    status = subprocess.run(["git", "diff", "--name-status", "-z", "--no-renames", old_sha, sha, "--",
-                             CONTENT_CORPUS, CONTENT_GOLDEN], cwd=REPOSITORY, check=True, capture_output=True,
-                            text=True).stdout.split("\0")
-    changed = set()
-    for kind, path in zip(status[::2], status[1::2]):
-        if kind != "A":
-            entry = path.removeprefix(CONTENT_CORPUS).split("/")[0] if path.startswith(CONTENT_CORPUS) else path
-            changed.add(entry.removeprefix(CONTENT_GOLDEN).removesuffix(".txt"))
+def changed_content(sha: str, old_sha: str, old_tag: str, work: Path) -> list[str]:
+    """The corpus entries of `old_sha` that `sha`'s readers no longer load as `old_sha`'s golden files say."""
+    tree, report = work / "content-tree", work / "content-changed.txt"
+    unpack(sha, tree)
+    for theirs in (CONTENT_CORPUS, CONTENT_GOLDEN, CONTENT_DRIVER):
+        path = tree / theirs
+        shutil.rmtree(path) if path.is_dir() else path.unlink(missing_ok=True)
+    judge = subprocess.Popen(["git", "archive", old_sha, "--", CONTENT_CORPUS, CONTENT_GOLDEN, CONTENT_DRIVER],
+                             cwd=REPOSITORY, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    laid = subprocess.run(["tar", "-x", "-C", str(tree)], stdin=judge.stdout, capture_output=True)
+    judge.stdout.close()
+    problem = judge.stderr.read().decode().strip()
+    if judge.wait():
+        raise SystemExit(f"::error::refused: {old_tag} has no content corpus to judge by: {problem}")
+    if laid.returncode:
+        raise SystemExit(f"::error::{old_tag}'s content corpus could not be unpacked: {laid.stderr.decode().strip()}")
+    done = subprocess.run(["cargo", "test", "--locked", "--quiet", "-p", "sunrise-mod-package", "--test",
+                           "content_golden", "--target-dir", str(work / "content-target")], cwd=tree,
+                          env=isolated_env() | {"SUNRISE_CONTENT_GOLDEN_REPORT": str(report)}, capture_output=True,
+                          text=True)
+    changed = report.read_text().split() if report.exists() else []
+    if done.returncode and not changed:
+        # Not built, or stopped before comparing: within a line the parent's driver must run on the candidate's crates.
+        raise SystemExit(f"::error::refused: {old_tag}'s content check cannot judge {sha}: "
+                         f"{(done.stderr or done.stdout).strip()[-2000:]}")
+    return sorted(changed) if done.returncode else []
+
+
+def require_stable_content(sha: str, tag: str, old_sha: str, old_tag: str, notes: Path, work: Path) -> None:
+    changed = changed_content(sha, old_sha, old_tag, work)
     if not changed:
         return
+    names = ", ".join(changed)
+    if not " ".join(os.environ.get("CONTENT_CHANGE", "").split()):
+        raise SystemExit(f"::error::refused: {tag} changes how content declarations of {old_tag} load: {names}. A "
+                         "patch or minor loads every entry of its parent's corpus as the parent did; a deliberate "
+                         "change is dispatched with content_change (why) and approved in both break-glass "
+                         "environments")
     listed = subprocess.run(["git", "show", f"{sha}:{CONTENT_CHANGES}"], cwd=REPOSITORY, capture_output=True, text=True)
     declared = {}
     for line in listed.stdout.splitlines():
-        if match := re.fullmatch(r"- `([^`]+)` `([^`]+)`: (\S.*)", line):
-            if match[1] == tag:
-                declared[match[2]] = line
-    if missing := sorted(changed - declared.keys()):
-        raise SystemExit(f"::error::refused: {tag} changes how content declarations load since {old_tag}: "
-                         f"{', '.join(missing)}. A patch or minor keeps every corpus entry and its golden file as they "
-                         f"were; a deliberate change needs its line in {CONTENT_CHANGES}: "
+        if (match := re.fullmatch(r"- `([^`]+)` `([^`]+)`: (\S.*)", line)) and match[1] == tag:
+            declared[match[2]] = line
+    if missing := sorted(set(changed) - declared.keys()):
+        raise SystemExit(f"::error::refused: {tag} changes how content declarations of {old_tag} load without their "
+                         f"record in {CONTENT_CHANGES}: {', '.join(missing)}. Each needs a line "
                          f"- `{tag}` `<entry>`: <why>")
+    approvals = ["not approved yet: checked again, with both approvals, before the tag"]
+    if os.environ.get("CONTENT_CHANGE_APPROVALS") == "required":
+        approvals = train.break_glass_approvals(os.environ["GITHUB_RUN_ID"], os.environ["GITHUB_RUN_ATTEMPT"])
     with notes.open("a", encoding="utf-8") as out:
         out.write(f"\n### Changed content declarations\n\nCompared with `{old_tag}`:\n\n"
-                  + "".join(f"{declared[entry]}\n" for entry in sorted(changed)))
+                  + "".join(f"{declared[entry]}\n" for entry in changed)
+                  + "\nApproved by: " + "; ".join(approvals) + "\n")
 
 
 def unpack(sha: str, into: Path) -> None:
@@ -917,9 +950,10 @@ def stable_mod_api(sha: str, tag: str, notes: Path) -> None:
         raise SystemExit(f"::error::refused: a break-glass release is a patch of {old_tag}, not {tag}")
     if same_line:
         require_stable_lineage(sha, tag, old_sha, old_tag)
-        require_stable_content(sha, tag, old_sha, old_tag, notes)
     with tempfile.TemporaryDirectory() as directory:
         work = Path(directory)
+        if same_line:
+            require_stable_content(sha, tag, old_sha, old_tag, notes, work)
         before, after = work / "before.json", work / "after.json"
         old_content, old_functions = stable_sdk_inputs(old_sha, before if same_line else None)
         new_content, new_functions = stable_sdk_inputs(sha, after if same_line else None)

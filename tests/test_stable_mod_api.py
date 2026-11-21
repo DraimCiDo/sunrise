@@ -67,6 +67,7 @@ class StableModApiTests(unittest.TestCase):
                                                                 side_effect=signed_release_file))
         self.stage = self.enterContext(mock.patch.object(nightly, "parent_stage", return_value=TOOL))
         self.unpacked = []
+        self.unpack = nightly.unpack
         self.enterContext(mock.patch.object(nightly, "unpack",
                                             side_effect=lambda sha, into: self.unpacked.append((sha, into.name))))
 
@@ -372,75 +373,98 @@ class StableModApiTests(unittest.TestCase):
         with chdir(checkout), mock.patch.object(nightly, "REPOSITORY", checkout):
             nightly.require_stable_lineage(candidate, "26.3-0.1.11", previous, PREVIOUS)
 
-    def test_a_line_keeps_its_content_corpus_and_golden_files(self):
+    def test_a_line_loads_its_parents_content_corpus_as_the_parent_did(self):
         repo = self.notes.with_name("repo")
         repo.mkdir()
-        corpus, golden = nightly.CONTENT_CORPUS, nightly.CONTENT_GOLDEN
+        entry = f"{nightly.CONTENT_CORPUS}/blocks/sunrise-mod.toml"
+        golden = f"{nightly.CONTENT_GOLDEN}/blocks.txt"
+        judged = (entry, golden, nightly.CONTENT_DRIVER)
+        reader = "crates/sunrise-mod-package/src/content.rs"
         tags = ("26.3-0.1.11", "26.3-0.2.0")
 
-        def commit(name, text):
-            if text is None:
-                nightly.git("rm", "-q", name)
-            else:
+        def commit(files):
+            for name, text in files.items():
                 Path(name).parent.mkdir(parents=True, exist_ok=True)
                 Path(name).write_text(text)
                 nightly.git("add", name)
-            nightly.git("commit", "-m", name)
+            nightly.git("commit", "-m", "next")
             return nightly.git("rev-parse", "HEAD")
 
         with chdir(repo), mock.patch.object(nightly, "REPOSITORY", repo):
-            git = nightly.git
-            git("init", "--initial-branch=main")
-            git("config", "user.name", "Release Test")
-            git("config", "user.email", "release-test@example.invalid")
-            for entry in ("blocks", "items", "refused_key"):
-                commit(f"{corpus}{entry}/sunrise-mod.toml", "id = 'a'\n")
-                previous = commit(f"{golden}{entry}.txt", "loaded\n")
-            # A reader fix that changes nothing a mod wrote, and a new entry, are free.
-            commit("crates/sunrise-mod-package/src/content.rs", "// fixed\n")
-            commit(f"{corpus}fluids/data/a/fluid.json", "{}\n")
-            additions = commit(f"{golden}fluids.txt", "loaded\n")
-            reread = commit(f"{golden}blocks.txt", "loaded differently\n")
-            rewritten = commit(f"{corpus}items/sunrise-mod.toml", "id = 'b'\n")
-            removed = commit(f"{golden}refused_key.txt", None)
-            # Deliberate changes, named for each release that may carry them; one entry is still unnamed.
-            lines = "".join(f"- `{tag}` `{entry}`: vanilla parity fix\n" for tag in tags for entry in ("blocks", "items"))
-            partly_named = commit(nightly.CONTENT_CHANGES, "# Changes\n\n" + lines)
-            named = commit(nightly.CONTENT_CHANGES, "# Changes\n\n" + lines
-                           + "".join(f"- `{tag}` `refused_key`: no longer refused\n" for tag in tags))
-            # Keep the checkout elsewhere to prove the check reads the passed commits.
-            git("switch", "--detach", previous)
+            nightly.git("init", "--initial-branch=main")
+            nightly.git("config", "user.name", "Release Test")
+            nightly.git("config", "user.email", "release-test@example.invalid")
+            bare = commit({reader: "parent"})
+            previous = commit({name: "parent" for name in judged})
+            # The candidate rewrites everything it is judged by, and adds an entry of its own.
+            candidate = commit({reader: "candidate", f"{nightly.CONTENT_CORPUS}/fluids/sunrise-mod.toml": "new",
+                                **{name: "candidate" for name in judged}})
+            record = "".join(f"- `{tag}` `blocks`: vanilla parity fix\n" for tag in tags)
+            recorded = commit({nightly.CONTENT_CHANGES: "# Changes\n\n" + record})
+            nightly.git("switch", "--detach", bare)
 
-        parent = nightly.train.Release(PREVIOUS, previous, "")
         run = subprocess.run
         judge = self.judge(SURFACE, SURFACE)
+        verdict = {"changed": [], "fails": False}
 
-        def judge_or_git(args, **kwargs):
-            return judge(args, **kwargs) if args[0] == TOOL else run(args, **kwargs)
+        def tools(args, **kwargs):
+            if args[0] == TOOL:
+                return judge(args, **kwargs)
+            if args[:2] != ["cargo", "test"]:
+                return run(args, **kwargs)
+            # The parent's corpus, golden files and driver over the candidate's readers, and nothing of the
+            # candidate's in their place.
+            tree = Path(kwargs["cwd"])
+            self.assertEqual([(tree / name).read_text() for name in judged], ["parent"] * 3)
+            self.assertFalse((tree / nightly.CONTENT_CORPUS / "fluids").exists())
+            self.assertEqual((tree / reader).read_text(), "candidate")
+            self.assertEqual(args[2:8], ["--locked", "--quiet", "-p", "sunrise-mod-package", "--test", "content_golden"])
+            if verdict["fails"]:
+                return subprocess.CompletedProcess(args, 101, "", "error[E0425]: cannot find function")
+            Path(kwargs["env"]["SUNRISE_CONTENT_GOLDEN_REPORT"]).write_text("".join(f"{e}\n" for e in verdict["changed"]))
+            return subprocess.CompletedProcess(args, 101 if verdict["changed"] else 0, "", "")
 
+        def check(sha, tag, parent=previous, **environment):
+            self.notes.write_text("Existing notes.\n")
+            with mock.patch.dict(nightly.os.environ, {"BREAK_GLASS": "false", "GITHUB_RUN_ID": "7",
+                                                      "GITHUB_RUN_ATTEMPT": "1", **environment}), \
+                    mock.patch.object(nightly, "stable_parent",
+                                      return_value=nightly.train.Release(PREVIOUS, parent, "")):
+                nightly.stable_mod_api(sha, tag, self.notes)
+            return self.notes.read_text()
+
+        approvals = ["@umceko (break-glass-umceko): ok", "@arismoko (break-glass-aria): ok"]
         with mock.patch.object(nightly, "REPOSITORY", repo), \
-                mock.patch.object(nightly, "stable_parent", return_value=parent), \
                 mock.patch.object(nightly, "require_stable_lineage"), \
-                mock.patch.dict(nightly.os.environ, {"BREAK_GLASS": "false"}), \
                 mock.patch.object(nightly, "released_assets",
                                   side_effect=lambda sha, *names: sdk_assets(sha, SURFACE, "1", {})), \
-                mock.patch.object(nightly.subprocess, "run", side_effect=judge_or_git):
+                mock.patch.object(nightly.train, "break_glass_approvals", return_value=approvals) as approved, \
+                mock.patch.object(nightly, "unpack", side_effect=lambda sha, into: self.unpack(sha, into)
+                                  if into.name == "content-tree" else None), \
+                mock.patch.object(nightly.subprocess, "run", side_effect=tools):
             for tag in tags:
                 with self.subTest(tag=tag):
-                    nightly.stable_mod_api(additions, tag, self.notes)
-                    self.assertNotIn("Changed content declarations", self.notes.read_text())
-                    before = self.notes.read_text()
-                    for candidate, entries in ((reread, ["blocks"]), (rewritten, ["blocks", "items"]),
-                                               (removed, ["blocks", "items", "refused_key"]),
-                                               (partly_named, ["refused_key"])):
-                        with self.assertRaisesRegex(SystemExit, "changes how content declarations load") as refused:
-                            nightly.stable_mod_api(candidate, tag, self.notes)
-                        named_entries = str(refused.exception).split("since")[1].split(". A patch")[0]
-                        self.assertEqual(named_entries.split(": ")[1].split(", "), entries)
-                    nightly.stable_mod_api(named, tag, self.notes)
-                    self.assertIn(f"- `{tag}` `refused_key`: no longer refused\n", self.notes.read_text())
-                    self.notes.write_text(before)
-            nightly.stable_mod_api(removed, "26.3-1.0.0", self.notes)
+                    verdict.update(changed=[], fails=False)
+                    self.assertNotIn("Changed content declarations", check(candidate, tag))
+                    with self.assertRaisesRegex(SystemExit, "has no content corpus to judge by"):
+                        check(candidate, tag, parent=bare)
+                    verdict.update(fails=True)
+                    with self.assertRaisesRegex(SystemExit, "content check cannot judge .* cannot find function"):
+                        check(candidate, tag)
+                    verdict.update(changed=["blocks"], fails=False)
+                    with self.assertRaisesRegex(SystemExit, "changes how content declarations of .* load: blocks\\."):
+                        check(recorded, tag)
+                    with self.assertRaisesRegex(SystemExit, "without their record in .*: blocks\\."):
+                        check(candidate, tag, CONTENT_CHANGE="parity fix")
+                    approved.assert_not_called()
+                    self.assertIn("not approved yet", check(recorded, tag, CONTENT_CHANGE="parity fix"))
+                    approved.assert_not_called()
+                    notes = check(recorded, tag, CONTENT_CHANGE="parity fix", CONTENT_CHANGE_APPROVALS="required")
+                    approved.assert_called_once_with("7", "1")
+                    approved.reset_mock()
+                    self.assertIn(f"- `{tag}` `blocks`: vanilla parity fix\n\nApproved by: {'; '.join(approvals)}\n", notes)
+            verdict.update(changed=["blocks"])
+            self.assertNotIn("Changed content declarations", check(candidate, "26.3-1.0.0"))
 
     def test_stable_mod_api_command_requires_a_full_commit_sha(self):
         for sha in ("HEAD", HEAD[:12], HEAD.upper()):

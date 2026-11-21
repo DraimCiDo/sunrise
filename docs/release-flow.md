@@ -482,22 +482,30 @@ in a patch.
 
 Content mods are held by what loads, not by which files changed. `crates/sunrise-mod-package/tests/content-corpus/`
 holds manifests and declarations, one folder per entry, including ones that must be refused;
-`crates/sunrise-mod-package/tests/content-golden/<entry>.txt` holds what the readers make of each: the loaded
-manifest and content, or the refusal text. The `content_golden` test of `sunrise-mod-package` (in `verify`) re-reads
-the corpus and fails when a golden file is out of date, so a change in reading shows as a changed golden file in
-the pull request that makes it. A patch or minor refuses a candidate in which any file of an existing entry, or its
-golden file, changed or disappeared since the parent release; new entries may be added in either. A reader fix
-that leaves every golden file alone ships freely.
+`crates/sunrise-mod-package/tests/content-golden/<entry>.txt` holds what the readers make of each (the loaded
+manifest and content, or the refusal text); the `content_golden` test of `sunrise-mod-package` re-reads the corpus
+and compares. On a pull request that test (in `verify`) fails when a golden file is out of date, so a change in
+reading shows as a changed golden file in the pull request that makes it.
 
-- **A deliberate change** (a parity fix that changes how an existing declaration loads) ships in a patch or minor
-  only with a line in [`docs/content-declaration-changes.md`](content-declaration-changes.md) naming the release and
-  the entry. The check refuses a changed entry without its line and copies the lines into the release's notes under
-  "Changed content declarations". Aria and umceko decide these; nobody else adds a line.
-- **Adding a field changes every golden file.** The golden text is the `Debug` form of the loaded values, so a
-  minor that adds a declaration field changes the entries of that kind and goes through the same named lines. The
-  rule does not depend on the form of the golden text; a later form may leave defaults out.
-- **A new declaration key comes with its corpus entry**, in the pull request that adds the key. A key with no
-  entry is not held by the check.
+A patch or minor is judged by its **parent release's** corpus, golden files and test, never its own: the check lays
+those three over the candidate's tree, taken from the parent's commit, and runs the test there, so only the
+candidate's reader crates run and nothing the candidate commits can change what it is compared with. Every entry of
+the parent's corpus must load exactly as the parent's golden file says. A parent test that no longer builds
+against the candidate's crates is a refusal too. Entries the candidate adds are not judged until it is a parent, so
+the corpus can grow in any release, and a reader fix that changes no entry ships freely.
+
+- **A deliberate change** (a parity fix that changes how an existing declaration loads) is dispatched with
+  `content_change` (why). The run then waits for umceko and Aria in the two break-glass environments, exactly as a
+  break-glass release does, and the check reads this run's first attempt's approvals itself before the tag; without
+  both it refuses. Each changed entry also needs its line in
+  [`docs/content-declaration-changes.md`](content-declaration-changes.md); the lines and the approvals are copied
+  into the release's notes under "Changed content declarations". The line is the record, the approvals are the gate.
+- **Adding a field changes golden files.** The golden text is the `Debug` form of the loaded values, and a refusal
+  can list the known keys, so a minor that adds a declaration field or key changes the entries of that kind and
+  goes through the same approval. The rule does not depend on the form of the golden text; a later form may leave
+  defaults out.
+- **A new declaration key comes with its corpus entry.** The `content_keys` test of `sunrise-mod-package` (in
+  `verify`) takes the keys from the reader types and fails when one appears in no entry.
 - **Not yet covered:** the corpus holds what `sunrise-mod-package` reads (the manifest and the typed declarations:
   blocks, items, effects, creative tabs, fluids, fluid interactions, entity types, menus). What the game reads
   from a content mod's other `data/` and `assets/` files (biome and structure modifiers, load conditions, global

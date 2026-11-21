@@ -101,6 +101,12 @@ on:
           It waits for both break-glass environments' approvals; empty for every other release
         type: string
         default: ''
+      content_change:
+        description: >-
+          A stable patch or minor that changes how an existing content declaration loads: why. It waits for both
+          break-glass environments' approvals; empty for every other release
+        type: string
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -261,6 +267,8 @@ jobs:
           SHA: ${{ steps.pick.outputs.sha }}
           TAG: ${{ steps.pick.outputs.tag }}
           BREAK_GLASS: ${{ steps.pick.outputs.break_glass }}
+          # Why a changed content declaration is deliberate; its two approvals are checked before the tag.
+          CONTENT_CHANGE: ${{ inputs.content_change }}
         run: |
           : > "$RUNNER_TEMP/mod-api.md"
           python3 tools/ci/nightly.py stable-mod-api "$SHA" "$TAG" "$RUNNER_TEMP/mod-api.md"
@@ -269,9 +277,13 @@ jobs:
   # each of which has that one person as its required reviewer (GitHub lets any one reviewer of an environment
   # approve). `break-glass` then reads the first attempt's recorded approvals and refuses unless each environment was
   # approved once, by its own approver (release_train.BREAK_GLASS_APPROVERS), and by nobody else. A dry run binds none.
+  # A stable release dispatched with `content_change` waits for the same two people: its publish job needs these jobs
+  # through `break-glass`, and stable-mod-api reads the approvals itself before the tag.
   break-glass-umceko:
     needs: pick
-    if: needs.pick.outputs.break_glass == 'true' && github.run_attempt == '1'
+    if: >-
+      (needs.pick.outputs.break_glass == 'true' || (inputs.kind == 'stable' && inputs.content_change != '')) &&
+      github.run_attempt == '1'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: ${{ needs.pick.outputs.publish == 'true' && 'break-glass-umceko' || '' }}
@@ -282,7 +294,9 @@ jobs:
         run: echo "### break-glass-umceko $SAID" >> "$GITHUB_STEP_SUMMARY"
   break-glass-aria:
     needs: pick
-    if: needs.pick.outputs.break_glass == 'true' && github.run_attempt == '1'
+    if: >-
+      (needs.pick.outputs.break_glass == 'true' || (inputs.kind == 'stable' && inputs.content_change != '')) &&
+      github.run_attempt == '1'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: ${{ needs.pick.outputs.publish == 'true' && 'break-glass-aria' || '' }}
@@ -586,6 +600,10 @@ jobs:
           SHA: ${{ needs.pick.outputs.sha }}
           TAG: ${{ needs.pick.outputs.tag }}
           BREAK_GLASS: ${{ needs.pick.outputs.break_glass }}
+          # A deliberate content declaration change ships only with both break-glass environments' approvals of this
+          # run's first attempt (release_train.break_glass_approvals); a dry run binds no environment.
+          CONTENT_CHANGE: ${{ inputs.content_change }}
+          CONTENT_CHANGE_APPROVALS: ${{ needs.pick.outputs.publish == 'true' && 'required' || '' }}
         run: python3 tools/ci/nightly.py stable-mod-api "$SHA" "$TAG" dist/nightly-notes.md
       - name: Publish as the stable release <target>-<semver>
         if: needs.pick.outputs.publish == 'true' && inputs.kind == 'stable'
