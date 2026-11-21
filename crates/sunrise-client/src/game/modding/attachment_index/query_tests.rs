@@ -89,7 +89,7 @@ fn query_writes_join_transaction_journal_without_implicit_commit() {
         VALUE.set(game, Holder::Chunk([2, 3]), 10).unwrap();
         let batch = game.query_mut(&VALUE).unwrap();
         let row = batch.iter().next().unwrap().unwrap();
-        let aborted: Result<(), ()> = game.transaction(|host, _| {
+        let aborted: Result<(), ()> = game.storage_transaction(|host, _| {
             row.set(host, 11).unwrap();
             assert_eq!(values(host), [11]);
             let current = host.query_mut(&VALUE).unwrap();
@@ -106,7 +106,7 @@ fn query_writes_join_transaction_journal_without_implicit_commit() {
         assert_eq!(aborted, Err(()));
         assert_eq!(values(game), [10]);
         assert_eq!(*row.value(), 10);
-        let committed: Result<(), ()> = game.transaction(|host, _| {
+        let committed: Result<(), ()> = game.storage_transaction(|host, _| {
             let current = host.query_mut(&VALUE).unwrap();
             current
                 .iter()

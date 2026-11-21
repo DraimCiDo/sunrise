@@ -545,24 +545,25 @@ fn an_outer_abort_undoes_an_accepted_grindstone_take() {
             script(Script::default());
 
             for commit in [false, true] {
-                let outer = game.transaction_open();
-                click(game, window, 2, 0);
-                assert_eq!(slot(game, 0), None);
-                assert_eq!(
-                    game.lan.as_ref().unwrap().hub.guests[0].carried,
-                    Some(ItemStack::new("minecraft:dirt", 1))
-                );
-                assert_eq!(game.orbs[game.orbs.locate(join).unwrap()].count, 2);
-                assert!(
-                    rx.try_recv().is_err(),
-                    "published station content before commit"
-                );
-                assert_eq!(
-                    game.lan_events.len(),
-                    events,
-                    "published level event before commit"
-                );
-                game.transaction_close(&outer, commit);
+                let _ = game.storage_transaction(|game, _| {
+                    click(game, window, 2, 0);
+                    assert_eq!(slot(game, 0), None);
+                    assert_eq!(
+                        game.lan.as_ref().unwrap().hub.guests[0].carried,
+                        Some(ItemStack::new("minecraft:dirt", 1))
+                    );
+                    assert_eq!(game.orbs[game.orbs.locate(join).unwrap()].count, 2);
+                    assert!(
+                        rx.try_recv().is_err(),
+                        "published station content before commit"
+                    );
+                    assert_eq!(
+                        game.lan_events.len(),
+                        events,
+                        "published level event before commit"
+                    );
+                    if commit { Ok(()) } else { Err(()) }
+                });
                 if !commit {
                     assert_eq!(slot(game, 0), Some(original.clone()));
                     assert_eq!(slot(game, 2), Some(ItemStack::new("minecraft:dirt", 1)));

@@ -375,28 +375,30 @@ fn a_container_move_keeps_one_slot_not_the_entity() {
             let items = level.capability(game, &ITEMS, [1, 64, 1], None).unwrap();
             let before = holder_state(game);
             // Moves as `move_once` makes them: each in its own transaction, nested in a root.
-            let root = game.transaction_open();
-            for _ in 0..50 {
-                for put in [true, false] {
-                    (game as &mut dyn ServerHost)
-                        .transaction(|host, tx| {
-                            let moved = if put {
-                                items.insert_at(host, tx, 0, &dirt(), 1)
-                            } else {
-                                items.extract_at(host, tx, 0, &dirt(), 1)
-                            };
-                            assert_eq!(moved, 1);
-                            Ok::<_, ()>(())
-                        })
-                        .unwrap();
+            game.storage_transaction(|game, _| {
+                for _ in 0..50 {
+                    for put in [true, false] {
+                        (game as &mut dyn ServerHost)
+                            .transaction(|host, tx| {
+                                let moved = if put {
+                                    items.insert_at(host, tx, 0, &dirt(), 1)
+                                } else {
+                                    items.extract_at(host, tx, 0, &dirt(), 1)
+                                };
+                                assert_eq!(moved, 1);
+                                Ok::<_, ()>(())
+                            })
+                            .unwrap();
+                    }
                 }
-            }
-            assert_eq!(
-                game.journal_kept(),
-                (0, 1),
-                "one slot kept, the entity not copied"
-            );
-            game.transaction_close(&root, false);
+                assert_eq!(
+                    game.journal_kept(),
+                    (0, 1),
+                    "one slot kept, the entity not copied"
+                );
+                Err::<(), _>(())
+            })
+            .unwrap_err();
             assert_eq!(holder_state(game), before);
             // A hopper's slot has its cooldown beside it: kept whole.
             let hopper = game
@@ -411,12 +413,14 @@ fn a_container_move_keeps_one_slot_not_the_entity() {
                 BlockEntity::for_block("minecraft:hopper").unwrap(),
             );
             let hopper = level.capability(game, &ITEMS, [3, 64, 1], None).unwrap();
-            let root = game.transaction_open();
-            (game as &mut dyn ServerHost)
-                .transaction(|host, tx| Ok::<_, ()>(hopper.insert_at(host, tx, 0, &dirt(), 1)))
-                .unwrap();
-            assert_eq!(game.journal_kept(), (1, 0));
-            game.transaction_close(&root, false);
+            game.storage_transaction(|game, _| {
+                (game as &mut dyn ServerHost)
+                    .transaction(|host, tx| Ok::<_, ()>(hopper.insert_at(host, tx, 0, &dirt(), 1)))
+                    .unwrap();
+                assert_eq!(game.journal_kept(), (1, 0));
+                Err::<(), _>(())
+            })
+            .unwrap_err();
             assert!(game.transactions.is_empty());
         });
     });
@@ -677,13 +681,15 @@ fn a_kept_slot_goes_back_only_into_the_block_entity_it_came_from() {
             // same kind at the same position must not receive the old chest's 64 stone.
             container_at(game, pos, "minecraft:chest");
             let items = level.capability(game, &ITEMS, at, None).unwrap();
-            let seal = game.transaction_open();
-            let tx = game.transaction_current().unwrap();
-            assert_eq!(items.extract_at(game, &tx, 0, &stone, 10), 10);
-            game.world
-                .block_entities
-                .replace(pos, BlockEntity::for_block("minecraft:chest").unwrap());
-            game.transaction_close(&seal, false);
+            game.storage_transaction(|game, _| {
+                let tx = game.transaction_current().unwrap();
+                assert_eq!(items.extract_at(game, &tx, 0, &stone, 10), 10);
+                game.world
+                    .block_entities
+                    .replace(pos, BlockEntity::for_block("minecraft:chest").unwrap());
+                Err::<(), _>(())
+            })
+            .unwrap_err();
             let slots = slots_at(game, pos).expect("the replacement chest's block entity");
             assert!(
                 slots.iter().all(Option::is_none),

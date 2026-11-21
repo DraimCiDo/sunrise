@@ -812,7 +812,7 @@ pub(in crate::game) mod tests {
             assert_eq!(renamed.score(game, ScoreHolder::Name("a".into())), None);
             // An aborted transaction puts the board back; a committed one keeps its writes.
             let before = game.score.board.clone();
-            let aborted: Result<(), ()> = game.transaction(|host, _| {
+            let aborted: Result<(), ()> = game.storage_transaction(|host, _| {
                 let temp = ScoreboardServerHost::add_objective(
                     host,
                     "temp",
@@ -830,7 +830,7 @@ pub(in crate::game) mod tests {
             assert_eq!(game.score.board, before);
             assert!(game.objective("temp").is_none());
             assert_eq!(renamed.name(game).as_deref(), Some("kills"));
-            let kept: Result<(), ()> = game.transaction(|host, _| {
+            let kept: Result<(), ()> = game.storage_transaction(|host, _| {
                 ScoreboardServerHost::add_objective(
                     host,
                     "temp",

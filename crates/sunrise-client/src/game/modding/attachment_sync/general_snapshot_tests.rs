@@ -89,9 +89,11 @@ fn a_general_row_always_has_a_first_snapshot_holding_what_it_holds_now() {
         assert_eq!(first.len(), 1);
         assert!(first[0].replace && first[0].changes.is_empty());
         // A client that pairs later is sent the value the row holds then.
-        let seal = game.transaction_open();
-        VALUE.set(store(game), Holder::Entity(id), 7).unwrap();
-        game.transaction_close(&seal, true);
+        game.storage_transaction(|game, _| {
+            VALUE.set(store(game), Holder::Entity(id), 7).unwrap();
+            Ok::<_, ()>(())
+        })
+        .unwrap();
         let late = game.attachment_snapshot(Holder::Entity(id));
         assert_eq!(late.len(), 1);
         assert!(late[0].replace);

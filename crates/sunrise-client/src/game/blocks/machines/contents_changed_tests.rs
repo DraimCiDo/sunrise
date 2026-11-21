@@ -234,7 +234,7 @@ fn explicit_notices_observe_tentative_writes_and_survive_abort() {
             );
             changes.0.lock().unwrap().clear();
             assert_eq!(
-                game.transaction(|host, tx| {
+                game.storage_transaction(|host, tx| {
                     assert_eq!(items.insert_at(host, tx, 0, &sticks, 2), 2);
                     assert!(
                         host.transaction(|host, inner| {
@@ -263,7 +263,7 @@ fn explicit_notices_observe_tentative_writes_and_survive_abort() {
             changes.0.lock().unwrap().clear();
             game.world.block_log = Some(Vec::new());
             assert!(
-                game.transaction(|host, tx| {
+                game.storage_transaction(|host, tx| {
                     assert_eq!(items.insert_at(host, tx, 0, &sticks, 4), 4);
                     for _ in 0..2 {
                         assert!(entity.set_changed(host).unwrap());
@@ -434,7 +434,7 @@ fn a_double_container_notifies_each_backing_block_once() {
             );
             changes.0.lock().unwrap().clear();
             assert_eq!(
-                game.transaction(|host, tx| {
+                game.storage_transaction(|host, tx| {
                     assert_eq!(items.insert_at(host, tx, 0, &sticks, 3), 3);
                     assert_eq!(items.insert_at(host, tx, 27, &sticks, 2), 2);
                     Ok::<_, ()>(())
@@ -484,7 +484,7 @@ fn a_native_types_payload_notifications_observe_each_write_before_commit() {
             let entity = game.block_entity(level, pos).unwrap();
             changes.0.lock().unwrap().clear();
             assert_eq!(
-                game.transaction(|host, _| {
+                game.storage_transaction(|host, _| {
                     for version in [11, 12] {
                         assert!(
                             entity
@@ -594,7 +594,7 @@ fn notices_come_in_first_write_order_once_each_whatever_the_journal_keeps() {
                 .unwrap(),
             );
             changes.0.lock().unwrap().clear();
-            let committed = game.transaction(|host, tx| {
+            let committed = game.storage_transaction(|host, tx| {
                 assert_eq!(first.insert_at(host, tx, 0, &sticks, 2), 2);
                 host.transaction(|host, inner| {
                     assert_eq!(second.insert_at(host, inner, 3, &sticks, 5), 5);
@@ -655,7 +655,7 @@ fn default_items_notifies_for_committed_mod_container_writes() {
             );
             changes.0.lock().unwrap().clear();
             assert_eq!(
-                game.transaction(|host, tx| {
+                game.storage_transaction(|host, tx| {
                     assert_eq!(items.insert_at(host, tx, 0, &stick, 32), 32);
                     Err::<(), _>(())
                 }),
@@ -666,7 +666,7 @@ fn default_items_notifies_for_committed_mod_container_writes() {
             assert!(!game.block_ticks.blocks.has_scheduled(comparator, kind));
 
             assert_eq!(
-                game.transaction(|host, tx| {
+                game.storage_transaction(|host, tx| {
                     assert_eq!(items.insert_at(host, tx, 0, &stick, 32), 32);
                     host.transaction(|host, inner| {
                         assert_eq!(items.insert_at(host, inner, 1, &stick, 32), 32);
@@ -943,7 +943,7 @@ fn bookshelf_abort_restores_items_flags_and_last_slot_but_keeps_issued_effects()
                 changes.0.lock().unwrap().clear();
                 game.world.modified.clear();
                 game.world.block_log = Some(Vec::new());
-                let aborted: Result<(), ()> = game.transaction(|host, tx| {
+                let aborted: Result<(), ()> = game.storage_transaction(|host, tx| {
                     match operation {
                         "insert" => {
                             assert_eq!(items.insert_at(host, tx, 2, &book, 1), 1);

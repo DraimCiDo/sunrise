@@ -201,7 +201,7 @@ fn mob_first_store_binds_and_nested_rollback_retires_authority() {
         let holder = Holder::Entity(id);
         assert_eq!(VALUE.get_existing(game, holder), Ok(None));
         assert!(!game.mobs[0].attachment_lifetime.is_bound());
-        let result: Result<(), AttachmentError> = game.transaction(|host, _| {
+        let result: Result<(), AttachmentError> = game.storage_transaction(|host, _| {
             VALUE.set(host, holder, 7)?;
             let index = host.attachment_indexes[&Dim::Overworld].clone();
             assert_eq!(
@@ -318,7 +318,7 @@ fn mob_inner_first_binding_commit_outer_abort_invalidates_retained_row() {
         let id = game.load_mob(Tag::Compound(tag), None).unwrap();
         let holder = Holder::Entity(id);
         let mut retained = None;
-        let result: Result<(), AttachmentError> = game.transaction(|host, _| {
+        let result: Result<(), AttachmentError> = game.storage_transaction(|host, _| {
             let inner: Result<(), AttachmentError> = host.transaction(|host, _| {
                 VALUE.set(host, holder, 13)?;
                 retained = Some(host.query_mut(&VALUE).unwrap());

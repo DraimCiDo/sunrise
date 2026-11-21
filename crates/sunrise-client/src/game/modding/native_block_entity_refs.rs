@@ -1060,7 +1060,7 @@ mod tests {
             });
             assert_eq!(original.set_data_slots(game, vec![7]), Ok(true));
             let mut tentative = None;
-            let _: Result<(), ()> = game.transaction(|game, _| {
+            let _: Result<(), ()> = game.storage_transaction(|game, _| {
                 game.journal_block_entity(pos);
                 game.world
                     .block_entities

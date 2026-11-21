@@ -541,16 +541,27 @@ fn exploration_trade_maps_share_nested_reservations() {
         let start = game.peek_map_id();
         let make = || MapData::fresh(0.0, 0.0, 0, "minecraft:overworld");
         for commit in [false, true] {
-            let outer = game.transaction_open();
-            assert_eq!(game.new_map_id(make()), start);
-            let take = game.transaction_open();
-            let trade_id = game.peek_map_id();
-            assert_eq!(trade_id, start + 1);
-            game.register_exploration_maps(vec![(trade_id, [640, 64, -640], 2, String::new())]);
-            game.transaction_close(&take, true);
-            assert_eq!(game.new_map_id(make()), start + 2);
-            assert!(!game.maps.data.contains_key(&trade_id));
-            game.transaction_close(&outer, commit);
+            let trade_id = game
+                .storage_transaction(|game, _| {
+                    assert_eq!(game.new_map_id(make()), start);
+                    let trade_id = game
+                        .storage_transaction(|game, _| {
+                            let trade_id = game.peek_map_id();
+                            assert_eq!(trade_id, start + 1);
+                            game.register_exploration_maps(vec![(
+                                trade_id,
+                                [640, 64, -640],
+                                2,
+                                String::new(),
+                            )]);
+                            Ok::<_, ()>(trade_id)
+                        })
+                        .unwrap();
+                    assert_eq!(game.new_map_id(make()), start + 2);
+                    assert!(!game.maps.data.contains_key(&trade_id));
+                    if commit { Ok(trade_id) } else { Err(trade_id) }
+                })
+                .unwrap_or_else(|value| value);
             assert_eq!(game.peek_map_id(), if commit { start + 3 } else { start });
             if commit {
                 assert!(game.maps.data[&trade_id].unlimited);
@@ -715,11 +726,13 @@ fn a_panicking_completion_listener_cannot_drop_success_packets() {
                 panic_on_completion: true,
                 ..Script::default()
             });
-            let outer = game.transaction_open();
-            assert!(game.lan_merchant_click(12, &click));
-            assert_eq!(COMPLETED.get(), 0);
-            assert!(packets(&rx).is_empty());
-            game.transaction_close(&outer, true);
+            game.storage_transaction(|game, _| {
+                assert!(game.lan_merchant_click(12, &click));
+                assert_eq!(COMPLETED.get(), 0);
+                assert!(packets(&rx).is_empty());
+                Ok::<_, ()>(())
+            })
+            .unwrap();
             assert_eq!(COMPLETED.get(), 1);
             assert_eq!((result(game), stat(game)), (1, 1));
             assert_eq!(game.lan_trade_session(12).unwrap().offers[0].uses, 6);
@@ -795,13 +808,15 @@ fn an_outer_abort_undoes_an_accepted_trade() {
             let click = open(game, 2);
             script(Script::default());
             let rx = record_packets(game);
-            let seal = game.transaction_open();
-            assert!(game.lan_merchant_click(12, &click));
-            assert_eq!((result(game), dirt(game), stat(game)), (1, 0, 1));
-            assert!(game.orbs.is_empty(), "orb creation waits for root commit");
-            assert_eq!(COMPLETED.get(), 0);
-            assert!(packets(&rx).is_empty());
-            game.transaction_close(&seal, false);
+            game.storage_transaction(|game, _| {
+                assert!(game.lan_merchant_click(12, &click));
+                assert_eq!((result(game), dirt(game), stat(game)), (1, 0, 1));
+                assert!(game.orbs.is_empty(), "orb creation waits for root commit");
+                assert_eq!(COMPLETED.get(), 0);
+                assert!(packets(&rx).is_empty());
+                Err::<(), _>(())
+            })
+            .unwrap_err();
             assert_eq!(COMPLETED.get(), 0);
             corrected(&rx, click.container, 2);
             unchanged(game, 2);

@@ -150,7 +150,7 @@ fn a_committed_mod_tank_survives_a_world_save_close_and_reopen() {
         ));
         let tanks = level.capability(game, &FLUIDS, pos, None).unwrap();
         assert_eq!(
-            game.transaction(|host, tx| Ok::<_, ()>((
+            game.storage_transaction(|host, tx| Ok::<_, ()>((
                 tanks.insert_at(host, tx, 0, &fluid(BRINE, 1), 1500),
                 tanks.insert_at(host, tx, 1, &fluid("minecraft:lava", 1), 1000),
             ))),
@@ -158,7 +158,7 @@ fn a_committed_mod_tank_survives_a_world_save_close_and_reopen() {
         );
         // An aborted transaction's insert is rolled back and must not be saved.
         assert_eq!(
-            game.transaction(|host, tx| {
+            game.storage_transaction(|host, tx| {
                 assert_eq!(tanks.insert_at(host, tx, 0, &fluid(BRINE, 1), 500), 500);
                 Err::<(), _>("abort")
             }),

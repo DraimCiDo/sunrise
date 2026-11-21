@@ -279,10 +279,12 @@ fn a_click_on_a_mod_menu_tells_the_mods_inside_an_action_and_a_failure_undoes_it
                 write_dirt: true,
                 ..Script::default()
             });
-            let seal = game.transaction_open();
-            click(game);
-            assert_eq!(inventory(game, 20), 2);
-            game.transaction_close(&seal, false);
+            game.storage_transaction(|game, _| {
+                click(game);
+                assert_eq!(inventory(game, 20), 2);
+                Err::<(), _>(())
+            })
+            .unwrap_err();
             assert_eq!(inventory(game, 20), 0);
         });
     });
@@ -539,10 +541,12 @@ fn a_mod_quick_move_is_one_action_and_a_refusal_leaves_no_prefix() {
             assert_eq!(depot(game), (1, 4, 5, 0));
             // Row 90: applied inside a transaction that then aborts: the move is undone.
             open_depot(game);
-            let seal = game.transaction_open();
-            click(game);
-            assert_eq!(depot(game), (1, 4, 5, 0));
-            game.transaction_close(&seal, false);
+            game.storage_transaction(|game, _| {
+                click(game);
+                assert_eq!(depot(game), (1, 4, 5, 0));
+                Err::<(), _>(())
+            })
+            .unwrap_err();
             assert_eq!(depot(game), (10, 0, 0, 0));
         });
     });
@@ -603,9 +607,11 @@ fn an_untaken_quick_move_that_wrote_to_another_block_is_undone_and_routed_once()
             // back in it, the second block is empty, and the inventory holds what the first
             // click routed there.
             let window = open_depot(game);
-            let seal = game.transaction_open();
-            game.lan_guest_packet(12, container_click(window, 0, 1));
-            game.transaction_close(&seal, false);
+            game.storage_transaction(|game, _| {
+                game.lan_guest_packet(12, container_click(window, 0, 1));
+                Err::<(), _>(())
+            })
+            .unwrap_err();
             assert_eq!(stone_everywhere(game), (10, 0, inventory));
         });
     });

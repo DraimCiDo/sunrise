@@ -1940,26 +1940,31 @@ mod tests {
                                 .hub
                                 .resend_menu(1, window, &game.world);
                         };
-                        let abort = game.transaction_open();
-                        assert_eq!(menu.set_data_slot(game, 0, i32::MAX), Ok(true));
-                        assert!(sent(&rx).is_empty());
-                        resend(game);
-                        assert_eq!(
-                            updates(sent(&rx)),
-                            snapshot,
-                            "a resend cannot see the pending write"
-                        );
-                        game.transaction_close(&abort, false);
+                        game.storage_transaction(|game, _| {
+                            assert_eq!(menu.set_data_slot(game, 0, i32::MAX), Ok(true));
+                            assert!(sent(&rx).is_empty());
+                            resend(game);
+                            assert_eq!(
+                                updates(sent(&rx)),
+                                snapshot,
+                                "a resend cannot see the pending write"
+                            );
+                            Err::<(), _>(())
+                        })
+                        .unwrap_err();
                         assert_eq!(menu.set_data_slot(game, 0, -80_000), Ok(false));
                         assert!(sent(&rx).is_empty());
 
-                        let capture = game.transaction_open();
-                        game.transactions.last_mut().unwrap().packets =
-                            Some(sunrise_client::lan::conn::transaction_packets::Scope::begin());
-                        assert_eq!(menu.set_data_slot(game, 0, 100_000), Ok(true));
-                        resend(game);
-                        assert!(sent(&rx).is_empty());
-                        game.transaction_close(&capture, true);
+                        game.storage_transaction(|game, _| {
+                            game.transactions.last_mut().unwrap().packets = Some(
+                                sunrise_client::lan::conn::transaction_packets::Scope::begin(),
+                            );
+                            assert_eq!(menu.set_data_slot(game, 0, 100_000), Ok(true));
+                            resend(game);
+                            assert!(sent(&rx).is_empty());
+                            Ok::<_, ()>(())
+                        })
+                        .unwrap();
                         assert_eq!(
                             updates(sent(&rx)),
                             [

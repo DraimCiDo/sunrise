@@ -36,31 +36,33 @@ fn cancel_action_undoes_real_game_listener_block_and_deferred_drop() {
         let before = game.world.block(0, 64, 0);
         let drops = game.dropped.len();
         let menu = Menu::new(tests::state());
-        let root = game.transaction_open();
-        let mut host = GameHost { game, identity };
-        assert_eq!(
-            run(
-                &mut host,
-                &menu,
-                |_, s| tests::placement(s),
-                |host| {
-                    host.game.journal_set_block([0, 64, 0], stone);
-                    host.game
-                        .drop_after_commit(1, ItemStack::new("minecraft:dirt", 2));
-                    menu.edit(host, |s| {
-                        s.slots[2] = Some(ItemStack::new("minecraft:dirt", 2))
-                    });
-                    Reply::Cancel
-                }
-            ),
-            Ok(Outcome::Canceled)
-        );
-        assert_eq!(menu.read(Clone::clone), tests::state());
-        assert_eq!(host.game.world.block(0, 64, 0), before);
-        assert_eq!(host.game.dropped.len(), drops);
-        host.game.transaction_close(&root, true);
-        assert_eq!(host.game.dropped.len(), drops);
-        assert!(host.game.transactions.is_empty());
+        game.storage_transaction(|game, _| {
+            let mut host = GameHost { game, identity };
+            assert_eq!(
+                run(
+                    &mut host,
+                    &menu,
+                    |_, s| tests::placement(s),
+                    |host| {
+                        host.game.journal_set_block([0, 64, 0], stone);
+                        host.game
+                            .drop_after_commit(1, ItemStack::new("minecraft:dirt", 2));
+                        menu.edit(host, |s| {
+                            s.slots[2] = Some(ItemStack::new("minecraft:dirt", 2))
+                        });
+                        Reply::Cancel
+                    }
+                ),
+                Ok(Outcome::Canceled)
+            );
+            assert_eq!(menu.read(Clone::clone), tests::state());
+            assert_eq!(host.game.world.block(0, 64, 0), before);
+            assert_eq!(host.game.dropped.len(), drops);
+            Ok::<_, ()>(())
+        })
+        .unwrap();
+        assert_eq!(game.dropped.len(), drops);
+        assert!(game.transactions.is_empty());
     });
 }
 
@@ -80,42 +82,47 @@ fn nested_real_game_commit_then_trap_rolls_back_next_placement_succeeds() {
             .unwrap();
         let before = game.world.block(0, 64, 0);
         let menu = Menu::new(tests::state());
-        let root = game.transaction_open();
-        let mut host = GameHost { game, identity };
-        assert_eq!(
-            run(
-                &mut host,
-                &menu,
-                |_, s| tests::placement(s),
-                |host| {
-                    let child = host.game.transaction_open();
-                    host.game.journal_set_block([0, 64, 0], dirt);
-                    menu.edit(host, |s| {
-                        s.slots[2] = Some(ItemStack::new("minecraft:dirt", 2))
-                    });
-                    host.game.transaction_close(&child, true);
-                    panic!("listener trap after nested commit");
-                }
-            ),
-            Ok(Outcome::ListenerFailed)
-        );
-        assert_eq!(host.game.world.block(0, 64, 0), before);
+        game.storage_transaction(|game, _| {
+            let mut host = GameHost { game, identity };
+            assert_eq!(
+                run(
+                    &mut host,
+                    &menu,
+                    |_, s| tests::placement(s),
+                    |host| {
+                        host.game
+                            .storage_transaction(|game, _| {
+                                game.journal_set_block([0, 64, 0], dirt);
+                                menu.edit(host, |s| {
+                                    s.slots[2] = Some(ItemStack::new("minecraft:dirt", 2))
+                                });
+                                Ok::<_, ()>(())
+                            })
+                            .unwrap();
+                        panic!("listener trap after nested commit");
+                    }
+                ),
+                Ok(Outcome::ListenerFailed)
+            );
+            assert_eq!(host.game.world.block(0, 64, 0), before);
+            assert_eq!(menu.read(Clone::clone), tests::state());
+            assert_eq!(host.game.transactions.len(), 1);
+            assert!(!host.menu_busy(menu.id));
+            assert_eq!(
+                run(
+                    &mut host,
+                    &menu,
+                    |_, s| tests::placement(s),
+                    |_| Reply::Allow
+                ),
+                Ok(Outcome::Applied)
+            );
+            assert_eq!(menu.read(|s| s.cursor.clone()), None);
+            Err::<(), _>(())
+        })
+        .unwrap_err();
         assert_eq!(menu.read(Clone::clone), tests::state());
-        assert_eq!(host.game.transactions.len(), 1);
-        assert!(!host.menu_busy(menu.id));
-        assert_eq!(
-            run(
-                &mut host,
-                &menu,
-                |_, s| tests::placement(s),
-                |_| Reply::Allow
-            ),
-            Ok(Outcome::Applied)
-        );
-        assert_eq!(menu.read(|s| s.cursor.clone()), None);
-        host.game.transaction_close(&root, false);
-        assert_eq!(menu.read(Clone::clone), tests::state());
-        assert!(host.game.transactions.is_empty());
+        assert!(game.transactions.is_empty());
     });
 }
 
@@ -136,36 +143,38 @@ fn outer_real_game_abort_undoes_applied_menu_block_cost_rng_and_drops() {
         let before = game.world.block(0, 64, 0);
         let drops = game.dropped.len();
         let menu = Menu::new(tests::state());
-        let root = game.transaction_open();
-        let mut host = GameHost { game, identity };
-        assert_eq!(
-            run(
-                &mut host,
-                &menu,
-                |_, s| {
-                    let mut plan = tests::placement(s);
-                    plan.steps.extend([
-                        Step::Write(Mutation::Cost(2)),
-                        Step::Write(Mutation::Rng(102)),
-                    ]);
-                    plan
-                },
-                |host| {
-                    host.game.journal_set_block([0, 64, 0], stone);
-                    host.game
-                        .drop_after_commit(1, ItemStack::new("minecraft:dirt", 2));
-                    Reply::Allow
-                }
-            ),
-            Ok(Outcome::Applied)
-        );
-        assert_eq!(menu.read(|s| (s.cost, s.rng)), (2, 102));
-        assert_eq!(host.game.dropped.len(), drops);
-        host.game.transaction_close(&root, false);
+        game.storage_transaction(|game, _| {
+            let mut host = GameHost { game, identity };
+            assert_eq!(
+                run(
+                    &mut host,
+                    &menu,
+                    |_, s| {
+                        let mut plan = tests::placement(s);
+                        plan.steps.extend([
+                            Step::Write(Mutation::Cost(2)),
+                            Step::Write(Mutation::Rng(102)),
+                        ]);
+                        plan
+                    },
+                    |host| {
+                        host.game.journal_set_block([0, 64, 0], stone);
+                        host.game
+                            .drop_after_commit(1, ItemStack::new("minecraft:dirt", 2));
+                        Reply::Allow
+                    }
+                ),
+                Ok(Outcome::Applied)
+            );
+            assert_eq!(menu.read(|s| (s.cost, s.rng)), (2, 102));
+            assert_eq!(host.game.dropped.len(), drops);
+            Err::<(), _>(())
+        })
+        .unwrap_err();
         assert_eq!(menu.read(Clone::clone), tests::state());
-        assert_eq!(host.game.world.block(0, 64, 0), before);
-        assert_eq!(host.game.dropped.len(), drops);
-        assert!(host.game.transactions.is_empty());
+        assert_eq!(game.world.block(0, 64, 0), before);
+        assert_eq!(game.dropped.len(), drops);
+        assert!(game.transactions.is_empty());
     });
 }
 
@@ -175,27 +184,29 @@ fn real_save_gate_and_save_all_refuse_action_savepoint() {
     with_game(|game| {
         let identity = identity(game);
         let menu = Menu::new(tests::state());
-        let root = game.transaction_open();
-        let mut host = GameHost { game, identity };
-        assert_eq!(
-            run(
-                &mut host,
-                &menu,
-                |_, s| tests::placement(s),
-                |host| {
-                    assert!(Game::admit_entity_save().is_err());
-                    assert_eq!(
-                        host.game.save_all_reply().translation_key(),
-                        Some("commands.save.failed")
-                    );
-                    Reply::Cancel
-                }
-            ),
-            Ok(Outcome::Canceled)
-        );
-        assert_eq!(menu.read(Clone::clone), tests::state());
-        host.game.transaction_close(&root, false);
-        assert!(host.game.transactions.is_empty());
+        game.storage_transaction(|game, _| {
+            let mut host = GameHost { game, identity };
+            assert_eq!(
+                run(
+                    &mut host,
+                    &menu,
+                    |_, s| tests::placement(s),
+                    |host| {
+                        assert!(Game::admit_entity_save().is_err());
+                        assert_eq!(
+                            host.game.save_all_reply().translation_key(),
+                            Some("commands.save.failed")
+                        );
+                        Reply::Cancel
+                    }
+                ),
+                Ok(Outcome::Canceled)
+            );
+            assert_eq!(menu.read(Clone::clone), tests::state());
+            Err::<(), _>(())
+        })
+        .unwrap_err();
+        assert!(game.transactions.is_empty());
     });
 }
 
@@ -248,28 +259,30 @@ fn a_save_is_refused_in_an_action_savepoint_a_special_item_is_drawn_in_isolated(
         game.world_root = folder.path().to_path_buf();
         let saved = persisted(folder.path());
         let menu = Menu::new(tests::state());
-        let root = game.transaction_open();
-        let mut host = GameHost { game, identity };
-        assert_eq!(
-            run(
-                &mut host,
-                &menu,
-                |_, s| tests::placement(s),
-                |host| {
-                    draw_stick(host.game, 7);
-                    assert_eq!(asked(7), 1, "the stick wasn't drawn by its renderer");
-                    assert!(Game::admit_entity_save().is_err());
-                    assert_eq!(
-                        host.game.save_all_reply().translation_key(),
-                        Some("commands.save.failed")
-                    );
-                    Reply::Cancel
-                }
-            ),
-            Ok(Outcome::Canceled)
-        );
-        host.game.transaction_close(&root, false);
-        assert!(host.game.transactions.is_empty());
+        game.storage_transaction(|game, _| {
+            let mut host = GameHost { game, identity };
+            assert_eq!(
+                run(
+                    &mut host,
+                    &menu,
+                    |_, s| tests::placement(s),
+                    |host| {
+                        draw_stick(host.game, 7);
+                        assert_eq!(asked(7), 1, "the stick wasn't drawn by its renderer");
+                        assert!(Game::admit_entity_save().is_err());
+                        assert_eq!(
+                            host.game.save_all_reply().translation_key(),
+                            Some("commands.save.failed")
+                        );
+                        Reply::Cancel
+                    }
+                ),
+                Ok(Outcome::Canceled)
+            );
+            Err::<(), _>(())
+        })
+        .unwrap_err();
+        assert!(game.transactions.is_empty());
         assert_eq!(persisted(folder.path()), saved);
     });
 }
@@ -281,41 +294,45 @@ fn only_root_commit_publishes_real_listener_and_plan_drops_in_order() {
         let identity = identity(game);
         let menu = Menu::new(tests::state());
         let initial = game.dropped.len();
-        let root = game.transaction_open();
-        let mut host = GameHost { game, identity };
-        assert_eq!(
-            run(
-                &mut host,
-                &menu,
-                |_, s| {
-                    let mut plan = tests::placement(s);
-                    plan.steps.push(Step::Effect(Effect::Drop(
-                        [0, 64, 0],
-                        ItemStack::new("minecraft:sand", 3),
-                    )));
-                    plan
-                },
-                |host| {
-                    host.defer(Effect::Drop(
-                        [0, 64, 0],
-                        ItemStack::new("minecraft:stone", 1),
-                    ));
-                    let child = host.game.transaction_open();
-                    host.defer(Effect::Drop(
-                        [0, 64, 0],
-                        ItemStack::new("minecraft:dirt", 2),
-                    ));
-                    host.game.transaction_close(&child, true);
-                    assert_eq!(host.game.dropped.len(), initial);
-                    Reply::Allow
-                }
-            ),
-            Ok(Outcome::Applied)
-        );
-        assert_eq!(host.game.dropped.len(), initial);
-        host.game.transaction_close(&root, true);
-        let stacks: Vec<_> = host
-            .game
+        game.storage_transaction(|game, _| {
+            let mut host = GameHost { game, identity };
+            assert_eq!(
+                run(
+                    &mut host,
+                    &menu,
+                    |_, s| {
+                        let mut plan = tests::placement(s);
+                        plan.steps.push(Step::Effect(Effect::Drop(
+                            [0, 64, 0],
+                            ItemStack::new("minecraft:sand", 3),
+                        )));
+                        plan
+                    },
+                    |host| {
+                        host.defer(Effect::Drop(
+                            [0, 64, 0],
+                            ItemStack::new("minecraft:stone", 1),
+                        ));
+                        host.game
+                            .storage_transaction(|game, _| {
+                                host.defer(Effect::Drop(
+                                    [0, 64, 0],
+                                    ItemStack::new("minecraft:dirt", 2),
+                                ));
+                                Ok::<_, ()>(())
+                            })
+                            .unwrap();
+                        assert_eq!(host.game.dropped.len(), initial);
+                        Reply::Allow
+                    }
+                ),
+                Ok(Outcome::Applied)
+            );
+            assert_eq!(host.game.dropped.len(), initial);
+            Ok::<_, ()>(())
+        })
+        .unwrap();
+        let stacks: Vec<_> = game
             .dropped
             .iter()
             .skip(initial)
@@ -329,7 +346,7 @@ fn only_root_commit_publishes_real_listener_and_plan_drops_in_order() {
                 ItemStack::new("minecraft:sand", 3)
             ]
         );
-        assert!(host.game.transactions.is_empty());
+        assert!(game.transactions.is_empty());
     });
 }
 
@@ -345,28 +362,30 @@ fn abandoned_token_releases_real_save_gate_and_publishes_nothing() {
         let menu = Menu::new(tests::state());
         let drops = game.dropped.len();
         assert!(Game::admit_entity_save().is_ok());
-        let root = game.transaction_open();
-        let mut host = GameHost { game, identity };
-        assert_eq!(
-            run(
-                &mut host,
-                &menu,
-                |_, view| tests::placement(view),
-                |host| {
-                    assert!(Game::admit_entity_save().is_err());
-                    host.game
-                        .drop_after_commit(1, ItemStack::new("minecraft:dirt", 2));
-                    panic!("listener trap with a live decision");
-                }
-            ),
-            Ok(Outcome::ListenerFailed)
-        );
-        assert!(Game::admit_entity_save().is_ok());
-        assert!(!host.menu_busy(menu.id));
-        assert_eq!(host.game.transactions.len(), 1);
-        assert_eq!(menu.read(Clone::clone), tests::state());
-        host.game.transaction_close(&root, true);
-        assert_eq!(host.game.dropped.len(), drops);
-        assert!(host.game.transactions.is_empty());
+        game.storage_transaction(|game, _| {
+            let mut host = GameHost { game, identity };
+            assert_eq!(
+                run(
+                    &mut host,
+                    &menu,
+                    |_, view| tests::placement(view),
+                    |host| {
+                        assert!(Game::admit_entity_save().is_err());
+                        host.game
+                            .drop_after_commit(1, ItemStack::new("minecraft:dirt", 2));
+                        panic!("listener trap with a live decision");
+                    }
+                ),
+                Ok(Outcome::ListenerFailed)
+            );
+            assert!(Game::admit_entity_save().is_ok());
+            assert!(!host.menu_busy(menu.id));
+            assert_eq!(host.game.transactions.len(), 1);
+            assert_eq!(menu.read(Clone::clone), tests::state());
+            Ok::<_, ()>(())
+        })
+        .unwrap();
+        assert_eq!(game.dropped.len(), drops);
+        assert!(game.transactions.is_empty());
     });
 }

@@ -2291,7 +2291,7 @@ mod tests {
             *game.native_menu_storage(menu, 1).unwrap() = Some(stone.clone());
             let place = mod_api::ItemPlace::MenuSlot { menu, slot: 1 };
             let resource = ItemResource::of(&stone.try_into_api().unwrap());
-            let aborted: Result<(), ()> = game.transaction(|game, tx| {
+            let aborted: Result<(), ()> = game.storage_transaction(|game, tx| {
                 assert_eq!(place.insert(game, tx, &resource, 2), 2);
                 assert_eq!(place.insert(game, tx, &resource, 3), 3);
                 let journal = &game.transactions.last().unwrap().menus;
@@ -2523,7 +2523,7 @@ mod tests {
                 items[0] = Some(sticks(9));
             }
             let target = level.capability(game, &ITEMS, [1, 64, 4], None).unwrap();
-            game.transaction(|host, tx| {
+            game.storage_transaction(|host, tx| {
                 assert!(target.set_max_stack_size(host, tx, 10));
                 Ok::<_, ()>(())
             })
@@ -2531,7 +2531,7 @@ mod tests {
             game.hoppers.remove(&(0, 64, 4));
             game.hopper_try_move_items((0, 64, 4));
             assert_eq!(slots(game, (1, 64, 4)), 270);
-            let _ = game.transaction(|host, tx| {
+            let _ = game.storage_transaction(|host, tx| {
                 assert!(target.set_max_stack_size(host, tx, 64));
                 Err::<(), ()>(())
             });

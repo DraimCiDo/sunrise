@@ -108,7 +108,7 @@ fn bundle_items_place_handler_reads_and_rolls_back() {
                 .as_ref(),
             "minecraft:arrow"
         );
-        let result = game.transaction(|host, tx| {
+        let result = game.storage_transaction(|host, tx| {
             assert_eq!(handler.extract_at(host, tx, 0, &pearl, 2), 2);
             Err::<(), _>(())
         });
@@ -167,7 +167,7 @@ fn stacked_bundle_insertion_splits_one_and_restores_inventory_on_abort() {
             &ItemStack::new("minecraft:arrow", 1).try_into_api().unwrap(),
         );
         assert_eq!(
-            game.transaction(|host, tx| {
+            game.storage_transaction(|host, tx| {
                 assert_eq!(handler.insert_at(host, tx, 0, &arrow, 3), 3);
                 Err::<(), _>(())
             }),
@@ -175,7 +175,9 @@ fn stacked_bundle_insertion_splits_one_and_restores_inventory_on_abort() {
         );
         assert_eq!(game.lan.as_ref().unwrap().hub.guests[0].inventory, original);
         assert_eq!(
-            game.transaction(|host, tx| Ok::<_, ()>(handler.insert_at(host, tx, 0, &arrow, 3))),
+            game.storage_transaction(|host, tx| Ok::<_, ()>(
+                handler.insert_at(host, tx, 0, &arrow, 3)
+            )),
             Ok(3)
         );
         let mut changed = ItemStack::new("minecraft:bundle", 1);
@@ -226,7 +228,9 @@ fn mod_registered_bundle_items_uses_weight_and_front_extraction() {
             let handler = place.capability(game, &ITEM_ITEMS).unwrap();
             let pearl = handler.resource(game, 0).unwrap();
             assert_eq!(
-                game.transaction(|host, tx| Ok::<_, ()>(handler.insert_at(host, tx, 0, &pearl, 1))),
+                game.storage_transaction(|host, tx| Ok::<_, ()>(
+                    handler.insert_at(host, tx, 0, &pearl, 1)
+                )),
                 Ok(0)
             );
             assert_eq!(
@@ -234,7 +238,7 @@ fn mod_registered_bundle_items_uses_weight_and_front_extraction() {
                 Some(bundle)
             );
             assert_eq!(
-                game.transaction(|host, tx| Ok::<_, ()>(
+                game.storage_transaction(|host, tx| Ok::<_, ()>(
                     handler.extract_at(host, tx, 0, &pearl, 3)
                 )),
                 Ok(3)
@@ -245,17 +249,21 @@ fn mod_registered_bundle_items_uses_weight_and_front_extraction() {
                 &ItemStack::new("minecraft:arrow", 1).try_into_api().unwrap(),
             );
             assert_eq!(
-                game.transaction(|host, tx| Ok::<_, ()>(handler.insert_at(host, tx, 0, &arrow, 2))),
+                game.storage_transaction(|host, tx| Ok::<_, ()>(
+                    handler.insert_at(host, tx, 0, &arrow, 2)
+                )),
                 Ok(2)
             );
             assert_eq!(
-                game.transaction(|host, tx| Ok::<_, ()>(handler.insert_at(host, tx, 0, &pearl, 1))),
+                game.storage_transaction(|host, tx| Ok::<_, ()>(
+                    handler.insert_at(host, tx, 0, &pearl, 1)
+                )),
                 Ok(1)
             );
             assert_eq!(handler.resource(game, 0), Some(pearl.clone()));
             assert_eq!(handler.amount(game, 0), 14);
             assert_eq!(
-                game.transaction(|host, tx| Ok::<_, ()>(
+                game.storage_transaction(|host, tx| Ok::<_, ()>(
                     handler.extract_at(host, tx, 0, &pearl, 64)
                 )),
                 Ok(14)
