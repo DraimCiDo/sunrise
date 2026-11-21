@@ -11,13 +11,17 @@
 //! and totals are capped, vanilla ids cannot be redefined, and no two mods
 //! share a namespace ([`clash`]).
 use crate::manifest::Manifest;
-use mod_vocab::{__private::DeclarationKind, DeclarationError};
 use serde::Deserialize;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    io::Read,
-    path::{Path, PathBuf},
+use std::collections::{BTreeMap, BTreeSet};
+
+mod entries;
+mod load;
+pub use entries::{
+    Block, BlockEntityType, CreativeTab, FluidLook, FluidModel, Item, LocalDeclaration,
 };
+use load::reader_of;
+pub use load::{Content, FileReader, MAX_FILE, MAX_FILES, MAX_TOTAL, check_path, clash};
+pub(crate) use load::{folder_files, runtime_folder_files};
 pub use sunrise_core::arm_pose::ArmPose;
 
 /// The single resource location NeoForge's `RecipePriorityManager` reads in pack order.

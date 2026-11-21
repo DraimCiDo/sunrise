@@ -27,15 +27,12 @@
 //! (a block with no loot table or name); it says "could not find ... in this mod; if X supplies
 //! it, ignore this". What the tool cannot judge at all is dropped, not warned: the ids a mod's
 //! code declares, what the load conditions decide, a payload only a mod reads.
-use super::{Content, FileReader, RenderShape};
+mod declarations;
+
+use super::{Content, FileReader, RenderShape, without_comments};
 use crate::manifest::{Manifest, Side};
-use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
-use sunrise_assets::{
-    blockstate::{BlockStateFile, VariantSet},
-    item_model::ClientItem,
-    model::{CuboidModel, Loader, TextureSlot},
-};
+use sunrise_assets::model::{CuboidModel, Loader, TextureSlot};
 
 /// What [`check_references`] found, each a sentence that names the file.
 #[derive(Debug, Default, PartialEq, Eq)]

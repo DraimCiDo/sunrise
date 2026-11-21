@@ -1,3 +1,18 @@
+//! Content sources, file admission and native declarations.
+
+use super::{
+    Block, BlockEntityType, CreativeTab, EntityType, FluidInteraction, FluidLook, Item,
+    LocalDeclaration, MenuType, MobEffect, check_block, check_item, namespaced_id,
+    sign_wall_refusals, vanilla_id,
+};
+use crate::manifest::Manifest;
+use mod_vocab::{__private::DeclarationKind, DeclarationError};
+use std::{
+    collections::BTreeSet,
+    io::Read,
+    path::{Path, PathBuf},
+};
+
 /// Content files per mod, bytes per file and bytes per mod.
 pub const MAX_FILES: usize = 65_536;
 
@@ -42,7 +57,7 @@ pub fn check_path(name: &str) -> Result<(), String> {
 }
 
 #[derive(Debug, Clone)]
-enum Source {
+pub(super) enum Source {
     Dir(PathBuf),
     Zip(PathBuf),
     /// No files: content a native mod declares in code.
@@ -52,7 +67,7 @@ enum Source {
 /// A mod's content: its files and declarations.
 #[derive(Debug)]
 pub struct Content {
-    source: Source,
+    pub(super) source: Source,
     /// Every content file (`assets/...`, `data/...`), sorted.
     pub files: Vec<String>,
     pub blocks: Vec<Block>,
@@ -395,7 +410,7 @@ impl Content {
     }
 }
 
-fn reader_of(source: &Source) -> Result<FileReader<'_>, String> {
+pub(super) fn reader_of(source: &Source) -> Result<FileReader<'_>, String> {
     Ok(match source {
         Source::Dir(root) => FileReader::Dir(root),
         Source::Zip(path) => FileReader::Zip(Box::new(open_zip(path)?)),

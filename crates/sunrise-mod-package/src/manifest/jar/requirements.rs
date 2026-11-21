@@ -1,3 +1,8 @@
+//! The generated record of the original jars a prepared installation needs.
+
+use super::JarRef;
+use serde::{Deserialize, Serialize};
+
 /// One exact file and every Sunrise mod requiring it, in load order.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(try_from = "RequirementFields")]

@@ -163,9 +163,7 @@ fn mixins_bridges_states_modules_share_one_id_space() {
 #[test]
 fn a_bridge_id_that_cannot_name_an_accessor_is_refused() {
     let bridge = |id: &str| {
-        format!(
-            "[[native.bridge]]\nid='{id}'\nkind='GET'\ntarget='game::Game'\nmember='world'\n"
-        )
+        format!("[[native.bridge]]\nid='{id}'\nkind='GET'\ntarget='game::Game'\nmember='world'\n")
     };
     assert!(parse(&native(), &bridge("ticks-current_2")).is_ok());
     let error = parse(&native(), &bridge("ticks.current")).unwrap_err();
@@ -178,9 +176,7 @@ fn a_bridge_id_that_cannot_name_an_accessor_is_refused() {
 #[test]
 fn two_bridge_ids_with_one_accessor_name_are_refused() {
     let bridge = |id: &str| {
-        format!(
-            "[[native.bridge]]\nid='{id}'\nkind='GET'\ntarget='game::Game'\nmember='world'\n"
-        )
+        format!("[[native.bridge]]\nid='{id}'\nkind='GET'\ntarget='game::Game'\nmember='world'\n")
     };
     let error = parse(
         &native(),

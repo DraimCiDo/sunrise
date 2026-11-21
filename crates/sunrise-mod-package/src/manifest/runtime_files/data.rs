@@ -1,3 +1,9 @@
+//! A package's verified runtime files.
+
+use super::{MAX_RUNTIME_FILES, RuntimeTable};
+use sha2::{Digest, Sha256, Sha512};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+
 /// The folder of a package that holds its runtime files.
 pub const RUNTIME_DIR: &str = "runtime";
 
@@ -102,7 +108,7 @@ pub struct RuntimeData {
 }
 
 impl RuntimeData {
-    pub(super) fn new(
+    pub(in crate::manifest) fn new(
         files: BTreeMap<String, Arc<[u8]>>,
         digest: String,
         dir: Option<PathBuf>,

@@ -1,5 +1,7 @@
 use super::*;
 use crate::manifest::Package;
+use mod_vocab::{__private::DeclarationKind, DeclarationError};
+use std::path::PathBuf;
 
 #[test]
 fn plain_content_files_over_the_size_limit_are_refused() {

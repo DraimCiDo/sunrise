@@ -5,10 +5,12 @@
 //! Runtime files are the bytes a mod's code opens beside itself (a compiled script bundle, a baked
 //! lookup table). They are not pack data: no datapack or resource pack can replace them and no
 //! reload touches them.
-use super::hash::{sha512_hex, sha512_of};
+mod data;
+
+use super::hash::sha512_hex;
+pub use data::{MAX_RUNTIME_FILE, MAX_RUNTIME_TOTAL, RUNTIME_DIR, RuntimeData, sha512_of};
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+use std::collections::BTreeMap;
 
 /// The most files a package's `[runtime]` may list.
 pub const MAX_RUNTIME_FILES: usize = 256;
@@ -53,5 +55,4 @@ impl RuntimeTable {
     pub fn lists(&self, name: &str) -> bool {
         self.0.contains_key(name)
     }
-
 }

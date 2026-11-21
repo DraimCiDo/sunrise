@@ -1,3 +1,12 @@
+//! Look up original files in the launcher-prepared jar cache.
+
+use super::{JarRef, JarRequirement};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    path::{Path, PathBuf},
+};
+
 /// One missing original file, shared by launcher preparation and game refusals.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MissingJar {

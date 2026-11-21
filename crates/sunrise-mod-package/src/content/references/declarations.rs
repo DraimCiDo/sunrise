@@ -1,3 +1,14 @@
+//! Read references from a mod's assets and data for diagnostics.
+
+use super::{Asset, Model, References};
+use serde_json::Value;
+use std::collections::BTreeMap;
+use sunrise_assets::{
+    blockstate::{BlockStateFile, VariantSet},
+    item_model::ClientItem,
+    model::CuboidModel,
+};
+
 // Only check these built-in tag folders. A mod-declared registry's folder is
 // `<namespace>/<path>`, and a tag's own id may contain slashes, so the file path alone
 // does not say where the registry folder ends.
@@ -60,7 +71,7 @@ impl References<'_> {
             .filter(|value| !conditional(value)))
     }
 
-    fn blockstate(&mut self, name: &str) -> Result<(), String> {
+    pub(super) fn blockstate(&mut self, name: &str) -> Result<(), String> {
         let Some((text, _)) = self.json(name)? else {
             return Ok(());
         };
@@ -105,7 +116,12 @@ impl References<'_> {
     }
 
     /// Match the model library: read UTF-8 and let its decoder consume one model, not the whole file.
-    fn read_model(&mut self, name: &str, namespace: &str, path: &str) -> Result<(), String> {
+    pub(super) fn read_model(
+        &mut self,
+        name: &str,
+        namespace: &str,
+        path: &str,
+    ) -> Result<(), String> {
         let bytes = self.reader.read(name)?;
         let definition = match std::str::from_utf8(&bytes)
             .map_err(|error| error.to_string())
@@ -129,7 +145,7 @@ impl References<'_> {
         Ok(())
     }
 
-    fn item_definition(&mut self, name: &str) -> Result<(), String> {
+    pub(super) fn item_definition(&mut self, name: &str) -> Result<(), String> {
         let Some((text, _)) = self.json(name)? else {
             return Ok(());
         };
@@ -144,7 +160,7 @@ impl References<'_> {
         Ok(())
     }
 
-    fn recipe(&mut self, name: &str) -> Result<(), String> {
+    pub(super) fn recipe(&mut self, name: &str) -> Result<(), String> {
         let Some(recipe) = self.data(name)? else {
             return Ok(());
         };
@@ -166,7 +182,7 @@ impl References<'_> {
         Ok(())
     }
 
-    fn loot_table(&mut self, name: &str) -> Result<(), String> {
+    pub(super) fn loot_table(&mut self, name: &str) -> Result<(), String> {
         let Some(table) = self.data(name)? else {
             return Ok(());
         };
@@ -184,7 +200,7 @@ impl References<'_> {
         Ok(())
     }
 
-    fn tag(&mut self, name: &str, tag: &str) -> Result<(), String> {
+    pub(super) fn tag(&mut self, name: &str, tag: &str) -> Result<(), String> {
         let Some(registry) = CHECKED_TAG_FOLDERS.into_iter().find(|&folder| {
             tag.strip_prefix(folder)
                 .is_some_and(|rest| rest.starts_with('/'))
@@ -229,7 +245,7 @@ impl References<'_> {
     }
 
     /// Each `(language key, declaring file)` has a name in its namespace's `en_us.json`.
-    fn names(&mut self, wanted: Vec<(String, String)>) -> Result<(), String> {
+    pub(super) fn names(&mut self, wanted: Vec<(String, String)>) -> Result<(), String> {
         // `None`: no file. `Some(None)`: a file the game's lenient reader may take and this
         // one does not; no key is asked of it.
         let mut by_namespace: BTreeMap<String, Option<Option<Value>>> = Default::default();

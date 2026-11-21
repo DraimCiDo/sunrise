@@ -7,23 +7,24 @@ mod hash;
 mod jar;
 pub mod loops;
 pub mod mixin;
+mod package;
 mod runtime_files;
-pub use hash::sha512_of;
 pub use jar::{
     JarConflict, JarInputsError, JarRef, JarRequirement, MissingJar, collect_jar_requirements,
     missing_jars,
 };
+pub(crate) use package::plain_path;
+pub use package::{
+    ContentFileError, MAX_MANIFEST, MAX_SOURCE_BYTES, MAX_SOURCE_FILES, MAX_USES, NOT_PACKAGED,
+    Package, STORAGE_DIR, find, source_file,
+};
 pub use runtime_files::{
     MAX_RUNTIME_FILE, MAX_RUNTIME_FILES, MAX_RUNTIME_TOTAL, RUNTIME_DIR, RuntimeData, RuntimeTable,
+    sha512_of,
 };
 
-use mod_surface::uses::USES_FILE;
 use serde::{Deserialize, Serialize};
-use std::{
-    fmt,
-    io::Read,
-    path::{Path, PathBuf},
-};
+use std::fmt;
 
 /// The manifest's file name in a `.smod` or a mod folder.
 pub const MANIFEST: &str = "sunrise-mod.toml";

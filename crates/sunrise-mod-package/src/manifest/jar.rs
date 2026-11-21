@@ -1,10 +1,12 @@
 //! stable-line: content-declarations
+mod cache;
+mod requirements;
+
+pub use cache::{JarConflict, JarInputsError, MissingJar, collect_jar_requirements, missing_jars};
+pub use requirements::JarRequirement;
+
+use super::valid_mod_id;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::BTreeMap,
-    fmt,
-    path::{Path, PathBuf},
-};
 
 /// An original Java jar used as a passive asset/data layer, in manifest order.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

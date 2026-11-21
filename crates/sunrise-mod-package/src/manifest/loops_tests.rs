@@ -2,7 +2,8 @@ use super::super::Manifest;
 
 const HEADER: &str =
     "id='sample'\nname='Sample'\nversion='1.0.0'\napi='0.2'\ncapabilities=['registries']\n";
-const ROW: &str = "[[native.loop]]\nid='slow'\nloop='block_entities.tick'\nhelper='src/slow.rs'\nwith='Slow'\n";
+const ROW: &str =
+    "[[native.loop]]\nid='slow'\nloop='block_entities.tick'\nhelper='src/slow.rs'\nwith='Slow'\n";
 
 fn native() -> String {
     format!(
@@ -45,8 +46,8 @@ fn bad_rows_are_refused_without_panicking() {
         ("[[native.loop]]", "[native.loop]", None),
         ("loop='block_entities.tick'\n", "", None),
     ] {
-        let error = Manifest::parse(&format!("{HEADER}{}{}", native(), ROW.replace(old, new)))
-            .unwrap_err();
+        let error =
+            Manifest::parse(&format!("{HEADER}{}{}", native(), ROW.replace(old, new))).unwrap_err();
         if let Some(field) = field {
             assert!(
                 error.contains(&format!("E_LOOP_INVALID: sample:slow: invalid {field};")),

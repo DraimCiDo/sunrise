@@ -85,3 +85,7 @@ impl Loop {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "loops_tests.rs"]
+mod tests;

@@ -154,3 +154,7 @@ impl Mixin {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "mixin_tests.rs"]
+mod tests;

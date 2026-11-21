@@ -1,3 +1,12 @@
+//! Read and write packages containing a mod manifest.
+
+use super::{MANIFEST, MAX_RUNTIME_FILE, Manifest, RUNTIME_DIR, RuntimeData, RuntimeTable, Side};
+use mod_surface::uses::USES_FILE;
+use std::{
+    io::Read,
+    path::{Path, PathBuf},
+};
+
 /// The largest uses table ([`USES_FILE`]) a package may carry: what the surface crate reads.
 pub const MAX_USES: u64 = mod_surface::uses::MAX_USES_BYTES as u64;
 
@@ -595,7 +604,7 @@ impl std::error::Error for ContentFileError {
 
 /// The shared content-file boundary. Refuse type/mode before opening a file,
 /// then inspect its header even when its name has no executable extension.
-pub(crate) fn check_file<R: Read>(
+pub(super) fn check_file<R: Read>(
     name: &str,
     mode: u32,
     open: impl FnOnce() -> std::io::Result<R>,

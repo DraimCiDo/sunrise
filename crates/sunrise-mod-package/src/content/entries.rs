@@ -1,3 +1,11 @@
+//! Typed block, item, fluid and creative tab entries.
+
+use super::{
+    ArmPose, BlockProperties, BlockShapes, ContextCollision, GateSound, RandomTicks, Rarity,
+    ShapeEntityKind, StateLight, StateProperty, StewEffect, WorldFluid, check_block, check_item,
+};
+use std::collections::BTreeMap;
+
 /// A block the mod adds: a vanilla template's behaviour, states and shapes
 /// under a new id, with `properties` applied. A mod's code declares one as a
 /// `mod_api::Block` (`native_blocks`), whose `item` is true as a file's is.
