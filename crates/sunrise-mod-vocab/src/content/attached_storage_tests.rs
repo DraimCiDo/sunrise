@@ -219,6 +219,42 @@ fn energy_limits_and_a_nested_abort() {
     });
 }
 
+#[test]
+fn attachment_handlers_refuse_a_foreign_live_frame() {
+    in_world(|| {
+        resolve(&["minecraft:dirt"], &[]);
+        let dirt = item("minecraft:dirt");
+        let slots = AttachedItems::single(&ITEMS, CHUNK, 64, |_| true);
+        let battery = AttachedEnergy::new(&ENERGY, CHUNK, 100, 30, 20);
+        let mut host = FakeHost::new();
+        let mut other = FakeHost::new();
+
+        // Raw attachment writes remain ambient, even without an open transaction.
+        let server: &mut dyn ServerHost = &mut host;
+        ITEMS
+            .set(server, CHUNK, vec![Some((dirt.clone(), 11))])
+            .unwrap();
+        ENERGY.set(server, CHUNK, 24).unwrap();
+        (&mut other as &mut dyn ServerHost)
+            .transaction(|_, foreign| {
+                (&mut host as &mut dyn ServerHost)
+                    .transaction(|host, own| {
+                        assert_eq!(own.depth(), foreign.depth());
+                        assert_eq!(slots.insert_at(host, foreign, 0, &dirt, 5), 0);
+                        assert_eq!(slots.extract_at(host, foreign, 0, &dirt, 3), 0);
+                        assert_eq!(battery.insert(host, foreign, 6), 0);
+                        assert_eq!(battery.extract(host, foreign, 7), 0);
+                        Ok::<_, ()>(())
+                    })
+                    .unwrap();
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+        assert_eq!(slots.amount(&mut host, 0), 11);
+        assert_eq!(battery.amount(&mut host), 24);
+    });
+}
+
 /// A write through a smaller view keeps the higher indices a bigger one stored.
 #[test]
 fn a_smaller_view_keeps_higher_indices() {

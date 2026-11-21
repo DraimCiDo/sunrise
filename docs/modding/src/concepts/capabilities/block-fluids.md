@@ -2,7 +2,8 @@
 
 Look up `level.capability(host, &FLUIDS, pos, side)` to access a block's
 `ResourceHandler<FluidResource>`. Transfer fluids inside a transaction with
-`resource_util::move_resources`, as you transfer items. `FLUIDS` corresponds to NeoForge's
+`resource_util::move_resources`, passing `Some(tx)` with the host's current context as you would
+for items. `FLUIDS` corresponds to NeoForge's
 `Capabilities.Fluid.BLOCK`. Amounts are millibuckets (mB); one bucket is 1000 mB.
 
 ## Resources and tanks
@@ -93,8 +94,9 @@ A fluid container can pick up and place fluid in the world as a bucket does
 | `fluid_util::first_stack_contained(host, place)` | Reads what the container at an `ItemPlace` holds at its first non-empty index |
 
 The three that move fluid each run in a transaction of its own, nested in one you have
-open. Under them, `level.pickup_fluid(host, pos, player, tx)` and
-`level.place_fluid(host, pos, fluid, player, validate, tx)` decide everything at the
+open. The low-level `level.pickup_fluid(host, pos, player, tx)` and
+`level.place_fluid(host, pos, fluid, player, validate, tx)` take a borrowed context from the
+same host; `level.play_fluid_effects` also requires this loan. Pickup and placement decide at the
 call against the world as the transaction has it and write the block at once, so a
 second pickup of the same source in the transaction gets nothing. A block the fluid
 replaces has its drops made at the call, with the block as it is and its block entity kept

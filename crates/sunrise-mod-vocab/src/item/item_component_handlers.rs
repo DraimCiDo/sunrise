@@ -36,7 +36,7 @@ impl ItemComponentHandler {
         self.place.resource(host)?.value(&*host, &self.component)
     }
     /// Rewrites one item at the place with the component set to `value`, or removed for none, in
-    /// `tx`: whether that went through.
+    /// a savepoint under the current context `tx`: whether that went through.
     pub fn write(
         &self,
         host: &mut dyn ServerHost,

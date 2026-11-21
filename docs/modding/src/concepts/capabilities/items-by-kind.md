@@ -8,7 +8,8 @@ A block's `ItemStorage` answers by kind, with `u64` amounts:
 
 - `amount(host, resource)` and `space_for(host, resource)`: how much of one kind it holds, and the planning bound
   for that kind. The default handler decides offer-dependent admission on the actual insert, not in `space_for`.
-- `insert(host, tx, resource, amount)` and `extract(...)`: writes in the caller's transaction, never more than asked.
+- `insert(host, tx, resource, amount)` and `extract(...)`: writes given the server host and its
+  borrowed `&TransactionContext`, never more than asked.
 - `visit_entries(host, &mut visitor)`: calls `visitor(&kind, amount)` for each occupied entry, in provider order.
   For a container, this is the order of the slots exposed on the queried side, not necessarily physical slot order.
   Each slot has its own amount, even when several hold the same kind.
@@ -62,8 +63,10 @@ items accepted by the filter. It stops at the next matching entry and lets the r
 `transfer` by kind, which is not limited to that entry's amount. If nothing moves, it resumes after that occurrence.
 After a successful move, it scans again from the first entry: a depleted entry can disappear and shift the rest.
 The filter can see the same kind again, including kinds that previously failed to move. It does not read the source
-when `max` is zero. Totals and entry counts that do not fit in 64 bits return `StorageError::Overflow` rather than
-wrapping.
+when `max` is zero. Both helpers require the context of the host's current frame. They return `Ok(0)`
+for a foreign or non-current loan without calling the providers or opening a savepoint. An admitted move
+can still roll back its own attempt independently of the caller. Totals and entry counts that do not fit
+in 64 bits return `StorageError::Overflow` rather than wrapping.
 
 **Cost.** A bulk store can use a by-kind index to avoid scanning slots. The game's adapter answers in one pass over the slots
 (O(slots)), with no work per item moved, so a question about a chest costs the same whether it moves one item or a

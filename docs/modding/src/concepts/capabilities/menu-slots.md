@@ -165,7 +165,8 @@ entity is out of the world during the call, as in `menu_button`. Nothing is aske
 ## Crafted-by processing for held stacks
 
 After delivering an item into a menu slot or onto the cursor, server-side code can use the
-held `place`, the caller's transaction `tx`, and the actual crafted count `amount` (`i32`):
+held `place`, the transaction loan `tx: &TransactionContext` supplied with the host, and the
+actual crafted count `amount` (`i32`):
 
 ```rust,ignore
 place.on_crafted_by(host, tx, amount)?;
@@ -281,10 +282,10 @@ reads and writes nothing. `menu.cursor()` is that menu's cursor (`ItemPlace::Pla
 ```rust,ignore
 // Put four of the menu's offered emeralds into slot 0 of the open chest, or nothing.
 let (slot, cursor) = (ItemPlace::MenuSlot { menu, slot: 0 }, menu.cursor());
-host.transaction(|host, tx| {
+let moved: Result<(), mod_api::TransactionError<()>> = host.transaction(|host, tx| {
     let took = cursor.extract(host, tx, &emerald, 4);
     if took == 4 && slot.insert(host, tx, &emerald, 4) == 4 { Ok(()) } else { Err(()) }
-})
+});
 ```
 
 `menu_clicked` (contract version 2) and `menu_quick_move` (contract version 3, with an optional remainder where `None` empties the clicked slot) each run as one action: what a listener writes
@@ -297,8 +298,9 @@ set-slot never reach it, and it cannot know whether the click changes anything.
 Inside `menu_clicked`, `ItemPlace::MenuSlot` can take from and give to the clicking
 player's inventory and hotbar slots as well as the menu's own storage. Inserts fill
 only the named slot and return the amount that fits. Abort the transaction if a
-partial move should leave both places unchanged. Stale menu or player identities
-refuse writes.
+partial move should leave both places unchanged: the example returns `Aborted(())`
+if it cannot move all four, or `Unavailable` if the savepoint did not run. A stale
+menu or player identity or a context not lent by the current frame refuses the write.
 
 ## A mod's chest menu
 

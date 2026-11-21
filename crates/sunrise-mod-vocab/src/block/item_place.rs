@@ -310,7 +310,7 @@ impl crate::NoBackend for ItemPlaceEditError {
 pub trait PlaceProvider: Send + Sync + 'static {
     /// The stack at `key`, if any.
     fn stack(&self, host: &mut dyn ServerHost, key: u64) -> Option<ItemStack>;
-    /// Puts up to `amount` of `resource` at `key`, in transaction `tx`: how much went. What
+    /// Puts up to `amount` of `resource` at `key` using the loan `tx`: how much went. What
     /// doesn't stack with what is there may go where the mod puts it, such as the player's
     /// inventory (`ItemAccess.insert`); none where `key` is no longer a place.
     fn insert(
@@ -321,7 +321,7 @@ pub trait PlaceProvider: Send + Sync + 'static {
         resource: &ItemResource,
         amount: u32,
     ) -> u32;
-    /// Takes up to `amount` of `resource` from `key`, in transaction `tx`: how much came.
+    /// Takes up to `amount` of `resource` from `key` using the loan `tx`: how much came.
     fn extract(
         &self,
         host: &mut dyn ServerHost,
@@ -562,7 +562,8 @@ impl ItemPlace {
     /// [`ScratchSlots`](Self::ScratchSlots) stack's into its second slot. A player-backed place whose
     /// player is in another level than the hook's (not a creative one) takes only what fits their
     /// inventory, and nothing is dropped: the rest stays the caller's, and [`exchange`](Self::exchange)
-    /// rolls back when it cannot insert the whole replacement.
+    /// rolls back when it cannot insert the whole replacement. Returns zero without reaching
+    /// the place if `tx` does not name this host's current frame.
     pub fn insert(
         &self,
         host: &mut dyn ServerHost,
@@ -574,7 +575,8 @@ impl ItemPlace {
     }
 
     /// Takes up to `amount` of `resource` from here, in transaction `tx`: how much came
-    /// (`ItemAccess.extract`). A creative player's hand gives without losing any.
+    /// (`ItemAccess.extract`). A creative player's hand gives without losing any. Returns zero
+    /// without reaching the place if `tx` does not name this host's current frame.
     pub fn extract(
         &self,
         host: &mut dyn ServerHost,
@@ -590,7 +592,8 @@ impl ItemPlace {
     /// what doesn't stack, as vanilla's `ItemUtils.createFilledResult` puts a filled bucket. In a
     /// transaction of its own, nested in `tx`: all of it, or nothing and 0. Inside an item that
     /// shares its place with others like it, it's done in one of them: that one splits off,
-    /// changed, and the others stay as they were. Returns 0 if it cannot open a transaction.
+    /// changed, and the others stay as they were. Returns zero without reaching the place if
+    /// `tx` does not name this host's current frame or the savepoint cannot be opened.
     pub fn exchange(
         &self,
         host: &mut dyn ServerHost,
@@ -598,7 +601,9 @@ impl ItemPlace {
         resource: &ItemResource,
         amount: u32,
     ) -> u32 {
-        let _ = tx;
+        if !host.transaction_matches(Some(tx)) {
+            return 0;
+        }
         let swap = |host: &mut dyn ServerHost, tx: &TransactionContext| {
             let old = self.resource(host).ok_or(())?;
             let out = self.extract(host, tx, &old, amount);
@@ -615,7 +620,7 @@ impl ItemPlace {
     /// server-side menu take does. This awards the player's `crafted` statistic, applies item
     /// post-processing such as a filled map's pending scale or lock, and runs the normal stat
     /// hook. Only a [`MenuSlot`](Self::MenuSlot) or [`PlayerCursor`](Self::PlayerCursor) is
-    /// accepted; the changed stack and statistic are part of `tx`.
+    /// accepted; the changed stack and statistic are journaled using the loan `tx`.
     pub fn on_crafted_by(
         &self,
         host: &mut dyn ServerHost,
@@ -636,7 +641,8 @@ impl ItemPlace {
     /// attribute reapplication. The usual slot sync sends the new stack. `Strict` preserves this
     /// contract. Cursors, `OneByOne` and `InfiniteMaterials` refuse the edit because they do not
     /// provide a synced whole-stack write. Other places use their usual exchange rules. A refusal
-    /// leaves the place unchanged; aborting `tx` restores a successful write.
+    /// leaves the place unchanged. Pass the current loan `tx`; an abort restores a successful
+    /// write.
     pub fn edit(
         &self,
         host: &mut dyn ServerHost,
@@ -710,7 +716,7 @@ impl ItemPlace {
         amount: u32,
         insert: bool,
     ) -> u32 {
-        if amount == 0 {
+        if amount == 0 || !host.transaction_matches(Some(tx)) {
             return 0;
         }
         let (mut place, mut amount, mut spills) = (self, amount, true);
@@ -738,7 +744,7 @@ impl ItemPlace {
                 _ => break,
             };
         }
-        place.moved_at(host, tx, resource, amount, insert, spills)
+        place.moved_at(host, resource, amount, insert, spills)
     }
 
     /// `insert` or `extract` at a place that wraps none, in a transaction of its own: a handler
@@ -747,13 +753,11 @@ impl ItemPlace {
     fn moved_at(
         &self,
         host: &mut dyn ServerHost,
-        tx: &TransactionContext,
         resource: &ItemResource,
         amount: u32,
         insert: bool,
         spills: bool,
     ) -> u32 {
-        let _ = tx;
         // A menu slot's own rules come before its storage's: `Slot.mayPlace` and
         // `getMaxStackSize` for what goes in, `Slot.mayPickup` for what comes out.
         let amount = match self {

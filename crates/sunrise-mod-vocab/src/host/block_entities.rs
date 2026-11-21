@@ -215,10 +215,10 @@ pub trait BlockEntitiesBackendMut {
         values: Vec<i32>,
     ) -> Result<bool, BlockEntityDataError>;
     /// Side: server.
-    /// Replace internal storage under the existing transaction; ITEMS routing is separate.
-    /// A committed change marks the chunk unsaved but sends no notification. Call
-    /// set_changed explicitly to notify. Removed, replaced or reloaded holders return
-    /// BlockEntityItemError::Stale.
+    /// Replace internal storage using a context lent by this host; `ITEMS` routing is separate.
+    /// A loan not open in this host's journal returns `Ok(false)` without writing. A committed
+    /// change marks the chunk unsaved but sends no notification. Call `set_changed` explicitly
+    /// to notify. Removed, replaced or reloaded holders return [`BlockEntityItemError::Stale`].
     #[access(WorldOnly)]
     fn block_entity_set_item_slot(
         &mut self,

@@ -114,10 +114,10 @@ pub trait ItemsServerHost {
         stack: ItemStack,
     ) -> Result<Option<ItemStack>, StackWriteError>;
     /// Side: server.
-    /// Holds `stack` outside the world, in the open transaction `tx` (`ItemAccess.forStack`):
-    /// the [`ItemPlace::Scratch`] to run item capabilities against. It lives until the
-    /// outermost transaction closes, and an abort of the one that made it drops it. None
-    /// where `tx` is not open.
+    /// Holds `stack` outside the world, using the loan `tx` (`ItemAccess.forStack`): the
+    /// [`ItemPlace::Scratch`] to run item capabilities against. It lives until the outermost
+    /// transaction closes. Aborting the transaction that made it drops it. Returns `Ok(None)`
+    /// if `tx` does not name an open frame of this host's journal.
     #[access(WorldOnly)]
     fn scratch_stack(
         &mut self,
@@ -125,15 +125,15 @@ pub trait ItemsServerHost {
         stack: ItemStack,
     ) -> Result<Option<ItemPlace>, StackWriteError>;
     /// Side: server.
-    /// Takes the stack out of scratch place `place`, in `tx`, ending the place: none where it
-    /// is empty, no longer held, or not a scratch place.
+    /// Takes the stack out of scratch place `place`, using `tx`, ending the place. Returns
+    /// `None` for a missing or wrong kind of place, or a loan not open in this host's journal.
     #[access(WorldOnly)]
     fn scratch_take(&mut self, tx: &TransactionContext, place: &ItemPlace) -> Option<ItemStack>;
     /// Side: server.
     /// Holds `stack` outside the world in a two-slot copy whose item may change, in the open
     /// transaction `tx`: the [`ItemPlace::ScratchSlots`] a dispensed fluid container runs in
     /// (`DispenseFluidContainer`), `stack` in its first slot. It lives as a
-    /// [`scratch_stack`](Self::scratch_stack) place does. None where `tx` is not open.
+    /// [`scratch_stack`](Self::scratch_stack) place does, with the same loan requirements.
     #[access(WorldOnly)]
     fn scratch_slots(
         &mut self,
@@ -141,9 +141,9 @@ pub trait ItemsServerHost {
         stack: ItemStack,
     ) -> Result<Option<ItemPlace>, StackWriteError>;
     /// Side: server.
-    /// Takes both slots out of two-slot place `place`, in `tx`, ending the place: what the
-    /// first holds and what the second caught. None where it is no longer held or not a
-    /// two-slot place.
+    /// Takes both slots out of two-slot place `place`, using `tx`, ending the place: what the
+    /// first holds and what the second caught. Returns `None` if the place is missing or not
+    /// two-slot, or the loan is not open in this host's journal.
     #[access(WorldOnly)]
     fn scratch_take_slots(
         &mut self,

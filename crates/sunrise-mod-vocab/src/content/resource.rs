@@ -487,10 +487,12 @@ impl fmt::Debug for ItemResource {
 /// numbered from 0, as NeoForge's `ResourceHandler`: a provider makes one for its holder, so it
 /// knows where its contents live. It holds no borrow of the game: each call is given the host,
 /// and its state is the game's (slots, a saved compound, attachments, a stack's components), so
-/// the transaction `tx` a write runs in puts it back on an abort. Amounts never exceed what was
+/// the journal puts it back on an abort. Writes take the host and its borrowed
+/// [`TransactionContext`] together; forward the supplied loan to the storage that owns the
+/// write, or use a savepoint's own loan for its writes. Amounts never exceed what was
 /// asked; a handler answering more is a mod bug, and the move it was part of is aborted.
 pub trait ResourceHandler<R> {
-    /// Set the container limit transactionally, accepting 1..=99 (vanilla's upper bound).
+    /// Set the container limit using the loan `tx`, accepting 1..=99 (vanilla's upper bound).
     /// Existing oversized stacks remain extractable. The game persists this with block entity data.
     /// On the default block `ITEMS` handler, a successful call queues the backing container's
     /// change notice at root commit, even if no items moved.
@@ -528,7 +530,7 @@ pub trait ResourceHandler<R> {
     fn is_valid(&self, host: &mut dyn ServerHost, index: usize, resource: &R) -> bool {
         self.capacity(host, index, Some(resource)) > 0
     }
-    /// Puts up to `amount` of `resource` into index `index`: how much went in.
+    /// Puts up to `amount` of `resource` into index `index` using `tx`: how much went in.
     fn insert_at(
         &self,
         host: &mut dyn ServerHost,
@@ -537,8 +539,8 @@ pub trait ResourceHandler<R> {
         resource: &R,
         amount: u32,
     ) -> u32;
-    /// Takes up to `amount` of `resource` out of index `index`: how much came out. None of
-    /// another resource.
+    /// Takes up to `amount` of `resource` out of index `index` using `tx`: how much came out.
+    /// None of another resource.
     fn extract_at(
         &self,
         host: &mut dyn ServerHost,
@@ -549,7 +551,9 @@ pub trait ResourceHandler<R> {
     ) -> u32;
     /// Puts up to `amount` of `resource` in wherever it goes: by default index by index from 0.
     /// Prefer this to `insert_at` unless targeting a specific index. The default runs in its
-    /// own journal and rolls back with [`Overanswered`] if an index answers more than requested.
+    /// own savepoint, nested in the current frame named by `tx`, and rolls back with
+    /// [`Overanswered`] if an index answers more than requested. A foreign or non-current
+    /// context moves nothing.
     fn insert(
         &self,
         host: &mut dyn ServerHost,
@@ -563,8 +567,8 @@ pub trait ResourceHandler<R> {
         })
     }
     /// Takes up to `amount` of `resource` out from wherever it is: by default index by index
-    /// from 0. Prefer this to `extract_at` unless targeting a specific index. Overanswers are
-    /// handled as in [`Self::insert`].
+    /// from 0. Prefer this to `extract_at` unless targeting a specific index. The default uses
+    /// the current context and handles overanswers as in [`Self::insert`].
     fn extract(
         &self,
         host: &mut dyn ServerHost,

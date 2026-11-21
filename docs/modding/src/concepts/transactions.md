@@ -1,31 +1,34 @@
 # Transactions
 
-Use `HostTransaction` on a `ServerHost` to group capability writes. The closure's
-`Ok` commits; `Err` aborts. Pass the borrowed `&TransactionContext` to each
-handler or place write. The closure still returns `Result<T, E>`, but the call
-returns `Result<T, TransactionError<E>>`:
+Import `HostTransaction` to group server-side writes in one action. Return `Ok` from the
+closure to commit, or `Err` to roll back. For example, move one item between two places
+only if both writes succeed:
 
-- `Ok(value)` means the transaction committed.
-- `Err(TransactionError::Aborted(error))` carries the closure's original error. Its writes were rolled back.
-- `Err(TransactionError::Unavailable)` means the host could not open a transaction. The closure did not run.
+```rust
+use mod_api::{HostTransaction, ItemPlace, ItemResource, ServerHost, TransactionError};
 
-```rust,ignore
-use mod_api::{HostTransaction, ServerHost, TransactionError};
-
-fn update(host: &mut dyn ServerHost) -> Result<(), TransactionError<()>> {
+fn move_one(
+    host: &mut dyn ServerHost,
+    from: &ItemPlace,
+    to: &ItemPlace,
+    item: &ItemResource,
+) -> Result<(), TransactionError<()>> {
     host.transaction(|host, tx| {
-        // Pass host and tx to your capability writes.
+        if from.extract(host, tx, item, 1) != 1 || to.insert(host, tx, item, 1) != 1 {
+            return Err(());
+        }
         Ok(())
     })
 }
 ```
 
-To write as part of an action that is already open, use `host.join_transaction(|host, tx| …)`.
-It lends the current context without opening a savepoint. `Ok(None)` means no action
-was open and the closure did not run; `Err(TransactionUnavailable)` means the host
-could not lend a context. The opener decides whether the joined writes commit or roll
-back, regardless of what the joining closure returns. Use `host.transaction` instead
-when you need a savepoint that can roll back independently.
+The closure returns `Result<T, E>`; `host.transaction` returns `Result<T, TransactionError<E>>`:
+
+- `Ok(value)`: the transaction committed.
+- `Err(TransactionError::Aborted(error))`: the closure returned this error and its journaled writes rolled back.
+- `Err(TransactionError::Unavailable)`: the host could not open a transaction and the closure did not run.
+
+When the caller uses a different error type, map both variants before propagating with `?`.
 
 ## Commit and rollback
 
@@ -110,20 +113,31 @@ Entities a transaction spawns or removes follow the same commit and rollback rul
 
 ## Transaction authority
 
-The host lends `&mut dyn ServerHost` and `&TransactionContext` together to the closure.
-Pass the context down to capability and item-place writes. It cannot be copied, encoded,
-returned from the closure or stored for later. A context from another host cannot write
-in this host's journal, even while both hosts have a transaction open. The host owns the
-transaction and closes it on return or unwind; the loan cannot close it.
+The closure borrows a `&mut dyn ServerHost` and a `&TransactionContext` together. Pass both
+down to capability, item-place and world fluid writes. You cannot obtain an owned context,
+return the borrow from the closure, save it for later, or encode it as a payload. Even if two hosts
+have open roots at the same depth, a context lent by one is not authority on the other.
+
+If a hook or Part already runs inside an action and has no context parameter, use
+`host.join_transaction(|host, tx| …)`. It lends the current frame and returns `Ok(Some(value))`
+with the callback's result. `Ok(None)` means no action was open; `Err(TransactionUnavailable)`
+means the host could not lend access. Neither calls the callback. Joining does not open,
+close or roll back anything by itself, even if the callback returns an error. The opener
+decides the outcome. Use `host.transaction` for an independent savepoint, and use the fresh
+context lent to that closure for its writes. Move helpers can also open their own savepoints:
+a failed helper can undo its attempt without undoing the action around it.
 
 ## Inspecting a transaction
 
 | Method | Result |
 |---|---|
-| `tx.depth()` | `0` for a root transaction, increasing by one at each nesting level |
-| `host.transaction_matches(Some(tx))` | Whether this loan names the innermost open frame on this host |
-| `host.transaction_matches(None)` | Whether there is no open frame on this host |
-| `host.transaction_lifecycle()` | `TransactionLifecycle` describing the open or closing phase |
+| `tx.depth()` | `usize`: zero for the root, plus one for each level of nesting |
+| `host.transaction_matches(Some(tx))` | Whether this loan names the current frame on this host |
+| `host.transaction_matches(None)` | Whether this host has no open frame |
+| `host.transaction_lifecycle()` | A read-only observation of the host's journal phase |
+
+Depth is not a frame identity. Neither depth nor the observed `TransactionLifecycle` grants
+write or close authority, and `TransactionLifecycle` is not a Wire payload.
 
 | `TransactionLifecycle` variant | Meaning |
 |---|---|

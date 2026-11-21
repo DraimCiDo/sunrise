@@ -1,4 +1,4 @@
-//! `host.transaction` ( §7): NeoForge 26.3's `Transaction`. Changes made through the
+//! `host.transaction` (#41 §7): NeoForge 26.3's `Transaction`. Changes made through the
 //! capability helpers inside one are kept by the game and made final only when the outermost
 //! transaction commits; an abort puts back everything its closure changed.
 use crate::ServerHost;
@@ -11,8 +11,10 @@ use std::{
 
 // no wire: only the host can lend this thread-bound authority over a live journal.
 /// A loan of write authority in one open transaction, as NeoForge's `TransactionContext`.
-/// Pass it to handler and item-place writes. It cannot close the transaction or outlive the
-/// callback it was lent to. A write refuses a loan that does not belong to the host's journal.
+/// Pass this loan and the accompanying server host to handler, item-place and world fluid
+/// writes. It cannot close the transaction, be encoded as payload data, or outlive the
+/// callback it was lent to. A live loan from another host is not authority on this host.
+/// When opening a nested savepoint, use the context that its own callback receives.
 // exhaustive: its fields are private, so mods cannot build or destructure it.
 pub struct TransactionContext {
     frame: TransactionFrame,
@@ -20,7 +22,8 @@ pub struct TransactionContext {
 }
 
 impl TransactionContext {
-    /// The nesting depth in its owning journal. The root transaction has depth zero.
+    /// The nesting depth at which this context was lent: zero at the root, plus one per
+    /// enclosing transaction. Depth alone cannot identify a frame or journal.
     pub fn depth(&self) -> usize {
         self.frame.depth
     }
@@ -85,8 +88,9 @@ impl TransactionFrame {
 }
 
 // no wire: observes the process-local transaction journal.
-/// Where the transaction system is (`Transaction.Lifecycle`), as
-/// [`transaction_lifecycle`](crate::prelude::ModStateServerHost::transaction_lifecycle) reads it.
+/// A read-only observation of the host's journal phase (`Transaction.Lifecycle`), returned by
+/// [`transaction_lifecycle`](crate::prelude::ModStateServerHost::transaction_lifecycle).
+/// It is not a write or close capability or a Wire payload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TransactionLifecycle {
@@ -96,9 +100,8 @@ pub enum TransactionLifecycle {
     Open,
     /// A nested transaction is closing: committing into the one around it, or aborting.
     Closing,
-    /// The outermost transaction is closing: on a commit, the game is telling the world of its
-    /// changes (`setChanged`, `contents_changed`, block updates), so a write now lands outside
-    /// the transaction that just ended.
+    /// The outermost transaction is closing. On commit, effects such as `contents_changed`
+    /// and block updates run after its frame has been removed; they cannot join that frame.
     RootClosing,
 }
 

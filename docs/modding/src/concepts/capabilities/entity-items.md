@@ -34,16 +34,19 @@ one item whose `equippable` permits the slot and entity type.
 Register with `r.entity_capability(&ENTITY_ITEMS, "mymod:robot", |host, robot, ()| …)`.
 Providers registered with `r.entity_capability_before_game` run before the game's
 provider; ordinary providers run after it. Within each group, registration order
-applies and the first handler returned wins.
+applies and the first handler returned wins. A provider's handler writes receive
+`&mut dyn ServerHost` and `&TransactionContext` together.
 
 Give, take and count player items through this capability. For example, this
 trade aborts if an offer changes or either recipient lacks room:
 
 ```rust,ignore
+use mod_api::{HostTransaction, TransactionError};
+
 // A trade: each offer is (index, the exact stack it must still hold). A stale offer or no
 // room for one aborts the transaction, and every move in it is put back.
 let (a, b) = (seller.capability(host, &ENTITY_ITEMS, ())?, buyer.capability(host, &ENTITY_ITEMS, ())?);
-host.transaction(|host, tx| {
+let trade: Result<(), TransactionError<()>> = host.transaction(|host, tx| {
     for (from, to, offer) in [(&a, &b, &seller_offer), (&b, &a, &buyer_offer)] {
         for (index, stack) in offer {
             let offered = ItemResource::of(stack);
@@ -51,15 +54,18 @@ host.transaction(|host, tx| {
                 && from.amount(host, *index) == stack.count();
             if !still
                 || from.extract_at(host, tx, *index, &offered, stack.count()) != stack.count()
-                || to.insert(host, tx, &offered, stack.count()) != stack.count()
+                || to.insert(host, tx, &offered, stack.count()) != Ok(stack.count())
             {
                 return Err(());
             }
         }
     }
     Ok(())
-})
+});
 ```
+
+`Aborted(())` means the offer check or transfer failed and the trade was undone;
+`Unavailable` means the trade closure did not run.
 
 Cauldron interactions outside a transaction retain vanilla's effect order.
 Inside a transaction, statistics (including `player_stat_award`), sounds and

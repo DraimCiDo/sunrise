@@ -23,6 +23,12 @@ What a hook's return value means depends on its kind:
 
 A hook with no receiver gets no `Host`.
 
+Capability writes that require a transaction context use the `ServerHost`. If a hook or Part
+already got a loan, forward it with the host. If it runs inside an action but receives only the
+host, `join_transaction` borrows the active frame without opening or closing it. Use
+`transaction` instead when the write needs a savepoint you decide to commit or roll back.
+See [Transactions](transactions.md) for the return values and the writes that are journaled.
+
 ## Player tick hooks
 
 `player_tick_pre` and `player_tick_post` bracket the player's body tick on both

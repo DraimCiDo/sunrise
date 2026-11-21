@@ -34,8 +34,9 @@ pub trait ModStateServerHost {
         token: AttachmentWriteToken,
     ) -> Result<(), AttachmentRowError>;
     /// Side: server.
-    /// Where the transaction system is (`Transaction.getLifecycle`): none open, one open, a
-    /// nested one closing, or the outermost closing while the game tells the world of a commit.
+    /// Observe the journal phase (`Transaction.getLifecycle`): none open, open, a nested close,
+    /// or a root close. This does not lend write authority or allow the caller to close anything.
+    /// Use [`HostTransaction::join_transaction`] to write in an already open action.
     #[access(WorldOnly)]
     fn transaction_lifecycle(&self) -> TransactionLifecycle;
     /// Side: server.

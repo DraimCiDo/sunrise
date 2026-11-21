@@ -63,8 +63,9 @@ impl From<crate::Overanswered> for StorageError {
 }
 
 /// A block's items by kind: how much of one kind it holds and has room for, and its writes, by
-/// kind and in transactions, as a [`ResourceHandler`] is written. Stateless and given the host,
-/// as every capability handler is. Amounts are 64-bit: a million items is one call.
+/// kind with a borrowed [`TransactionContext`], as a [`ResourceHandler`] is written. The
+/// provider gets the host and its loan on each write. Amounts are 64-bit: a million items is
+/// one call.
 pub trait ItemStorage {
     /// How much of `resource` it holds.
     fn amount(
@@ -80,8 +81,8 @@ pub trait ItemStorage {
         host: &mut dyn ServerHost,
         resource: &ItemResource,
     ) -> Result<u64, StorageError>;
-    /// Puts up to `amount` of `resource` in, in transaction `tx`: how much went in, never more
-    /// than `amount`.
+    /// Puts up to `amount` of `resource` in using `tx`: how much went in, never more than
+    /// `amount`.
     fn insert(
         &self,
         host: &mut dyn ServerHost,
@@ -89,8 +90,8 @@ pub trait ItemStorage {
         resource: &ItemResource,
         amount: u64,
     ) -> u64;
-    /// Takes up to `amount` of `resource` out, in transaction `tx`: how much came out, never more
-    /// than `amount`.
+    /// Takes up to `amount` of `resource` out using `tx`: how much came out, never more than
+    /// `amount`.
     fn extract(
         &self,
         host: &mut dyn ServerHost,
@@ -350,7 +351,8 @@ impl ItemStorage for Slots {
 /// Extract from `from` first, then offer the extracted amount to `to` in the same journal. If
 /// `to` takes only part, roll back and retry once with that amount. A handler that answers more
 /// than it was asked rolls back the move with [`StorageError::Overanswered`]. If `from` has none
-/// or `to` has no room, neither is asked to transfer anything.
+/// or `to` has no room, neither is asked to transfer anything. If `tx` does not name this
+/// host's current frame, returns `Ok(0)` before reading either provider or opening a savepoint.
 pub fn transfer(
     host: &mut dyn ServerHost,
     from: &Capability<dyn ItemStorage>,
@@ -359,7 +361,20 @@ pub fn transfer(
     max: u64,
     tx: &TransactionContext,
 ) -> Result<u64, StorageError> {
-    let _ = tx;
+    if !host.transaction_matches(Some(tx)) {
+        return Ok(0);
+    }
+    transfer_admitted(host, from, to, resource, max)
+}
+
+/// Moves one kind after the caller admits the enclosing context, with its own savepoint.
+fn transfer_admitted(
+    host: &mut dyn ServerHost,
+    from: &Capability<dyn ItemStorage>,
+    to: &Capability<dyn ItemStorage>,
+    resource: &ItemResource,
+    max: u64,
+) -> Result<u64, StorageError> {
     let want = max
         .min(from.amount(host, resource)?)
         .min(to.space_for(host, resource)?);
@@ -387,7 +402,9 @@ pub fn transfer(
 ///
 /// A zero move advances past that occurrence. After a positive move, rescan from the first
 /// entry: extraction can remove an entry and shift those after it. The filter can therefore
-/// see the same kind more than once, even if that kind previously failed to move.
+/// see the same kind more than once, even if that kind previously failed to move. If `tx`
+/// does not name this host's current frame, returns `Ok(0)` before visiting the source or
+/// opening a savepoint.
 pub fn transfer_matching(
     host: &mut dyn ServerHost,
     from: &Capability<dyn ItemStorage>,
@@ -396,6 +413,9 @@ pub fn transfer_matching(
     max: u64,
     tx: &TransactionContext,
 ) -> Result<u64, StorageError> {
+    if !host.transaction_matches(Some(tx)) {
+        return Ok(0);
+    }
     let mut moved = 0;
     let mut tried_prefix = 0;
     while moved < max {
@@ -417,7 +437,7 @@ pub fn transfer_matching(
         let Some(resource) = selected? else {
             break;
         };
-        let went = transfer(host, from, to, &resource, max - moved, tx)?;
+        let went = transfer_admitted(host, from, to, &resource, max - moved)?;
         moved += went;
         tried_prefix = if went == 0 { seen } else { 0 };
     }
@@ -511,6 +531,7 @@ mod tests {
             _: &mut dyn ServerHost,
             visitor: &mut dyn FnMut(&ItemResource, u64) -> ControlFlow<()>,
         ) -> Result<(), StorageError> {
+            self.0.calls.set(self.0.calls.get() + 1);
             for (resource, &amount) in self.0.held.borrow().iter() {
                 if amount != 0 && visitor(resource, amount).is_break() {
                     break;
@@ -709,6 +730,37 @@ mod tests {
         assert_eq!(from_store.held.borrow()[&r[0]], 808);
         let moved = host.transaction(|host, tx| transfer(host, &from, &into, &r[0], 1000, tx));
         assert_eq!(moved, Ok(0), "a full target is not tried");
+    }
+
+    #[test]
+    fn transfers_refuse_a_foreign_live_context_before_probe_or_savepoint() {
+        let (mut host, r) = host_with(&["minecraft:stone"]);
+        let mut other = FakeHost::new();
+        let stone = &r[0];
+        let (source, from) = bulk(64, &[(stone, 19)]);
+        chest(&mut host, [0, 64, 0], &[Some((stone, 3))]);
+        let to = storage_at(&mut host, [0, 64, 0]);
+        (&mut other as &mut dyn ServerHost)
+            .transaction(|_, foreign| {
+                (&mut host as &mut dyn ServerHost)
+                    .transaction(|host, own| {
+                        assert_eq!(own.depth(), foreign.depth());
+                        assert_eq!(transfer(host, &from, &to, stone, 7, foreign), Ok(0));
+                        assert_eq!(
+                            transfer_matching(host, &from, &to, |_| true, 7, foreign),
+                            Ok(0)
+                        );
+                        Ok::<_, ()>(())
+                    })
+                    .unwrap();
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+
+        assert_eq!(host.journal.closed(), &[(1, true)], "only the root opened");
+        assert_eq!(source.calls.get(), 0);
+        assert_eq!(source.held.borrow()[stone], 19);
+        assert_eq!(to.amount(&mut host, stone), Ok(3));
     }
 
     #[test]

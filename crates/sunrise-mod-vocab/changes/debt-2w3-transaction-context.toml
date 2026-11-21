@@ -1,0 +1,67 @@
+ids = [
+    "type:Transaction",
+    "type:TransactionSeal",
+    "handle:TransactionSeal::transaction",
+    "type:TransactionLifecycle",
+    "trait:HostTransaction",
+    "method:HostTransaction::transaction",
+    "fn:run_transaction",
+    "method:prelude::ModStateServerHost::transaction_open",
+    "method:prelude::ModStateServerHost::transaction_close",
+    "method:prelude::ModStateServerHost::transaction_current",
+    "method:prelude::ModStateServerHost::transaction_depth",
+    "method:prelude::ItemsServerHost::scratch_stack",
+    "method:prelude::ItemsServerHost::scratch_take",
+    "method:prelude::ItemsServerHost::scratch_slots",
+    "method:prelude::ItemsServerHost::scratch_take_slots",
+    "trait:ResourceHandler",
+    "method:ResourceHandler::set_max_stack_size",
+    "method:ResourceHandler::insert_at",
+    "method:ResourceHandler::extract_at",
+    "method:ResourceHandler::insert",
+    "method:ResourceHandler::extract",
+    "trait:EnergyHandler",
+    "method:EnergyHandler::insert",
+    "method:EnergyHandler::extract",
+    "trait:ItemStorage",
+    "method:ItemStorage::insert",
+    "method:ItemStorage::extract",
+    "trait:PlaceProvider",
+    "method:PlaceProvider::insert",
+    "method:PlaceProvider::extract",
+    "handle:ItemPlace::insert",
+    "handle:ItemPlace::extract",
+    "handle:ItemPlace::exchange",
+    "handle:ItemPlace::on_crafted_by",
+    "handle:ItemPlace::edit",
+    "handle:ItemComponentHandler::write",
+    "handle:BlockEntityRef::set_item_slot",
+    "handle:LevelRef::pickup_fluid",
+    "handle:LevelRef::place_fluid",
+    "handle:LevelRef::play_fluid_effects",
+    "fn:move_energy",
+    "fn:transfer",
+    "fn:transfer_matching",
+    "fn:resource_util::insert_stacking",
+    "fn:resource_util::extract_first",
+    "fn:resource_util::find_extractable_resource",
+    "fn:resource_util::move_resources",
+    "fn:resource_util::move_resources_stacking",
+    "fn:resource_util::move_first",
+    "fn:resource_util::move_first_stacking",
+    "type:PartStateError",
+]
+why = "A transaction is write authority over one live server journal, not data a mod can keep or send. The host lends the context and owns the close. Nested savepoints still roll back independently, and only the root commit publishes deferred effects. Observing the lifecycle does not grant authority. A host that cannot lend a transaction has not run the closure; that refusal is distinct from an error returned by a closure that ran and rolled back."
+migrate = """
+Replace `use mod_api::Transaction` with `use mod_api::TransactionContext` for typed writes. Change `tx: &Transaction` to `tx: &TransactionContext` in your `ResourceHandler` (including `set_max_stack_size`, indexed writes and slot-less overrides), `EnergyHandler`, `ItemStorage` and `PlaceProvider` implementations. Keep `host: &mut dyn ServerHost`, the other parameters and the write's return type unchanged. Forward the borrowed `tx` with that host to delegated writes; do not store or recreate it. If you open a nested savepoint, use its callback's own `host, tx` instead. Scratch methods, item-place and component writes, block entity slot writes, and `LevelRef` fluid pickup, placement and queued fluid effects keep their argument order: pass the borrowed `tx` directly in the old transaction argument's place.
+
+Replace `run_transaction(host, |host, tx| ...)`, or `host.transaction_open()` followed by writes using `seal.transaction()` and `host.transaction_close(&seal, commit)`, with one `host.transaction(|host, tx| { ... })` call. Import `mod_api::HostTransaction` and remove the `run_transaction` and `TransactionSeal` imports. The callback receives `&mut dyn ServerHost` rather than `&mut Self`; use that type for explicit annotations. Return `Ok(value)` to commit or `Err(error)` to roll back; unwinding also rolls back. The opener alone closes the scope.
+
+Replace `host.transaction_current()` by forwarding the context you already have or by using `host.join_transaction(|host, tx| { ... })`. Handle `Ok(Some(value))` for a completed callback, `Ok(None)` for no active action, and `Err(TransactionUnavailable)` when the host cannot lend the context. Joining never opens, closes or rolls back a transaction by itself; a callback's returned error is just its return value. Use `host.transaction` for an independent savepoint. Replace `host.transaction_depth(tx)` with `tx.depth()` (`usize`, root zero); use `host.transaction_matches(Some(tx))` to check the current frame or `host.transaction_matches(None)` to check for no frame. Depth alone does not identify the frame. `host.transaction_lifecycle()` still observes the phase; neither `TransactionLifecycle` nor `TransactionContext` can be used as Wire payload data. Send mod-owned descriptive data instead if you need to report a phase.
+
+The callback still returns `Result<T, E>`, but `host.transaction` now returns `Result<T, TransactionError<E>>`. Replace a match on `Err(e)` with `Err(TransactionError::Aborted(e))` for the old callback error, and handle `Err(TransactionError::Unavailable)` separately (the callback was not invoked). Map both variants before using `?` when the caller has a different error type. For Part state edits, handle `PartStateError::Unavailable` for the same refusal instead of treating it as a stale holder; the edit callback was not invoked.
+
+Pass the current borrowed `tx` to `move_energy`, `transfer` and `transfer_matching`; a foreign or non-current loan returns `Ok(0)` before probing a provider. For `resource_util` helpers whose last argument was `Option<&Transaction>`, pass `Some(tx)` with the current loan, or `None` only when there is no open frame and the helper may open a root. The helpers still own their probes and savepoints and can undo them without closing the caller's frame. Attachment-backed handlers require the current loan for their writes; ordinary attachment writes still use the ambient journal.
+
+For a custom test host, replace `FakeJournal::open`, `close`, `current` and `depth_of` with `ServerHost::with_transaction_scope` delegating to `FakeJournal::with_scope(host, mode, callback, journal, snapshot, restore)`, returning `Ok(ran)`. Implement `ServerHost::transaction_matches` with `journal.matches(expected)`. `journal.holds(tx)` now takes `&TransactionContext` and checks membership, including an open ancestor; use `tx.depth()` for its depth. `testing::FakeHost` already implements these scopes. A cloned journal copies close history, not authority over open frames.
+"""

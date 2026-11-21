@@ -4,11 +4,13 @@ Use `level.capability(host, &ENERGY, pos, side)` to look up a block's
 `EnergyHandler`. Transfer energy inside a transaction with
 `move_energy(host, &from, &to, max, tx)`. It returns the amount moved or
 [`Overanswered`](answer-limits.md). A partially accepted move is rolled back and
-retried with the accepted amount.
+retried with the accepted amount. A foreign or non-current `tx` returns `Ok(0)`
+without reading the handlers or opening a savepoint.
 
 `ENERGY` corresponds to NeoForge's `Capabilities.Energy.BLOCK`. An `EnergyHandler`
 reports an amount and a capacity, without a resource identity. Its `insert` and
-`extract` methods receive a `Transaction` and return the amount transferred.
+`extract` methods receive the server host and its borrowed `&TransactionContext`
+and return the amount transferred.
 
 ## Block providers
 
@@ -30,8 +32,8 @@ buffer with `r.block_energy(&block, buffer)`, where `buffer` is a `ModEnergyBuff
 | `LimitingEnergyHandler::new(inner, max_insert, max_extract)` | Clamps each request before forwarding it in the same transaction. |
 
 To delegate, implement `EnergyHandler` on a struct that holds another handler and
-forward its methods. Journal any additional state you change in a transfer so
-an aborted transaction restores it.
+forward its methods, passing the same host and context to any delegated write.
+Keep additional state in journaled storage so an aborted transfer restores it.
 
 Energy handlers, including those reached through `Capability`, provide `is_full`
 and `comparator_signal`. The signal is 0 for an empty or zero-capacity handler;

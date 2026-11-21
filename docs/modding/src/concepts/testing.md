@@ -9,8 +9,8 @@ a static slice. Call `dispatch_<hook>(&mut host, args…)` inside the closure to
 the game: `registries` (item reports, items with slots of their own, the loaded mods), `players` (who is online,
 their inventories by slot, what you give to them and show on their action bar), `level` (blocks, block entities
 with item slots, fluid tanks and energy storage as the game answers them, and entities), `commands` and
-`messages` (what ran and what was said), and `journal`, which keeps the players and the level on each transaction
-and puts them back when it aborts. The fake has no client backend, so client handle writes refuse.
+`messages` (what ran and what was said), and `journal`, which snapshots players, the level
+and attachments on each transaction and restores them on abort. The fake has no client backend, so client handle writes refuse.
 
 Set up the world through those fields, run your code with `&mut host`, then inspect
 the fakes. This example moves three items between two containers:
@@ -35,7 +35,7 @@ let into = level.capability(server, &ITEMS, [1, 64, 0], None).unwrap();
 let moved = server.transaction(|host, tx| {
     move_resources(host, &from, &into, |_: &ItemResource| true, 3, Some(tx))
 });
-assert_eq!(moved.ok(), Some(3));
+assert_eq!(moved, Ok(3));
 let into = host.level.block_entity_at([1, 64, 0]).unwrap().items.as_ref().unwrap();
 assert_eq!(into.count("minecraft:stone"), 3);
 ```
@@ -56,4 +56,9 @@ checks the frozen table rather than extending it. A new load requires a new part
 
 An unsupported host method panics with its name, so an unexpected call fails
 loudly. You can write your own double for behavior the fakes do not model,
-implementing the services your hook calls; `testing::FakeJournal` gives such a host the same transaction journal over its own state.
+implementing the services your hook calls. On a double without a journal, `transaction` and
+`join_transaction` refuse without invoking their closures. To model transactions, implement
+`ServerHost::with_transaction_scope` by delegating to `testing::FakeJournal::with_scope` with
+callbacks to find your journal, snapshot state and restore it. Return `Ok(ran)` from the scope
+method and use `journal.matches(expected)` in `ServerHost::transaction_matches`. The fake
+supports both opening an independent savepoint and lending the current context without a close.

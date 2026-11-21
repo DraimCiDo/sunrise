@@ -474,8 +474,8 @@ pub fn comparator_signal<R>(host: &mut dyn ServerHost, handler: &dyn ResourceHan
 
 /// Inserts up to `amount` of `resource`, topping up matching indices before empty ones.
 /// An overanswer rolls back the insertion and returns [`Overanswered`]. Pass `Some(tx)` for
-/// the current transaction or `None` to open a root. A mismatched token, including a missing
-/// token when a transaction is open, returns `Ok(0)` without calling the handler.
+/// the current frame's loan or `None` to open a root. A foreign or non-current context, or
+/// `None` when a transaction is open, returns `Ok(0)` without calling the handler.
 pub fn insert_stacking<R: PartialEq>(
     host: &mut dyn ServerHost,
     handler: &dyn ResourceHandler<R>,
@@ -530,8 +530,8 @@ fn try_insert_stacking<R: PartialEq>(
 }
 
 /// Takes up to `amount` of the first extractable resource `filter` accepts. An overanswer
-/// aborts the extraction. Pass `Some(tx)` for the current transaction or `None` to open a root.
-/// A mismatched token, including a missing token when a transaction is open, returns `None`
+/// aborts the extraction. Pass `Some(tx)` for the current frame's loan or `None` to open a root.
+/// A foreign or non-current context, or `None` when a transaction is open, returns `None`
 /// without calling the handler.
 pub fn extract_first<R>(
     host: &mut dyn ServerHost,
@@ -560,7 +560,7 @@ pub fn extract_first<R>(
 
 /// The first resource `filter` accepts that can be extracted. Probes with the slot's whole
 /// int amount in a transaction that always rolls back. Pass `Some(tx)` for the current
-/// transaction or `None` to probe at the root. A mismatched token, including a missing token
+/// frame's loan or `None` to probe at the root. A foreign or non-current context, or `None`
 /// when a transaction is open, returns `None` without calling the handler.
 pub fn find_extractable_resource<R>(
     host: &mut dyn ServerHost,
@@ -664,8 +664,9 @@ impl<R> Attributed<'_, R> {
 /// capability reference to retain its provider in the error, or a `&dyn ResourceHandler<R>`
 /// for a directly composed handler.
 ///
-/// Pass `Some(tx)` to run under the current transaction, or `None` to open a root. A token
-/// that does not name the current transaction, or `None` while one is open, moves nothing.
+/// Pass `Some(tx)` with the current frame's loan to use a nested savepoint, or `None` to open
+/// a root. A foreign or non-current context, or `None` while a transaction is open, returns
+/// `Ok(0)` without calling either handler.
 pub fn move_resources<'a, R: 'a>(
     host: &mut dyn ServerHost,
     from: impl Into<Attributed<'a, R>>,

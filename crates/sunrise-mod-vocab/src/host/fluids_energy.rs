@@ -44,21 +44,23 @@ pub trait FluidsEnergyBackendMut {
     /// Side: server.
     /// `SimpleEnergyHandler.insert`: puts up to `amount` into the buffer at `at`
     /// (`native_energy_amount`) through its side, no more than its room and its limit per call,
-    /// kept by transaction `tx`. How much went in.
+    /// journaled using the borrowed context `tx`. Returns the amount inserted, or zero if
+    /// the loan is not open in this host's journal.
     #[access(WorldOnly)]
     fn energy_insert(&mut self, at: BlockSide, amount: u32, tx: &TransactionContext) -> u32;
     /// Side: server.
     /// `SimpleEnergyHandler.extract`: takes up to `amount` out of the buffer at `at`
-    /// (`native_energy_amount`) by its side, no more than it holds and its limit per call, kept
-    /// by transaction `tx`. How much came out.
+    /// (`native_energy_amount`) by its side, no more than it holds and its limit per call,
+    /// journaled using `tx`. Returns the amount extracted, or zero if the loan is not open
+    /// in this host's journal.
     #[access(WorldOnly)]
     fn energy_extract(&mut self, at: BlockSide, amount: u32, tx: &TransactionContext) -> u32;
     /// Side: server.
     /// Puts as much of `fluid` as tank `tank` of those `at`'s side reaches takes: a mod
     /// block's fillable tank, empty or holding that fluid, up to its capacity; a cauldron by
     /// whole thirds, lava only whole into an empty one, discarding the fluid's components.
-    /// What didn't fit. The write is kept by
-    /// transaction `tx`.
+    /// Returns what didn't fit, or the whole input if the loan `tx` is not open in this host's
+    /// journal. An abort restores the old contents.
     #[access(WorldOnly)]
     fn fluid_tank_insert(
         &mut self,
@@ -70,7 +72,7 @@ pub trait FluidsEnergyBackendMut {
     /// Side: server.
     /// Takes up to `max` out of tank `tank` of those `at`'s side reaches: a mod block's
     /// drainable tank, a cauldron by whole thirds and lava only whole. What came out. The
-    /// write is kept by transaction `tx`.
+    /// write uses the loan `tx`; returns `None` if it is not open in this host's journal.
     #[access(WorldOnly)]
     fn fluid_tank_extract(
         &mut self,
@@ -86,9 +88,9 @@ pub trait FluidsEnergyBackendMut {
     /// picking it up when given (only a creative player drains a barrier). What came out, a
     /// bucket of it. None, with nothing done, where the block gives no fluid (a flowing fluid,
     /// powder snow, any other block), in another level, a chunk that isn't loaded, or a
-    /// transaction that isn't open.
+    /// context `tx` not open in this host's journal.
     ///
-    /// Kept by transaction `tx`: the block is decided and written at the call, so later reads
+    /// Kept by the journal that lent `tx`: the block is decided and written at the call, so later reads
     /// in the transaction see it drained and a second pickup there gets nothing; its updates, a
     /// drained block's drops when it no longer survives, and the bucket's fill sound and
     /// `minecraft:fluid_pickup` (from `player`) follow at the outermost commit. An abort leaves
@@ -110,9 +112,9 @@ pub trait FluidsEnergyBackendMut {
     /// false placement answer fails instead of emptying the bucket (NeoForge's `validatePlaced`). True
     /// when it was placed or hissed away; false, with nothing done, for a fluid with no world
     /// form, where it can't be placed, in another level, a chunk that isn't loaded, or a
-    /// transaction that isn't open.
+    /// context `tx` not open in this host's journal.
     ///
-    /// Kept by transaction `tx` as [`level_pickup_fluid`](Self::level_pickup_fluid) is: the
+    /// Kept by the journal that lent `tx` as [`level_pickup_fluid`](Self::level_pickup_fluid) is: the
     /// block written at the call, its updates, the fluid tick, a replaced block's drops, a doused
     /// block's sound and the bucket's empty sound and `minecraft:fluid_place` (from `player`) at
     /// the outermost commit, nothing of it after an abort.
@@ -130,9 +132,9 @@ pub trait FluidsEnergyBackendMut {
     /// The bucket's sound and game event for `fluid` at the centre of `pos` in the level in
     /// place, as `FluidUtil.triggerSoundAndGameEvent` plays them (`pickup`: the fill sound and
     /// `minecraft:fluid_pickup`, else the empty sound and `minecraft:fluid_place`; a tank-only
-    /// fluid has no sound), from `player` when given, at the outermost commit of transaction
-    /// `tx`: nothing if it aborts. False, with nothing queued, in another level or for a
-    /// transaction that isn't open.
+    /// fluid has no sound), from `player` when given. Queued under `tx` for the outermost
+    /// commit and dropped on abort. False, with nothing queued, in another level or for a
+    /// context not open in this host's journal.
     #[access(WorldOnly)]
     fn level_play_fluid_effects(
         &mut self,

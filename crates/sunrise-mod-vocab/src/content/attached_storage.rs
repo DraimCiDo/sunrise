@@ -2,7 +2,8 @@
 //! mods keep an `ItemStacksResourceHandler`, a `FluidStacksResourceHandler` or a
 //! `SimpleEnergyHandler` in an attachment: handlers over an [`AttachmentType`] the mod declares,
 //! saved by its codec. Every write is an attachment write, so the game's transaction journal,
-//! which keeps each holder's attachment map, puts it back on an abort.
+//! which keeps each holder's attachment map, puts it back on an abort. Handler writes require
+//! a loan of the host's current frame; direct attachment writes still use the ambient journal.
 use crate::content::registry_keys::{fluid_id, fluid_key, item_id, item_key_by_identifier};
 use crate::{
     AttachmentCodec, AttachmentError, AttachmentType, Components, Compound, EnergyHandler,
@@ -159,12 +160,12 @@ impl<R: StackedResource> ResourceHandler<R> for AttachedStacks<R> {
     fn insert_at(
         &self,
         host: &mut dyn ServerHost,
-        _: &TransactionContext,
+        tx: &TransactionContext,
         index: usize,
         resource: &R,
         amount: u32,
     ) -> u32 {
-        if !self.is_valid(host, index, resource) {
+        if !host.transaction_matches(Some(tx)) || !self.is_valid(host, index, resource) {
             return 0;
         }
         let room = self.capacity(host, index, Some(resource));
@@ -182,11 +183,14 @@ impl<R: StackedResource> ResourceHandler<R> for AttachedStacks<R> {
     fn extract_at(
         &self,
         host: &mut dyn ServerHost,
-        _: &TransactionContext,
+        tx: &TransactionContext,
         index: usize,
         resource: &R,
         amount: u32,
     ) -> u32 {
+        if !host.transaction_matches(Some(tx)) {
+            return 0;
+        }
         let Some((held, have)) = self.at(host, index).filter(|(held, _)| held == resource) else {
             return 0;
         };
@@ -248,7 +252,10 @@ impl EnergyHandler for AttachedEnergy {
     fn capacity(&self, _: &mut dyn ServerHost) -> u32 {
         self.capacity
     }
-    fn insert(&self, host: &mut dyn ServerHost, _: &TransactionContext, amount: u32) -> u32 {
+    fn insert(&self, host: &mut dyn ServerHost, tx: &TransactionContext, amount: u32) -> u32 {
+        if !host.transaction_matches(Some(tx)) {
+            return 0;
+        }
         let held = self.amount(host);
         match amount
             .min(self.max_insert)
@@ -258,7 +265,10 @@ impl EnergyHandler for AttachedEnergy {
             went => self.write(host, held + went, went),
         }
     }
-    fn extract(&self, host: &mut dyn ServerHost, _: &TransactionContext, amount: u32) -> u32 {
+    fn extract(&self, host: &mut dyn ServerHost, tx: &TransactionContext, amount: u32) -> u32 {
+        if !host.transaction_matches(Some(tx)) {
+            return 0;
+        }
         let held = self.amount(host);
         match amount.min(self.max_extract).min(held) {
             0 => 0,

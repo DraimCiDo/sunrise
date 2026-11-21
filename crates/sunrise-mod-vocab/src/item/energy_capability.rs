@@ -9,15 +9,16 @@ use crate::{
 use std::marker::PhantomData;
 
 /// A block's energy (NeoForge's `EnergyHandler`): stateless, given the host, and written only in
-/// a transaction, as a [`ResourceHandler`](crate::ResourceHandler) is.
+/// a transaction, as a [`ResourceHandler`](crate::ResourceHandler) is. Pass the host and its
+/// borrowed [`TransactionContext`] together to writes.
 pub trait EnergyHandler: Send + Sync {
     /// How much it holds.
     fn amount(&self, host: &mut dyn ServerHost) -> u32;
     /// How much it holds when full.
     fn capacity(&self, host: &mut dyn ServerHost) -> u32;
-    /// Puts up to `amount` in, in transaction `tx`: how much went. Never more than `amount`.
+    /// Puts up to `amount` in using `tx`: how much went. Never more than `amount`.
     fn insert(&self, host: &mut dyn ServerHost, tx: &TransactionContext, amount: u32) -> u32;
-    /// Takes up to `amount` out, in transaction `tx`: how much came. Never more than `amount`.
+    /// Takes up to `amount` out using `tx`: how much came. Never more than `amount`.
     fn extract(&self, host: &mut dyn ServerHost, tx: &TransactionContext, amount: u32) -> u32;
 }
 
@@ -70,6 +71,8 @@ impl EnergyHandler for GameEnergy {
 /// transaction `tx`: how much moved. Extract from `from` first, then offer the extracted amount
 /// to `to` in the same journal. If `to` takes only part, roll back and retry once with that amount.
 /// A handler that answers more than it was asked rolls back the move with [`Overanswered`].
+/// If `tx` does not name this host's current frame, returns `Ok(0)` before reading either
+/// provider or opening a savepoint.
 pub fn move_energy(
     host: &mut dyn ServerHost,
     from: &Capability<dyn EnergyHandler>,
@@ -77,7 +80,9 @@ pub fn move_energy(
     max: u32,
     tx: &TransactionContext,
 ) -> Result<u32, Overanswered> {
-    let _ = tx;
+    if !host.transaction_matches(Some(tx)) {
+        return Ok(0);
+    }
     let want = max.min(from.amount(host));
     if want == 0 {
         return Ok(0);

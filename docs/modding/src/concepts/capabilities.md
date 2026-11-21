@@ -111,15 +111,17 @@ Each method receives the host; the handler holds no borrow of the game.
 | `insert` / `extract` | Let the handler choose where to move the resource. The default visits indices in order. Prefer these unless you need to target a specific index. They return `Result<u32, Overanswered>`. |
 
 Keep handler state in transaction-managed storage such as block entity slots, saved compounds or
-attachments. Your handler can look up and call a neighbour's capability through the host.
+attachments. In a provider's write implementation, take `tx: &TransactionContext` with
+`host: &mut dyn ServerHost`. Forward that loan with the host when delegating a write; use the
+fresh loan if you open a savepoint. Your handler can look up a neighbour's capability through the host.
 
 Use `resource_util::move_resources(host, &from, &to, filter, max, Some(tx))` to transfer matching
 resources, up to `max`, in source index order. The helper probes an extraction and rolls the probe
 back before asking the destination to insert. A step commits only if the source can then extract
 exactly what went in. An overanswer rolls back the entire helper call, even if you handle the error
-and commit the enclosing transaction. Use `Some(tx)` for the current transaction or `None` to open a
-root transaction; a loan that does not name the current frame, or `None` while one is open,
-moves nothing.
+and commit the enclosing transaction. Pass `Some(tx)` with the current frame's loan to nest a
+savepoint, or `None` to open a root. A foreign or non-current loan, or `None` while a frame is open,
+moves nothing and does not call the handlers.
 Pass capability references to keep their provider names in `Overanswered` errors. For a handler
 you compose directly, pass it as `&dyn ResourceHandler<R>`; the helper does not infer a provider.
 
@@ -144,7 +146,9 @@ everything, `InfiniteResourceHandler::new(resource)` for an endless supply of on
 `RangedResourceHandler`'s API example.
 
 There is no `simulate` parameter. To try an operation without keeping its changes, run it in a
-transaction and return `Err` to abort. See [Transactions](transactions.md).
+transaction and return `Err` to abort. The transaction returns `TransactionError::Aborted(error)`
+for that error, or `TransactionError::Unavailable` if the callback could not run. See
+[Transactions](transactions.md).
 
 ### Hopper and dropper attempts
 

@@ -3,7 +3,8 @@
 Use an `ItemPlace` to read or change a stack where it lives. A place can identify a player's
 slot, hand or cursor, a block entity's slot, an item entity, an entity's inventory or equipment,
 a menu slot, or a stack inside another item (`ItemPlace::Nested`). For storage you manage,
-register a `PlaceProvider` with `r.place_provider` and use `ItemPlace::Mod`.
+register a `PlaceProvider` with `r.place_provider` and use `ItemPlace::Mod`. Its `insert` and
+`extract` implementations receive a server host and a borrowed `&TransactionContext`.
 
 ## Item capabilities
 
@@ -35,9 +36,11 @@ Keep the contents in the stack and use these methods to access it:
 | `place.extract(host, tx, &resource, amount)` | How much was extracted |
 | `place.exchange(host, tx, &resource, amount)` | How much was exchanged, or 0 if the exchange fails |
 
-Each write runs in its own transaction nested in `tx`. Aborting restores changes at every
-level of nested items. If a handler answers more than requested, the move is undone and the
-game warns once, naming the mod.
+Pass the loan of this host's current frame as `tx`. `insert`, `extract` and `exchange` return 0
+for a foreign or non-current loan, before reaching the place (including creative places). Storage
+moves and exchanges use their own nested savepoints. Aborting restores changes at every level
+of nested items. If a handler answers more than requested, the move is undone and the game
+warns once, naming the mod.
 
 ## Exchanging one item
 
@@ -58,7 +61,8 @@ backpack keeps its contents.
 
 ## Scratch stacks and wrapped places
 
-These correspond to NeoForge's other `ItemAccess` factories:
+These correspond to NeoForge's other `ItemAccess` factories. The scratch methods take the
+borrowed context along with the host:
 
 - `host.scratch_stack(tx, stack)` (`forStack`) holds a stack outside the world, such as a
   crafting result or a preview, and returns its `ItemPlace::Scratch`. Take it back with
@@ -85,7 +89,7 @@ These correspond to NeoForge's other `ItemAccess` factories:
 ## Editing the whole stack
 
 To change components on the **whole stack**, use `place.edit(host, tx, |stack| { ... })`
-with a server host. A player's slot (including the armour and off-hand slots supplied
+with a server host and its current context. A player's slot (including the armour and off-hand slots supplied
 by `inventory_tick`), hand, and a mob's or armour stand's `ItemPlace::Equipment` update
 only the changed components in place: no equip sound, equip event or immediate attribute
 reapplication. The usual slot sync sends the changed stack. `Strict` keeps this behavior.
@@ -118,7 +122,8 @@ compare by NBT type and value. Invalid component values return `StackError`.
 `without_component` removes the stack's own value. If the item has a default value, it also
 records a removal such as `"!minecraft:max_damage": {}` in the patch.
 
-These methods return detached resources. Store the result with an exchange of one item:
+These methods return detached resources. Store the result with an exchange of one item,
+using the context borrowed with the host:
 
 ```rust,ignore
 let resource = place.resource(host).ok_or("empty place")?;
