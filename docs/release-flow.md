@@ -481,8 +481,10 @@ also refuses any patch or minor whose tree changes a manifest or mod-content rea
 docs carry the line `//! stable-line: content-declarations`, in the candidate or in the release before it. Tests
 live in their own `*_tests.rs` files and runtime helpers carry no such line, so fixing either is not held. Every
 file in the folders that hold the readers (`CONTENT_FOLDERS` in `tools/ci/nightly.py`) must carry that line or
-`//! stable-line: no-content-declarations`, so a new file there is classified before a release; a reader anywhere
-else carries the first line too. The
+`//! stable-line: no-content-declarations`, so a new file there is classified before a release, and a file with the second line
+may not decode anything (a serde derive, a parse call, a JSON or TOML value): decoding belongs in a reader, and a
+file that decodes something that is not a content declaration, such as a native-only table or a runtime codec, says
+so with `//! stable-line: decodes-other-data`. A reader anywhere else carries the first line too. The
 refusal names every changed file. Even a legitimate fix in one
 of those files cannot ship in a patch or minor until #3817. The first release of a line has no API restriction.
 No label, change note or dispatch option overrides the check. The mod API surface comparison judges declarations,

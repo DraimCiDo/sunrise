@@ -411,6 +411,7 @@ class StableModApiTests(unittest.TestCase):
             commit(dropped, helper)
             schema_edit = commit("crates/sunrise-world/src/loot/new_reader.rs", reader)
             unjudged = commit(unclassified, "")
+            decoding = commit(unclassified, helper + "use serde::Deserialize;\n")
             # Keep the checkout elsewhere to prove the guard reads the passed commits.
             git("switch", "--detach", previous)
         declarations = (dropped, "crates/sunrise-world/src/loot/new_reader.rs")
@@ -443,7 +444,15 @@ class StableModApiTests(unittest.TestCase):
                         nightly.stable_mod_api(unjudged, tag, self.notes)
                     self.assertIn(unclassified, str(refused.exception))
                     self.assertNotIn(tests, str(refused.exception))
+                    with self.assertRaisesRegex(SystemExit, "decodes data in files marked") as refused:
+                        nightly.stable_mod_api(decoding, tag, self.notes)
+                    self.assertIn(unclassified, str(refused.exception))
+                    self.assertNotIn(runtime, str(refused.exception))
             nightly.stable_mod_api(schema_edit, "26.3-1.0.0", self.notes)
+
+    def test_this_tree_classifies_its_content_files(self):
+        # What a release would refuse is refused on the pull request that adds it.
+        self.assertTrue(nightly.content_readers("HEAD", "this tree"))
 
     def test_stable_mod_api_command_requires_a_full_commit_sha(self):
         for sha in ("HEAD", HEAD[:12], HEAD.upper()):

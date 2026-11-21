@@ -840,33 +840,62 @@ def require_stable_lineage(sha: str, tag: str, old_sha: str, old_tag: str) -> No
 # with CONTENT_READER as a line of its module docs, and a patch or minor cannot change it. Tests live in their own
 # `*_tests.rs` files and runtime helpers are not marked, so neither is held. A file in the folders that hold the
 # readers (CONTENT_FOLDERS, by path prefix) must be classified, with either line, so a new one cannot go unjudged; a
-# reader elsewhere is marked too.
+# reader elsewhere is marked too. A file marked CONTENT_HELPER may not decode at all, so decoding added to one is
+# refused until it moves to a reader; a file that decodes something else (a native-only table, a runtime codec) says
+# so with CONTENT_OTHER.
 CONTENT_READER = "//! stable-line: content-declarations"
 CONTENT_HELPER = "//! stable-line: no-content-declarations"
+CONTENT_OTHER = "//! stable-line: decodes-other-data"
 CONTENT_FOLDERS = (
     "crates/sunrise-mod-package/src/manifest",
     "crates/sunrise-mod-package/src/content",
     "crates/sunrise-client/src/mod_content",
+    "crates/sunrise-client/src/game/modding/",
     "crates/sunrise-world/src/conditions.rs",
 )
 
 
-def files_marked(sha: str, marker: str) -> set[str]:
-    """The Rust files of `sha` that carry `marker`, which has no pattern characters, as a whole line."""
-    found = subprocess.run(["git", "grep", "-l", "-z", "-e", f"^{marker}$", sha, "--",
-                            "*.rs"], cwd=REPOSITORY, capture_output=True, text=True)
+# What decoding looks like: a serde derive or impl, a parse call, or picking a key out of a JSON or TOML value.
+CONTENT_DECODING = (r"Deserialize\|from_str(\|from_slice(\|from_value(\|from_reader(\|serde_json::Value\|toml::Value"
+                    r"\|toml::Table")
+
+
+def files_matching(sha: str, pattern: str, *paths: str) -> set[str]:
+    """The files of `sha` among `paths` with a line matching `pattern`."""
+    found = subprocess.run(["git", "grep", "-l", "-z", "-e", pattern, sha, "--", *paths], cwd=REPOSITORY,
+                           capture_output=True, text=True)
     if found.returncode > 1:
         raise SystemExit(f"::error::git grep in {sha} failed: {found.stderr.strip()}")
     return {name.split(":", 1)[1] for name in found.stdout.split("\0") if name}
 
 
-def require_unchanged_content_schema(sha: str, tag: str, old_sha: str, old_tag: str) -> None:
+def files_marked(sha: str, marker: str) -> set[str]:
+    """The Rust files of `sha` that carry `marker`, which has no pattern characters, as a whole line. A fragment
+    pulled in by `include!` cannot hold module docs, so the line may also be a plain `//` comment."""
+    return files_matching(sha, f"^//!\\?{marker.removeprefix('//!')}$", "*.rs")
+
+
+def content_readers(sha: str, name: str) -> set[str]:
+    """The files of `sha` that read content declarations, once every file in the reader folders is classified."""
     readers = files_marked(sha, CONTENT_READER)
     listed = {name for name in git("ls-tree", "-r", "--name-only", sha, "crates/").splitlines()
-              if name.startswith(CONTENT_FOLDERS) and name.endswith(".rs") and not name.endswith("_tests.rs")}
-    if unclassified := sorted(listed - readers - files_marked(sha, CONTENT_HELPER)):
-        raise SystemExit(f"::error::refused: {tag} has files that do not say whether they read content declarations: "
-                         f"{', '.join(unclassified)}. Each needs `{CONTENT_READER}` or `{CONTENT_HELPER}`.")
+              if name.startswith(CONTENT_FOLDERS) and name.endswith(".rs") and not name.endswith(("_tests.rs", "/tests.rs"))}
+    helpers = files_marked(sha, CONTENT_HELPER)
+    if unclassified := sorted(listed - readers - helpers - files_marked(sha, CONTENT_OTHER)):
+        raise SystemExit(f"::error::refused: {name} has files that do not say whether they read content declarations: "
+                         f"{', '.join(unclassified)}. Each needs `{CONTENT_READER}`, `{CONTENT_HELPER}` or "
+                         f"`{CONTENT_OTHER}`.")
+    # A file that says it reads none takes typed values only.
+    decoding = helpers and files_matching(sha, CONTENT_DECODING, *(f":(literal){name}" for name in helpers))
+    if decoding:
+        raise SystemExit(f"::error::refused: {name} decodes data in files marked `{CONTENT_HELPER}`: "
+                         f"{', '.join(sorted(decoding))}. Move the decoding to a file marked `{CONTENT_READER}`, or "
+                         f"mark the file `{CONTENT_OTHER}` if what it decodes is not a content declaration.")
+    return readers
+
+
+def require_unchanged_content_schema(sha: str, tag: str, old_sha: str, old_tag: str) -> None:
+    readers = content_readers(sha, tag)
     # A file that was a reader in the previous release is still judged if the candidate drops its line.
     guarded = sorted(readers | files_marked(old_sha, CONTENT_READER))
     changed = guarded and git("diff", "--name-only", "--no-renames", old_sha, sha, "--",
