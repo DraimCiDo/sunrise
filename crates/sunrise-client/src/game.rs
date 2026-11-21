@@ -1749,11 +1749,6 @@ struct Game<'a> {
     native_mod_screen: Option<String>,
     /// Meshed sections waiting for an upload budget (Sunrise settings).
     pending_uploads: Vec<sunrise_client::streaming::MeshUpload>,
-    /// Empty between updates. Reuses storage for merging two sorted runs.
-    pending_uploads_merge: Vec<sunrise_client::streaming::MeshUpload>,
-    /// The camera section (column, height) `pending_uploads` is sorted for, farthest first:
-    /// while it stays, the list needs only its new meshes merged in, not a sort every frame.
-    pending_uploads_order: Option<((i32, i32), i32)>,
     upload_pace: upload_pace::UploadPace,
     /// This frame's view frustum, for culling entities and block entities.
     view_frustum: Option<sunrise_client::gfx::JoinedFrusta>,
@@ -11371,8 +11366,6 @@ impl<'a> Game<'a> {
             occlusion: Default::default(),
             async_particle_culler: RefCell::new(Default::default()),
             pending_uploads: Vec::new(),
-            pending_uploads_merge: Vec::new(),
-            pending_uploads_order: None,
             upload_pace: Default::default(),
             extras: Default::default(),
             pvp: Default::default(),
