@@ -58,7 +58,7 @@ impl Build {
 
     fn check_game(&self, game: &str, contract: u32) -> Result<(), String> {
         let ContractRange { min, max } = self.supports;
-        if (min..=max).contains(&contract) {
+        if self.supports.contains(contract) {
             Ok(())
         } else {
             Err(format!(
