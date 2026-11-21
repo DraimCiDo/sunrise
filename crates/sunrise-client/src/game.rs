@@ -182,8 +182,8 @@ mod block_part_tool_tests;
 #[path = "game/blocks/block_particles.rs"]
 mod block_particles;
 #[cfg(test)]
-#[path = "game/interface/block_screen_effect_draw_tests.rs"]
-mod block_screen_effect_draw_tests;
+#[path = "game/interface/block_screen_effect_tests.rs"]
+mod block_screen_effect_tests;
 #[path = "game/blocks/block_ticks.rs"]
 mod block_ticks;
 #[path = "game/modding/block_use_completion.rs"]

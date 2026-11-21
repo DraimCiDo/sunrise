@@ -1034,7 +1034,7 @@ impl BlockScreenEffectRenderer for Painter {
 #[test]
 #[ignore = "daily"]
 fn screen_effect_quads_draw_over_the_level_and_under_the_gui() {
-    let name = "game::block_screen_effect_draw_tests::screen_effect_quads_draw_over_the_level_and_under_the_gui";
+    let name = "game::block_screen_effect_tests::screen_effect_quads_draw_over_the_level_and_under_the_gui";
     if run_fresh_cases(name, "SUNRISE_SCREEN_EFFECT_PASS_CHILD", &["pixels"]) {
         return;
     }

@@ -1,1 +1,1 @@
-sunrise-client game::block_screen_effect_draw_tests::a_refused_renderer_discards_partial_quads_and_runs_again lib daily resources
+sunrise-client game::block_screen_effect_tests::a_refused_renderer_discards_partial_quads_and_runs_again lib daily resources
