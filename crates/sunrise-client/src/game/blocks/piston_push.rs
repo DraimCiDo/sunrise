@@ -1069,8 +1069,14 @@ impl Game<'_> {
         pos: Option<BlockPos>,
         steps: &StepHeights,
     ) -> Option<Body> {
-        self.push_body(target, pos, steps)
-            .filter(|body| body.piston_reaction != PushReaction::IgnoreEntity)
+        let body = match target {
+            // PistonMovingBlockEntity collects a resident stand regardless of health.
+            MoveWho::Entity(handle @ EntityHandle::ArmorStand(i)) if pos.is_some() => {
+                (!self.armor_stands[i].is_removed()).then(|| self.listed_body(handle, pos))
+            }
+            _ => self.push_body(target, pos, steps),
+        }?;
+        (body.piston_reaction != PushReaction::IgnoreEntity).then_some(body)
     }
 
     /// What the push needs from a live, non-spectating body. `pos` is the
@@ -1636,6 +1642,47 @@ mod order_tests {
     use sunrise_core::geometry::Vec3;
     use sunrise_core::{geometry::Direction, position::BlockPos};
     use sunrise_world::level::pistons::MovingPiston;
+
+    #[test]
+    #[ignore = "daily"]
+    fn a_piston_pushes_a_resident_armor_stand_with_zero_health() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.build_registries();
+            game.set_allow_commands(true);
+            let registry = &game.pack.assets.registry;
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let moving = registry.default_state("minecraft:moving_piston").unwrap();
+            let mut chunk = Chunk::empty(0, 0);
+            chunk.set(5, 200, 5, moving.0);
+            game.world.chunks.insert((0, 0), Arc::new(chunk));
+            assert!(game.run_command("summon armor_stand 5.5 200 5.5 {Health:0f}"));
+            assert_eq!(game.armor_stands[0].health, 0.0);
+
+            let pos = BlockPos::new(5, 200, 5);
+            let piston = MovingPiston {
+                moved_state: stone,
+                direction: Direction::East,
+                extending: true,
+                source: false,
+                progress: 0.0,
+                progress_o: 0.0,
+                last_ticked: 0,
+                death_ticks: 0,
+                id: 1,
+            };
+            game.block_ticks.moving_pistons = vec![(
+                pos,
+                MovingPiston {
+                    progress: 0.5,
+                    ..piston
+                },
+            )];
+            game.sync_moving_pistons();
+            game.push_piston_entities(vec![(pos, piston, 0.5)]);
+            // The face reaches the stand's centre; its half-width and the piston offset clear it.
+            assert_eq!(game.armor_stands[0].position.x, 5.5 + (0.25 + 0.01));
+        });
+    }
 
     /// A stone pushes a primed TNT east, into the cell a second stone is
     /// sliding north out of (half way there). The TNT collides with that

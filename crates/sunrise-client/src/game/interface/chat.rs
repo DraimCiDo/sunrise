@@ -1422,7 +1422,9 @@ impl Game<'_> {
             }
         }
         if let Some(screen) = self.ui.chat_screen.as_mut() {
-            if screen.click(&m, &c, cursor.0 as f64, cursor.1 as f64) {
+            let (x, y) = (f64::from(cursor.0), f64::from(cursor.1));
+            let double_click = screen.live_double_click(x, y);
+            if screen.click(&m, &c, x, y, double_click) {
                 self.notify_chat_suggestion_completion();
                 return;
             }

@@ -186,6 +186,12 @@ Which to take:
 naming one (`cargo install`); a tool older than that option answers with its usage instead. The newest tool's commit is `commit` in
 [`tool.json`](https://github.com/sunrise-org/sunrise/releases/download/mod-tool/tool.json).
 
+For [tagged native releases](../how-to/publish.md#tagged-native-releases-in-github-actions), use a signed `mod-tool`
+that supports both `cargo sunrise-mod release plan` and `cargo sunrise-mod release scripts`. The generated workflow
+verifies the tool and `tool.json` against the signed sums before running it, pins the same tool commit across all
+jobs and extracts the release scripts shipped in that tool. The mod's stable SDK is a separate pin, even if that
+SDK ships an older tool.
+
 ## With `cargo install`
 
 If no prebuilt tool fits your computer, build it from source:

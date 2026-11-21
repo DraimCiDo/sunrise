@@ -2,6 +2,7 @@
 //! moon and stars (`celestial_geometry`), the first-person hand and arm (`hand_geometry`,
 //! `first_person_arm`) and the rain and snow around the camera (`weather_geometry`).
 use super::*;
+use sunrise_client::gfx::CelestialBody;
 
 impl Game<'_> {
     /// Stored local and remote display positions, keeping the furthest stage on each cell.
@@ -57,57 +58,16 @@ impl Game<'_> {
             .collect()
     }
     /// SkyRenderer.renderSunMoonAndStars: bodies on a frame rotated Y -90 then X by angle.
-    /// Returns the sun and moon quads, and the stars' frame and brightness
-    /// (the renderer keeps their geometry, built once). The bodies fade with
-    /// the rain (`rainBrightness = 1 - rainLevel`, their colour's alpha).
+    /// Returns the sun and moon quads with what each is (`celestial_bodies`), and the stars'
+    /// frame and brightness (the renderer keeps their geometry, built once). The bodies fade
+    /// with the rain (`rainBrightness = 1 - rainLevel`, their colour's alpha).
     pub(super) fn celestial_geometry(
         &self,
         sky: &sunrise_client::environment::Sky,
         rain: f32,
-    ) -> (Vec<Vertex>, Option<(glam::Mat4, f32)>) {
+    ) -> (Vec<Vertex>, Vec<CelestialBody>, Option<(glam::Mat4, f32)>) {
         let body_color =
             0x00FF_FFFF | (((1.0 - rain).clamp(0.0, 1.0) * 255.0).round() as u32) << 24;
-        let mut out = Vec::new();
-        let atlas = &self.gui.atlas;
-        let frame = |angle: f32| {
-            glam::Mat4::from_rotation_y((-90.0f32).to_radians())
-                * glam::Mat4::from_rotation_x(angle.to_radians())
-        };
-        let mut body = |name: &str, angle: f32, size: f32, moon: bool| {
-            let Some(r) = atlas.sprites.get(name).copied() else {
-                return;
-            };
-            // How brightly HDR output lets the body shine (mesher::hdr_tier):
-            // the moon at the low tier, not the sun's.
-            let tier = if moon {
-                sunrise_client::mesher::LOW
-            } else {
-                sunrise_client::mesher::VERY_BRIGHT
-            };
-            let m = frame(angle);
-            let corners = [(-size, -size), (size, -size), (size, size), (-size, size)];
-            // buildCelestialQuad (sun) vs buildMoonPhases: the moon's UVs run
-            // the other way round.
-            let uv = if moon {
-                [[r.u1, r.v1], [r.u0, r.v1], [r.u0, r.v0], [r.u1, r.v0]]
-            } else {
-                [[r.u0, r.v0], [r.u1, r.v0], [r.u1, r.v1], [r.u0, r.v1]]
-            };
-            for ((x, z), uv) in corners.iter().zip(uv) {
-                let p = m.transform_point3(glam::Vec3::new(*x, 100.0, *z));
-                out.push(Vertex {
-                    normal: [0; 4],
-                    pos: p.to_array(),
-                    uv,
-                    layer: 2 | u32::from(tier) << 16,
-                    color: body_color,
-                    light: 0,
-
-                    glint_uv: [0.0, 0.0],
-                });
-            }
-        };
-        body("environment/celestial/sun", sky.sun_angle, 30.0, false);
         let phases = [
             "full_moon",
             "waning_gibbous",
@@ -119,16 +79,12 @@ impl Game<'_> {
             "waxing_gibbous",
         ];
         let phase = phases[(self.view_day_time() / 24000).rem_euclid(8) as usize];
-        body(
-            &format!("environment/celestial/moon/{phase}"),
-            sky.moon_angle,
-            20.0,
-            true,
-        );
+        let moon = format!("environment/celestial/moon/{phase}");
+        let (out, bodies) = celestial_bodies(&self.gui.atlas.sprites, sky, &moon, body_color);
         // SkyRenderer.renderStars: the static star buffer on the same frame.
-        let stars =
-            (sky.star_brightness > 0.0).then(|| (frame(sky.star_angle), sky.star_brightness));
-        (out, stars)
+        let stars = (sky.star_brightness > 0.0)
+            .then(|| (celestial_frame(sky.star_angle), sky.star_brightness));
+        (out, bodies, stars)
     }
     /// `renderPlayerHand` (`AvatarRenderer.renderHand`): the player's own
     /// `left` or right arm with its skin at pose `m`, in its rest pose
@@ -605,6 +561,69 @@ const DESTROY_STAGES_OIT: [&str; 10] = [
     "block/destroy_oit_stage_9",
 ];
 
+/// The sky's frame for a body at `angle`: rotated Y -90, then X by the angle.
+fn celestial_frame(angle: f32) -> glam::Mat4 {
+    glam::Mat4::from_rotation_y((-90.0f32).to_radians())
+        * glam::Mat4::from_rotation_x(angle.to_radians())
+}
+
+/// The sun's quad, then the moon's (its phase's sprite `moon`), in `color`, with what each
+/// quad is. A body whose sprite is missing is left out, quad and entry alike, so the moon's
+/// quad may come first.
+fn celestial_bodies(
+    sprites: &std::collections::HashMap<String, sunrise_client::hud::Rect>,
+    sky: &sunrise_client::environment::Sky,
+    moon: &str,
+    color: u32,
+) -> (Vec<Vertex>, Vec<CelestialBody>) {
+    let mut out = Vec::new();
+    let mut bodies = Vec::new();
+    let mut body = |name: &str, angle: f32, size: f32, kind: CelestialBody| {
+        let Some(r) = sprites.get(name).copied() else {
+            return;
+        };
+        bodies.push(kind);
+        let moon = kind == CelestialBody::Moon;
+        // How brightly HDR output lets the body shine (mesher::hdr_tier):
+        // the moon at the low tier, not the sun's.
+        let tier = if moon {
+            sunrise_client::mesher::LOW
+        } else {
+            sunrise_client::mesher::VERY_BRIGHT
+        };
+        let m = celestial_frame(angle);
+        let corners = [(-size, -size), (size, -size), (size, size), (-size, size)];
+        // buildCelestialQuad (sun) vs buildMoonPhases: the moon's UVs run
+        // the other way round.
+        let uv = if moon {
+            [[r.u1, r.v1], [r.u0, r.v1], [r.u0, r.v0], [r.u1, r.v0]]
+        } else {
+            [[r.u0, r.v0], [r.u1, r.v0], [r.u1, r.v1], [r.u0, r.v1]]
+        };
+        for ((x, z), uv) in corners.iter().zip(uv) {
+            let p = m.transform_point3(glam::Vec3::new(*x, 100.0, *z));
+            out.push(Vertex {
+                normal: [0; 4],
+                pos: p.to_array(),
+                uv,
+                layer: 2 | u32::from(tier) << 16,
+                color,
+                light: 0,
+
+                glint_uv: [0.0, 0.0],
+            });
+        }
+    };
+    body(
+        "environment/celestial/sun",
+        sky.sun_angle,
+        30.0,
+        CelestialBody::Sun,
+    );
+    body(moon, sky.moon_angle, 20.0, CelestialBody::Moon);
+    (out, bodies)
+}
+
 /// The crack sprites drawn: with improved transparency vanilla's own OIT set.
 fn crack_stage_names(improved_transparency: bool) -> &'static [&'static str; 10] {
     if improved_transparency {
@@ -656,5 +675,61 @@ mod crumbling_sprite_tests {
             crumbling_sprite(&sprites, true),
             [0.5, 0.0, 16.0 / 1024.0, 16.0 / 1024.0]
         );
+    }
+}
+
+/// `celestial_bodies`: each quad comes with what it is, and a body whose sprite is missing
+/// leaves out its quad and its entry alike, so the moon alone is the first quad.
+#[cfg(test)]
+mod celestial_body_tests {
+    use super::*;
+    use sunrise_client::gfx::CelestialBody::{Moon, Sun};
+
+    const SUN: &str = "environment/celestial/sun";
+    const MOON: &str = "environment/celestial/moon/full_moon";
+
+    /// The quads and bodies with a sprite for each of `names`; the sun's sprite starts at u 0.25,
+    /// the moon's at 0.5.
+    fn bodies(names: &[&str]) -> (Vec<[f32; 2]>, Vec<sunrise_client::gfx::CelestialBody>) {
+        let rect = |u0: f32| sunrise_client::hud::Rect {
+            u0,
+            v0: 0.0,
+            u1: u0 + 0.125,
+            v1: 0.125,
+            w: 16,
+            h: 16,
+        };
+        let sprites = names
+            .iter()
+            .map(|&name| (name.to_owned(), rect(if name == SUN { 0.25 } else { 0.5 })))
+            .collect();
+        let sky = sunrise_client::environment::Sky::default();
+        let (quads, bodies) = celestial_bodies(&sprites, &sky, MOON, u32::MAX);
+        assert_eq!(quads.len(), bodies.len() * 4, "one entry a quad");
+        (quads.iter().step_by(4).map(|v| v.uv).collect(), bodies)
+    }
+
+    #[test]
+    fn the_sun_then_the_moon() {
+        // The moon's UVs run the other way round: its first corner is (u1, v1).
+        assert_eq!(
+            bodies(&[SUN, MOON]),
+            (vec![[0.25, 0.0], [0.625, 0.125]], vec![Sun, Moon])
+        );
+    }
+
+    #[test]
+    fn the_moon_alone_is_the_first_quad_and_the_moon() {
+        assert_eq!(bodies(&[MOON]), (vec![[0.625, 0.125]], vec![Moon]));
+    }
+
+    #[test]
+    fn the_sun_alone_is_the_sun() {
+        assert_eq!(bodies(&[SUN]), (vec![[0.25, 0.0]], vec![Sun]));
+    }
+
+    #[test]
+    fn no_sprite_no_body() {
+        assert_eq!(bodies(&[]), (vec![], vec![]));
     }
 }

@@ -151,7 +151,10 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           commit=$(git rev-parse HEAD)
-          gh release download "sdk-$commit" --dir "$QS_SCRATCH/sdk-base/sdk-$commit"
+          gh release download "sdk-$commit" --dir "$QS_SCRATCH/sdk-base/sdk-$commit" \
+            --pattern 'SHA256SUMS*' --pattern 'sdk.json' --pattern 'surface.json' \
+            --pattern 'api-source.tar.xz' --pattern 'build-data.tar.xz' \
+            --pattern '*-x86_64-unknown-linux-gnu*.tar.xz'
       # What `cargo sunrise-mod new` reads when it names no build: nightly/sdk.json, only a pointer (the build it
       # names is verified when fetched). The mod pages run `new` with no --sunrise.
       - name: This run's SDK is the Nightly of the SDK folder
@@ -168,8 +171,18 @@ jobs:
           cargo test --locked -p cargo-sunrise-mod --test build_errors --
           --ignored --exact a_failed_native_build_names_the_authors_file_and_not_the_cache_copy
           a_failed_registry_build_names_the_authors_file_and_a_good_one_still_builds
+      - name: Native registration reaches the game log
+        if: inputs.own_sdk
+        run: >-
+          cargo test --locked -p cargo-sunrise-mod --test run --
+          --ignored --exact run_writes_native_registration_logs_to_latest_log
       - name: The start pages run with the mod tool alone
         run: python3 tools/book_quickstart.py --tool "${CARGO_TARGET_DIR:-target}/debug/cargo-sunrise-mod"
+      - name: Generated native release on this run's Linux SDK
+        if: inputs.own_sdk
+        run: >-
+          python3 tools/ci/mod_release_smoke.py --tool "${CARGO_TARGET_DIR:-target}/debug/cargo-sunrise-mod"
+          --scratch "$QS_SCRATCH" --commit "$(git rev-parse HEAD)"
       - name: Clean private scratch
         if: always() && inputs.own_sdk
         run: |

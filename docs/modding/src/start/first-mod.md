@@ -106,6 +106,10 @@ A mod with crates.io dependencies is compiled with them, as `cargo build` would,
 When a build stops on a package the lock doesn't pin, its error ends with that command. The
 [build log](../how-to/native-mods/05-build-log.md) shows the compiler's output when a build fails.
 
+For publishing later, the native template also writes `.github/workflows/release.yml`, `.github/workflows/rebuild.yml`
+and their shared workflow and bootstrap action. They stay off until you opt in; you can keep developing against Nightly. See
+[Tagged native releases in GitHub Actions](../how-to/publish.md#tagged-native-releases-in-github-actions) for setup.
+
 ## 6. Run it
 
 <!-- quickstart-test: skip, needs the reader's game and prepared resources -->
@@ -114,7 +118,8 @@ cargo sunrise-mod run --resources <folder> -- --world Greeter --creative
 ```
 
 `run` builds, stages the game with your mod in `target/sunrise-mod/run/` and starts it, with its game folder and its
-logs inside that folder, so nothing of a player's is touched. Everything after `--` goes to the game. Join a world;
+logs inside that folder, so nothing of a player's is touched. The game's `logs/latest.log` includes native mods' and
+their dependencies' `log` records through INFO, prefixed with `[target]`. Everything after `--` goes to the game. Join a world;
 the greeting appears in chat, and the mod is listed on the game's **Mods** screen. On Linux without a display, start
 `run` under `xvfb-run`. If your mod uses [`[[jar]]` originals](../how-to/content-mods.md#java-jars-as-external-assets),
 `run` stages them in its development home. Use `--jars <dir>` to choose a different source folder.

@@ -241,6 +241,112 @@ fn without_a_list_for_its_pin_a_mod_works_on_its_own_build_only() {
     std::fs::remove_dir_all(stale).unwrap();
 }
 
+const RUN_WITH: &str = "sunrise_client::game::run_with";
+const INDEX_REASON: &str = "sentinel from functions.json: private::provider";
+
+fn refused_run_with(name: &str, build: &str) -> (PathBuf, PathBuf) {
+    let id = format!("game:fn:{RUN_WITH}");
+    let dir = project_dir(name, Some(&[(&id, "sig:body")]), None);
+    let manifest = dir.join(crate::NATIVE_MANIFEST);
+    let text = std::fs::read_to_string(&manifest)
+        .unwrap()
+        .replace(crate::tests::B, crate::MIXINS_REV)
+        + &format!(
+            "[[native.mixin]]\nid = \"entry_probe\"\ntarget = \"{RUN_WITH}\"\nkind = \"HEAD\"\nhelper = \"src/m.rs\"\n"
+        );
+    std::fs::write(&manifest, text).unwrap();
+    std::fs::write(dir.join("src/m.rs"), "{}").unwrap();
+    let data = dir.join(".sunrise/build-data");
+    std::fs::create_dir_all(&data).unwrap();
+    let file = serde_json::json!({
+        "schema": 1, "build": {"commit": build}, "crates": {}, "functions": {},
+        "refused": { RUN_WITH: { "code": "E_MIXIN_NOT_REPLACEABLE", "why": INDEX_REASON } },
+    });
+    std::fs::write(data.join("functions.json"), file.to_string()).unwrap();
+    (dir, data)
+}
+
+#[test]
+fn native_check_needs_the_index_and_names_the_refused_same_build_target() {
+    let (dir, data) = refused_run_with("refused-same-build", crate::tests::A);
+    let mut plan = Plan {
+        contract: crate::contract::CONTRACT,
+        mods: dir.clone(),
+        build: crate::tests::A.into(),
+        surface: None,
+        build_data: None,
+    };
+    let needs = check(&plan).unwrap();
+    assert_eq!(needs.mods[0].needs, Some("build-data"));
+    assert_eq!(needs.route, None);
+    plan.build_data = Some(data);
+    let checked = check(&plan).unwrap();
+    assert_eq!(checked.route, None);
+    assert_eq!(checked.mods[0].verdict, None);
+    assert_eq!(checked.mods[0].needs, None);
+    assert_eq!(checked.mods[0].id, "greeter");
+    let refusal = checked.mods[0].refusal.as_deref().unwrap();
+    assert!(refusal.contains("E_MIXIN_NOT_REPLACEABLE"), "{refusal}");
+    assert!(refusal.contains("greeter"), "{refusal}");
+    assert!(refusal.contains("entry_probe"), "{refusal}");
+    assert!(refusal.contains(RUN_WITH), "{refusal}");
+    assert!(refusal.contains(INDEX_REASON), "{refusal}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn cross_build_fit_distinguishes_a_refused_target_from_a_removed_one() {
+    let (dir, data) = refused_run_with("refused-cross-build", OTHER_BUILD);
+    assert_eq!(
+        judged_with(&dir, OTHER_BUILD, &surface(&[]), Some(&data)),
+        Verdict::DoesNotFit {
+            made_for: pin(&dir),
+            misfits: vec![Misfit {
+                id: format!("game:fn:{RUN_WITH}"),
+                change: Change::Refused {
+                    code: "E_MIXIN_NOT_REPLACEABLE",
+                    why: INDEX_REASON.into(),
+                }
+            }],
+        },
+    );
+    let surface_file = dir.join(".sunrise/surface.json");
+    std::fs::write(&surface_file, serde_json::to_vec(&surface(&[])).unwrap()).unwrap();
+    let checked = check(&Plan {
+        contract: crate::contract::CONTRACT,
+        mods: dir.clone(),
+        build: OTHER_BUILD.into(),
+        surface: Some(surface_file),
+        build_data: Some(data),
+    })
+    .unwrap();
+    let reply = serde_json::to_value(checked).unwrap();
+    assert_eq!(reply["contract"], 2);
+    assert_eq!(reply["route"], serde_json::Value::Null);
+    let row = &reply["mods"][0];
+    assert_eq!(row["id"], "greeter");
+    assert_eq!(row["refusal"], serde_json::Value::Null);
+    let verdict = &row["verdict"];
+    assert_eq!(verdict["kind"], "does-not-fit");
+    assert_eq!(verdict["made_for"], pin(&dir));
+    let [misfit] = verdict["misfits"].as_array().unwrap().as_slice() else {
+        panic!("expected one misfit: {verdict}");
+    };
+    assert_eq!(misfit["change"], "changed");
+    let diagnostic = misfit["id"].as_str().unwrap();
+    assert!(
+        !diagnostic.starts_with("game:"),
+        "the launcher shortens game ids"
+    );
+    assert!(diagnostic.contains(RUN_WITH), "{diagnostic}");
+    assert!(diagnostic.contains(INDEX_REASON), "{diagnostic}");
+    assert!(
+        diagnostic.contains("E_MIXIN_NOT_REPLACEABLE"),
+        "{diagnostic}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn a_mod_with_a_mixin_fits_while_its_target_is_what_its_list_records() {
     const TARGET: &str = "sunrise_client::game::f";

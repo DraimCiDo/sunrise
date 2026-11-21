@@ -9,7 +9,7 @@ use super::{
 };
 use crate::join_seq::JoinList;
 use sunrise_core::geometry::{Aabb, Vec3};
-use sunrise_core::nbt::{Compound, Tag};
+use sunrise_core::nbt::Tag;
 
 /// The goal flags a controlling passenger takes from its vehicle.
 const CONTROLLED: u8 = MOVE | JUMP | LOOK;
@@ -745,7 +745,7 @@ pub fn keeps_alive(m: &Mob) -> bool {
 }
 
 /// `IsChickenJockey`, `SkeletonTrap` and `SkeletonTrapTime`.
-pub fn write_nbt(m: &Mob, map: &mut Compound) {
+pub fn write_nbt(m: &Mob, map: &mut crate::entity_nbt::EntityTagWriter) {
     match m.species() {
         Species::Chicken => {
             map.insert(

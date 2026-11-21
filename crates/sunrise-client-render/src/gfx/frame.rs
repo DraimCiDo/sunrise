@@ -98,6 +98,17 @@ impl ShrinkGate {
     }
 }
 
+/// What one quad of [`Frame::celestial`] is, as its producer built it
+/// (`Game::celestial_geometry`, `Game::end_flash_geometry`). A producer leaves out a body whose
+/// sprite is missing, so a quad's place in the list doesn't tell which body it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum CelestialBody {
+    Sun,
+    Moon,
+    /// The End's flash (`SkyRenderer.renderEndFlash`): neither the sun nor the moon.
+    EndFlash,
+}
+
 pub struct Frame<'a> {
     pub camera: DVec3,
     pub yaw: f32,
@@ -226,6 +237,9 @@ pub struct Frame<'a> {
     /// Camera-relative sun and moon, or the animated End flash (additive,
     /// behind everything and after the resident End sky box).
     pub celestial: &'a [Vertex],
+    /// What each quad of `celestial` is, in the same order, one entry a quad. A quad without
+    /// an entry isn't drawn, and nor is an entry without a quad.
+    pub celestial_bodies: &'a [CelestialBody],
     /// The stars, drawn from their static buffer after the sun and moon:
     /// the sky's rotation (camera-relative world from star space) and the
     /// star brightness.

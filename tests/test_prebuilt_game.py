@@ -546,7 +546,7 @@ class SdkAssetTests(unittest.TestCase):
 
 
 class ToolBuildTests(unittest.TestCase):
-    def built_with(self, environment: dict) -> dict:
+    def built_with(self, environment: dict, binary: bytes = b"tool") -> dict:
         calls = []
         with tempfile.TemporaryDirectory() as directory, \
                 patch.dict(os.environ, {"CARGO_TARGET_DIR": directory}), \
@@ -557,13 +557,18 @@ class ToolBuildTests(unittest.TestCase):
             os.environ.update(environment)
             release = Path(directory) / "release"
             release.mkdir()
-            (release / prebuilt_game.TOOL_PROGRAM).write_bytes(b"tool")
+            (release / prebuilt_game.TOOL_PROGRAM).write_bytes(binary)
             prebuilt_game.tool("x86_64-unknown-linux-gnu")
         return calls[0]["env"]
 
     def test_the_tool_is_built_naming_the_sources_commit_unless_the_workflow_names_one(self):
         self.assertEqual(self.built_with({})["SUNRISE_TOOL_COMMIT"], COMMIT)
         self.assertEqual(self.built_with({"SUNRISE_TOOL_COMMIT": "d" * 40})["SUNRISE_TOOL_COMMIT"], "d" * 40)
+
+    def test_a_tool_that_reads_the_developer_sdk_key_is_never_packed(self):
+        # The release build of the real tool holds no such name; one built with debug assertions does.
+        with self.assertRaisesRegex(SystemExit, "built with debug assertions"):
+            self.built_with({}, b"\0{SUNRISE_SDK_TRUSTED_KEY} ignored: \0")
 
 
 class TrackedBlobsTests(unittest.TestCase):

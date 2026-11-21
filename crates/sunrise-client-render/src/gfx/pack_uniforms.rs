@@ -2768,6 +2768,7 @@ pub(super) mod initial_history_tests {
             see_through: &[],
             world_primitives: Default::default(),
             celestial: &[],
+            celestial_bodies: &[],
             stars: None,
             hand: &[],
             hand_items: &[],

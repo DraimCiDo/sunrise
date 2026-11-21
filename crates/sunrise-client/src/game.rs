@@ -8835,8 +8835,8 @@ impl Game<'_> {
             self.dragon_fireball_geometry(camera, alpha, &mut entities);
         }
         pr.lap("pr_dragon_fireballs_bolts");
-        let (celestial, stars) = if title {
-            (Vec::new(), None)
+        let (celestial, celestial_bodies, stars) = if title {
+            (Vec::new(), Vec::new(), None)
         } else if self.overworld_skybox()
             && self.potions.effects.get("darkness").is_none()
             && self.potions.effects.get("blindness").is_none()
@@ -8844,9 +8844,10 @@ impl Game<'_> {
             // Camera.doesMobEffectBlockSky: no sun, moon or stars.
             self.celestial_geometry(&sky, rain)
         } else if self.end_skybox() && self.settings.sunrise.sky {
-            (self.end_flash_geometry(), None)
+            let (flash, bodies) = self.end_flash_geometry();
+            (flash, bodies, None)
         } else {
-            (Vec::new(), None)
+            (Vec::new(), Vec::new(), None)
         };
         self.custom_sky_frame([camera.x, camera.y, camera.z], &sky, (rain, thunder), title);
         pr.lap("pr_celestial");
@@ -9051,6 +9052,8 @@ impl Game<'_> {
             } else {
                 &[]
             },
+            // With `celestial` left empty, these have no quad to draw.
+            celestial_bodies: &celestial_bodies,
             stars: stars.filter(|_| self.settings.sunrise.sky || title),
             hand: &hand,
             hand_items: &hand_items,

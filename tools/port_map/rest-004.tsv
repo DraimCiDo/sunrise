@@ -20,9 +20,9 @@ Options.chatDelay	port	crates/sunrise-client-render/src/options_ui_values.rs::ch
 Options.loadSelectedResourcePacks	port	crates/sunrise-client-render/src/packs.rs::enabled	gap: minor: dropped packs are not written back to resourcePacks
 Options.readListOfStrings	port	crates/sunrise-client-render/src/options_file.rs::read_list
 Options.dumpOptionsForReport	skip:debug		options dump for the debug report
-Options.pixelValueLabel	port	crates/sunrise-client-render/src/options_ui.rs::chat_px
-Options.percentValueLabel	port	crates/sunrise-client-render/src/options_ui.rs::percent
-Options.genericValueLabel	port	crates/sunrise-client-render/src/options_ui.rs::generic
+Options.pixelValueLabel	port	crates/sunrise-client-render/src/options_ui_values.rs::chat_px
+Options.percentValueLabel	port	crates/sunrise-client-render/src/options_ui_values.rs::percent
+Options.genericValueLabel	port	crates/sunrise-client-render/src/options_ui_values.rs::generic
 Options.percentValueOrOffLabel	port	crates/sunrise-client-render/src/options_ui.rs::Opt::value_text	gap: minor: OFF text is only drawn for sound volumes
 PeriodicNotificationManager.prepare	skip:other		regional play-time notices (REGIONAL_COMPLIANCIES, country check); none ship with the 26.3 assets and Sunrise has no equivalent
 PeriodicNotificationManager.apply	skip:other		regional play-time notices (REGIONAL_COMPLIANCIES, country check); none ship with the 26.3 assets and Sunrise has no equivalent
@@ -56,7 +56,7 @@ StringSplitter.stringWidth	port	crates/sunrise-client-render/src/font.rs::Font::
 StringSplitter.plainIndexAtWidth	port	crates/sunrise-client-render/src/screen_draw.rs::Measure::plain	gap: minor: measures without the style (bold widths)
 StringSplitter.plainTailByWidth	port	crates/sunrise-client-render/src/screen_draw.rs::Measure::plain	gap: minor: same as plainIndexAtWidth, from the end
 StringSplitter.findLineBreak	port	crates/sunrise-client-render/src/block_entity_render.rs::first_line	returns the first styled line rather than the break index; production signs use Font.split_formatted
-StringSplitter.getWordPosition	port	crates/sunrise-client-render/src/ui.rs::word_position	gap: minor: always strips spaces; no newline stop
+StringSplitter.getWordPosition	port	crates/sunrise-mod-vocab/src/client/widgets_text_edit.rs::word_position	gap: minor: always strips spaces; no newline stop
 StringSplitter.FlatComponents.getRemainder	inline	crates/sunrise-client-render/src/font.rs::Font::split	the remainder is produced inside split
 StringSplitter.LineBreakFinder.accept	port	crates/sunrise-client-render/src/font.rs::Font::split_lines
 StringSplitter.LineComponent.visit	skip:java		visitor plumbing over FormattedText

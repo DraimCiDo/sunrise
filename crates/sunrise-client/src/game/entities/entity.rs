@@ -190,6 +190,10 @@ pub(super) trait Entity: EntityRules {
     fn ticks_after_projectiles(&self) -> bool {
         false
     }
+    /// Whether a new member of this kind waits for its spawn packet before its first tick.
+    fn waits_for_spawn_packet(&self) -> bool {
+        false
+    }
     /// `Entity.push` with the explosion's knockback.
     fn push_from_explosion(&mut self, push: Vec3) {
         let v = self.velocity_mut();
@@ -1997,7 +2001,7 @@ impl Entity for ItemEntity {
         blast.items_ignore
     }
     fn explosion_eye_height(&self) -> f64 {
-        0.2125
+        Self::EYE_HEIGHT
     }
     fn bounds(&self) -> Aabb {
         ItemEntity::bounds(self)
@@ -2296,6 +2300,10 @@ impl Entity for ArmorStand {
     fn reset_fall_distance(&mut self) {
         self.enchantment_fall_distance = 0.0;
     }
+    /// `LivingEntity.isAlive`: health above 0 (removal is the level's).
+    fn is_alive(&self) -> bool {
+        self.health > 0.0
+    }
     fn move_entity(&mut self, gate: &mut MoveGate, movement: Vec3) {
         if gate.skipped() {
             return;
@@ -2466,6 +2474,9 @@ impl Entity for PrimedTnt {
     fn ticks_after_projectiles(&self) -> bool {
         true
     }
+    fn waits_for_spawn_packet(&self) -> bool {
+        true
+    }
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:tnt".into()
     }
@@ -2558,6 +2569,9 @@ impl Entity for FallingBlock {
         self.on_ground = on_ground;
     }
     fn ticks_after_projectiles(&self) -> bool {
+        true
+    }
+    fn waits_for_spawn_packet(&self) -> bool {
         true
     }
     fn native_type(&self) -> Cow<'static, str> {

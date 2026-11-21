@@ -1201,6 +1201,9 @@ impl Package {
         let options = zip::write::SimpleFileOptions::default();
         let err = |e: zip::result::ZipError| e.to_string();
         let mut put = |name: &str, bytes: &[u8]| -> Result<(), String> {
+            if minisign_secret_key(bytes) {
+                return Err(format!("{name}: a Minisign private key cannot be packaged"));
+            }
             zip.start_file(name, options).map_err(err)?;
             zip.write_all(bytes).map_err(|e| e.to_string())
         };
@@ -1235,6 +1238,38 @@ impl Package {
         Self::read_zip(&mut archive)?;
         Ok(bytes)
     }
+}
+
+/// Recognize a Minisign secret-key record by its framing, without decrypting or copying the secret.
+/// The 158-byte payload starts with Ed25519, a scrypt or empty KDF, and a BLAKE2b checksum tag.
+fn minisign_secret_key(bytes: &[u8]) -> bool {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    const KEY_BYTES: usize = 158;
+    let header = |bytes: &[u8]| matches!(bytes, b"EdScB2" | b"Ed\0\0B2");
+    if bytes.len() >= KEY_BYTES && header(&bytes[..6]) {
+        return true;
+    }
+    // The text format has an arbitrary comment line, then the base64 payload. The comment
+    // is not authentication: a renamed file or a different comment still carries the key.
+    let Some(line) = bytes.splitn(3, |&byte| byte == b'\n').nth(1) else {
+        return false;
+    };
+    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    if line.len() < KEY_BYTES.div_ceil(3) * 4 || !line.len().is_multiple_of(4) {
+        return false;
+    }
+    let mut prefix = [0; 6];
+    if STANDARD.decode_slice(&line[..8], &mut prefix).is_err() || !header(&prefix) {
+        return false;
+    }
+    let encoded = line
+        .strip_suffix(b"==")
+        .or_else(|| line.strip_suffix(b"="))
+        .unwrap_or(line);
+    encoded.len() * 3 / 4 >= KEY_BYTES
+        && encoded[8..]
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/'))
 }
 
 /// A content entry that cannot be safely loaded as data.

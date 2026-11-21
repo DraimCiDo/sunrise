@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use sunrise_mod_package::native_route::{API_PACKAGE, INTERNALS_PACKAGE, PACKAGES};
 
 /// Where the launcher stages the mods' crates.
 pub const DIR: &str = "native-api";
@@ -62,8 +63,7 @@ pub fn check_game_graph_names(
                     .filter_map(toml::Value::as_str)
                 {
                     let dep = dep.split_whitespace().next().unwrap_or(dep);
-                    if dep == super::api::API_PACKAGE || facades.get(dep) == Some(&current.as_str())
-                    {
+                    if dep == API_PACKAGE || facades.get(dep) == Some(&current.as_str()) {
                         continue;
                     }
                     let first = if current == *name {
@@ -191,8 +191,8 @@ pub fn wanted(
                 {
                     continue;
                 }
-                if super::api::PACKAGES.iter().any(|(game, _)| {
-                    *game != super::api::INTERNALS_PACKAGE
+                if PACKAGES.iter().any(|(game, _)| {
+                    *game != INTERNALS_PACKAGE
                         && package == *game
                         && path == format!("../../crates/{game}")
                 }) {

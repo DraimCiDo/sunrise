@@ -88,6 +88,7 @@ fn the_sun_leaves_its_own_alpha_over_the_sky() {
     frame.skybox = true;
     let sun = quad(100.0);
     frame.celestial = &sun;
+    frame.celestial_bodies = &[crate::gfx::CelestialBody::Sun];
     let pixels = gpu.render(&mut post, &color, &depth, &frame, &mut |_, _, _, _| {});
     // The top four rows see the sky disc (sky_depth_tests); the sun covers the whole view.
     for (i, p) in pixels[..4 * SIZE[0] as usize].iter().enumerate() {

@@ -103,7 +103,9 @@ pub(crate) fn table(uses: &Uses, root: &Path, sdk: &PinnedSdk) -> Result<UsesTab
                 .into_iter()
                 .filter_map(|(id, now)| match now {
                     game_uses::Now::Is(hash) => Some(Entry::plain(id, hash)),
-                    game_uses::Now::Gone | game_uses::Now::Unjudged => None,
+                    game_uses::Now::Gone
+                    | game_uses::Now::Refused { .. }
+                    | game_uses::Now::Unjudged => None,
                 }),
         );
     }

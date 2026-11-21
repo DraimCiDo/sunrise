@@ -24,7 +24,12 @@ pub fn stamp(path: &Path, build: &str, id: &str, version: &str, patch: bool) -> 
         mod_id: id.into(),
         // Every library, the patch library too, names its panic strategy as its entry's export
         // does; the loader refuses `abort` by name.
-        identity: format!("{build} {id} {version} {} unwind", crate::rust::VERSION),
+        identity: sunrise_mod_package::index::registry::builds::library_identity(
+            build,
+            id,
+            version,
+            crate::rust::VERSION,
+        ),
     };
     fs::write(
         path.with_extension("identity.json"),

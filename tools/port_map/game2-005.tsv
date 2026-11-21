@@ -1,6 +1,6 @@
 ZombieVillager.defineSynchedData	skip:java		SynchedEntityData definitions; Sunrise keeps the fields on Mob and sets them at spawn
 ZombieVillager.addAdditionalSaveData	port	crates/sunrise-client/src/entity_nbt.rs::mob_to_nbt	zombie villager save arm; cure and gossip go through zombie_villager::write_nbt
-ZombieVillager.readAdditionalSaveData	port	crates/sunrise-client/src/entity_nbt.rs::mob_from_nbt	load arm; cure and gossip go through zombie_villager::read_nbt
+ZombieVillager.readAdditionalSaveData	port	crates/sunrise-client/src/entity_nbt/mob_load.rs::mob_from_nbt	load arm; cure and gossip go through zombie_villager::read_nbt
 ZombieVillager.finalizeSpawn	port	crates/sunrise-client/src/mobs/finalize.rs::Ctx::finalize	ZombieVillager arm: villager type, then profession, then zombie spawn
 ZombieVillager.initializeZombieVillagerData	port	crates/sunrise-client/src/mobs/finalize.rs::Ctx::finalize	profession drawn in the same arm, from a seeded fresh RNG rather than the mob random
 ZombieVillager.handleEntityEvent	port	crates/sunrise-client/src/mobs/zombie_villager.rs::start_converting	cure sound (event 16) is queued when the cure starts
@@ -21,7 +21,7 @@ CatSpawner.spawnCat	port	crates/sunrise-gameplay/src/cat_spawner.rs::spawn_cat	b
 InventoryCarrier.pickUpItem	port	crates/sunrise-client/src/game/mobs/villagers.rs::Game::villager_pickups	gap: minor: villager arm only; piglins, sulfur cubes, pandas and others have their own pickup fns
 AbstractVillager.finalizeSpawn	port	crates/sunrise-client/src/mobs/finalize.rs::Ctx::finalize	villager arm: type, then the baby group
 AbstractVillager.addAdditionalSaveData	port	crates/sunrise-client/src/entity_nbt.rs::mob_to_nbt	Offers; Villager inventory via villager::write_nbt, WanderingTrader inventory via extra.inventory, including empty
-AbstractVillager.readAdditionalSaveData	port	crates/sunrise-client/src/entity_nbt.rs::mob_from_nbt	Offers via read_villager; Villager inventory via villager::read_nbt, WanderingTrader via eight-slot extra.inventory; aggregation gap retained
+AbstractVillager.readAdditionalSaveData	port	crates/sunrise-client/src/entity_nbt/mob_load.rs::mob_from_nbt	Offers via read_villager; Villager inventory via villager::read_nbt, WanderingTrader via eight-slot extra.inventory; aggregation gap retained
 AbstractVillager.getSlot	missing		minor: commands cannot address a villager inventory slot (container.N); mob slot names cover weapon, armour and saddle only
 AbstractVillager.addOffersFromItemListings	port	crates/sunrise-client/src/merchant.rs::Trades::offers_from_set	the allow_duplicates path: a picked trade stays in the pool
 AbstractVillager.addOffersFromItemListingsWithoutDuplicates	port	crates/sunrise-client/src/merchant.rs::Trades::offers_from_set	the no-duplicates path: a picked trade leaves the pool

@@ -90,7 +90,7 @@ ClientPacketListener.handleMerchantOffers	port	crates/sunrise-client/src/game/ne
 ClientPacketListener.handleSetChunkCacheRadius	port	crates/sunrise-client/src/game/network/remote/mod.rs::Game::apply_packet	SetChunkCacheRadius arm: streaming radius, columns out of range dropped
 ClientPacketListener.handleSetSimulationDistance	inline	crates/sunrise-client/src/game/network/remote/mod.rs::Game::apply_packet	SetSimulationDistance arm: ClientLevel.serverSimulationDistance
 ClientPacketListener.handleSetChunkCacheCenter	port	crates/sunrise-client/src/game/network/remote/mod.rs::Game::apply_packet	SetChunkCacheCenter arm
-ClientPacketListener.handleBlockChangedAck	port	crates/sunrise-client/src/game/network/remote/mod.rs::Game::end_predictions
+ClientPacketListener.handleBlockChangedAck	port	crates/sunrise-client/src/game/network/remote/break_prediction.rs::Game::end_predictions
 ClientPacketListener.handleBundlePacket	inline	crates/sunrise-client/src/net.rs::receive_play	bundle delimiters are dropped; the packets inside arrive as a stream and are handled one by one, in order
 ClientPacketListener.handleProjectilePowerPacket	port	crates/sunrise-client/src/game/network/remote/packets_object.rs::Game::apply_projectile_power_packet	ProjectilePower arm: a hurting projectile's acceleration power, by id
 ClientPacketListener.handleChunkBatchFinished	inline	crates/sunrise-client/src/net.rs::receive_play	ChunkBatchFinished arm: answered on the network thread with the measured rate

@@ -97,18 +97,17 @@ impl TextureFlags {
         (flags != Self::default()).then_some(flags)
     }
 }
+mod cit;
+use cit::*;
+mod atlas_sprites;
+pub use atlas_sprites::*;
 mod atlas;
-#[cfg(test)]
-use atlas::{AtlasSprites, GUI_KEY, REGISTERED_KEY, atlas_sprites, cit_sprites};
-pub use atlas::{GuiSprite, HudAtlas, MISSING_SPRITE, dump_atlas, map_slot_sprite};
-
-pub use atlas::{
-    GLYPH_ROWS, MAP_SLOTS, MAX_ATLAS_SIZE, PACK_ICON_SIZE, PACK_ICON_SLOTS, SKIN_SLOTS, TRIM_SLOTS,
-    WORLD_ICON_SLOTS,
-};
+pub use atlas::*;
+mod atlas_pack;
 mod image;
 pub use image::*;
 mod batch;
+mod batch_text;
 mod renderer;
 pub use batch::*;
 pub use renderer::*;

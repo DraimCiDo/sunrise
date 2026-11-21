@@ -477,7 +477,7 @@ class PickStableTests(unittest.TestCase):
                 self.pick(folder, tags={"26.3-0.1.0": "9" * 40})
 
     def test_a_version_that_skips_a_step_stops_at_the_pick(self):
-        parent = nightly.train.Release("26.3-0.1.0", "9" * 40, "")
+        parent = nightly.train.Release("26.3-0.1.0", "9" * 40, nightly.train.github_time("2026-11-01T00:00:00Z"))
         with tempfile.TemporaryDirectory() as folder:
             tags = {"26.3-0.1.0": parent.sha}
             with mock.patch.object(nightly, "stop", side_effect=SystemExit("stopped")) as stop:
@@ -551,7 +551,8 @@ class ReserveStableTagTests(unittest.TestCase):
             self.reserve({}, ref="refs/heads/Release/26.3")
         with self.assertRaisesRegex(SystemExit, "26.3-0.1.1 is not newer than 26.3-0.2.0"):
             self.reserve({"26.3-0.2.0": "9" * 40}, tag="26.3-0.1.1",
-                         parent=nightly.train.Release("26.3-0.2.0", "9" * 40, ""))
+                         parent=nightly.train.Release("26.3-0.2.0", "9" * 40,
+                                                                      nightly.train.github_time("2026-11-01T00:00:00Z")))
         with self.assertRaisesRegex(SystemExit, "the first stable release on 26.3 is 26.3-0.1.0"):
             self.reserve({}, tag="26.3-0.2.0")
         # The parent the pick judged it against, and no other.

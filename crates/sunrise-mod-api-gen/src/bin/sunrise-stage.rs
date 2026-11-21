@@ -97,6 +97,28 @@ fn read_surface(path: &std::path::Path) -> Surface {
     Surface::read(&bytes).unwrap_or_else(|e| fail(format!("{}: {e}", path.display())))
 }
 
+/// `surface-read IN OUT`: IN as this tool reads it, written to OUT (the fields and collections it
+/// doesn't know left out). Refuses a document it can't read, or whose stored hashes are not the
+/// ones it gives their contracts ([`Surface::read_sealed`]).
+fn surface_read(args: &[PathBuf]) -> ! {
+    let [input, out] = args else {
+        fail("usage: sunrise-stage surface-read IN OUT")
+    };
+    let bytes = std::fs::read(input).unwrap_or_else(|e| fail(format!("{}: {e}", input.display())));
+    let (surface, unsealed) =
+        Surface::read_sealed(&bytes).unwrap_or_else(|e| fail(format!("{}: {e}", input.display())));
+    if !unsealed.is_empty() {
+        fail(format!(
+            "{}: these hashes are not what their contracts give: {}",
+            input.display(),
+            unsealed.join(", ")
+        ));
+    }
+    std::fs::write(out, surface.to_json())
+        .unwrap_or_else(|e| fail(format!("{}: {e}", out.display())));
+    std::process::exit(0)
+}
+
 fn surface_catalogs(args: &[PathBuf]) {
     let [root, path, flags @ ..] = args else {
         fail("usage: sunrise-stage surface-catalogs ROOT SURFACE [--with-internals]");
@@ -332,11 +354,12 @@ fn main() {
         Some("uses") => return uses_command(entry, &args[1..]),
         Some("fits") => fits_command(&args[1..]),
         Some("surface-diff") => surface_diff(&args[1..]),
+        Some("surface-read") => surface_read(&args[1..]),
         _ => {}
     }
     let usage = || {
         eprintln!(
-            "usage: sunrise-stage ROOT INTERNALS_JSON COMMIT [--sync-internals]\n       sunrise-stage surface ROOT OUT [--with-loops] [--with-internals]\n       sunrise-stage surface-catalogs ROOT SURFACE [--with-internals]\n       sunrise-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--api-notes-only] [--landed SHA] [--covered-by DIR --covered-base DIR] [--json OUT] [--gate]\n       sunrise-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]\n       sunrise-stage fits USES_JSON TARGET_SURFACE"
+            "usage: sunrise-stage ROOT INTERNALS_JSON COMMIT [--sync-internals]\n       sunrise-stage surface ROOT OUT [--with-loops] [--with-internals]\n       sunrise-stage surface-catalogs ROOT SURFACE [--with-internals]\n       sunrise-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--api-notes-only] [--landed SHA] [--covered-by DIR --covered-base DIR] [--json OUT] [--gate]\n       sunrise-stage surface-read IN OUT\n       sunrise-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]\n       sunrise-stage fits USES_JSON TARGET_SURFACE"
         );
         std::process::exit(2)
     };

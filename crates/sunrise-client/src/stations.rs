@@ -310,10 +310,7 @@ pub fn hover_name_text(names: &crate::creative::Names, stack: &ItemStack) -> cra
     // `ItemStack.getItemName`: the item's own `getName`, which for a few items is not its
     // `item_name` component.
     if let Some(key) = crate::brewing::contents_name_key(stack) {
-        let fallback = names
-            .get(&key)
-            .map_or_else(|| names.item(&stack.item), str::to_owned);
-        return Text::translate_with_fallback(&key, &fallback, &[]);
+        return Text::translate(&key, &[]);
     }
     if &*stack.item == "minecraft:shield"
         && let Some(color) = data.and_then(|d| d.base_color.as_deref())
@@ -331,49 +328,39 @@ pub fn hover_name_text(names: &crate::creative::Names, stack: &ItemStack) -> cra
         // `PlayerHeadItem.getName`: a profile's name, else the item name.
         return head.text();
     }
-    // `Item.getName`: the stack's `item_name` component, the patch over the prototype.
-    if stack.item_name().is_some()
-        && let Some(component) = data.and_then(|d| d.other("minecraft:item_name"))
-    {
+    // `Item.getName`: the stack's `item_name` component, including the compact raid banner.
+    if let Some(component) = data.and_then(|d| d.saved_other("minecraft:item_name")) {
         return crate::entity_nbt::name_text(component);
     }
     if data.is_some_and(|d| d.other("!minecraft:item_name").is_some()) {
         // `Item.getName` is `getOrDefault(ITEM_NAME, EMPTY)`.
         return Text::literal("");
     }
-    if data.is_some_and(|d| d.ominous_banner) {
-        let key = "block.minecraft.ominous_banner";
-        return Text::translate_with_fallback(key, names.get(key).unwrap_or("Ominous Banner"), &[]);
+    // Keep the prototype's component, including any fallback it actually carries.
+    // Do not insert an English fallback into a component shared with other viewers.
+    if let Some(name) = names.item_name(&stack.item) {
+        return match name
+            .as_object()
+            .filter(|component| component.len() == 1)
+            .and_then(|component| component.get("translate"))
+            .and_then(serde_json::Value::as_str)
+        {
+            Some(key) => Text::translate(key, &[]),
+            None => crate::entity_nbt::name_text(&crate::scoreboard::json_to_tag(name)),
+        };
     }
-    // The prototype's default `item_name` (`Item.getDescriptionId`), else, for an item whose
-    // prototype carries none (a mod's), the key `Item.Properties` gives it: its block's for a
-    // block item (`useBlockDescriptionPrefix`), else `item.*` (`Util.makeDescriptionId`).
-    // The English name is the fallback text.
+    // An item without a prototype (a mod's) takes the key `Item.Properties` gives it: its
+    // block's for a block item (`useBlockDescriptionPrefix`), else `item.*`.
     let (namespace, path) = stack
         .item
         .split_once(':')
         .unwrap_or(("minecraft", &stack.item));
-    let fallback = names.item(&stack.item);
-    match names.item_name(&stack.item) {
-        Some(name) => match name.as_object() {
-            Some(component) if component.len() == 1 => match component
-                .get("translate")
-                .and_then(serde_json::Value::as_str)
-            {
-                Some(key) => Text::translate_with_fallback(key, &fallback, &[]),
-                None => crate::entity_nbt::name_text(&crate::scoreboard::json_to_tag(name)),
-            },
-            _ => crate::entity_nbt::name_text(&crate::scoreboard::json_to_tag(name)),
-        },
-        None => {
-            let prefix = if names.is_block_item(&stack.item) {
-                "block"
-            } else {
-                "item"
-            };
-            Text::translate_with_fallback(&format!("{prefix}.{namespace}.{path}"), &fallback, &[])
-        }
-    }
+    let prefix = if names.is_block_item(&stack.item) {
+        "block"
+    } else {
+        "item"
+    };
+    Text::translate(&format!("{prefix}.{namespace}.{path}"), &[])
 }
 /// `ItemStack.getHoverName` as plain text in the current language: the component of
 /// [`hover_name_text`], rendered.
@@ -1908,6 +1895,38 @@ mod tests {
                     "{branch}"
                 );
             }
+        });
+    }
+
+    #[test]
+    fn hover_name_keeps_only_authored_fallbacks() {
+        use serde_json::json;
+        use std::collections::BTreeMap;
+        let blocks = Box::leak(Box::new(
+            sunrise_world::registry::BlockRegistry::from_facts_json(
+                br#"{"defaults":{"minecraft:air":0},"states":[["a",true,false,"","minecraft:air"]]}"#
+                    .as_slice(),
+            )
+            .unwrap(),
+        ));
+        let sword = ItemStack::new("minecraft:diamond_sword", 1);
+        let name = json!({"translate": "item.minecraft.diamond_sword"});
+        let names = crate::creative::Names::default().with_item_names(
+            &BTreeMap::from([(
+                sword.item.to_string(),
+                BTreeMap::from([("minecraft:item_name".into(), name.clone())]),
+            )]),
+            blocks,
+        );
+        crate::lang::scoped(crate::lang::Language::default(), || {
+            assert_eq!(hover_name_text(&names, &sword).component(), name);
+            let mut renamed = sword;
+            let name = json!({"translate": "test.name", "fallback": "A custom sword"});
+            renamed.data_mut().set_other(
+                "minecraft:item_name",
+                Some(crate::scoreboard::json_to_tag(&name)),
+            );
+            assert_eq!(hover_name_text(&names, &renamed).component(), name);
         });
     }
 

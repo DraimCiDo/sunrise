@@ -322,7 +322,7 @@ pub fn texture(m: &Mob) -> &'static str {
 /// loaded with stands when the owner is gone.
 pub fn write_nbt(
     m: &Mob,
-    map: &mut sunrise_core::nbt::Compound,
+    map: &mut crate::entity_nbt::EntityTagWriter,
     uuid_of: &mut impl FnMut(u32) -> Option<[i32; 4]>,
 ) {
     use sunrise_core::nbt::Tag;

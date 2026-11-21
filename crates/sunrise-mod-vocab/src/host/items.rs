@@ -32,9 +32,9 @@ pub trait ItemsHost {
     /// `ItemStack.getHoverName()` as a component, as vanilla builds it: the custom name as
     /// written, else a potion's or tipped arrow's contents name, a written book's non-blank
     /// title, a player head's `%s's Head` for its owner, the `item_name` component (a removed one
-    /// reads empty), the ominous banner's name, else the item's name as a translatable (`item.*`
-    /// or `block.*`, with the English name as its fallback). It carries no rarity colour or
-    /// italics (`getStyledHoverName` adds those). Each viewer renders a translatable in their own
+    /// reads empty; the ominous banner's included), else the item's default name as a bare
+    /// translatable (`item.*` or `block.*`); only a fallback written into a component is kept.
+    /// It carries no rarity colour or italics (`getStyledHoverName` adds those). Each viewer renders a translatable in their own
     /// language; call `text_string` on it for a string in this side's language. An invalid stack
     /// is a [`TextFormError`].
     #[access(Metadata)]

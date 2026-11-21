@@ -53,7 +53,7 @@ pub const BESIDE_ASSETS: [&str; 3] = [INDEX, "SHA256SUMS", "SHA256SUMS.sig"];
 pub struct Index {
     pub schema: u32,
     pub build: Build,
-    pub package_format: u32,
+    pub package_format: u64,
     pub toolchain: Toolchain,
     /// The content manifest's version ([`crate::manifest::API`]).
     pub content_api: String,
@@ -225,6 +225,14 @@ pub enum Side {
 }
 
 impl Asset {
+    /// A runtime host name, also used by the native release archives.
+    pub fn host_name(target: &str, side: Side) -> String {
+        match side {
+            Side::Client => target.to_owned(),
+            Side::Server => format!("{target}-server"),
+        }
+    }
+
     /// The kind, codec, target and side an asset's file name states:
     /// `surface.json`, `build-data.tar.xz`, `api-source.tar.xz`, `tool-<target>.tar.xz` and
     /// `<runtime|api|engine>-<target>[-server].tar.xz`, where a target is made of `a-z`, `0-9`,
@@ -257,12 +265,8 @@ impl Asset {
 
     /// A per-target asset's file name, as [`Asset::parts_of`] reads it; `side` names only a per-side kind's.
     pub fn name(kind: Kind, target: &str, side: Side) -> String {
-        let suffix = if kind.per_side() && side == Side::Server {
-            "-server"
-        } else {
-            ""
-        };
-        format!("{}-{target}{suffix}.tar.xz", kind.name())
+        let host = Self::host_name(target, if kind.per_side() { side } else { Side::Client });
+        format!("{}-{host}.tar.xz", kind.name())
     }
 }
 
@@ -569,7 +573,7 @@ impl Index {
         Ok(Index {
             schema: SCHEMA,
             build,
-            package_format: PACKAGE_FORMAT,
+            package_format: u64::from(PACKAGE_FORMAT),
             toolchain: Toolchain { rust },
             content_api: crate::manifest::API.to_owned(),
             surface: Surface {
@@ -680,6 +684,20 @@ impl Index {
     /// Read `sdk.json` for build `commit`: its schema, build, package format and every asset's
     /// kind, codec and name, and the mixins revision, are checked here, once.
     pub fn read(bytes: &[u8], commit: &str) -> Result<Index, Refusal> {
+        Self::read_with_format(bytes, commit, Some(u64::from(PACKAGE_FORMAT)))
+    }
+
+    /// Read the index for a fit comparison, which never opens compiled packages.
+    /// All index checks except compiled package format compatibility still apply.
+    pub fn read_for_fit(bytes: &[u8], commit: &str) -> Result<Index, Refusal> {
+        Self::read_with_format(bytes, commit, None)
+    }
+
+    fn read_with_format(
+        bytes: &[u8],
+        commit: &str,
+        expected_format: Option<u64>,
+    ) -> Result<Index, Refusal> {
         let malformed = |error: serde_json::Error| Refusal::Malformed(error.to_string());
         Self::schema(bytes)?;
         let written: Written = serde_json::from_slice(bytes).map_err(malformed)?;
@@ -689,7 +707,7 @@ impl Index {
                 found: written.build.commit,
             });
         }
-        if written.package_format != u64::from(PACKAGE_FORMAT) {
+        if expected_format.is_some_and(|expected| expected != written.package_format) {
             return Err(Refusal::PackageFormat(written.package_format));
         }
         if !crate::manifest::revision(&written.mixins.rev) {
@@ -732,7 +750,7 @@ impl Index {
         Ok(Index {
             schema: SCHEMA,
             build: written.build,
-            package_format: PACKAGE_FORMAT,
+            package_format: written.package_format,
             toolchain: written.toolchain,
             content_api: written.content_api,
             surface: written.surface,
@@ -839,7 +857,7 @@ impl Index {
 
 /// The largest xz dictionary [`unpack`] decodes with: `xz -9`'s. The decoder's memory is this plus
 /// fixed buffers, whatever the archive holds; an archive asking for more is refused as damaged.
-#[cfg(feature = "prebuilt")]
+#[cfg(any(feature = "prebuilt", feature = "index"))]
 pub const DICTIONARY_LIMIT: usize = 64 << 20;
 
 /// The largest tar extension entry (a GNU long name or link, a PAX header) [`unpack`] reads.

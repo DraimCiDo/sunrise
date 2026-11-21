@@ -35,6 +35,18 @@ fn compiler_plan(
     }
 }
 
+const LOGGERS: &str = "/* MOD_LOGGERS */";
+
+fn check_log_template(template: &str, native_log: bool) -> Result<(), String> {
+    if native_log && template.matches(LOGGERS).count() != 1 {
+        return Err(trf(
+            "The prebuilt SDK declares native log forwarding, but {file} must contain exactly one {marker} slot.",
+            &[("file", super::api_route::TEMPLATE), ("marker", LOGGERS)],
+        ));
+    }
+    Ok(())
+}
+
 /// `out` is the mods folder's staging folder, rewritten every build; `target_dir` is cargo's build
 /// folder, kept between builds of the same game build (see `prebuilt::compile`).
 #[allow(clippy::too_many_arguments)]
@@ -49,6 +61,8 @@ pub fn compile(
     options: Options<'_>,
 ) -> Result<(PathBuf, Vec<PathBuf>), String> {
     let sdk = prebuilt::identity(game)?;
+    let template = api::template(&game.join(super::api_route::TEMPLATE))?;
+    check_log_template(&template, sdk.native_log)?;
     let lock = sdk.registry_lock.as_ref().ok_or_else(|| tr("The prebuilt SDK does not declare a locked registry graph; install an SDK that supports registry-bearing native mods").to_string())?;
     let mut patches = sdk.registry_patches.clone().ok_or_else(|| {
         tr("The prebuilt SDK does not declare game registry patches; install a newer SDK")
@@ -95,7 +109,6 @@ pub fn compile(
         fs::rename(out, &previous).map_err(|e| e.to_string())?;
     }
     fs::create_dir_all(out).map_err(|e| e.to_string())?;
-    let template = api::template(&game.join(super::api_route::TEMPLATE))?;
     let mut bindings = BTreeMap::new();
     let mut members = Vec::new();
     let mut wrapper_deps = toml::Table::new();
@@ -423,7 +436,13 @@ pub fn compile(
     // from one library, so a mod depending on several mods doesn't reach a copy of each through
     // each of them (`registry_shared`). The mods' manifests were checked above without it; it adds
     // no package cargo hasn't already resolved and locked.
-    let shared = registry_shared::Shared::select(metadata.runtime_uses(out, &mod_dirs)?);
+    // The SDK owns the entry template and the sink it can call. The mod's lock still owns log.
+    let logs = if sdk.native_log {
+        metadata.runtime_logs()?
+    } else {
+        Default::default()
+    };
+    let shared = registry_shared::Shared::select(metadata.runtime_uses(out, &mod_dirs)?, logs);
     if let Some(shared) = &shared {
         shared.check_name(&metadata.packages, out)?;
         shared.write(out)?;
@@ -438,6 +457,18 @@ pub fn compile(
             registry_shared::link(&mut manifest, &mut source).map_err(|e| format!("{id}: {e}"))?;
             fs::write(&path, manifest.to_string()).map_err(|e| e.to_string())?;
             fs::write(root, source).map_err(|e| e.to_string())?;
+            if !shared.logs.is_empty() {
+                let path = root.with_file_name("__sunrise_entry.rs");
+                let entry = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+                fs::write(
+                    path,
+                    entry.replace(
+                        LOGGERS,
+                        "extern crate sunrise_registry_shared;\n    sunrise_registry_shared::install_loggers();",
+                    ),
+                )
+                .map_err(|e| e.to_string())?;
+            }
         }
         let path = out.join("Cargo.toml");
         let mut manifest: toml::Table = fs::read_to_string(&path)
@@ -451,12 +482,17 @@ pub fn compile(
             .ok_or("generated workspace")?
             .push(registry_shared::RELATIVE.into());
         fs::write(&path, manifest.to_string()).map_err(|e| e.to_string())?;
-        // Bindings with no `--extern`, so the compiler wrapper still links it like a mod: dynamic
-        // linking, and the mods' rpath arguments.
+        // Link it like a mod (dynamic, with the same rpath). Only the forwarder calls the SDK.
+        let mut externs = BTreeMap::new();
+        if !shared.logs.is_empty() {
+            let api = prebuilt::library(&deps, "mod_api")?;
+            prebuilt::refuse_closure_rlib(registry_shared::CRATE, "mod_api", &api)?;
+            externs.insert("mod_api".into(), api);
+        }
         bindings.insert(
             out.join(registry_shared::RELATIVE),
             registry_rustc::Bindings {
-                externs: BTreeMap::new(),
+                externs,
                 link_args: mod_link_args(),
             },
         );
@@ -690,6 +726,14 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn forwarding_sdk_requires_one_logger_slot_in_its_template() {
+        assert!(check_log_template("fn entry() {}", false).is_ok());
+        assert!(check_log_template("fn entry() {}", true).is_err());
+        assert!(check_log_template("/* MOD_LOGGERS */", true).is_ok());
+        assert!(check_log_template("/* MOD_LOGGERS */ /* MOD_LOGGERS */", true).is_err());
+    }
 
     #[test]
     #[ignore = "daily"]

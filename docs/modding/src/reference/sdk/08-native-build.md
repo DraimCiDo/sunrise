@@ -78,7 +78,7 @@ cargo sunrise-mod native-check < plan.json
 | `mods` | A mod's folder, or a folder of mod folders. |
 | `build` | The build id (the game's full commit) the mods are checked against. |
 | `surface` | Optional. The build's `surface.json`, read only for a mod made for another build. |
-| `build_data` | Optional. The build's unpacked build data (`functions.json`, `internals.json`, `loops.json`), read only for a mod made for another build that declares game code (a `[[native.mixin]]` or `[[native.loop]]` row, an `internals` list). |
+| `build_data` | Optional. The build's unpacked build data (`functions.json`, `internals.json`, `loops.json`), read when comparing a mod made for another build that declares game code (a `[[native.mixin]]` or `[[native.loop]]` row, an `internals` list). A same-build mod with `[[native.mixin]]` rows needs `functions.json` to check for indexed refusals. |
 
 The reply is `{"contract": 2, "route": …, "mods": […]}`. `route` is `prebuilt-api` or `prebuilt` for the usable
 mods, `null` when none is. Each of `mods` has:
@@ -87,11 +87,14 @@ mods, `null` when none is. Each of `mods` has:
 |---|---|
 | `id` | The mod's id. |
 | `refusal` | Why no build takes it, as the build log says it; then `verdict` is `null`. |
-| `verdict` | `{"kind": …, "made_for": build}`: `made-for` (no `made_for`), `fits`, `exact` (`why`: the `[native]` table whose rows no list can judge, or `internals` for a declared function whose body this build's data does not hold), `no-list` (its package's list of what it uses cannot show a fit; `why` is `missing`, `unreadable`, `newer-schema` (a tool from a newer build reads it), `other-build` (made for another build than its pin), `hook-versions` (nothing it can judge changed, but it holds no version of the hooks in `hooks`; packing the mod again writes them) or `game-code` (nothing it can judge changed, but it holds no record of game code the mod declares; packing the mod again writes it)), `does-not-fit` (`misfits`: each `{id, change}`: a surface id, or a `game:` id for game code the mod declares (`game:fn:<path>`, `game:internal:<kind>:<path>`, `game:loop:<name>`, `game:tool:horizon-mixins`), and how it changed). `made-for` and `fits` are usable. |
+| `verdict` | `{"kind": …, "made_for": build}`: `made-for` (no `made_for`), `fits`, `exact` (`why`: the `[native]` table whose rows no list can judge, or `internals` for a declared function whose body this build's data does not hold), `no-list` (its package's list of what it uses cannot show a fit; `why` is `missing`, `unreadable`, `newer-schema` (a tool from a newer build reads it), `other-build` (made for another build than its pin), `hook-versions` (nothing it can judge changed, but it holds no version of the hooks in `hooks`; packing the mod again writes them) or `game-code` (nothing it can judge changed, but it holds no record of game code the mod declares; packing the mod again writes it)), `does-not-fit` (`misfits`: each `{id, change}`: a surface id, or a `game:` id for game code the mod declares (`game:fn:<path>`, `game:internal:<kind>:<path>`, `game:loop:<name>`, `game:tool:horizon-mixins`), or for a mixin target that build's function index refuses, display text naming the target, error code and reason; and how it changed). `made-for` and `fits` are usable. |
 | `needs` | `surface` or `build-data` when the plan didn't give the file its verdict needs; then `verdict` is `null`. The caller fetches it and asks again. |
 
 A `change` is `"removed"`, `"changed"`, `{"lost-impl": trait}`, `{"fields": {gained, at}}`, `{"version": {named, now}}`,
-`{"not-buildable": {at}}`, `{"path": path}` or `{"route": {from, owner}}`.
+`{"not-buildable": {at}}`, `{"path": path}` or `{"route": {from, owner}}`. On a mod's own build, an indexed
+mixin refusal appears in `refusal`. When checking its fit on another build, the result remains
+`does-not-fit`: the misfit's `id` is display text with the full target, error code and reason, and its
+`change` is `"changed"`.
 
 ## `native-discover` and `native-lock`
 

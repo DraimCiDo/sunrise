@@ -48,9 +48,34 @@ impl<'a, T: Serialize> Document<'a, T> {
     }
 }
 
-/// Read the build-data file `file` from `text`: refuse a missing or unknown schema by name, then
-/// read the build and the body. `T` names the file's own fields; unknown fields are ignored.
-pub fn read<T: DeserializeOwned>(file: &str, text: &str) -> Result<(Build, T), String> {
+#[derive(Debug)]
+pub enum ReadError {
+    /// An unknown numbered schema with a readable build identity.
+    Schema {
+        file: String,
+        schema: u64,
+        build: Build,
+    },
+    Invalid(String),
+}
+
+impl std::fmt::Display for ReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Schema { file, schema, .. } => write!(
+                f,
+                "{file} has build-data schema {schema}; this program reads schema {SCHEMA}. Use the tool and launcher made for that game build"
+            ),
+            Self::Invalid(reason) => f.write_str(reason),
+        }
+    }
+}
+
+impl std::error::Error for ReadError {}
+
+/// Read the build-data file `file` from `text`. The build identity is readable even on unknown
+/// schemas; the body is read only on the supported schema. `T` names the file's own fields.
+pub fn read<T: DeserializeOwned>(file: &str, text: &str) -> Result<(Build, T), ReadError> {
     #[derive(Deserialize)]
     struct Header {
         schema: Option<u64>,
@@ -61,21 +86,29 @@ pub fn read<T: DeserializeOwned>(file: &str, text: &str) -> Result<(Build, T), S
         #[serde(flatten)]
         body: T,
     }
-    let header: Header = serde_json::from_str(text).map_err(|e| format!("{file}: {e}"))?;
+    let invalid = |e| ReadError::Invalid(format!("{file}: {e}"));
+    let header: Header = serde_json::from_str(text).map_err(invalid)?;
     match header.schema {
         Some(schema) if schema == u64::from(SCHEMA) => {}
         Some(schema) => {
-            return Err(format!(
-                "{file} has build-data schema {schema}; this program reads schema {SCHEMA}. Use the tool and launcher made for that game build"
-            ));
+            #[derive(Deserialize)]
+            struct Named {
+                build: Build,
+            }
+            let Named { build } = serde_json::from_str(text).map_err(invalid)?;
+            return Err(ReadError::Schema {
+                file: file.into(),
+                schema,
+                build,
+            });
         }
         None => {
-            return Err(format!(
+            return Err(ReadError::Invalid(format!(
                 "{file} has no build-data schema; it was written by an older game build. Fetch this build's SDK again"
-            ));
+            )));
         }
     }
-    let document: WithBuild<T> = serde_json::from_str(text).map_err(|e| format!("{file}: {e}"))?;
+    let document: WithBuild<T> = serde_json::from_str(text).map_err(invalid)?;
     Ok((document.build, document.body))
 }
 
@@ -115,21 +148,30 @@ mod tests {
         let later = format!(r#"{{"schema":2,"build":{{"commit":"{commit}"}},"loops":[]}}"#);
         let error = read::<Loops>(LOOPS, &later).unwrap_err();
         assert!(
-            error.contains("loops.json has build-data schema 2"),
+            matches!(&error, ReadError::Schema { file, schema: 2, build }
+            if file == LOOPS && build.commit == commit),
             "{error}"
         );
         let error = read::<Loops>(LOOPS, r#"{"loops":[]}"#).unwrap_err();
         assert!(
-            error.contains("loops.json has no build-data schema"),
+            matches!(&error, ReadError::Invalid(reason)
+            if reason.contains("loops.json has no build-data schema")),
             "{error}"
         );
         let error = read::<Loops>(LOOPS, "[]").unwrap_err();
-        assert!(error.starts_with("loops.json: "), "{error}");
-        let headless = r#"{"schema":1,"loops":[]}"#;
         assert!(
-            read::<Loops>(LOOPS, headless)
-                .unwrap_err()
-                .contains("build")
+            matches!(&error, ReadError::Invalid(reason)
+            if reason.starts_with("loops.json: ")),
+            "{error}"
         );
+        for schema in [SCHEMA, SCHEMA + 1] {
+            let headless = format!(r#"{{"schema":{schema},"loops":[]}}"#);
+            let error = read::<Loops>(LOOPS, &headless).unwrap_err();
+            assert!(
+                matches!(&error, ReadError::Invalid(reason)
+                if reason.contains("build")),
+                "{error}"
+            );
+        }
     }
 }

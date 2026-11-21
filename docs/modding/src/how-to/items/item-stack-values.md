@@ -109,7 +109,7 @@ means none). Runtime selection is not a persistent component. Drawing receives t
 `host.hover_name(&stack)` is `ItemStack.getHoverName()` as a component, on both sides: the custom
 name as written, else a potion's contents name, a written book's non-blank title, a player head's
 `%s's Head`, the `item_name` component, else the item's name as a translatable (`item.*` or
-`block.*`, with the English name as its fallback). It has no rarity colour or italics. Because it
+`block.*`, with no fallback; a fallback written into a component is kept). It has no rarity colour or italics. Because it
 stays a component, each player renders it in their own language: put it into world text or a
 display as it is. Call `host.text_string(&name)` for a string, which is in the language of the
 side that calls it. An invalid stack is a `TextFormError`.
