@@ -418,6 +418,24 @@ impl SaveDir {
             .collect()
     }
 
+    /// Visit loaded terrain that still has a refused record. The durable error outlives
+    /// the one-shot retry notice, since the chunk may not have been resident at that point.
+    pub fn for_each_refused_chunk_save(
+        &self,
+        loaded: impl Iterator<Item = (i32, i32)>,
+        mut mark: impl FnMut((i32, i32)),
+    ) {
+        if let Ok(errors) = self.outstanding.record_errors.lock()
+            && !errors.is_empty()
+        {
+            for (x, z) in loaded {
+                if errors.contains_key(&("region", x, z)) {
+                    mark((x, z));
+                }
+            }
+        }
+    }
+
     /// Wait until every queued write is on disk, or report what could not be saved.
     pub fn flush(&self) -> Result<()> {
         let mut count = self

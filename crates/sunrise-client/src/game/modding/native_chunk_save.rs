@@ -224,6 +224,125 @@ mod tests {
 
     #[test]
     #[ignore = "daily"]
+    fn shutdown_saves_a_refused_edit_after_the_chunk_reloads() {
+        use mod_api::{
+            AttachmentCodec, AttachmentError, AttachmentType, ChunkDataSaveEvent, ChunkDiskHost,
+            Hooks, ModEntry,
+        };
+        use std::sync::{Mutex, mpsc};
+        use sunrise_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
+
+        const KEY: (i32, i32) = (2, 0);
+        struct RefuseOnce(Arc<Mutex<Option<mpsc::Receiver<()>>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for RefuseOnce {
+            fn chunk_data_save(
+                &self,
+                host: &dyn ChunkDiskHost,
+                event: &mut ChunkDataSaveEvent<'_>,
+            ) {
+                if host.job().pos != [KEY.0, KEY.1] {
+                    return;
+                }
+                let gate = self.0.lock().unwrap().take();
+                if let Some(gate) = gate {
+                    gate.recv_timeout(Duration::from_secs(5)).unwrap();
+                    let invalid = AttachmentType {
+                        namespace: "reload_refusal",
+                        name: "bad",
+                        default: || 0,
+                        codec: Some(AttachmentCodec {
+                            encode: |_| Err(AttachmentError::Encode),
+                            decode: |_| Ok(0),
+                        }),
+                        copy_on_death: false,
+                        sync: false,
+                    };
+                    let _ = event.data.set(&invalid, 1);
+                }
+            }
+        }
+
+        let gate = Arc::new(Mutex::new(None));
+        let mods = vec![ModEntry::new(
+            "reload_refusal",
+            Box::new(RefuseOnce(gate.clone())),
+        )]
+        .into();
+        mod_platform::testing::with_mods(mods, || {
+            with_game(|game| {
+                let dir = tempfile::tempdir().unwrap();
+                game.world_root = dir.path().to_path_buf();
+                game.session_lock =
+                    Some(sunrise_client::save::SessionLock::acquire(dir.path()).unwrap());
+                game.world_adopted = true;
+                let open = || {
+                    SaveDir::new(
+                        dir.path().to_path_buf(),
+                        LevelShape::OVERWORLD,
+                        Some(Default::default()),
+                    )
+                };
+                game.save = Arc::new(open());
+                let load = LoadContext::new(
+                    DataLoadOrigin::ServerDataLoad,
+                    Arc::new(LoadInputs::new(
+                        Default::default(),
+                        game.world_root.join("settings"),
+                    )),
+                    [],
+                );
+                game.save.set_chunk_disk_context(
+                    mod_api::WorldEpoch::new(17),
+                    mod_api::Identifier::parse("minecraft:overworld").unwrap(),
+                    Arc::new(load.worldgen_context([])),
+                );
+                let registry = game.pack.assets.registry;
+                let stone = registry.default_state("minecraft:stone").unwrap();
+                let gold = registry.default_state("minecraft:gold_block").unwrap();
+                let mut chunk = Chunk::with_layout(KEY.0, KEY.1, game.world.layout());
+                chunk.lit = true;
+                chunk.set(1, 64, 1, stone.0);
+                game.save
+                    .save(&[Arc::new(chunk.clone())], registry, world_biomes!(game))
+                    .unwrap();
+
+                let (allow_refusal, wait_for_unload) = mpsc::channel();
+                *gate.lock().unwrap() = Some(wait_for_unload);
+                chunk.set(1, 64, 1, gold.0);
+                game.world.chunks.insert(KEY, Arc::new(chunk));
+                game.world.modified.insert(KEY);
+                game.save_chunks_eagerly_at(Instant::now());
+                assert!(!game.world.modified.contains(&KEY));
+                assert!(game.world.unload_chunk(KEY).is_some());
+                allow_refusal.send(()).unwrap();
+                assert!(game.save.flush().unwrap_err().is::<RecordSaveFailures>());
+                game.requeue_failed_chunk_saves();
+
+                let loaded = game
+                    .save
+                    .load(KEY.0, KEY.1, registry, world_biomes!(game))
+                    .unwrap();
+                assert_eq!(loaded.block(1, 64, 1), gold);
+                game.world.chunks.insert(KEY, Arc::new(loaded));
+                game.world.loaded_chunks.push((KEY.0, KEY.1, false));
+                game.native_chunks_loaded();
+                game.run_server_lifecycle(false, |_, began| {
+                    *began = true;
+                    Ok(())
+                })
+                .unwrap();
+
+                let disk = open()
+                    .load(KEY.0, KEY.1, registry, world_biomes!(game))
+                    .unwrap();
+                assert_eq!(disk.block(1, 64, 1), gold);
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
     fn an_unloaded_refusal_cannot_hide_a_later_edit_from_eager_saves() {
         let dir = tempfile::tempdir().unwrap();
         mod_platform::testing::with_mods(Vec::new().into(), || {

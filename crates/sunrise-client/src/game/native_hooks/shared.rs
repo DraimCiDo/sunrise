@@ -2345,6 +2345,16 @@ impl Game<'_> {
         if self.remote.is_some() {
             return;
         }
+        if !loaded.is_empty() {
+            let (chunks, modified) = (&self.world.chunks, &mut self.world.modified);
+            self.save.for_each_refused_chunk_save(
+                loaded
+                    .iter()
+                    .map(|&(x, z, _)| (x, z))
+                    .filter(|key| chunks.contains_key(key)),
+                |key| modified.retain_refused_save(key),
+            );
+        }
         let dimension = self.dim.id();
         for (x, z, new) in loaded {
             self.native_chunk_load(dimension, [x, z], new);
