@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! Biome modifiers: a content mod's placed features and mob spawns in biomes
 //! it does not own (vanilla's), as NeoForge's `add_features`,
 //! `remove_features`, `add_spawns`, `remove_spawns`, `add_spawn_costs` and

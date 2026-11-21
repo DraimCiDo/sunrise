@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 use super::*;
 
 static FLUID_INTERACTIONS: std::sync::RwLock<Vec<sunrise_mod_package::content::FluidInteraction>> =

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! Protect prepared roots while the game or resource readers retain them.
 use super::*;
 use sunrise_assets::resource_source::ResourceSource;

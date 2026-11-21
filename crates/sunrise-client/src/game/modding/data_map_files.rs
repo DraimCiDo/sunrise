@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! Decode a whole data-map file before applying any replace, values or removals.
 use serde::Deserialize;
 use serde::de::DeserializeOwned;

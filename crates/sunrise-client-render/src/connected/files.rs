@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! A mod's connected textures as asset files: `assets/<mod>/sunrise/connected/<name>.json`, one
 //! `table` rule each, whose table is inline or a shared file
 //! `assets/<mod>/sunrise/connected_tables/<name>.json` (docs/modding/src/how-to/client/connected-textures.md).
@@ -17,6 +18,18 @@ const MAX_FILE: u64 = 1 << 20;
 
 /// The named tables read so far in one load, each parsed once, refused ones too.
 type Tables = HashMap<String, Result<Arc<Table>, String>>;
+
+/// The rules to load for `root`: those the installed pack formats read, then the mods' asset
+/// files, in the order they are tried.
+pub fn read_rules(root: &ResourceSource) -> Vec<Rule> {
+    let mut rules = crate::pack_hooks::formats().connected(root);
+    let files = read(root);
+    if !files.is_empty() {
+        rules.extend(files);
+        sunrise_connected::sort(&mut rules);
+    }
+    rules
+}
 
 /// Every rule the `sunrise/connected` files of `root` declare, refused ones left out.
 pub fn read(root: &ResourceSource) -> Vec<Rule> {

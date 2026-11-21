@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,

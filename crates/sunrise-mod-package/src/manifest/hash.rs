@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 use sha2::{Digest, Sha512};
 
 /// Checks a SHA-512 written as 128 lowercase hex digits, the form `[[jar]]` and `[runtime]` use.

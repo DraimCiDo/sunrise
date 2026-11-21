@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! Content-root condition selection through the owning reload snapshot.
 use super::*;
 

@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! The light a declared block's gameplay row takes: `properties.light`, its
 //! `state_light` over it, and `dynamic_light`.
 use super::{J, NewBlock};

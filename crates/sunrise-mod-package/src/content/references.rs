@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! The references a content mod's files make to each other, which `Content::read` leaves for the
 //! game to meet at load: a blockstate's models, a model's parent and textures, an item
 //! definition's model, the ids a recipe, a tag or a loot table names in the mod's own namespaces,

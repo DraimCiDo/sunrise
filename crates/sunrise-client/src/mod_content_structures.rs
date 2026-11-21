@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! NeoForge structure modifiers, applied to the canonical structure bundle at
 //! content-root build time. Contract: public 26.3 `StructureModifiers` and
 //! `StructureSettingsBuilder` javadoc:

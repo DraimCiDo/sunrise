@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! A package's runtime data files: the `runtime/` folder and the `[runtime]` table that lists
 //! each file with its SHA-512.
 //!

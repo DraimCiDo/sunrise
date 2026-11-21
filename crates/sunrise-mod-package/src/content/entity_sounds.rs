@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! Declarative sound selection; omission remains distinct from explicit silence.
 use serde::{Deserialize, Serialize};
 

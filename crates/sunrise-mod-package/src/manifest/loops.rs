@@ -1,3 +1,4 @@
+//! stable-line: no-content-declarations
 //! `[[native.loop]]`: a native mod's type in the slot of a hot loop the game publishes. Like a
 //! mixin, its helper is game code: compiled into the launcher's patch crate beside the loop, it
 //! names the game's own types, pinned to the exact build. The launcher compiles one copy of the

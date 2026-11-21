@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! Prepared, data-enabled modifiers and their one-pass roll capability.
 #[cfg(test)]
 #[path = "global_modifiers_tests.rs"]

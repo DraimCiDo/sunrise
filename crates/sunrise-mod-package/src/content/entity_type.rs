@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 use super::LIVING_TEMPLATES;
 use super::entity_sounds::EntitySounds;
 use serde::Deserialize;

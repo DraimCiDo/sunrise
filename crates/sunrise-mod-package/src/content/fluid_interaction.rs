@@ -1,3 +1,4 @@
+//! stable-line: content-declarations
 //! What a liquid block turns into beside another fluid or block, as a mod's
 //! `data/<id>/sunrise/fluid_interaction/<name>.json` says it or its code declares it
 //! (`Registrar::fluid_interaction`). Ids are full (`namespace:path`); the game resolves them,
