@@ -22,7 +22,10 @@ fn a_short_version_with_a_pre_release_is_padded_in_its_core() {
     assert!(parse_version("one.two").is_err());
 }
 
+use super::package::check_file;
 use super::*;
+use mod_surface::uses::USES_FILE;
+use std::io::Read;
 
 #[test]
 fn a_version_that_is_not_semver_refuses_the_manifest_when_read() {

@@ -11,55 +11,18 @@
 //! and totals are capped, vanilla ids cannot be redefined, and no two mods
 //! share a namespace ([`clash`]).
 use crate::manifest::Manifest;
-use mod_vocab::{__private::DeclarationKind, DeclarationError};
 use serde::Deserialize;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    io::Read,
-    path::{Path, PathBuf},
+use std::collections::{BTreeMap, BTreeSet};
+
+mod entries;
+mod load;
+pub use entries::{
+    Block, BlockEntityType, CreativeTab, FluidLook, FluidModel, Item, LocalDeclaration,
 };
+use load::reader_of;
+pub use load::{Content, FileReader, MAX_FILE, MAX_FILES, MAX_TOTAL, check_path, clash};
+pub(crate) use load::{folder_files, runtime_folder_files};
 pub use sunrise_core::arm_pose::ArmPose;
-
-/// Content files per mod, bytes per file and bytes per mod.
-pub const MAX_FILES: usize = 65_536;
-pub const MAX_FILE: u64 = 16 << 20;
-pub const MAX_TOTAL: u64 = 512 << 20;
-
-/// Checks a content path: `assets/` or `data/`, then `/`-separated parts of
-/// `[a-z0-9_.-]`, none of them `.` or `..` (vanilla's resource-location
-/// characters, so the path means the same on every OS).
-pub fn check_path(name: &str) -> Result<(), String> {
-    let plain_char = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || "_.-".contains(c);
-    let mut parts = name.split('/');
-    let top = parts.next();
-    // assets/<namespace>/<file> at least.
-    let named_ok = matches!(top, Some("assets" | "data"))
-        && parts.clone().count() >= 2
-        && parts
-            .clone()
-            .all(|part| !part.is_empty() && part != "." && part != "..");
-    if named_ok && parts.clone().all(|part| part.chars().all(plain_char)) {
-        return Ok(());
-    }
-    let mut error = format!(
-        "{name:?} is not a plain assets/ or data/ path: after assets/ or data/, every part is made of a-z, 0-9, _, . and - (vanilla's resource-location characters, so the path means the same on every OS), and none is . or .."
-    );
-    if named_ok {
-        let fixed: Vec<String> = parts
-            .map(|part| {
-                part.to_ascii_lowercase()
-                    .chars()
-                    .map(|c| if plain_char(c) { c } else { '_' })
-                    .collect()
-            })
-            .collect();
-        error.push_str(&format!(
-            "; rename it {:?}",
-            format!("{}/{}", top.unwrap_or(""), fixed.join("/"))
-        ));
-    }
-    Err(error)
-}
 
 /// The single resource location NeoForge's `RecipePriorityManager` reads in pack order.
 pub const RECIPE_PRIORITIES_PATH: &str = "data/neoforge/recipe_priorities.json";
@@ -343,18 +306,6 @@ pub enum RandomTicks {
         property: String,
         values: Vec<String>,
     },
-}
-
-impl RandomTicks {
-    /// Whether a state ticks, `combo` being its values of the block's own state properties.
-    pub fn applies(&self, combo: &[(String, String)]) -> bool {
-        match self {
-            RandomTicks::All(all) => *all,
-            RandomTicks::States { property, values } => combo
-                .iter()
-                .any(|(name, value)| name == property && values.contains(value)),
-        }
-    }
 }
 
 /// Values selected by one property or an ordered tuple of state properties.
@@ -642,83 +593,6 @@ impl GateSound {
     }
 }
 
-/// A block the mod adds: a vanilla template's behaviour, states and shapes
-/// under a new id, with `properties` applied. A mod's code declares one as a
-/// `mod_api::Block` (`native_blocks`), whose `item` is true as a file's is.
-/// Here `..Default::default()` leaves the rest as a file leaves it out, except
-/// `item`, false: the engine's own blocks, such as a fluid's, have none.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Block {
-    /// `<mod id>:<path>`.
-    pub id: String,
-    /// The vanilla block it copies, `minecraft:<path>`.
-    pub template: String,
-    pub properties: BlockProperties,
-    pub shapes: Option<BlockShapes>,
-    pub collision_shapes: Option<BlockShapes>,
-    /// Independent overrides for actual entity queries; omitted kinds use the defaults.
-    pub outline_context_shapes: BTreeMap<ShapeEntityKind, BlockShapes>,
-    pub collision_context_shapes: BTreeMap<ShapeEntityKind, BlockShapes>,
-    /// Ray-face override; does not replace the outline hit point or create a hit.
-    pub interaction_shapes: Option<BlockShapes>,
-    /// The block's block entity publishes its outline and collision shapes, which replace the
-    /// declared ones until cleared. Needs a block entity type that owns the block.
-    pub shapes_from_block_entity: bool,
-    /// A vanilla block's context collision it takes, over its shapes for entities that have
-    /// no `collision_context_shapes` of their own.
-    pub context_collision: Option<ContextCollision>,
-    /// Per-state emission; takes precedence over `properties.light`.
-    pub state_light: Option<StateLight>,
-    /// State properties of its own, which its template does not have.
-    pub state_properties: BTreeMap<String, StateProperty>,
-    /// State properties overlaid on the template default.
-    pub default_state: BTreeMap<String, String>,
-    /// Also add a block item with the same id.
-    pub item: bool,
-    /// A fence gate's opening sounds (`WoodType.fenceGateOpen`). `All` replaces
-    /// every site; `Sites` keeps the template wood's sound for each missing site.
-    /// Needs a `*_fence_gate` template.
-    pub open_sound: Option<GateSound>,
-    /// A fence gate's closing sounds (`WoodType.fenceGateClose`), with the same
-    /// per-site fallback as `open_sound`.
-    pub close_sound: Option<GateSound>,
-    /// The item this block is, for pick-block and `Block.asItem`, when
-    /// it is not a block item of its own: an item of this mod or a vanilla
-    /// one, checked to exist when the content loads. Needs `item` false.
-    pub block_item: Option<String>,
-    /// The item pick-block takes from this block (`getCloneItemStack`), when it is not
-    /// the block's item: a mature crop picks its seed. An item of this mod or a vanilla
-    /// one, checked to exist when the content loads. Absent is the block's item.
-    pub pick_item: Option<String>,
-    /// Its item's component patch, as an [`Item`]'s.
-    pub components: BTreeMap<String, serde_json::Value>,
-    /// Ordered effects supplied by this block, independent of its item's components.
-    pub suspicious_stew_effects: Option<Vec<StewEffect>>,
-    /// A connecting block (template `minecraft:chorus_plant`, a `PipeBlock`
-    /// without the chorus plant's rules): the block tag, without `#`, whose
-    /// blocks it joins besides itself (a cable's machines).
-    pub connects_to: Option<String>,
-    /// A connecting block's width in pixels (2 to 14): its shapes, the
-    /// chorus plant's (10) when unset.
-    pub thickness: Option<f32>,
-    /// A sign's `WoodType` (template a vanilla sign), which names its editor's
-    /// background: `<namespace>:<path>` a mod's texture, a bare name vanilla's.
-    /// The template's when unset.
-    pub wood_type: Option<String>,
-    /// The block a standing or ceiling sign's item places on a wall
-    /// (`StandingAndWallBlockItem.wallBlock`): one of this mod's blocks, whose
-    /// template is the matching wall sign and which has no item. The
-    /// template's when unset.
-    pub wall_block: Option<String>,
-    /// A sign's new text colour (`SignBlockEntity.createDefaultSignText`): a `DyeColor` name,
-    /// black when unset. Applies to a sign when it is placed, front and back.
-    pub sign_text_color: Option<String>,
-    /// Whether a new sign's text glows, false when unset.
-    pub sign_text_glow: Option<bool>,
-    /// The block farmland turns into; the template's base when unset.
-    pub base_block: Option<String>,
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CreativeTabFile {
@@ -782,80 +656,6 @@ impl WorldFluid {
     }
 }
 
-/// How a fluid the mod names looks on the client (`data/<id>/sunrise/fluid/`), as
-/// NeoForge's `IClientFluidTypeExtensions`: `getStillTexture` and `getTintColor`.
-/// The fluid needs no block, so it can be a fluid only a tank holds.
-#[derive(Clone, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
-#[wire(crate = ::mod_vocab::wire)]
-pub struct FluidLook {
-    /// `<mod id>:<path>`.
-    pub id: String,
-    /// An atlas sprite id (`namespace:path`); none draws a flat square of the tint.
-    pub sprite: Option<String>,
-    /// `0xAARRGGBB`.
-    pub tint: Option<u32>,
-    /// How it exists in the world; none for a fluid only a tank holds.
-    pub world: Option<WorldFluid>,
-}
-impl FluidLook {
-    /// The registry name of its flowing form: `<namespace>:flowing_<path>`.
-    pub fn flowing_id(&self) -> String {
-        match self.id.split_once(':') {
-            Some((namespace, path)) => format!("{namespace}:flowing_{path}"),
-            None => format!("flowing_{}", self.id),
-        }
-    }
-    /// The filled bucket a world fluid has.
-    pub fn bucket_id(&self) -> Option<String> {
-        self.world
-            .filter(|world| world.bucket)
-            .map(|_| format!("{}_bucket", self.id))
-    }
-    /// The block a world fluid is in the world: water's behaviour and states under its own id.
-    pub fn world_block(&self) -> Option<Block> {
-        self.world.map(|_| Block {
-            id: self.id.clone(),
-            template: "minecraft:water".into(),
-            ..Block::default()
-        })
-    }
-    /// The item its bucket is: a water bucket's under its own id, leaving the empty bucket.
-    pub fn world_bucket(&self) -> Option<Item> {
-        self.bucket_id().map(|id| Item {
-            id,
-            template: "minecraft:water_bucket".into(),
-            crafting_remainder: Some("minecraft:bucket".into()),
-            ..Item::default()
-        })
-    }
-}
-
-/// What a world fluid draws with beyond its [`FluidLook`], as NeoForge's fluid models: registered
-/// by a client mod in `register_fluid_models`. An unset sprite keeps the look's.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct FluidModel {
-    /// The world fluid's id, `<mod id>:<path>`.
-    pub fluid: String,
-    /// The block atlas sprite on a surface at rest; the look's `sprite` when unset.
-    pub still: Option<String>,
-    /// The sprite on a surface that flows, and on its sides; `still` when unset.
-    pub flowing: Option<String>,
-    /// The sprite on sides against glass and leaves, as water's overlay; `flowing` when unset.
-    pub overlay: Option<String>,
-}
-
-/// A creative inventory tab the mod adds (`data/<id>/sunrise/creative_tab/`):
-/// its title, the item on its button, and its items in order. Items no mod
-/// or vanilla registers are left out when the game loads.
-#[derive(Clone, Debug, PartialEq)]
-pub struct CreativeTab {
-    /// `<mod id>:<path>`.
-    pub id: String,
-    pub title: String,
-    pub icon: String,
-    pub items: Vec<String>,
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Rarity {
@@ -876,27 +676,6 @@ struct ItemFile {
     crafting_remainder: Option<String>,
     block: Option<String>,
     arm_pose: Option<ArmPose>,
-}
-
-/// An item the mod adds: a vanilla template item's components under a new
-/// id, with these changed. A native mod may build one in code
-/// (`native_items`).
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Item {
-    pub id: String,
-    /// The vanilla item it copies, `minecraft:<path>`.
-    pub template: String,
-    pub max_stack_size: Option<u8>,
-    pub rarity: Option<Rarity>,
-    /// A 26.3 data component patch over the template's: `!minecraft:<type>` removes one.
-    pub components: BTreeMap<String, serde_json::Value>,
-    /// What it leaves in the crafting grid (`Item.Properties.craftRemainder`):
-    /// a vanilla item or one of the mod's own.
-    pub crafting_remainder: Option<String>,
-    /// The block placed by this item, if any.
-    pub block: Option<String>,
-    /// The arm pose a humanoid takes holding it, in place of vanilla's (`ArmPose`).
-    pub arm_pose: Option<ArmPose>,
 }
 
 /// `MobEffectCategory`.
@@ -994,13 +773,6 @@ mod references;
 #[cfg(feature = "references")]
 pub use references::{Findings, check_references};
 
-/// A block entity type declared in code, with the blocks it supports.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BlockEntityType {
-    pub id: String,
-    pub blocks: Vec<String>,
-}
-
 /// a menu type the mod adds (vanilla's `MenuType`, NeoForge's
 /// `IMenuTypeExtension.create`): its container's slot count, the
 /// `ContainerData` count its menu syncs, and its take-only slots
@@ -1089,357 +861,7 @@ impl MenuCrafting {
 /// container (`native_block_entity_container`) may.
 pub const MAX_MENU_SLOTS: u16 = 256;
 
-#[derive(Debug, Clone)]
-enum Source {
-    Dir(PathBuf),
-    Zip(PathBuf),
-    /// No files: content a native mod declares in code.
-    Code,
-}
-
-/// A mod's content: its files and declarations.
-#[derive(Debug)]
-pub struct Content {
-    source: Source,
-    /// Every content file (`assets/...`, `data/...`), sorted.
-    pub files: Vec<String>,
-    pub blocks: Vec<Block>,
-    pub items: Vec<Item>,
-    pub effects: Vec<MobEffect>,
-    /// Its creative inventory tabs, by id.
-    pub creative_tabs: Vec<CreativeTab>,
-    /// How its fluids look, by id.
-    pub fluids: Vec<FluidLook>,
-    /// What its liquid blocks turn into beside another fluid or block, in file-name order.
-    pub fluid_interactions: Vec<FluidInteraction>,
-    pub entity_types: Vec<EntityType>,
-    /// Block entity types declared by native code, not content files.
-    pub block_entity_types: Vec<BlockEntityType>,
-    pub menu_types: Vec<MenuType>,
-    /// The namespaces it owns: the mod id, then the manifest's `namespaces`.
-    pub namespaces: Vec<String>,
-}
-
-/// Reads a mod's content files ([`Content::reader`]).
-pub enum FileReader<'a> {
-    Dir(&'a Path),
-    Zip(Box<zip::ZipArchive<std::fs::File>>),
-}
-impl FileReader<'_> {
-    /// One content file's bytes.
-    pub fn read(&mut self, name: &str) -> Result<Vec<u8>, String> {
-        check_path(name)?;
-        let reader: Box<dyn Read + '_> = match self {
-            Self::Dir(root) => {
-                Box::new(std::fs::File::open(root.join(name)).map_err(|e| format!("{name}: {e}"))?)
-            }
-            Self::Zip(zip) => Box::new(zip.by_name(name).map_err(|e| format!("{name}: {e}"))?),
-        };
-        let mut out = Vec::new();
-        reader
-            .take(MAX_FILE + 1)
-            .read_to_end(&mut out)
-            .map_err(|e| format!("{name}: {e}"))?;
-        if out.len() as u64 > MAX_FILE {
-            return Err(format!("{name} is over {} MiB", MAX_FILE >> 20));
-        }
-        Ok(out)
-    }
-    /// A content file's path on disk, checked as [`read`](Self::read) checks it (the name,
-    /// the size), for a caller that copies it without reading it; `None` in an archive.
-    pub fn path(&self, name: &str) -> Result<Option<std::path::PathBuf>, String> {
-        check_path(name)?;
-        let root = match self {
-            Self::Dir(root) => root,
-            Self::Zip(_) => return Ok(None),
-        };
-        let path = root.join(name);
-        let len = std::fs::metadata(&path)
-            .map_err(|e| format!("{name}: {e}"))?
-            .len();
-        if len > MAX_FILE {
-            return Err(format!("{name} is over {} MiB", MAX_FILE >> 20));
-        }
-        Ok(Some(path))
-    }
-}
-
-/// Why two content mods cannot be on together: a namespace both own (one's
-/// id or listed namespace is the other's), which would mix their files.
-/// `a` and `b` are (mod id, owned namespaces).
-pub fn clash(a: (&str, &[String]), b: (&str, &[String])) -> Option<String> {
-    let shared = a.1.iter().find(|ns| b.1.contains(ns))?;
-    Some(format!(
-        "mods {} and {} both use the namespace {shared}; turn one of them off",
-        a.0, b.0
-    ))
-}
-
 impl Content {
-    /// The content of the mod at `path` (a `.smod` or a mod folder).
-    pub fn read(path: &Path, manifest: &Manifest) -> Result<Content, String> {
-        Self::read_declaring(path, manifest, &[])
-    }
-    /// [`Content::read`] for a mod whose native code also declares items (`native_items`):
-    /// a file's `crafting_remainder` may name one of those `declared` ids, which are not in the
-    /// files.
-    pub fn read_declaring(
-        path: &Path,
-        manifest: &Manifest,
-        declared: &[String],
-    ) -> Result<Content, String> {
-        let (source, sized) = if path.is_dir() {
-            (Source::Dir(path.to_owned()), folder_files(path)?)
-        } else {
-            let mut zip = open_zip(path)?;
-            let mut out = Vec::new();
-            for i in 0..zip.len() {
-                let entry = zip.by_index_raw(i).map_err(|e| e.to_string())?;
-                let name = entry.name().map_err(|e| e.to_string())?.into_owned();
-                if (name.starts_with("assets/") || name.starts_with("data/")) && !entry.is_dir() {
-                    out.push((name.to_owned(), entry.size()));
-                }
-            }
-            (Source::Zip(path.to_owned()), out)
-        };
-        let mut files = Vec::with_capacity(sized.len());
-        let mut total = 0u64;
-        for (name, size) in sized {
-            check_path(&name)?;
-            if size > MAX_FILE {
-                return Err(format!("{name} is over {} MiB", MAX_FILE >> 20));
-            }
-            total += size;
-            files.push(name);
-        }
-        if files.len() > MAX_FILES {
-            return Err(format!("more than {MAX_FILES} content files"));
-        }
-        if total > MAX_TOTAL {
-            return Err(format!("content is over {} MiB", MAX_TOTAL >> 20));
-        }
-        files.sort();
-        files.dedup();
-        let mut content = Content {
-            source,
-            files,
-            blocks: Vec::new(),
-            items: Vec::new(),
-            effects: Vec::new(),
-            creative_tabs: Vec::new(),
-            fluids: Vec::new(),
-            fluid_interactions: Vec::new(),
-            entity_types: Vec::new(),
-            block_entity_types: Vec::new(),
-            menu_types: Vec::new(),
-            namespaces: manifest.owned_namespaces().map(str::to_owned).collect(),
-        };
-        content.check(manifest, declared)?;
-        Ok(content)
-    }
-
-    /// Content with no files, for native declarations in `namespace`
-    /// ([`Content::declare`]).
-    pub fn declared(namespace: &str) -> Content {
-        Content {
-            source: Source::Code,
-            files: Vec::new(),
-            blocks: Vec::new(),
-            items: Vec::new(),
-            effects: Vec::new(),
-            creative_tabs: Vec::new(),
-            fluids: Vec::new(),
-            fluid_interactions: Vec::new(),
-            entity_types: Vec::new(),
-            block_entity_types: Vec::new(),
-            menu_types: Vec::new(),
-            namespaces: vec![namespace.to_owned()],
-        }
-    }
-
-    /// Adds blocks and items a native mod declares in code (`native_blocks`,
-    /// `native_items`), checked as declaration files are: ids in any of this
-    /// mod's owned namespaces (its id and manifest `namespaces`) and declared once
-    /// with what it already has, a vanilla template, a crafting remainder
-    /// that is vanilla or this mod's. All or nothing: on an error nothing is
-    /// added.
-    pub fn declare(
-        &mut self,
-        blocks: &[Block],
-        items: &[Item],
-    ) -> Result<(), Vec<(DeclarationKind, DeclarationError)>> {
-        let in_own = |id: &str| {
-            if namespaced_id(id)
-                && id
-                    .split_once(':')
-                    .is_some_and(|(ns, _)| self.namespaces.iter().any(|owned| owned == ns))
-            {
-                Ok(())
-            } else {
-                Err(format!(
-                    "not an id in owned namespaces {:?}",
-                    self.namespaces
-                ))
-            }
-        };
-        self.check_declaration_batch(
-            blocks
-                .iter()
-                .map(|b| (b, in_own(&b.id).and_then(|()| check_block(b)))),
-            items
-                .iter()
-                .map(|i| (i, in_own(&i.id).and_then(|()| check_item(i)))),
-        )?;
-        self.blocks.extend_from_slice(blocks);
-        self.items.extend_from_slice(items);
-        Ok(())
-    }
-
-    /// Joins declarations whose fields and submitting namespaces were checked at registration.
-    pub fn declare_validated(
-        &mut self,
-        blocks: &[LocalDeclaration<Block>],
-        items: &[LocalDeclaration<Item>],
-    ) -> Result<(), Vec<(DeclarationKind, DeclarationError)>> {
-        self.check_declaration_batch(
-            blocks.iter().map(|b| (b.get(), Ok(()))),
-            items.iter().map(|i| (i.get(), Ok(()))),
-        )?;
-        self.blocks.extend(blocks.iter().map(|b| b.get().clone()));
-        self.items.extend(items.iter().map(|i| i.get().clone()));
-        Ok(())
-    }
-
-    fn check_declaration_batch<'a>(
-        &self,
-        blocks: impl IntoIterator<Item = (&'a Block, Result<(), String>)>,
-        items: impl IntoIterator<Item = (&'a Item, Result<(), String>)>,
-    ) -> Result<(), Vec<(DeclarationKind, DeclarationError)>> {
-        let mut ids: BTreeSet<&str> = self
-            .blocks
-            .iter()
-            .map(|b| b.id.as_str())
-            .chain(self.items.iter().map(|i| i.id.as_str()))
-            .collect();
-        let mut item_ids: BTreeSet<&str> = self
-            .blocks
-            .iter()
-            .filter(|b| b.item)
-            .map(|b| b.id.as_str())
-            .chain(self.items.iter().map(|i| i.id.as_str()))
-            .collect();
-        let mut errors = Vec::new();
-        let mut refuse = |kind, id: &str, reason| {
-            errors.push((
-                kind,
-                DeclarationError::Rejected {
-                    id: id.to_owned(),
-                    reason,
-                },
-            ));
-        };
-        let mut all_blocks: Vec<&Block> = self.blocks.iter().collect();
-        for (block, fields) in blocks {
-            let id = block.id.as_str();
-            let result = fields.and_then(|()| {
-                if !ids.insert(id) {
-                    return Err("declared twice".into());
-                }
-                if block.item {
-                    item_ids.insert(id);
-                }
-                Ok(())
-            });
-            match result {
-                Ok(()) => all_blocks.push(block),
-                Err(reason) => refuse(DeclarationKind::Block, id, reason),
-            }
-        }
-        sign_wall_refusals(&all_blocks)
-            .for_each(|(id, reason)| refuse(DeclarationKind::Block, id, reason));
-        let mut valid_items = Vec::new();
-        for (item, fields) in items {
-            let id = item.id.as_str();
-            let result = fields.and_then(|()| {
-                if !item_ids.insert(id) {
-                    return Err("declared twice, or is also a block's item".into());
-                }
-                Ok(())
-            });
-            match result {
-                Ok(()) => valid_items.push(item),
-                Err(reason) => refuse(DeclarationKind::Item, id, reason),
-            }
-        }
-        for item in valid_items {
-            if let Some(rest) = &item.crafting_remainder
-                && (rest == "minecraft:air"
-                    || !vanilla_id(rest) && !item_ids.contains(rest.as_str()))
-            {
-                refuse(
-                    DeclarationKind::Item,
-                    &item.id,
-                    format!(
-                        "crafting_remainder {rest:?} is not a vanilla item (minecraft:...) or one of this mod's"
-                    ),
-                );
-            }
-        }
-        if !errors.is_empty() {
-            return Err(errors);
-        }
-        Ok(())
-    }
-
-    /// Where the files are read from: the mod's folder or its `.smod`.
-    pub fn source(&self) -> &Path {
-        match &self.source {
-            Source::Dir(path) => path,
-            Source::Zip(path) => path,
-            Source::Code => Path::new(""),
-        }
-    }
-
-    /// No files: a mod with code only.
-    pub fn is_empty(&self) -> bool {
-        self.files.is_empty()
-    }
-
-    /// The refusal of a `side = "server"` package whose files declare registry content
-    /// (`data/<owned namespace>/sunrise/`), naming the mod and the first such file: every client
-    /// must have that content. Assets and data vanilla syncs itself (recipes, loot, tags) are
-    /// allowed. None for a package of any other side.
-    pub fn server_only_refusal(&self, manifest: &Manifest) -> Option<String> {
-        if manifest.side != crate::manifest::Side::Server {
-            return None;
-        }
-        let name = self.files.iter().find(|name| {
-            let mut parts = name.splitn(3, '/');
-            let (top, namespace, rest) = (parts.next(), parts.next(), parts.next());
-            top == Some("data")
-                && rest.is_some_and(|rest| rest.starts_with("sunrise/"))
-                && manifest
-                    .owned_namespaces()
-                    .any(|owned| Some(owned) == namespace)
-        })?;
-        Some(format!(
-            "{}: a side = \"server\" mod carries {name}, which every client must have; \
-             declare side = \"both\"",
-            manifest.id
-        ))
-    }
-
-    /// One content file's bytes.
-    pub fn file(&self, name: &str) -> Result<Vec<u8>, String> {
-        self.reader()?.read(name)
-    }
-
-    /// A reader of its content files. A packaged mod's archive is opened
-    /// once for all of them (opening it reads its whole index).
-    pub fn reader(&self) -> Result<FileReader<'_>, String> {
-        reader_of(&self.source)
-    }
-
     /// Where content may go, and the declarations.
     fn check(&mut self, manifest: &Manifest, declared: &[String]) -> Result<(), String> {
         let id = manifest.id.as_str();
@@ -1863,30 +1285,6 @@ fn check_components(
     Ok(())
 }
 
-/// A declaration checked without consulting other entries or loaded resources.
-#[derive(Clone)]
-pub struct LocalDeclaration<T>(T);
-
-impl<T> LocalDeclaration<T> {
-    pub fn get(&self) -> &T {
-        &self.0
-    }
-}
-
-impl Block {
-    pub fn validate_local(self) -> Result<LocalDeclaration<Self>, String> {
-        check_block(&self)?;
-        Ok(LocalDeclaration(self))
-    }
-}
-
-impl Item {
-    pub fn validate_local(self) -> Result<LocalDeclaration<Self>, String> {
-        check_item(&self)?;
-        Ok(LocalDeclaration(self))
-    }
-}
-
 /// An item's fields, as a file or code gives them.
 fn check_item(item: &Item) -> Result<(), String> {
     if !vanilla_id(&item.template) {
@@ -2212,77 +1610,6 @@ fn sign_wall_refusals<'a>(blocks: &'a [&'a Block]) -> impl Iterator<Item = (&'a 
             }
         }
     })
-}
-
-fn reader_of(source: &Source) -> Result<FileReader<'_>, String> {
-    Ok(match source {
-        Source::Dir(root) => FileReader::Dir(root),
-        Source::Zip(path) => FileReader::Zip(Box::new(open_zip(path)?)),
-        Source::Code => FileReader::Dir(Path::new("")),
-    })
-}
-
-fn open_zip(path: &Path) -> Result<zip::ZipArchive<std::fs::File>, String> {
-    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    zip::ZipArchive::new(file).map_err(|e| e.to_string())
-}
-
-/// Files under `dir`, relative to `root` with `/` separators. Symbolic links
-/// are not followed: a mod folder holds its own files.
-pub(crate) fn folder_files(root: &Path) -> Result<Vec<(String, u64)>, String> {
-    let mut out = Vec::new();
-    for top in ["assets", "data"] {
-        walk(root, &root.join(top), &mut out)?;
-    }
-    Ok(out)
-}
-
-/// The files under a package folder's `runtime/`, as `(name below it, bytes)`. Symbolic links and
-/// other non-files are refused, not followed.
-pub(crate) fn runtime_folder_files(root: &Path) -> Result<Vec<(String, u64)>, String> {
-    let mut out = Vec::new();
-    walk(root, &root.join(crate::manifest::RUNTIME_DIR), &mut out)?;
-    let prefix = format!("{}/", crate::manifest::RUNTIME_DIR);
-    for (name, _) in &mut out {
-        *name = name.strip_prefix(&prefix).unwrap_or(name).to_owned();
-    }
-    Ok(out)
-}
-
-fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, u64)>) -> Result<(), String> {
-    match std::fs::symlink_metadata(dir) {
-        Ok(m) if !m.is_dir() => {
-            return Err(format!(
-                "{}: unsupported file type in a content mod",
-                dir.display()
-            ));
-        }
-        Ok(_) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(format!("{}: {e}", dir.display())),
-    }
-    let read = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    for entry in read {
-        let path = entry.map_err(|e| e.to_string())?.path();
-        let meta = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
-        if meta.is_dir() {
-            walk(root, &path, out)?;
-        } else if meta.is_file() {
-            let rel = path.strip_prefix(root).map_err(|e| e.to_string())?;
-            let parts: Option<Vec<&str>> = rel.iter().map(|p| p.to_str()).collect();
-            let name = parts.ok_or_else(|| format!("{} is not UTF-8", rel.display()))?;
-            out.push((name.join("/"), meta.len()));
-        } else {
-            return Err(format!(
-                "{}: unsupported file type in a content mod",
-                path.display()
-            ));
-        }
-        if out.len() > MAX_FILES {
-            return Err(format!("more than {MAX_FILES} content files"));
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 use super::*;
-use std::io::Write;
+use std::{io::Write, path::Path};
 
 const NAV: &[u8] = b"baked lookup table";
 const IMAGE: &[u8] = b"\x7fELF an interpreter image";
