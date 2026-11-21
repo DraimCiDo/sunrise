@@ -267,8 +267,8 @@ jobs:
           SHA: ${{ steps.pick.outputs.sha }}
           TAG: ${{ steps.pick.outputs.tag }}
           BREAK_GLASS: ${{ steps.pick.outputs.break_glass }}
-          # Why a changed content declaration is deliberate; its two approvals are checked before the tag.
-          CONTENT_CHANGE: ${{ inputs.content_change }}
+          # The content job judges the content declarations after this job; publish holds its verdict to the rule.
+          CONTENT_CHECKED: deferred
         run: |
           : > "$RUNNER_TEMP/mod-api.md"
           python3 tools/ci/nightly.py stable-mod-api "$SHA" "$TAG" "$RUNNER_TEMP/mod-api.md"
@@ -278,7 +278,8 @@ jobs:
   # approve). `break-glass` then reads the first attempt's recorded approvals and refuses unless each environment was
   # approved once, by its own approver (release_train.BREAK_GLASS_APPROVERS), and by nobody else. A dry run binds none.
   # A stable release dispatched with `content_change` waits for the same two people: its publish job needs these jobs
-  # through `break-glass`, and stable-mod-api reads the approvals itself before the tag.
+  # through `break-glass`, and stable-mod-api reads the approvals itself before the tag, for the entries the
+  # `content` job found changed.
   break-glass-umceko:
     needs: pick
     if: >-
@@ -328,6 +329,36 @@ jobs:
           PUBLISH: ${{ needs.pick.outputs.publish }}
           BREAK_GLASS_REASON: ${{ inputs.break_glass }}
         run: python3 tools/release_train.py break-glass-approvals
+
+  # A stable patch or minor loads its parent release's content corpus as the parent did (docs/release-flow.md). This
+  # is the one job of a release that runs the candidate's crates, under the parent's corpus, golden files and test:
+  # it holds no secret and can write nothing, and publish reads only its list of changed entries.
+  content:
+    needs: pick
+    if: >-
+      inputs.kind == 'stable' && needs.pick.outputs.build == 'true' && needs.pick.outputs.parent_sha != '' &&
+      github.repository == 'sunrise-org/sunrise'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The whole history: the candidate's and the parent release's trees.
+          fetch-depth: 0
+          persist-credentials: false
+      - run: bash tools/ci/rustup_install.sh --profile minimal
+      - id: check
+        env:
+          SHA: ${{ needs.pick.outputs.sha }}
+          TAG: ${{ needs.pick.outputs.tag }}
+          PARENT_SHA: ${{ needs.pick.outputs.parent_sha }}
+          PARENT_TAG: ${{ needs.pick.outputs.parent_tag }}
+          CONTENT_CHANGE: ${{ inputs.content_change }}
+        run: python3 tools/ci/nightly.py stable-content "$SHA" "$TAG" "$PARENT_SHA" "$PARENT_TAG"
 
   exporters:
     needs: [pick, break-glass]
@@ -455,7 +486,7 @@ jobs:
           retention-days: 3
 
   publish:
-    needs: [pick, build, complete, sign, break-glass]
+    needs: [pick, build, complete, sign, break-glass, content]
     if: >-
       !cancelled() && needs.complete.outputs.complete == 'true' && needs.sign.result == 'success' &&
       (needs.pick.outputs.break_glass == 'false' ||
@@ -604,6 +635,8 @@ jobs:
           # run's first attempt (release_train.break_glass_approvals); a dry run binds no environment.
           CONTENT_CHANGE: ${{ inputs.content_change }}
           CONTENT_CHANGE_APPROVALS: ${{ needs.pick.outputs.publish == 'true' && 'required' || '' }}
+          CONTENT_CHECKED: ${{ needs.content.result }}
+          CONTENT_CHANGED: ${{ needs.content.outputs.changed }}
         run: python3 tools/ci/nightly.py stable-mod-api "$SHA" "$TAG" dist/nightly-notes.md
       - name: Publish as the stable release <target>-<semver>
         if: needs.pick.outputs.publish == 'true' && inputs.kind == 'stable'

@@ -605,17 +605,26 @@ class StableModApiTests(unittest.TestCase):
             Path(kwargs["env"]["SUNRISE_CONTENT_GOLDEN_REPORT"]).write_text("".join(f"{e}\n" for e in verdict["changed"]))
             return subprocess.CompletedProcess(args, 101 if verdict["changed"] else 0, "", "")
 
-        def check(sha, tag, parent=previous, **environment):
+        def content(sha, tag, parent=previous, **environment):
+            """The content job's output, or its refusal."""
+            written = self.notes.with_name("output")
+            written.write_text("")
+            with mock.patch.dict(nightly.os.environ, {"GITHUB_OUTPUT": str(written), **environment}):
+                nightly.stable_content(sha, tag, parent, PREVIOUS)
+            return written.read_text()
+
+        def check(sha, tag, **environment):
+            """The notes after the check before the tag, given the content job's verdict."""
             self.notes.write_text("Existing notes.\n")
             with mock.patch.dict(nightly.os.environ, {"BREAK_GLASS": "false", "GITHUB_RUN_ID": "7",
                                                       "GITHUB_RUN_ATTEMPT": "1", **environment}), \
-                    mock.patch.object(nightly, "stable_parent",
-                                      return_value=nightly.train.Release(
-                                          PREVIOUS, parent, nightly.train.github_time("2026-11-01T00:00:00Z"))):
+                    mock.patch.object(nightly, "stable_parent", return_value=nightly.train.Release(
+                        PREVIOUS, previous, nightly.train.github_time("2026-11-01T00:00:00Z"))):
                 nightly.stable_mod_api(sha, tag, self.notes)
             return self.notes.read_text()
 
         approvals = ["@umceko (break-glass-umceko): ok", "@arismoko (break-glass-aria): ok"]
+        found = {"CONTENT_CHECKED": "success", "CONTENT_CHANGED": "blocks"}
         with mock.patch.object(nightly, "REPOSITORY", repo), \
                 mock.patch.object(nightly, "require_stable_lineage"), \
                 mock.patch.object(nightly, "released_assets",
@@ -627,25 +636,38 @@ class StableModApiTests(unittest.TestCase):
             for tag in tags:
                 with self.subTest(tag=tag):
                     verdict.update(changed=[], fails=False)
-                    self.assertNotIn("Changed content declarations", check(candidate, tag))
+                    self.assertEqual(content(candidate, tag), "changed=\n")
                     with self.assertRaisesRegex(SystemExit, "has no content corpus to judge by"):
-                        check(candidate, tag, parent=bare)
+                        content(candidate, tag, parent=bare)
                     verdict.update(fails=True)
                     with self.assertRaisesRegex(SystemExit, "content check cannot judge .* cannot find function"):
-                        check(candidate, tag)
+                        content(candidate, tag)
                     verdict.update(changed=["blocks"], fails=False)
                     with self.assertRaisesRegex(SystemExit, "changes how content declarations of .* load: blocks\\."):
-                        check(recorded, tag)
+                        content(candidate, tag)
+                    self.assertEqual(content(candidate, tag, CONTENT_CHANGE="parity fix"), "changed=blocks\n")
+
+                    # Before the tag: the job's verdict is required, and a changed entry needs why, its record and
+                    # both approvals.
+                    self.assertNotIn("Changed content declarations", check(candidate, tag, CONTENT_CHECKED="success"))
+                    self.assertNotIn("Changed content declarations", check(candidate, tag, CONTENT_CHECKED="deferred"))
+                    for result in ("", "skipped", "failure", "cancelled"):
+                        with self.assertRaisesRegex(SystemExit, "the content job did not judge"):
+                            check(candidate, tag, CONTENT_CHECKED=result, CONTENT_CHANGED="")
+                    with self.assertRaisesRegex(SystemExit, "changes how content declarations of .* load: blocks\\."):
+                        check(recorded, tag, **found)
                     with self.assertRaisesRegex(SystemExit, "without their record in .*: blocks\\."):
-                        check(candidate, tag, CONTENT_CHANGE="parity fix")
+                        check(candidate, tag, CONTENT_CHANGE="parity fix", **found)
+                    self.assertIn("not approved yet", check(recorded, tag, CONTENT_CHANGE="parity fix", **found))
                     approved.assert_not_called()
-                    self.assertIn("not approved yet", check(recorded, tag, CONTENT_CHANGE="parity fix"))
-                    approved.assert_not_called()
-                    notes = check(recorded, tag, CONTENT_CHANGE="parity fix", CONTENT_CHANGE_APPROVALS="required")
+                    notes = check(recorded, tag, CONTENT_CHANGE="parity fix", CONTENT_CHANGE_APPROVALS="required",
+                                  **found)
                     approved.assert_called_once_with("7", "1")
                     approved.reset_mock()
                     self.assertIn(f"- `{tag}` `blocks`: vanilla parity fix\n\nApproved by: {'; '.join(approvals)}\n", notes)
-            verdict.update(changed=["blocks"])
+            # A new major holds nothing: the job runs no test, and the check asks for no verdict.
+            verdict.update(fails=True)
+            self.assertEqual(content(candidate, "26.3-1.0.0"), "changed=\n")
             self.assertNotIn("Changed content declarations", check(candidate, "26.3-1.0.0"))
 
     def test_stable_mod_api_command_requires_a_full_commit_sha(self):

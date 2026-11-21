@@ -506,7 +506,9 @@ reading shows as a changed golden file in the pull request that makes it.
 
 A patch or minor is judged by its **parent release's** corpus, golden files and test, never its own: the check lays
 those three over the candidate's tree, taken from the parent's commit, and runs the test there, so only the
-candidate's reader crates run and nothing the candidate commits can change what it is compared with. Every entry of
+candidate's reader crates run and nothing the candidate commits can change what it is compared with. That runs in
+the release workflow's `content` job, the one job of a release that runs the candidate's code: it holds no secret,
+can write nothing, and hands the publish job only its list of changed entries. Every entry of
 the parent's corpus must load exactly as the parent's golden file says. A parent test that no longer builds
 against the candidate's crates is a refusal too. Entries the candidate adds are not judged until it is a parent, so
 the corpus can grow in any release, and a reader fix that changes no entry ships freely.

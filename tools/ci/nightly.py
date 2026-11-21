@@ -23,6 +23,7 @@
     nightly.py sdk-previous <sha> <out>  prints the SDK published before <sha> on its history, and writes its
                                    surface.json to <out>, checked; prints nothing when there is none
     nightly.py stable-mod-api <sha> <tag> <notes>  checks the stable mod API step and appends changed mixin targets
+    nightly.py stable-content <sha> <tag> <parent sha> <parent tag>  the parent's content corpus on the candidate's readers
     nightly.py verify-sums --tag T [--signature F] [--only N]... [--key K]... [--publishing] DIR
                                          checks a release folder's signed sums with OpenSSL and main's release keys
     nightly.py break-glass-legs <sha>    the daily legs a break-glass daily run of <sha> runs (daily.yml resolve)
@@ -884,7 +885,8 @@ def require_stable_lineage(sha: str, tag: str, old_sha: str, old_tag: str) -> No
 # the golden file of each entry holds what the readers make of it; the driver (the content_golden test of
 # sunrise-mod-package) re-reads the corpus and compares. A candidate is judged by its parent release's corpus, golden
 # files and driver, laid over the candidate's tree, so nothing the candidate commits there can change the verdict:
-# only its reader crates run. The candidate's own additions to the corpus are not judged until it is a parent.
+# only its reader crates run, in a job of their own (stable_content). The candidate's own additions to the corpus are
+# not judged until it is a parent.
 CONTENT_CORPUS = "crates/sunrise-mod-package/tests/content-corpus"
 CONTENT_GOLDEN = "crates/sunrise-mod-package/tests/content-golden"
 CONTENT_DRIVER = "crates/sunrise-mod-package/tests/content_golden.rs"
@@ -921,8 +923,31 @@ def changed_content(sha: str, old_sha: str, old_tag: str, work: Path) -> list[st
     return sorted(changed) if done.returncode else []
 
 
-def require_stable_content(sha: str, tag: str, old_sha: str, old_tag: str, notes: Path, work: Path) -> None:
-    changed = changed_content(sha, old_sha, old_tag, work)
+def stable_content(sha: str, tag: str, old_sha: str, old_tag: str) -> None:
+    """The `content` job of nightly-build.yml, the one place a release runs the candidate's crates: no secret and no
+    write permission. Its output `changed` lists the entries that load differently; changed entries without
+    `content_change` fail it at once, before anything is built."""
+    target, version = train.stable_version(tag)
+    old_target, old_version = train.stable_version(old_tag)
+    changed = []
+    if (target, version[0]) == (old_target, old_version[0]):
+        with tempfile.TemporaryDirectory() as directory:
+            changed = changed_content(sha, old_sha, old_tag, Path(directory))
+    output(changed=" ".join(changed))
+    if changed and not os.environ.get("CONTENT_CHANGE", "").strip():
+        raise SystemExit(f"::error::refused: {tag} changes how content declarations of {old_tag} load: "
+                         f"{', '.join(changed)}. Dispatch a deliberate change with content_change (why)")
+
+
+def require_stable_content(sha: str, tag: str, old_sha: str, old_tag: str, notes: Path) -> None:
+    """What the `content` job found, held to the rule. The pick's own early check runs before that job
+    (CONTENT_CHECKED=deferred); the check before the tag needs its success."""
+    checked = os.environ.get("CONTENT_CHECKED", "")
+    if checked == "deferred":
+        return
+    changed = sorted(os.environ.get("CONTENT_CHANGED", "").split())
+    if checked != "success":
+        raise SystemExit(f"::error::refused: the content job did not judge {tag} against {old_tag} ({checked or 'not run'})")
     if not changed:
         return
     names = ", ".join(changed)
@@ -1047,10 +1072,10 @@ def stable_mod_api(sha: str, tag: str, notes: Path) -> None:
         raise SystemExit(f"::error::refused: a break-glass release is a patch of {old_tag}, not {tag}")
     if same_line:
         require_stable_lineage(sha, tag, old_sha, old_tag)
+    if same_line:
+        require_stable_content(sha, tag, old_sha, old_tag, notes)
     with tempfile.TemporaryDirectory() as directory:
         work = Path(directory)
-        if same_line:
-            require_stable_content(sha, tag, old_sha, old_tag, notes, work)
         before, after = work / "before.json", work / "after.json"
         old_content, old_functions = stable_sdk_inputs(old_sha, before if same_line else None)
         new_content, new_functions = stable_sdk_inputs(sha, after if same_line else None)
@@ -1415,6 +1440,9 @@ def main() -> None:
     stable_api.add_argument("sha")
     stable_api.add_argument("tag")
     stable_api.add_argument("notes", type=Path)
+    stable_content_args = sub.add_parser("stable-content")
+    for name in ("sha", "tag", "parent_sha", "parent_tag"):
+        stable_content_args.add_argument(name)
     sub.add_parser("prune").add_argument("--days", type=int, default=7)
     sub.add_parser("prune-snapshots").add_argument("--days", type=int, default=7)
     sub.add_parser("prune-builds").add_argument("--days", type=int, default=7)
@@ -1461,6 +1489,10 @@ def main() -> None:
         break_glass_legs(args.sha)
     elif args.cmd == "break-glass-notes":
         break_glass_notes(args.notes)
+    elif args.cmd == "stable-content":
+        if not (train.FULL_SHA.fullmatch(args.sha) and train.FULL_SHA.fullmatch(args.parent_sha)):
+            stable_content_args.error("sha and parent_sha must be full lowercase commit SHAs")
+        stable_content(args.sha, args.tag, args.parent_sha, args.parent_tag)
     elif args.cmd == "stable-mod-api":
         if not train.FULL_SHA.fullmatch(args.sha):
             stable_api.error("sha must be a full lowercase commit SHA")

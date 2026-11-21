@@ -643,11 +643,24 @@ class WorkflowTests(unittest.TestCase):
                 for step in jobs[name]["steps"]:
                     with self.subTest(workflow=file, job=name, step=step.get("name", step.get("uses"))):
                         self.assertNotRegex(step.get("run", ""), r"(^|\s)cargo\s")
-        # And nightly.py, which those jobs run, starts cargo in one place: parent_stage, on the parent's tree.
+        # And nightly.py, which those jobs run, starts cargo in one place: parent_stage, on the parent's tree. The
+        # candidate's reader crates run only in the content job (changed_content, reached from stable-content alone),
+        # which holds no secret and no write permission, and hands publish nothing but its list of changed entries.
         tree = ast.parse(Path(nightly.__file__).read_text())
-        starts = {function.name for function in ast.walk(tree) if isinstance(function, ast.FunctionDef)
+        functions = [function for function in ast.walk(tree) if isinstance(function, ast.FunctionDef)]
+        starts = {function.name for function in functions
                   for node in ast.walk(function) if isinstance(node, ast.Constant) and node.value == "cargo"}
-        self.assertEqual(starts, {"parent_stage"})
+        self.assertEqual(starts, {"parent_stage", "changed_content"})
+        callers = {function.name for function in functions for node in ast.walk(function)
+                   if isinstance(node, ast.Name) and node.id == "changed_content"}
+        self.assertEqual(callers, {"stable_content"})
+        content = workflow("nightly-build.yml")["jobs"]["content"]
+        self.assertEqual(content["permissions"], {"contents": "read"})
+        self.assertNotIn("secrets.", str(content))
+        self.assertNotIn("github.token", str(content))
+        self.assertEqual([step["run"] for step in content["steps"] if "stable-content" in step.get("run", "")],
+                         ['python3 tools/ci/nightly.py stable-content "$SHA" "$TAG" "$PARENT_SHA" "$PARENT_TAG"'])
+        self.assertEqual(content["outputs"], {"changed": "${{ steps.check.outputs.changed }}"})
 
     def test_the_full_daily_follows_every_published_stable_release(self):
         full_daily = workflow("nightly-build.yml")["jobs"]["full-daily"]

@@ -197,7 +197,7 @@ class MuslAttachmentTests(unittest.TestCase):
                 needs = self.jobs[name].get("needs", [])
                 pending.extend([needs] if isinstance(needs, str) else needs)
         self.assertEqual(seen, {"pick", "break-glass-umceko", "break-glass-aria", "break-glass", "exporters", "build",
-                                "complete", "sign", "publish"})
+                                "complete", "sign", "publish", "content"})
         self.assertEqual(self.jobs["build"]["needs"], ["pick", "exporters"])
         self.assertEqual(self.jobs["musl-build"]["needs"], ["pick", "exporters"])
         for call, part in (("exporters", "exporters"), ("build", "game"), ("musl-build", "musl")):
