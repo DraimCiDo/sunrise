@@ -1764,16 +1764,31 @@ impl Game<'_> {
             return Ok(());
         }
         let back = self.dim;
-        let dims: Vec<Dim> = self.levels.parked.keys().copied().collect();
+        let parked: Vec<_> = self
+            .levels
+            .parked
+            .iter()
+            .map(|(&dim, level)| (dim, level.idle_close_refused_at))
+            .collect();
         let mut refusals = RecordSaveFailures::default();
         let saved = (|| -> Result<()> {
-            for dim in dims {
+            for &(dim, _) in &parked {
                 self.enter_level(dim)?;
                 refusals.collect(self.save_level(wait))?;
             }
             Ok(())
         })();
-        saved.and(self.enter_level(back))?;
+        let restored = self.enter_level(back);
+        if !wait {
+            // The autosave's temporary swaps are not player re-entry. An unchanged
+            // refusal must keep idle close disarmed, even when the autosave fails.
+            for (dim, refused_at) in parked {
+                if let Some(level) = self.levels.parked.get_mut(&dim) {
+                    level.idle_close_refused_at = refused_at;
+                }
+            }
+        }
+        saved.and(restored)?;
         refusals.finish()
     }
 }
@@ -1928,9 +1943,11 @@ mod tests {
                     "the healthy chunk was still saved"
                 );
 
-                // A newer durable entity record clears the old refusal, but the idle
-                // tick must not try another close unless somebody changes the level.
+                // A newer durable entity record clears the old refusal, but the
+                // periodic save's administrative swaps must not re-arm idle close.
                 nether.save.save_entities(vec![((2, 0), vec![])]).unwrap();
+                game.save_game_with(false).unwrap();
+                assert_eq!(game.dim, Dim::Overworld);
                 for _ in 0..IDLE_TICKS {
                     game.close_idle_levels().unwrap();
                 }
