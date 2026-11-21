@@ -119,14 +119,10 @@ impl Game<'_> {
         modified.save_eagerly(
             now,
             || Instant::now() < deadline && self.save.active_chunk_writes() < 128,
-            |key| self.world.chunks.contains_key(&key),
-            |key| {
-                // `saveChunkIfNeeded` saves only a LevelChunk, so a lit one; a
-                // column still waiting for its light keeps its queue entry.
-                let Some(chunk) = self.world.chunks.get(&key).filter(|c| c.lit) else {
-                    return false;
-                };
-                let chunks = self.with_entities([chunk]);
+            // Only a lit column is a LevelChunk. An unlit one stays queued.
+            |key| self.world.chunks.get(&key).map(|chunk| chunk.lit),
+            |key, _| {
+                let chunks = self.with_entities([&self.world.chunks[&key]]);
                 match self
                     .save
                     .save_later(&chunks, self.pack.assets.registry, world_biomes!(self))
