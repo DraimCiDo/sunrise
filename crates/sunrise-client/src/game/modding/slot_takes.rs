@@ -77,7 +77,7 @@ impl Game<'_> {
         };
         let revision = api.revision();
         let heard = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            mod_api::run_transaction(self, |game, _| {
+            self.storage_transaction(|game, _| {
                 game.native_menu_slot_take(&mut api, player, menu, *slot, &taken, left.as_ref());
                 finish_block_entity_writeback(
                     entity,

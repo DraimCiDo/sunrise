@@ -253,7 +253,7 @@ impl Game<'_> {
     /// transaction. A panic aborts the row's writes without unbalancing the pass.
     fn dispatch_general_tick(&mut self, kind: &str, epoch: mod_api::WorldEpoch, id: u32) {
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            mod_api::run_transaction(self, |game, _| {
+            self.storage_transaction(|game, _| {
                 game.native_general_entity_tick(kind, EntityRef::new(epoch, id));
                 Ok::<_, std::convert::Infallible>(())
             })

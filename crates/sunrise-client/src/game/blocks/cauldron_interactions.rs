@@ -362,7 +362,7 @@ impl Game<'_> {
                     statistics: plan.statistics.iter().map(ToString::to_string).collect(),
                     item: held.item.to_string(),
                 };
-                mod_api::run_transaction(self, |game, _| {
+                self.storage_transaction(|game, _| {
                     game.journal_player(player);
                     if callback.handler.fire(game, &input, &plan) != CauldronFire::Applied
                         || !unchanged(game)

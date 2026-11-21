@@ -258,7 +258,7 @@ impl Game<'_> {
                 .data()
                 .is_some_and(|data| data.map_post_processing.is_some())
         {
-            mod_api::run_transaction(self, |game, tx| {
+            self.storage_transaction(|game, tx| {
                 let maps = game.level_maps([&held]);
                 Menu::map_crafted(Some(&maps), &mut held);
                 // Reserve before calling the handler, which can make other maps. A refusal

@@ -1556,7 +1556,7 @@ impl Game<'_> {
             return 0;
         };
         let resource = ItemResource::of(&snapshot);
-        mod_api::run_transaction(self, |game, tx| {
+        self.storage_transaction(|game, tx| {
             let host: &mut dyn mod_api::ServerHost = game;
             let went = part
                 .insert(host, tx, &resource, stack.count)
@@ -1587,7 +1587,7 @@ impl Game<'_> {
             return false;
         }
         let from = self.container_world_pos(hopper);
-        mod_api::run_transaction(self, |game, tx| {
+        self.storage_transaction(|game, tx| {
             use super::api_values::TryIntoApi;
             for slot in 0..hopper.len() {
                 let Some(snapshot) = game
@@ -1641,7 +1641,7 @@ impl Game<'_> {
             if part.amount(self, slot) == 0 || self.part_move_canceled(at, into, &one.item) {
                 continue;
             }
-            let moved = mod_api::run_transaction(self, |game, tx| {
+            let moved = self.storage_transaction(|game, tx| {
                 let host: &mut dyn mod_api::ServerHost = game;
                 let came = part.extract_at(host, tx, slot, &resource, 1);
                 if part.checked(came, 1, &at) != Some(1) {

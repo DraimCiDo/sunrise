@@ -53,7 +53,7 @@ impl Game<'_> {
                 return;
             };
             let failures = mod_api::runtime::isolated_failures();
-            mod_api::run_transaction(self, |game, _| {
+            self.storage_transaction(|game, _| {
                 let mut cancel = false;
                 game.native_farmland_trample(living, pos, state, distance, &mut cancel);
                 let valid = |game: &Self| {

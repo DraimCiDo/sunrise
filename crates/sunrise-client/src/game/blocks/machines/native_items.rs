@@ -96,7 +96,7 @@ impl Game<'_> {
             return false;
         };
         let resource = mod_api::ItemResource::of(&snapshot);
-        mod_api::run_transaction(self, |game, tx| {
+        self.storage_transaction(|game, tx| {
             let (pos, index) = source.locate(slot).ok_or(())?;
             game.journal_block_entity_slot(pos, index);
             // Reserve the offered item before writable insertion notices can re-enter.

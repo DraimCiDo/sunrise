@@ -5514,7 +5514,7 @@ impl Game<'_> {
             return;
         };
         let dimension = self.dim;
-        let _: std::result::Result<(), ()> = mod_api::run_transaction(self, |game, _| {
+        let _: std::result::Result<(), ()> = self.storage_transaction(|game, _| {
             let (mut target, _, cancel) =
                 game.native_pearl_teleport(owner, pearl.id, from, pearl.previous, 0.0, hit);
             // Listener writes stay in the transaction; never overwrite a changed,

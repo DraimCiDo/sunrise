@@ -305,7 +305,7 @@ impl Game<'_> {
                         .is_some_and(mod_api::__private::mod_index_on)
                     {
                         let _: Result<(), std::convert::Infallible> =
-                            mod_api::run_transaction(game, |game, _| {
+                            game.storage_transaction(|game, _| {
                                 task(game);
                                 Ok(())
                             });

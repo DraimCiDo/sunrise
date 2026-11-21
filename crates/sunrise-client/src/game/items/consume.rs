@@ -202,7 +202,7 @@ impl Game<'_> {
             remainder.map(|value| value.to_string()),
         )
         .map(std::sync::Arc::<str>::from);
-        let result: Result<bool, ()> = mod_api::run_transaction(self, |game, _| {
+        let result: Result<bool, ()> = self.storage_transaction(|game, _| {
             {
                 let mut mobs = game.mobs.lift();
                 if let Some(mob) = mobs.iter_mut().find(|m| m.id == decision.mob) {
@@ -347,7 +347,7 @@ impl Game<'_> {
             return;
         };
         let consumable = self.consumable(stack);
-        let result: Result<(), ()> = mod_api::run_transaction(self, |game, _| {
+        let result: Result<(), ()> = self.storage_transaction(|game, _| {
             if let Some(consumable) = &consumable
                 && !game.apply_consumable_effects(
                     stack,
