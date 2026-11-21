@@ -359,7 +359,7 @@ mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use super::super::native_scoreboard::tests::{guest, open_lan};
     use super::*;
-    use mod_api::{HostTransaction, prelude::ScoreboardServerHost};
+    use mod_api::prelude::ScoreboardServerHost;
 
     /// The API's visibility and rule names are the board's.
     #[test]

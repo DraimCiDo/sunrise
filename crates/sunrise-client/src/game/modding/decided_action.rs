@@ -157,15 +157,15 @@ impl Game<'_> {
             }),
         };
         // The action's savepoint needs a transaction to nest in: the open one, or this one.
-        let seal = self.transaction_open();
+        let mut scope = super::transactions::StorageScope::open(self);
         let outcome = {
             let mut host = GameHost {
-                game: &mut *self,
+                game: scope.game(),
                 identity,
             };
             decision::run(&mut host, &target, |_, _| Plan, |host| fire(host.game))
         };
-        self.transaction_close(&seal, matches!(outcome, Ok(Outcome::Applied)));
+        scope.finish(matches!(outcome, Ok(Outcome::Applied)));
         match outcome {
             Ok(Outcome::Applied) => true,
             // A cancelled action is the listener's own answer, not a refusal: the caller goes on.

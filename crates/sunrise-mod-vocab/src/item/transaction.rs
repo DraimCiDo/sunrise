@@ -100,6 +100,11 @@ pub fn seal_tokens(seal: &TransactionSeal) -> (u64, u64) {
     (seal.tx.0, seal.close)
 }
 
+// no wire: a local refusal to lend transaction authority, not a mod boundary payload.
+/// This host cannot lend a transaction context in the current phase.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TransactionUnavailable;
+
 /// Transactions are available only on the logical server and preserve the receiver type.
 ///
 /// ```
@@ -145,6 +150,23 @@ pub trait HostTransaction: ServerHost {
         &mut self,
         f: impl FnOnce(&mut Self, &TransactionContext) -> Result<T, E>,
     ) -> Result<T, E>;
+
+    /// Lends the innermost open action's context, or returns `Ok(None)` without calling `f`
+    /// if there is no open action. Returns [`TransactionUnavailable`] outside world access.
+    ///
+    /// Joining opens and closes nothing. Writes take effect in the opener's journal, and
+    /// `f`'s return value does not commit or abort it. Use [`Self::transaction`] for a new
+    /// savepoint that can roll back independently.
+    fn join_transaction<T>(
+        &mut self,
+        f: impl for<'loan> FnOnce(&'loan mut Self, &'loan TransactionContext) -> T,
+    ) -> Result<Option<T>, TransactionUnavailable> {
+        use crate::world::phase::{LoadAccess, access_allowed};
+        if !access_allowed("join_transaction", LoadAccess::WorldOnly) {
+            return Err(TransactionUnavailable);
+        }
+        Ok(self.transaction_current().map(|context| f(self, &context)))
+    }
 }
 
 impl<H: ServerHost + ?Sized> HostTransaction for H {
@@ -275,6 +297,39 @@ mod tests {
         assert_eq!(outer, Ok(7));
         assert_eq!(fake.journal.closed(), [(2, false), (2, true), (1, true)]);
         assert_eq!(fake.journal.depth(), 0);
+    }
+
+    #[test]
+    fn joining_lends_the_open_frame_and_does_not_control_rollback() {
+        use crate::{
+            ITEMS, Identifier, ItemResource, ItemStack, ResourceHandler, prelude::ItemsHost,
+        };
+        let mut fake = FakeHost::new();
+        let level = fake.level.level();
+        let at = [0, 64, 0];
+        let stone = Identifier::parse("minecraft:stone").unwrap();
+        fake.registries.resolve_items([stone.clone()]).unwrap();
+        let stone = ItemStack::new(fake.item_key(&stone).unwrap(), 1).unwrap();
+        let resource = ItemResource::of(&stone);
+        fake.level.block_entity(at).with_items(1);
+        fake.level.block_entity(at).items.as_mut().unwrap().slots[0] = Some(stone);
+        let items = level.capability(&mut fake, &ITEMS, at, None).unwrap();
+        let host: &mut dyn ServerHost = &mut fake;
+
+        assert_eq!(
+            host.join_transaction::<()>(|_, _| panic!("no open action")),
+            Ok(None)
+        );
+        let result = host.transaction(|host, _| {
+            let joined =
+                host.join_transaction(|host, tx| items.extract_at(host, tx, 0, &resource, 1));
+            assert_eq!(joined, Ok(Some(1)));
+            assert_eq!(items.amount(host, 0), 0);
+            Err::<(), ()>(())
+        });
+        assert_eq!(result, Err(()));
+        assert_eq!(items.amount(host, 0), 1);
+        assert_eq!(fake.journal.closed(), [(1, false)]);
     }
 
     #[test]

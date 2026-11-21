@@ -173,10 +173,10 @@ impl Game<'_> {
             shared: shared.clone(),
         };
         // The action's savepoint needs a transaction to nest in: the open one, or this one.
-        let seal = self.transaction_open();
+        let mut scope = super::transactions::StorageScope::open(self);
         let outcome = {
             let mut host = GameHost {
-                game: &mut *self,
+                game: scope.game(),
                 identity,
             };
             let fired = shared.clone();
@@ -189,7 +189,7 @@ impl Game<'_> {
         };
         // A replacement the slot's rules refused is undone with everything the listeners wrote.
         let ran = matches!(outcome, Ok(Outcome::Applied)) && !shared.refused.get();
-        self.transaction_close(&seal, ran);
+        scope.finish(ran);
         match outcome {
             Ok(Outcome::Applied) if ran => Pickup::Ran,
             Ok(Outcome::Applied) => {

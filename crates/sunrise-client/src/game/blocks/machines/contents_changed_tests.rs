@@ -237,14 +237,14 @@ fn explicit_notices_observe_tentative_writes_and_survive_abort() {
                 game.storage_transaction(|host, tx| {
                     assert_eq!(items.insert_at(host, tx, 0, &sticks, 2), 2);
                     assert!(
-                        host.transaction(|host, inner| {
+                        host.storage_transaction(|host, inner| {
                             assert_eq!(items.insert_at(host, inner, 0, &sticks, 7), 7);
                             Err::<(), ()>(())
                         })
                         .is_err()
                     );
                     assert_eq!(items.amount(host, 0), 2);
-                    host.transaction(|host, inner| {
+                    host.storage_transaction(|host, inner| {
                         assert_eq!(items.insert_at(host, inner, 0, &sticks, 3), 3);
                         Ok::<_, ()>(())
                     })?;
@@ -596,7 +596,7 @@ fn notices_come_in_first_write_order_once_each_whatever_the_journal_keeps() {
             changes.0.lock().unwrap().clear();
             let committed = game.storage_transaction(|host, tx| {
                 assert_eq!(first.insert_at(host, tx, 0, &sticks, 2), 2);
-                host.transaction(|host, inner| {
+                host.storage_transaction(|host, inner| {
                     assert_eq!(second.insert_at(host, inner, 3, &sticks, 5), 5);
                     Ok::<_, ()>(())
                 })?;
@@ -668,7 +668,7 @@ fn default_items_notifies_for_committed_mod_container_writes() {
             assert_eq!(
                 game.storage_transaction(|host, tx| {
                     assert_eq!(items.insert_at(host, tx, 0, &stick, 32), 32);
-                    host.transaction(|host, inner| {
+                    host.storage_transaction(|host, inner| {
                         assert_eq!(items.insert_at(host, inner, 1, &stick, 32), 32);
                         Ok::<_, ()>(())
                     })?;
@@ -725,15 +725,20 @@ fn a_mod_reads_the_open_transaction_its_depth_and_the_root_commits_phase() {
             let host: &mut dyn ServerHost = game;
             assert_eq!(host.transaction_lifecycle(), TransactionLifecycle::None);
             assert_eq!(host.transaction_current(), None);
-            // A helper given no transaction writes in the open one, which the abort undoes.
+            // A helper joins the open action; the opener's abort undoes its write.
             let aborted = host.transaction(|host, outer| {
                 assert_eq!(host.transaction_lifecycle(), TransactionLifecycle::Open);
                 assert_eq!(host.transaction_depth(outer), Some(0));
                 host.transaction(|host, inner| {
                     assert_eq!(host.transaction_depth(inner), Some(1));
                     assert_eq!(host.transaction_current().as_ref(), Some(inner));
-                    let current = host.transaction_current().unwrap();
-                    assert_eq!(items.insert_at(host, &current, 0, &sticks, 4), 4);
+                    assert_eq!(
+                        host.join_transaction(|host, tx| {
+                            assert_eq!(tx, inner);
+                            items.insert_at(host, tx, 0, &sticks, 4)
+                        }),
+                        Ok(Some(4))
+                    );
                     Ok::<_, ()>(())
                 })?;
                 assert_eq!(items.amount(host, 0), 4);

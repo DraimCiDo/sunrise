@@ -137,7 +137,6 @@ mod tests {
     #[test]
     #[ignore = "daily"]
     fn chunk_residency_uses_the_owning_level_through_cow_and_swaps() {
-        use mod_api::HostTransaction;
         use sunrise_client::chunk::{Chunk, ChunkExtras};
         use sunrise_mod_runtime::attachments::{AttachmentError, AttachmentType, Holder};
         static VALUE: AttachmentType<i32> = AttachmentType {

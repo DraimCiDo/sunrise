@@ -9,7 +9,8 @@ use crate::game::native_entity_refs::tests::with_game;
 use crate::game::native_guest_turn_tests::with_guests;
 use mod_api::item::menu::StackResult;
 use mod_api::{
-    Flow, Hooks, HostSide, ItemPlace, ItemResource, ItemStackedOnOtherEvent, ModEntry, Mods,
+    Flow, Hooks, HostSide, HostTransaction, ItemPlace, ItemResource, ItemStackedOnOtherEvent,
+    ModEntry, Mods,
 };
 use std::cell::RefCell;
 use sunrise_client::{items::ItemStack, menu::Input};
@@ -17,7 +18,7 @@ use sunrise_client::{items::ItemStack, menu::Input};
 /// What the listener does.
 #[derive(Clone, Default)]
 struct Script {
-    /// Put dirt in this inventory slot through the `Host` (its own nested transaction).
+    /// Put dirt in this inventory slot by joining the click's action.
     write_dirt: Option<i32>,
     /// ...and take it out again at once.
     take_dirt_back: bool,
@@ -90,17 +91,15 @@ impl Hooks for Listener {
                 slot,
             };
             let dirt = api_stack("minecraft:dirt", 1);
-            let tx = host.transaction_current().expect("inside the action");
-            assert_eq!(
-                place.insert(&mut **host, &tx, &ItemResource::of(&dirt), 2),
-                2
-            );
-            if s.take_dirt_back {
-                assert_eq!(
-                    place.extract(&mut **host, &tx, &ItemResource::of(&dirt), 2),
-                    2
-                );
-            }
+            host.join_transaction(|host, tx| {
+                let dirt = ItemResource::of(&dirt);
+                assert_eq!(place.insert(host, tx, &dirt, 2), 2);
+                if s.take_dirt_back {
+                    assert_eq!(place.extract(host, tx, &dirt, 2), 2);
+                }
+            })
+            .unwrap()
+            .expect("inside the action");
         }
         if s.write_scoreboard
             && let HostSide::Server(host) = &mut host

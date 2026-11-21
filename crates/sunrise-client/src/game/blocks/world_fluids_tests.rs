@@ -451,33 +451,40 @@ fn journal_level_host_retains_neighbour_updates_from_earlier_writes() {
         for nested in [false, true] {
             game.world.set(AT[0], AT[1], AT[2], air).unwrap();
             game.world.set(x, y, z, lamp).unwrap();
-            let root = game.transaction_open();
-            {
-                let mut host = JournalLevelWrite::new(game, level).unwrap();
-                let lever = host
-                    .block_state_id("minecraft:lever[face=floor,facing=east,powered=true]")
+            game.storage_transaction(|game, _| {
+                {
+                    let mut host = JournalLevelWrite::new(game, level).unwrap();
+                    let lever = host
+                        .block_state_id("minecraft:lever[face=floor,facing=east,powered=true]")
+                        .unwrap();
+                    assert!(host.set_block(
+                        AT,
+                        lever,
+                        BlockUpdateFlags::NEIGHBORS | BlockUpdateFlags::CLIENTS
+                    ));
+                }
+                let turn_lever = |game: &mut Game<'_>| {
+                    let mut host = JournalLevelWrite::new(game, level).unwrap();
+                    assert!(host.set_block_property(
+                        AT,
+                        "facing",
+                        "west",
+                        (BlockUpdateFlags::CLIENTS | BlockUpdateFlags::KNOWN_SHAPE).bits()
+                    ));
+                };
+                if nested {
+                    game.storage_transaction(|game, _| {
+                        turn_lever(game);
+                        Ok::<_, ()>(())
+                    })
                     .unwrap();
-                assert!(host.set_block(
-                    AT,
-                    lever,
-                    BlockUpdateFlags::NEIGHBORS | BlockUpdateFlags::CLIENTS
-                ));
-            }
-            let inner = nested.then(|| game.transaction_open());
-            {
-                let mut host = JournalLevelWrite::new(game, level).unwrap();
-                assert!(host.set_block_property(
-                    AT,
-                    "facing",
-                    "west",
-                    (BlockUpdateFlags::CLIENTS | BlockUpdateFlags::KNOWN_SHAPE).bits()
-                ));
-            }
-            if let Some(inner) = inner {
-                game.transaction_close(&inner, true);
-            }
-            assert_eq!(game.world.block(x, y, z), lamp);
-            game.transaction_close(&root, true);
+                } else {
+                    turn_lever(game);
+                }
+                assert_eq!(game.world.block(x, y, z), lamp);
+                Ok::<_, ()>(())
+            })
+            .unwrap();
             assert_eq!(game.world.block(x, y, z), lit_lamp, "nested: {nested}");
         }
     });

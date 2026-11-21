@@ -539,7 +539,7 @@ impl Game<'_> {
 pub(in crate::game) mod tests {
     use super::super::{lan::LanSettings, native_entity_refs::tests::with_game};
     use super::*;
-    use mod_api::{HostTransaction, TeamColor, prelude::ScoreboardServerHost, text::TextStyle};
+    use mod_api::{TeamColor, prelude::ScoreboardServerHost, text::TextStyle};
     use std::sync::{
         Arc,
         atomic::{AtomicI32, AtomicUsize},

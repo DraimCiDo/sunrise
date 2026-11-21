@@ -339,10 +339,10 @@ impl Game<'_> {
         mod_api::dispatch_place_liquid_with(write.pos, state, fluid, &mut answer, |part, event| {
             // For a player bucket this can be the root scope; the fluid
             // utility already has an outer transaction.
-            let seal = self.transaction_open();
-            let reply = JournalLevelWrite::new(self, level)
+            let mut scope = super::transactions::StorageScope::open(self);
+            let reply = JournalLevelWrite::new(scope.game(), level)
                 .and_then(|mut host| part.place_liquid(&mut host, event));
-            self.transaction_close(&seal, reply == Some(true));
+            scope.finish(reply == Some(true));
             reply
         });
         answer

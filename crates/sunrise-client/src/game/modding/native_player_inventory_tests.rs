@@ -2,7 +2,7 @@
 //! public player handle.
 
 use super::native_guest_turn_tests::with_guests;
-use mod_api::{Host, HostTransaction, ItemStack, PlayerDataRefusal, StackWriteError, prelude::*};
+use mod_api::{Host, ItemStack, PlayerDataRefusal, StackWriteError, prelude::*};
 
 fn api_item(game: &super::Game<'_>, snbt: &str) -> Option<ItemStack> {
     let host: &dyn Host = game;
@@ -290,7 +290,7 @@ fn equipment_effects_wait_for_root() {
         let new = stack(game, r#"{id:"minecraft:iron_boots",count:1}"#);
         game.audio.capture = Some(Vec::new());
         let _: Result<(), ()> = game.storage_transaction(|host, _| {
-            host.transaction(|host, _| {
+            host.storage_transaction(|host, _| {
                 player
                     .set_inventory_slot(host, 36, Some(new.clone()))
                     .unwrap();
@@ -305,7 +305,7 @@ fn equipment_effects_wait_for_root() {
                 .set_inventory_slot(host, 36, Some(new.clone()))
                 .unwrap();
             let outer = player.inventory_slots(host);
-            let aborted: Result<(), ()> = host.transaction(|host, _| {
+            let aborted: Result<(), ()> = host.storage_transaction(|host, _| {
                 player.set_inventory_slot(host, 39, Some(inner)).unwrap();
                 Err(())
             });

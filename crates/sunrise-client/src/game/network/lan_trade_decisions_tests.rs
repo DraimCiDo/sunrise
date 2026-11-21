@@ -141,13 +141,14 @@ fn trade(host: &mut dyn ServerHost, event: &mut TradeWithVillagerEvent<'_>) {
                     PlayerWrite::ShiftDestination { .. } => 8,
                 },
             };
-            let tx = host
-                .transaction_current()
-                .expect("trade listener is inside the action");
-            assert_eq!(place.insert(host, &tx, &dirt, 2), 2);
-            if matches!(write, PlayerWrite::ShiftDestination { restore: true }) {
-                assert_eq!(place.extract(host, &tx, &dirt, 2), 2);
-            }
+            host.join_transaction(|host, tx| {
+                assert_eq!(place.insert(host, tx, &dirt, 2), 2);
+                if matches!(write, PlayerWrite::ShiftDestination { restore: true }) {
+                    assert_eq!(place.extract(host, tx, &dirt, 2), 2);
+                }
+            })
+            .unwrap()
+            .expect("trade listener is inside the action");
             STAGED_WRITES.set(true);
         }
         if s.raise_second_price && call == 2 {

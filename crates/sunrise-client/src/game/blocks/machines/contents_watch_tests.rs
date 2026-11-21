@@ -256,7 +256,7 @@ fn watches_journal_nested_changes_and_preserve_explicit_abort_notices() {
             observer.watch_contents(game, source_pos(), true).unwrap();
             assert!(
                 game.storage_transaction(|host, _| {
-                    host.transaction(|host, _| {
+                    host.storage_transaction(|host, _| {
                         observer.watch_contents(host, source_pos(), false).unwrap();
                         Ok::<_, ()>(())
                     })
@@ -270,7 +270,7 @@ fn watches_journal_nested_changes_and_preserve_explicit_abort_notices() {
             assert_eq!(
                 game.storage_transaction(|host, _| {
                     assert!(
-                        host.transaction(|host, _| {
+                        host.storage_transaction(|host, _| {
                             observer.watch_contents(host, source_pos(), false).unwrap();
                             Err::<(), ()>(())
                         })

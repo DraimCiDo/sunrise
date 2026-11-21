@@ -73,7 +73,7 @@ fn bundle_handler_weight_front_order_and_refusal() {
 #[test]
 #[ignore = "daily"]
 fn bundle_items_place_handler_reads_and_rolls_back() {
-    use mod_api::{HostTransaction, ITEM_ITEMS, ItemPlace};
+    use mod_api::{ITEM_ITEMS, ItemPlace};
     with_game(|game| {
         game.creative = false;
         let mut bundle = ItemStack::new("minecraft:bundle", 1);
@@ -150,7 +150,7 @@ fn nested_bundle_weight_limits_arrow_capacity_and_insertion() {
 #[ignore = "daily"]
 fn stacked_bundle_insertion_splits_one_and_restores_inventory_on_abort() {
     use crate::game::api_values::TryIntoApi;
-    use mod_api::{HostTransaction, ITEM_ITEMS, ItemPlace};
+    use mod_api::{ITEM_ITEMS, ItemPlace};
     with_game(|game| {
         game.creative = false;
         open_to_lan(game);
@@ -208,7 +208,7 @@ impl mod_api::Hooks for BundleMod {
 #[test]
 #[ignore = "daily"]
 fn mod_registered_bundle_items_uses_weight_and_front_extraction() {
-    use mod_api::{HostTransaction, ITEM_ITEMS, ItemPlace};
+    use mod_api::{ITEM_ITEMS, ItemPlace};
     let mods: mod_api::Mods =
         vec![mod_api::ModEntry::new("bundle_test", Box::new(BundleMod))].into();
     crate::game::api_values::install_parts(&mods).unwrap();

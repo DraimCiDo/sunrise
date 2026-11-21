@@ -91,7 +91,7 @@ fn finalization_never_retargets_stale_items_or_replaced_placeholders() {
                         .insert(pos, BlockEntity::Mod(Box::new(replacement)));
                 }
                 "unbalanced" => {
-                    let _abandoned = game.transaction_open();
+                    game.abandon_storage_frame_for_test();
                 }
                 "revision" => {
                     snapshot =

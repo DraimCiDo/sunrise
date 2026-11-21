@@ -6,8 +6,8 @@ use crate::game::{
     stations::{Kind as StationKind, Station},
 };
 use mod_api::{
-    Flow, GrindstonePlaceEvent, GrindstoneTakeEvent, Hooks, HostBlockStates, ItemPlace,
-    ItemResource, ModEntry, Mods, Registrar, ServerHost,
+    Flow, GrindstonePlaceEvent, GrindstoneTakeEvent, Hooks, HostBlockStates, HostTransaction,
+    ItemPlace, ItemResource, ModEntry, Mods, Registrar, ServerHost,
 };
 use std::cell::{Cell, RefCell};
 use sunrise_client::items::ItemStack;
@@ -56,8 +56,10 @@ fn write_dirt(host: &mut dyn ServerHost) {
         player: 12,
         slot: 20,
     };
-    let tx = host.transaction_current().expect("inside the action");
-    assert_eq!(place.insert(host, &tx, &ItemResource::of(&dirt), 2), 2);
+    assert_eq!(
+        host.join_transaction(|host, tx| place.insert(host, tx, &ItemResource::of(&dirt), 2)),
+        Ok(Some(2))
+    );
 }
 
 fn replace_backing(host: &mut dyn ServerHost) {

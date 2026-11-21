@@ -188,7 +188,7 @@ fn saved_mob_binding_rebinds_retained_id_with_a_new_generation() {
 #[test]
 #[ignore = "daily"]
 fn mob_first_store_binds_and_nested_rollback_retires_authority() {
-    use mod_api::{AttachmentError, HostTransaction};
+    use mod_api::AttachmentError;
     with_game(|game| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
@@ -212,13 +212,13 @@ fn mob_first_store_binds_and_nested_rollback_retires_authority() {
                     .len(),
                 1
             );
-            let inner: Result<(), AttachmentError> = host.transaction(|host, _| {
+            let inner: Result<(), AttachmentError> = host.storage_transaction(|host, _| {
                 VALUE.set(host, holder, 8)?;
                 Err(AttachmentError::MissingHolder)
             });
             assert!(inner.is_err());
             assert_eq!(VALUE.get_existing(host, holder), Ok(Some(7)));
-            let committed: Result<(), AttachmentError> = host.transaction(|host, _| {
+            let committed: Result<(), AttachmentError> = host.storage_transaction(|host, _| {
                 VALUE.set(host, holder, 9)?;
                 Ok(())
             });
@@ -306,7 +306,7 @@ fn tnt_with_real_lifetime_accepts_first_store() {
 #[test]
 #[ignore = "daily"]
 fn mob_inner_first_binding_commit_outer_abort_invalidates_retained_row() {
-    use mod_api::{AttachmentError, HostTransaction};
+    use mod_api::AttachmentError;
     with_game(|game| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
@@ -319,7 +319,7 @@ fn mob_inner_first_binding_commit_outer_abort_invalidates_retained_row() {
         let holder = Holder::Entity(id);
         let mut retained = None;
         let result: Result<(), AttachmentError> = game.storage_transaction(|host, _| {
-            let inner: Result<(), AttachmentError> = host.transaction(|host, _| {
+            let inner: Result<(), AttachmentError> = host.storage_transaction(|host, _| {
                 VALUE.set(host, holder, 13)?;
                 retained = Some(host.query_mut(&VALUE).unwrap());
                 Ok(())

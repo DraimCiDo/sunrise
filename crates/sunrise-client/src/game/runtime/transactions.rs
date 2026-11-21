@@ -562,6 +562,12 @@ impl Game<'_> {
         result
     }
 
+    /// Leave a child frame open so a fixture can exercise the engine's drain path.
+    #[cfg(test)]
+    pub(in crate::game) fn abandon_storage_frame_for_test(&mut self) {
+        self.open_storage_transaction();
+    }
+
     /// Opens a transaction, nested in the open one if any (`Transaction.open`), and gives back
     /// the seal that ends it.
     pub(in crate::game) fn transaction_open(&mut self) -> TransactionSeal {

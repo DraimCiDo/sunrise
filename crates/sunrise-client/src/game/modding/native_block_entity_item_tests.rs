@@ -681,9 +681,8 @@ fn a_kept_slot_goes_back_only_into_the_block_entity_it_came_from() {
             // same kind at the same position must not receive the old chest's 64 stone.
             container_at(game, pos, "minecraft:chest");
             let items = level.capability(game, &ITEMS, at, None).unwrap();
-            game.storage_transaction(|game, _| {
-                let tx = game.transaction_current().unwrap();
-                assert_eq!(items.extract_at(game, &tx, 0, &stone, 10), 10);
+            game.storage_transaction(|game, tx| {
+                assert_eq!(items.extract_at(game, tx, 0, &stone, 10), 10);
                 game.world
                     .block_entities
                     .replace(pos, BlockEntity::for_block("minecraft:chest").unwrap());

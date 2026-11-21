@@ -1,6 +1,6 @@
 use super::Game;
 use crate::game::{api_values::TryIntoApi, native_entity_refs::tests::with_game};
-use mod_api::{BlockUpdateFlags, Flow, Hooks, ItemResource, ServerHost, run_transaction};
+use mod_api::{BlockUpdateFlags, Flow, Hooks, ItemResource, ServerHost};
 use std::sync::{Arc, Mutex};
 use sunrise_client::{chunk::Chunk, items::ItemStack};
 use sunrise_core::{

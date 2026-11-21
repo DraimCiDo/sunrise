@@ -15,12 +15,10 @@ pub(super) fn start(sync: Arc<SyncData>, net: NetConfig) -> io::Result<Lan> {
 }
 impl Game<'_> {
     fn configuration_callback(&mut self, session: &Session, callback: impl FnOnce(&mut Self)) {
-        let transaction = self.transaction_open();
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(self)));
-        self.transaction_close(
-            &transaction,
-            result.is_ok() && !matches!(session.result(), Some(Err(_))),
-        );
+        let mut scope = super::transactions::StorageScope::open(self);
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(scope.game())));
+        scope.finish(result.is_ok() && !matches!(session.result(), Some(Err(_))));
         if result.is_err() {
             session.fail("Configuration task callback panicked");
         }

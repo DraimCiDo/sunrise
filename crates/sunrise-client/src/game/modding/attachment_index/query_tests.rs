@@ -1,7 +1,7 @@
 //! Observable host query semantics through real holder writes and transaction journals.
 use super::*;
 use crate::game::native_entity_refs::tests::with_game;
-use mod_api::{AttachmentQueries, AttachmentQueriesMut, AttachmentType, HostTransaction};
+use mod_api::{AttachmentQueries, AttachmentQueriesMut, AttachmentType};
 use sunrise_client::chunk::Chunk;
 
 static VALUE: AttachmentType<u32> = AttachmentType {

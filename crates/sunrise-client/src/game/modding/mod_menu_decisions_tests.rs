@@ -5,7 +5,7 @@
 //! listener made. The fixtures need prepared resources.
 use crate::game::native_guest_turn_tests::{register_test_menu, with_guests};
 use mod_api::{
-    BlockEntityPart, Flow, Hooks, ITEMS, ItemPlace, ItemResource, MenuButtonEvent,
+    BlockEntityPart, Flow, Hooks, HostTransaction, ITEMS, ItemPlace, ItemResource, MenuButtonEvent,
     MenuClickedEvent, MenuQuickMoveEvent, MenuSlotTakeEvent, ModEntry, Mods, Registrar, ServerHost,
 };
 use std::{
@@ -71,8 +71,10 @@ fn write_dirt(host: &mut dyn ServerHost) {
         player: 12,
         slot: 20,
     };
-    let tx = host.transaction_current().expect("inside the action");
-    assert_eq!(place.insert(host, &tx, &ItemResource::of(&dirt), 2), 2);
+    assert_eq!(
+        host.join_transaction(|host, tx| place.insert(host, tx, &ItemResource::of(&dirt), 2)),
+        Ok(Some(2))
+    );
 }
 
 struct Part;
@@ -113,10 +115,11 @@ impl BlockEntityPart for Part {
             let items = level
                 .capability(host, &ITEMS, [2, 64, 1], None)
                 .expect("the second block's items");
-            let tx = host.transaction_current().expect("inside the action");
             assert_eq!(
-                items.insert_at(host, &tx, 0, &ItemResource::of(&stone(1)), 4),
-                4
+                host.join_transaction(|host, tx| {
+                    items.insert_at(host, tx, 0, &ItemResource::of(&stone(1)), 4)
+                }),
+                Ok(Some(4))
             );
             event.stack.as_mut().unwrap().set_count(6).unwrap();
         }

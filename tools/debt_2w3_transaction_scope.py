@@ -102,7 +102,7 @@ FIXTURE_OUTPUTS = {
     "network/lan_trade_decisions_tests.rs": {544: "trade_id", 546: "trade_id"},
     "runtime/transaction_entities_tests.rs": {
         205: "pig", 267: "pig", 291: "sheep", 329: "(held, kept_out)", 457: "pig",
-        458: "pig", 480: "kept", 482: "dropped", 512: "kept", 534: "pig",
+        458: "pig", 480: "(kept, dropped)", 482: "dropped", 512: "kept", 534: "pig",
         554: "(aborted, handle)", 653: "aborted", 656: "committed", 832: "fresh",
         860: "pig", 917: "(a, b)", 953: "kept", 980: "pig", 983: "pig", 1017: "a",
         1061: "(a, b)", 1100: "pig", 1200: "(a, b)",

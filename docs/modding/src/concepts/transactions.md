@@ -1,8 +1,8 @@
 # Transactions
 
 Use `HostTransaction` on a `ServerHost` to group capability writes. The closure's
-`Ok` commits; `Err` aborts. Pass the borrowed `&Transaction` to each handler or
-place write.
+`Ok` commits; `Err` aborts. Pass the borrowed `&TransactionContext` to each
+handler or place write.
 
 ```rust,ignore
 use mod_api::{HostTransaction, ServerHost};
@@ -14,6 +14,13 @@ fn update(host: &mut dyn ServerHost) -> Result<(), ()> {
     })
 }
 ```
+
+To write as part of an action that is already open, use `host.join_transaction(|host, tx| …)`.
+It lends the current context without opening a savepoint. `Ok(None)` means no action
+was open and the closure did not run; `Err(TransactionUnavailable)` means the host
+could not lend a context. The opener decides whether the joined writes commit or roll
+back, regardless of what the joining closure returns. Use `host.transaction` instead
+when you need a savepoint that can roll back independently.
 
 ## Commit and rollback
 
@@ -100,7 +107,7 @@ Entities a transaction spawns or removes follow the same commit and rollback rul
 
 ## Transaction authority
 
-`Transaction` identifies an open transaction with a game-issued write token. It
+`TransactionContext` identifies an open transaction with a game-issued write token. It
 does not grant permission to close it. A write with a token that does not name an
 open transaction changes nothing, including a token retained past its closure.
 
@@ -116,7 +123,7 @@ These methods are server-only:
 
 | Method | Result |
 |---|---|
-| `host.transaction_current()` | Innermost open `Transaction`, or `None`; not a closing seal |
+| `host.transaction_current()` | Innermost open `TransactionContext`, or `None`; not a closing seal |
 | `host.transaction_depth(tx)` | `Some(0)` for the outermost transaction, increasing by one per nesting level; `None` if it is not open |
 | `host.transaction_lifecycle()` | `TransactionLifecycle` describing the open or closing phase |
 

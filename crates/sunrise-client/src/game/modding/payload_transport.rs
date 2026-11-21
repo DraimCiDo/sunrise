@@ -94,28 +94,29 @@ impl Game<'_> {
         if !incoming.epoch.active() {
             return;
         }
-        let seal = self.transaction_open();
-        let mut context = MainContext {
-            game: self,
-            epoch: &incoming.epoch,
-            endpoint: endpoint.clone(),
-            receiver: &incoming.receiver,
-            disconnect: None,
-            failure: None,
+        let mut scope = super::transactions::StorageScope::open(self);
+        let (reason, failure) = {
+            let mut context = MainContext {
+                game: scope.game(),
+                epoch: &incoming.epoch,
+                endpoint: endpoint.clone(),
+                receiver: &incoming.receiver,
+                disconnect: None,
+                failure: None,
+            };
+            let result = match incoming.body {
+                Body::Payload(bytes) if incoming.receiver.thread == HandlerThread::Main => incoming
+                    .receiver
+                    .handle(bytes, &mut context)
+                    .map_err(|mod_api::PayloadHandleError::Failed(error)| error),
+                Body::Payload(_) => {
+                    Err("payload was not dispatched on its declared network executor".into())
+                }
+                Body::Work(work) => incoming.receiver.run_work(work.as_ref(), &mut context),
+            };
+            (context.disconnect, context.failure.or_else(|| result.err()))
         };
-        let result = match incoming.body {
-            Body::Payload(bytes) if incoming.receiver.thread == HandlerThread::Main => incoming
-                .receiver
-                .handle(bytes, &mut context)
-                .map_err(|mod_api::PayloadHandleError::Failed(error)| error),
-            Body::Payload(_) => {
-                Err("payload was not dispatched on its declared network executor".into())
-            }
-            Body::Work(work) => incoming.receiver.run_work(work.as_ref(), &mut context),
-        };
-        let reason = context.disconnect.take();
-        let failure = context.failure.take().or_else(|| result.err());
-        context.game.transaction_close(&seal, failure.is_none());
+        scope.finish(failure.is_none());
         if let Some(error) = failure.as_ref().filter(|_| incoming.raw) {
             // A raw channel's bytes come from any client; one declaring mod's
             // refusal rolls back its own work only, and the next mod still runs.

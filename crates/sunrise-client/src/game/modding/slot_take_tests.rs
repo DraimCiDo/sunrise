@@ -4,8 +4,9 @@
 //! prepared resources.
 use crate::game::native_guest_turn_tests::with_guests;
 use mod_api::{
-    BlockEntityPart, BlockPart, Hooks, HostBlockStates, ITEMS, ItemCraftedEvent, ItemPlace,
-    ItemResource, MenuPart, MenuSlotRulesEvent, MenuSlotTakeEvent, ModEntry, Mods, Registrar,
+    BlockEntityPart, BlockPart, Hooks, HostBlockStates, HostTransaction, ITEMS, ItemCraftedEvent,
+    ItemPlace, ItemResource, MenuPart, MenuSlotRulesEvent, MenuSlotTakeEvent, ModEntry, Mods,
+    Registrar,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -108,14 +109,16 @@ impl BlockEntityPart for Pot {
             player: event.player,
             slot: 8,
         };
-        let tx = host.transaction_current().expect("a take is tentative");
+        assert!(host.transaction_current().is_some(), "a take is tentative");
         match SCRIPT.get() {
             TakeScript::Hear => {}
             TakeScript::PanicWithoutReward => panic!("a broken craft listener"),
             TakeScript::Reward | TakeScript::Panic | TakeScript::Invalid => {
                 assert_eq!(
-                    place.insert(host, &tx, &ItemResource::of(event.taken), 1),
-                    1
+                    host.join_transaction(|host, tx| {
+                        place.insert(host, tx, &ItemResource::of(event.taken), 1)
+                    }),
+                    Ok(Some(1))
                 );
                 if matches!(SCRIPT.get(), TakeScript::Invalid) {
                     event.entity.items[0] = Some(api_item("minecraft:stone", 65));

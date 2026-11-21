@@ -791,7 +791,7 @@ pub(super) mod tests {
             // A child abort restores the slot even when the parent goes on to commit.
             assert_eq!(
                 game.storage_transaction(|host, _| {
-                    let child = host.transaction(|host, tx| {
+                    let child = host.storage_transaction(|host, tx| {
                         assert!(
                             slot.edit(host, tx, |stack| {
                                 stack.copy_component_from(&source, "minecraft:custom_name");
@@ -1003,7 +1003,7 @@ pub(super) mod tests {
 
             super::super::dispense_fixture::start_recording();
             let result = game.storage_transaction(|host, _| {
-                host.transaction(|host, tx| {
+                host.storage_transaction(|host, tx| {
                     assert_eq!(items.insert_at(host, tx, 4, &chest, 1), 1);
                     Ok::<(), ()>(())
                 })?;
@@ -1017,12 +1017,12 @@ pub(super) mod tests {
             super::super::dispense_fixture::start_recording();
             let result = game.storage_transaction(|host, _| {
                 // An inner abort must not contribute effects to the root.
-                let aborted = host.transaction(|host, tx| {
+                let aborted = host.storage_transaction(|host, tx| {
                     assert_eq!(items.insert_at(host, tx, 4, &chest, 1), 1);
                     Err::<(), ()>(())
                 });
                 assert_eq!(aborted, Err(()));
-                host.transaction(|host, tx| {
+                host.storage_transaction(|host, tx| {
                     assert_eq!(items.insert_at(host, tx, 4, &chest, 1), 1);
                     Ok::<(), ()>(())
                 })?;
@@ -1376,7 +1376,7 @@ pub(super) mod tests {
                         "quiet edit must not recollect the worn stack"
                     );
                     let taken = place.resource(host).unwrap();
-                    let child = host.transaction(|host, tx| {
+                    let child = host.storage_transaction(|host, tx| {
                         assert_eq!(place.extract(host, tx, &taken, 1), 1);
                         assert!(armor(host) < before);
                         assert!(living.set_attribute_base(host, "minecraft:gravity", gravity));
@@ -1518,7 +1518,7 @@ pub(super) mod tests {
             assert_eq!(gravity(game), 0.375);
             let resource = place.resource(game).unwrap();
             game.storage_transaction(|host, _| {
-                let child = host.transaction(|host, tx| {
+                let child = host.storage_transaction(|host, tx| {
                     assert_eq!(place.extract(host, tx, &resource, 1), 1);
                     assert_eq!(gravity(host), 0.125);
                     assert!(living.add_attribute_modifier(
@@ -2129,44 +2129,43 @@ pub(super) mod tests {
                 index.get("data").unwrap().get("map").unwrap().clone()
             };
 
-            let root = game.transaction_open();
-            let tx = game.transaction_current().unwrap();
-            cursor.on_crafted_by(game, &tx, 1).unwrap();
-            let child = game.transaction_open();
-            let child_tx = game.transaction_current().unwrap();
-            slot.on_crafted_by(game, &child_tx, 1).unwrap();
-            assert_eq!(held_ids(game), [Some(source + 1), Some(source + 2)]);
+            game.storage_transaction(|game, tx| {
+                cursor.on_crafted_by(game, tx, 1).unwrap();
+                game.storage_transaction(|game, tx| {
+                    slot.on_crafted_by(game, tx, 1).unwrap();
+                    assert_eq!(held_ids(game), [Some(source + 1), Some(source + 2)]);
 
-            // A held map derived from the parent's pending copy can find the new map.
-            let mut derived = game.menu_carried(menu).flatten().unwrap();
-            derived.data_mut().map_post_processing = Some(0);
-            let maps = game.level_maps([&derived]);
-            Menu::map_crafted(Some(&maps), &mut derived);
-            assert_eq!(map_id(&derived), Some(source + 3));
-            game.register_made_maps(maps);
-            let chained = game.map(source + 3).unwrap();
-            assert_eq!(chained.scale, 1);
-            assert!(chained.locked);
+                    // A map derived from the parent's pending copy can find the new map.
+                    let mut derived = game.menu_carried(menu).flatten().unwrap();
+                    derived.data_mut().map_post_processing = Some(0);
+                    let maps = game.level_maps([&derived]);
+                    Menu::map_crafted(Some(&maps), &mut derived);
+                    assert_eq!(map_id(&derived), Some(source + 3));
+                    game.register_made_maps(maps);
+                    let chained = game.map(source + 3).unwrap();
+                    assert_eq!(chained.scale, 1);
+                    assert!(chained.locked);
+                    Err::<(), _>(())
+                })
+                .unwrap_err();
+                assert_eq!(held_ids(game), [Some(source + 1), Some(source)]);
+                assert!(game.map(source + 2).is_none());
+                assert!(game.map(source + 3).is_none());
 
-            game.transaction_close(&child, false);
-            assert_eq!(held_ids(game), [Some(source + 1), Some(source)]);
-            assert!(game.map(source + 2).is_none());
-            assert!(game.map(source + 3).is_none());
+                game.storage_transaction(|game, tx| slot.on_crafted_by(game, tx, 1))
+                    .unwrap();
+                assert_eq!(held_ids(game), [Some(source + 1), Some(source + 2)]);
+                assert!(game.map(source + 2).unwrap().locked);
 
-            let child = game.transaction_open();
-            let child_tx = game.transaction_current().unwrap();
-            slot.on_crafted_by(game, &child_tx, 1).unwrap();
-            game.transaction_close(&child, true);
-            assert_eq!(held_ids(game), [Some(source + 1), Some(source + 2)]);
-            assert!(game.map(source + 2).unwrap().locked);
-
-            // Child commit still isn't a save boundary. Root abort restores both slots and IDs.
-            game.save_maps();
-            assert_eq!(saved_counter(), Tag::Int(source));
-            for id in [source + 1, source + 2, source + 3] {
-                assert!(!maps_dir.join(format!("{id}.dat")).exists());
-            }
-            game.transaction_close(&root, false);
+                // Child commit still isn't a save boundary. Root abort restores both slots and IDs.
+                game.save_maps();
+                assert_eq!(saved_counter(), Tag::Int(source));
+                for id in [source + 1, source + 2, source + 3] {
+                    assert!(!maps_dir.join(format!("{id}.dat")).exists());
+                }
+                Err::<(), _>(())
+            })
+            .unwrap_err();
             game.save_maps();
             assert_eq!(saved_counter(), Tag::Int(source));
             assert_eq!(game.peek_map_id(), source + 1);

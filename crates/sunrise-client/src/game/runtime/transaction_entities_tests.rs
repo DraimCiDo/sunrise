@@ -8,7 +8,7 @@ use std::sync::{
 
 use mod_api::{
     AttachmentType, EntityConstructingEvent, EntityJoinLevelEvent, EntityLeaveLevelEvent,
-    EntityRef, Flow, Hooks, HostSide, RemovalReason, ServerHost,
+    EntityRef, Flow, Hooks, HostSide, HostTransaction, RemovalReason, ServerHost,
 };
 use sunrise_client::{chunk::Chunk, items::ItemStack, mobs::StoredEffect};
 use sunrise_core::nbt::{Tag, parse_snbt};
@@ -96,18 +96,25 @@ impl Hooks for Observer {
         };
         if answers.is_some() {
             let removes = ON_JOIN.lock().unwrap().2.take();
-            let seal = removes.map(|_| host.transaction_open());
-            let spawned = host.summon(
-                "minecraft:overworld",
-                "minecraft:pig",
-                [1.5, 70.0, 1.5],
-                Default::default(),
-            );
-            ON_JOIN.lock().unwrap().1.extend(spawned);
-            if let (Some(entity), Some(seal)) = (removes, seal) {
-                entity.remove(host, RemovalReason::Discarded);
-                *PENDING.lock().unwrap() = Some(entity);
-                host.transaction_close(&seal, true);
+            let spawn = |host: &mut dyn ServerHost| {
+                let spawned = host.summon(
+                    "minecraft:overworld",
+                    "minecraft:pig",
+                    [1.5, 70.0, 1.5],
+                    Default::default(),
+                );
+                ON_JOIN.lock().unwrap().1.extend(spawned);
+            };
+            if let Some(entity) = removes {
+                host.transaction(|host, _| {
+                    spawn(host);
+                    entity.remove(host, RemovalReason::Discarded);
+                    *PENDING.lock().unwrap() = Some(entity);
+                    Ok::<_, ()>(())
+                })
+                .unwrap();
+            } else {
+                spawn(host);
             }
         }
         let stage = NEST.load(Ordering::SeqCst);
@@ -122,11 +129,13 @@ impl Hooks for Observer {
             // Its listener commits a nether transaction of its own that spawned a cow.
             (2, "minecraft:zombie") => {
                 NEST.store(3, Ordering::SeqCst);
-                let seal = host.transaction_open();
-                host.commands().run_command(
-                    "execute in minecraft:the_nether run summon minecraft:cow 1.5 70 1.5",
-                );
-                host.transaction_close(&seal, true);
+                host.transaction(|host, _| {
+                    host.commands().run_command(
+                        "execute in minecraft:the_nether run summon minecraft:cow 1.5 70 1.5",
+                    );
+                    Ok::<_, ()>(())
+                })
+                .unwrap();
             }
             // The cow's join is told while that commit runs: a command in the overworld
             // spawns a chicken, which A's commit still holds.
@@ -507,7 +516,7 @@ fn a_nested_abort_takes_back_only_its_own() {
     const NAME: &str = "game::transaction_entities_tests::a_nested_abort_takes_back_only_its_own";
     with_observer(NAME, |game| {
         let (boat, cow) = boat_with_rider(game);
-        let kept = game
+        let (kept, dropped) = game
             .storage_transaction(|game, _| {
                 let kept = summon(game, "minecraft:pig", "{}").unwrap();
                 let dropped = game
@@ -519,7 +528,7 @@ fn a_nested_abort_takes_back_only_its_own() {
                     .unwrap_err();
                 assert_eq!(game.entity(dropped), None);
                 assert_eq!(game.entity(boat.id()), Some(boat));
-                Ok::<_, ()>(kept)
+                Ok::<_, ()>((kept, dropped))
             })
             .unwrap();
 

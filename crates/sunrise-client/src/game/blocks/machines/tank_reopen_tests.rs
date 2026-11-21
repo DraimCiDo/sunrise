@@ -14,8 +14,8 @@ use super::{BlockEntity, Game};
 use crate::game::native_entity_refs::tests::{run_fresh_cases, with_game_at};
 use crate::game::world_loading::WorldRequest;
 use mod_api::{
-    BlocksEvent, FLUIDS, FluidResource, FluidStack, Hooks, HostTransaction, LevelRef, ModEntry,
-    ModFluidTanks, Mods, Registrar, RegistrationContext,
+    BlocksEvent, FLUIDS, FluidResource, FluidStack, Hooks, LevelRef, ModEntry, ModFluidTanks, Mods,
+    Registrar, RegistrationContext,
 };
 use std::path::Path;
 use std::time::{Duration, Instant};
