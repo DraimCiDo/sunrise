@@ -13,11 +13,3 @@ pub(super) fn sha512_hex(value: &str) -> Result<(), &'static str> {
         Err("must be 128 lowercase hex digits")
     }
 }
-
-/// The SHA-512 of `bytes`, as `[runtime]` writes it.
-pub fn sha512_of(bytes: &[u8]) -> String {
-    Sha512::digest(bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
-}
