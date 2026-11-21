@@ -103,12 +103,12 @@ pub trait ItemStorage {
     ///
     /// Providers skip empty entries and report repeated kinds separately, each with its own
     /// amount. Read entries as needed: `ControlFlow::Continue(())` asks for the next entry;
-    /// `ControlFlow::Break(())` returns `Ok(())` without reading another. Exhaustion also
-    /// returns `Ok(())`; a read failure returns `Err`.
+    /// `ControlFlow::Break(())` stops the visit without reading another entry and is returned
+    /// in `Ok`. Exhaustion returns `Ok(ControlFlow::Continue(()))`; a read failure returns `Err`.
     ///
     /// The provider may hold a read borrow for the duration of the visit. Use each kind only
     /// within its callback or clone it to keep it. Do not re-enter the provider or write from
-    /// the callback: wait until the visit returns `Ok(())`.
+    /// the callback: wait until the visit returns successfully.
     ///
     /// ```
     /// use mod_api::{ItemResource, ItemStorage, ServerHost, StorageError};
@@ -120,7 +120,7 @@ pub trait ItemStorage {
     ///     minimum: u64,
     /// ) -> Result<Option<(ItemResource, u64)>, StorageError> {
     ///     let mut found = None;
-    ///     storage.visit_entries(host, &mut |kind, amount| {
+    ///     let stopped = storage.visit_entries(host, &mut |kind, amount| {
     ///         if amount >= minimum {
     ///             found = Some((kind.clone(), amount));
     ///             ControlFlow::Break(())
@@ -128,7 +128,7 @@ pub trait ItemStorage {
     ///             ControlFlow::Continue(())
     ///         }
     ///     })?;
-    ///     Ok(found)
+    ///     Ok(if stopped.is_break() { found } else { None })
     /// }
     /// ```
     fn visit_entries(
@@ -591,12 +591,11 @@ mod tests {
         chest(&mut host, [0, 64, 0], &slots);
         let storage = storage_at(&mut host, [0, 64, 0]);
         let mut entries = Vec::new();
-        let _ = storage
-            .visit_entries(&mut host, &mut |resource, amount| {
-                entries.push((resource.clone(), amount));
-                ControlFlow::Continue(())
-            })
-            .unwrap();
+        let flow = storage.visit_entries(&mut host, &mut |resource, amount| {
+            entries.push((resource.clone(), amount));
+            ControlFlow::Continue(())
+        });
+        assert_eq!(flow, Ok(ControlFlow::Continue(())));
         assert_eq!(
             entries,
             (1..=300u64)
@@ -666,16 +665,15 @@ mod tests {
             owner: None,
         });
         let mut delivered = Vec::new();
-        let _ = storage
-            .visit_entries(&mut host, &mut |kind, amount| {
-                delivered.push((kind.clone(), amount));
-                if *kind == r[0] {
-                    ControlFlow::Break(())
-                } else {
-                    ControlFlow::Continue(())
-                }
-            })
-            .unwrap();
+        let flow = storage.visit_entries(&mut host, &mut |kind, amount| {
+            delivered.push((kind.clone(), amount));
+            if *kind == r[0] {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        });
+        assert_eq!(flow, Ok(ControlFlow::Break(())));
         assert_eq!(reads.resources.borrow().as_slice(), &[0, 1]);
         assert_eq!(reads.amounts.borrow().as_slice(), &[1]);
         assert_eq!(delivered, [(r[0].clone(), 7)]);
