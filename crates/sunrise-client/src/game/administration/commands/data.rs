@@ -143,25 +143,29 @@ impl Game<'_> {
         Some(tag)
     }
     fn entity_nbt_in_level(&mut self, t: Target) -> Option<Tag> {
+        self.entity_tag_in_level(t, true)
+    }
+
+    fn entity_tag_in_level(&mut self, t: Target, include_id: bool) -> Option<Tag> {
         let player_uuid = self.saved_player_uuid();
-        Some(match t {
+        let mut tag = match t {
             // `FishingHook.shouldBeSaved` is false, and it keeps no compound here.
             // Neither is saved: `FishingHook.shouldBeSaved` and
             // `EnderDragonPart.shouldBeSaved` are false.
             Target::Hook(_) | Target::DragonPart(_) => return None,
             // Stage 3's save owns the general record; none is saved here.
             Target::General(_) => return None,
-            Target::Guest(_) => {
-                return self
-                    .for_player(t, |g| g.command_target_nbt(Target::Player))
-                    .flatten();
-            }
-            Target::Player => return self.player_nbt(),
+            Target::Guest(_) => self.for_player(t, |g| g.player_nbt()).flatten()?,
+            Target::Player => self.player_nbt()?,
             Target::Mob(id) => {
                 // `saveWithoutId` writes the entity as saved, riders under
                 // `Passengers`: `/data get` reads the same tree persistence does (#1519).
                 let i = self.mobs.iter().position(|m| m.id == id)?;
-                let mut tag = self.mob_tree_nbt(i);
+                let mut tag = if include_id {
+                    self.mob_tree_nbt(i)
+                } else {
+                    self.mob_tree_tag_without_id(i)
+                };
                 let session = self
                     .lan_trade_conn(id)
                     .and_then(|conn| self.lan_trade_session(conn))
@@ -196,7 +200,13 @@ impl Game<'_> {
             Target::Stand(id) => {
                 let uuid = self.uuid_for(id);
                 let a = self.armor_stands.iter().find(|a| a.id == id)?;
-                entity_nbt::armor_stand_to_nbt(a, uuid, self.persist.raw.get(&id), self.res.items())
+                entity_nbt::armor_stand_tag(
+                    a,
+                    uuid,
+                    self.persist.raw.get(&id),
+                    self.res.items(),
+                    include_id,
+                )
             }
             Target::Frame(id) => {
                 let uuid = self.uuid_for(id);
@@ -236,7 +246,7 @@ impl Game<'_> {
             Target::Other(id) => {
                 let uuid = self.uuid_for(id);
                 let o = self.others.iter().find(|o| o.id == id)?.clone();
-                self.other_to_nbt(&o, uuid)
+                self.other_tag(&o, uuid, include_id)
             }
             Target::Orb(id) => {
                 let uuid = self.uuid_for(id);
@@ -456,7 +466,14 @@ impl Game<'_> {
                 set_key(&mut tag, "Fire", Tag::Short(0));
                 tag
             }
-        })
+        };
+        if !include_id
+            && !matches!(t, Target::Mob(_) | Target::Stand(_) | Target::Other(_))
+            && let Tag::Compound(c) = &mut tag
+        {
+            c.remove(&"id".into());
+        }
+        Some(tag)
     }
     /// `Entity.load` of new data (`EntityDataAccessor.setData`): the entity is
     /// rebuilt from its compound, keeping its id and UUID. Also what
@@ -1228,15 +1245,10 @@ impl Game<'_> {
     pub(in crate::game) fn data_of(&mut self, r: &DataRef) -> R<Tag> {
         match r {
             // EntityDataAccessor.getData: Entity.saveWithoutId.
-            DataRef::Entity(t) => {
-                let mut tag = self
-                    .command_target_nbt(*t)
-                    .ok_or_else(|| err("argument.entity.notfound.entity", &[]))?;
-                if let Tag::Compound(c) = &mut tag {
-                    c.remove(&"id".into());
-                }
-                Ok(tag)
-            }
+            DataRef::Entity(t) => self
+                .in_target_level(*t, |g| g.entity_tag_in_level(*t, false))
+                .flatten()
+                .ok_or_else(|| err("argument.entity.notfound.entity", &[])),
             DataRef::Block(p) => self
                 .block_entity_nbt(*p)
                 .ok_or_else(|| err("commands.data.block.invalid", &[])),

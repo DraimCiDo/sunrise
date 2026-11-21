@@ -569,7 +569,8 @@ impl Game<'_> {
                 registries: &self.ui.registries,
             };
             let (x, y) = (f64::from(self.cursor.0), f64::from(self.cursor.1));
-            if s.command.click(&m, &c, x, y) {
+            let double_click = s.command.live_double_click(x, y);
+            if s.command.click(&m, &c, x, y, double_click) {
                 self.command_block_screen = Some(s);
                 return;
             }

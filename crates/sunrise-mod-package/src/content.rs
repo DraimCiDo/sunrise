@@ -1119,6 +1119,48 @@ pub struct Content {
     pub namespaces: Vec<String>,
 }
 
+macro_rules! declaration_kinds {
+    ($($kind:ident => $folder:literal: $file:ty),+ $(,)?) => {
+        enum FileKind { $($kind),+ }
+
+        impl FileKind {
+            fn from_folder(folder: &str) -> Option<Self> {
+                DECLARATION_KINDS.iter().zip([$(Self::$kind),+])
+                    .find_map(|(&name, kind)| (name == folder).then_some(kind))
+            }
+        }
+
+        /// Declaration folders admitted by the content reader.
+        #[doc(hidden)]
+        pub const DECLARATION_KINDS: &[&str] = &[$($folder),+];
+
+        /// Exposes the declaration file types to the integration test's Serde schema probe.
+        #[doc(hidden)]
+        pub fn probe_declaration<'de, D: serde::Deserializer<'de>>(
+            kind: &str,
+            deserializer: D,
+        ) -> Result<(), D::Error> {
+            match FileKind::from_folder(kind) {
+                $(Some(FileKind::$kind) => <$file>::deserialize(deserializer).map(drop),)+
+                None => Err(serde::de::Error::custom(format_args!(
+                    "unknown declaration kind {kind:?}"
+                ))),
+            }
+        }
+    };
+}
+
+declaration_kinds! {
+    Block => "block": BlockFile,
+    Item => "item": ItemFile,
+    MobEffect => "mob_effect": MobEffect,
+    CreativeTab => "creative_tab": CreativeTabFile,
+    Fluid => "fluid": FluidFile,
+    FluidInteraction => "fluid_interaction": FluidInteraction,
+    EntityType => "entity_type": EntityType,
+    Menu => "menu": MenuType,
+}
+
 /// Reads a mod's content files ([`Content::reader`]).
 pub enum FileReader<'a> {
     Dir(&'a Path),
@@ -1471,34 +1513,24 @@ impl Content {
             if manifest.side == crate::manifest::Side::Server {
                 continue;
             }
-            let parse = |kind: &str| -> Option<String> {
-                let path = decl
-                    .strip_prefix(kind)?
-                    .strip_prefix('/')?
-                    .strip_suffix(".json")?;
-                Some(format!("{namespace}:{path}"))
-            };
-            if let Some(block) = parse("block") {
-                blocks.push((block, name.clone()));
-            } else if let Some(item) = parse("item") {
-                items.push((item, name.clone()));
-            } else if let Some(effect) = parse("mob_effect") {
-                effects.push((effect, name.clone()));
-            } else if let Some(tab) = parse("creative_tab") {
-                tabs.push((tab, name.clone()));
-            } else if let Some(fluid) = parse("fluid") {
-                fluids.push((fluid, name.clone()));
-            } else if let Some(interaction) = parse("fluid_interaction") {
-                interactions.push((interaction, name.clone()));
-            } else if let Some(kind) = parse("entity_type") {
-                types.push((kind, name.clone()));
-            } else if let Some(menu) = parse("menu") {
-                menus.push((menu, name.clone()));
-            } else {
+            let Some((kind, path)) = decl.split_once('/').and_then(|(folder, path)| {
+                Some((FileKind::from_folder(folder)?, path.strip_suffix(".json")?))
+            }) else {
                 return Err(format!(
                     "{name}: data/{id}/sunrise/ holds block/, item/, mob_effect/, creative_tab/, fluid/, fluid_interaction/, entity_type/ and menu/*.json only"
                 ));
-            }
+            };
+            let rows = match kind {
+                FileKind::Block => &mut blocks,
+                FileKind::Item => &mut items,
+                FileKind::MobEffect => &mut effects,
+                FileKind::CreativeTab => &mut tabs,
+                FileKind::Fluid => &mut fluids,
+                FileKind::FluidInteraction => &mut interactions,
+                FileKind::EntityType => &mut types,
+                FileKind::Menu => &mut menus,
+            };
+            rows.push((format!("{namespace}:{path}"), name.clone()));
         }
         // One reader for every declaration: opening a packaged mod reads its
         // whole index, so a reader per file made loading a big mod quadratic.

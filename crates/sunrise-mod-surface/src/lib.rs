@@ -69,7 +69,8 @@
 //! [`Surface::read`] refuses an unknown `schema` number and malformed or truncated JSON with a
 //! typed [`ReadError`], and ignores fields it does not know. It does not recompute record
 //! hashes: a newer writer may hash contract fields this reader does not know, and the file's
-//! integrity is the signature's job.
+//! integrity is the signature's job. [`Surface::unsealed`] does, for a release gate that judges a
+//! newer writer's file with this reader.
 pub mod build_data;
 pub mod child;
 pub mod diff;
@@ -123,6 +124,44 @@ pub struct Surface {
     /// from SDK exports and not inferred by the API source-use scanner.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub engine_items: Vec<EngineItem>,
+}
+
+/// A document's top-level values, unread, refusing a key listed twice: a later value would hide
+/// an earlier one.
+struct TopLevel<'a>(BTreeMap<String, &'a serde_json::value::RawValue>);
+
+impl<'de> Deserialize<'de> for TopLevel<'de> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Keys;
+        impl<'de> serde::de::Visitor<'de> for Keys {
+            type Value = TopLevel<'de>;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a JSON object")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut values = BTreeMap::new();
+                while let Some(key) = map.next_key::<String>()? {
+                    let value = map.next_value()?;
+                    if values.insert(key.clone(), value).is_some() {
+                        return Err(serde::de::Error::custom(format!("{key} is listed twice")));
+                    }
+                }
+                Ok(TopLevel(values))
+            }
+        }
+        deserializer.deserialize_map(Keys)
+    }
+}
+
+/// A record of a list a newer writer added, as this reader knows it: its `id` and `hash` join the
+/// document hash.
+#[derive(Deserialize)]
+struct LaterRecord {
+    id: String,
+    hash: String,
 }
 
 /// Why a document was refused.
@@ -569,6 +608,12 @@ impl Surface {
 
     /// The SHA-256 (first 128 bits, hex) of `<id> <hash>\n` for every entry, in byte order of id.
     pub fn document_hash(&self) -> String {
+        self.document_hash_with(&[])
+    }
+
+    /// [`Self::document_hash`] with `later`'s entries counted too: the records of lists a newer
+    /// writer adds, which this reader knows only by their `id` and `hash`.
+    fn document_hash_with(&self, later: &[LaterRecord]) -> String {
         let tags: Vec<_> = self
             .extension_tags
             .iter()
@@ -582,6 +627,7 @@ impl Surface {
         let mut entries: Vec<(&str, &str)> = self
             .entries_with_engine()
             .chain(tags.iter().map(|(id, hash)| (id.as_str(), hash.as_str())))
+            .chain(later.iter().map(|r| (r.id.as_str(), r.hash.as_str())))
             .collect();
         entries.sort_unstable();
         let mut text = String::new();
@@ -592,6 +638,211 @@ impl Surface {
             text.push('\n');
         }
         digest(&text)
+    }
+
+    /// The ids whose stored hash is not the one this reader's constructors give their contract: a
+    /// hook's argument records are compared whole with the ones its contract gives. A newer writer that hashes contract fields this reader doesn't
+    /// know fails here too, so a release judged by an older tool keeps that tool's hashes.
+    /// (`fields_hash` is outside: it also covers fields no record lists.)
+    pub fn unsealed(&self) -> Vec<String> {
+        fn sealed<'a>(
+            out: &mut Vec<String>,
+            records: impl IntoIterator<Item = (&'a str, &'a str, String)>,
+        ) {
+            for (id, stored, hash) in records {
+                if stored != hash {
+                    out.push(id.to_owned());
+                }
+            }
+        }
+        let mut out = Vec::new();
+        for hook in &self.hooks {
+            let fresh = Hook::new(
+                hook.id.clone(),
+                "",
+                hook.engine.clone(),
+                hook.counterparts.clone(),
+                hook.contract.clone(),
+            );
+            sealed(
+                &mut out,
+                [(hook.id.as_str(), hook.hash.as_str(), fresh.hash)],
+            );
+            let fields = |fields: &[Field]| {
+                fields
+                    .iter()
+                    .map(|f| (f.id.clone(), f.hash.clone(), f.contract.clone()))
+                    .collect::<Vec<_>>()
+            };
+            if fields(&hook.fields) != fields(&fresh.fields) {
+                out.push(format!("{} (its argument records)", hook.id));
+            }
+        }
+        for item in &self.traits {
+            let fresh = Trait::new(
+                item.id.clone(),
+                "",
+                item.contract.clone(),
+                Vec::new(),
+                Vec::new(),
+            );
+            sealed(
+                &mut out,
+                [(item.id.as_str(), item.hash.as_str(), fresh.hash)],
+            );
+            sealed(
+                &mut out,
+                item.methods.iter().map(|m| {
+                    let hash = Method::new(m.id.clone(), "", m.contract.clone()).hash;
+                    (m.id.as_str(), m.hash.as_str(), hash)
+                }),
+            );
+            sealed(
+                &mut out,
+                item.associated.iter().map(|a| {
+                    let hash = Associated::new(a.id.clone(), "", a.contract.clone()).hash;
+                    (a.id.as_str(), a.hash.as_str(), hash)
+                }),
+            );
+        }
+        sealed(
+            &mut out,
+            self.handles.iter().chain(&self.functions).map(|f| {
+                let hash = Function::new(f.id.clone(), "", f.contract.clone()).hash;
+                (f.id.as_str(), f.hash.as_str(), hash)
+            }),
+        );
+        sealed(
+            &mut out,
+            self.macros.iter().map(|m| {
+                let hash = Macro::new(m.id.clone(), "", m.contract.clone()).hash;
+                (m.id.as_str(), m.hash.as_str(), hash)
+            }),
+        );
+        for item in &self.types {
+            let hash = Type::new(
+                item.id.clone(),
+                "",
+                None,
+                item.contract.clone(),
+                Vec::new(),
+                Vec::new(),
+            )
+            .hash;
+            sealed(&mut out, [(item.id.as_str(), item.hash.as_str(), hash)]);
+            sealed(
+                &mut out,
+                item.fields.iter().map(|f| {
+                    let hash = Field::new(f.id.clone(), "", f.contract.clone()).hash;
+                    (f.id.as_str(), f.hash.as_str(), hash)
+                }),
+            );
+            sealed(
+                &mut out,
+                item.variants.iter().map(|v| {
+                    let hash = Variant::new(v.id.clone(), "", v.contract.clone()).hash;
+                    (v.id.as_str(), v.hash.as_str(), hash)
+                }),
+            );
+        }
+        sealed(
+            &mut out,
+            self.parts.iter().map(|p| {
+                let hash = Part::new(p.id.clone(), "", Vec::new(), p.contract.clone()).hash;
+                (p.id.as_str(), p.hash.as_str(), hash)
+            }),
+        );
+        sealed(
+            &mut out,
+            self.capabilities.iter().map(|c| {
+                let hash = Capability::new(c.id.clone(), "", c.contract.clone()).hash;
+                (c.id.as_str(), c.hash.as_str(), hash)
+            }),
+        );
+        sealed(
+            &mut out,
+            self.behaviours.iter().map(|b| {
+                let hash = Behaviour::new(b.id.clone(), "", Vec::new(), b.contract.clone()).hash;
+                (b.id.as_str(), b.hash.as_str(), hash)
+            }),
+        );
+        sealed(
+            &mut out,
+            self.engine_items.iter().map(|e| {
+                let hash = EngineItem::new(e.id.clone(), e.contract.clone()).hash;
+                (e.id.as_str(), e.hash.as_str(), hash)
+            }),
+        );
+        out
+    }
+
+    /// [`Self::read`], and the ids it finds unsealed: [`Self::unsealed`]'s records, and `surface`
+    /// when the document's own hash is not [`Self::document_hash`] with every list this reader
+    /// doesn't know counted in: this reader recomputes the document hash, [`Self::read`] does not.
+    /// Such a list is how a newer writer adds a collection: JSON objects with a non-empty `id` (no
+    /// whitespace or control characters) and a `hash` (32 lowercase hex digits), whose other
+    /// fields this reader skips, and it refuses any other unknown list. Other
+    /// unknown values are outside the document hash. Every id, an extension tag's
+    /// `extension_tag:<registry>/<id>` included, is listed once in the whole document, and every
+    /// top-level key once.
+    pub fn read_sealed(bytes: &[u8]) -> Result<(Self, Vec<String>), ReadError> {
+        let surface = Self::read(bytes)?;
+        let mut unsealed = surface.unsealed();
+        let TopLevel(raw) =
+            serde_json::from_slice(bytes).map_err(|e| ReadError::Json(e.to_string()))?;
+        let known = serde_json::to_value(&surface).expect("a surface serializes");
+        let mut later = Vec::new();
+        for (key, value) in raw {
+            if key == "engine_items" || known.get(&key).is_some() || !value.get().starts_with('[') {
+                continue;
+            }
+            let refused = |why: String| ReadError::Json(format!("{key}: {why}"));
+            let records: Vec<&serde_json::value::RawValue> =
+                serde_json::from_str(value.get()).map_err(|e| refused(e.to_string()))?;
+            for record in records {
+                if !record.get().starts_with('{') {
+                    return Err(refused(format!("{} is no record", record.get())));
+                }
+                let record: LaterRecord =
+                    serde_json::from_str(record.get()).map_err(|e| refused(e.to_string()))?;
+                if record.id.is_empty()
+                    || record
+                        .id
+                        .chars()
+                        .any(|c| c.is_whitespace() || c.is_control())
+                {
+                    return Err(refused(format!("{:?} is no id", record.id)));
+                }
+                if record.hash.len() != 32
+                    || !record
+                        .hash
+                        .bytes()
+                        .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+                {
+                    return Err(refused(format!("{:?} is no hash", record.hash)));
+                }
+                later.push(record);
+            }
+        }
+        let tags: Vec<String> = surface
+            .extension_tags
+            .iter()
+            .map(|tag| format!("extension_tag:{}/{}", tag.registry, tag.id))
+            .collect();
+        let mut seen = BTreeSet::new();
+        let ids = surface.entries_with_engine().map(|(id, _)| id);
+        for id in ids
+            .chain(tags.iter().map(String::as_str))
+            .chain(later.iter().map(|r| r.id.as_str()))
+        {
+            if !seen.insert(id) {
+                return Err(ReadError::DuplicateId(id.to_owned()));
+            }
+        }
+        if surface.hash != surface.document_hash_with(&later) {
+            unsealed.push("surface".to_owned());
+        }
+        Ok((surface, unsealed))
     }
 
     /// The identifiers a mod's source may contain for each id: its [`leaf`], and a capability

@@ -20,6 +20,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -32,9 +33,12 @@ import java.util.zip.Inflater;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.level.ChunkTrackingView;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.core.SectionPos;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.PalettedContainerFactory;
 import net.minecraft.network.chat.Component;
@@ -111,7 +115,7 @@ import net.minecraft.world.phys.Vec3;
  * (entity ids, keep-alive ids, times, salts) are not part of the summaries.
  */
 public final class VanillaProtocolClient {
-    private final ClientInformation clientInformation = ClientInformation.createDefault();
+    private final ClientInformation clientInformation;
     private Socket socket;
     private DataInputStream in;
     private OutputStream out;
@@ -120,6 +124,7 @@ public final class VanillaProtocolClient {
     private ProtocolInfo<?> inbound;
     private ProtocolInfo<?> outbound;
     private String state;
+    private final boolean lowerSkyPads;
     /** With a fifth argument {@code entities}: the entity transcript mode (EntityTranscript). */
     private EntityTranscript entities;
     /** With {@code ride}: the entity mode, plus the order of what the player sees of a ride through a portal (RideTranscript). */
@@ -127,13 +132,21 @@ public final class VanillaProtocolClient {
     /** With {@code goat-voices}, {@code elder-curse}, {@code level-events} or {@code allay-dance}: the entity mode, plus a phased scene (PhasedTranscript). */
     private PhasedTranscript phased;
 
+    private VanillaProtocolClient(boolean lowerSkyPads) {
+        this.lowerSkyPads = lowerSkyPads;
+        var defaults = ClientInformation.createDefault();
+        clientInformation = lowerSkyPads ? new ClientInformation(defaults.language(), 10, defaults.chatVisibility(),
+            defaults.chatColors(), defaults.modelCustomisation(), defaults.mainHand(), defaults.textFilteringEnabled(),
+            defaults.allowsListing(), defaults.particleStatus()) : defaults;
+    }
+
     public static void main(String[] args) throws Exception {
         ParityData.init();
         String host = args[0];
         int port = Integer.parseInt(args[1]);
         String name = args[2];
         Path output = Path.of(args[3]);
-        VanillaProtocolClient client = new VanillaProtocolClient();
+        VanillaProtocolClient client = new VanillaProtocolClient(args.length > 4 && args[4].equals("lower-sky-pads"));
         if (args.length > 4 && args[4].equals("entities")) client.entities = new EntityTranscript();
         if (args.length > 4 && args[4].equals("ride")) {
             client.entities = new EntityTranscript();
@@ -479,6 +492,7 @@ public final class VanillaProtocolClient {
         socket.setSoTimeout(250);
         Map<String, String> chunks = new TreeMap<>();
         Map<String, String> layers = new TreeMap<>();
+        Map<String, ClientboundLevelChunkWithLightPacket> padPackets = new LinkedHashMap<>();
         ChunkPos chunkCacheCenter = null;
         int chunkCacheRadius = -1;
         Map<String, Integer> counts = new TreeMap<>();
@@ -608,12 +622,16 @@ public final class VanillaProtocolClient {
                 } else if (packet instanceof ClientboundChunkBatchFinishedPacket) {
                     send(new ServerboundChunkBatchReceivedPacket(64.0F));
                 } else if (packet instanceof ClientboundLevelChunkWithLightPacket p) {
-                    chunks.put(p.x() + "," + p.z(), chunkHash(p));
-                    if (entities == null && step == 0) layers.putIfAbsent(p.x() + "," + p.z(), lightLayers(p));
+                    String pos = p.x() + "," + p.z();
+                    if (!lowerSkyPads) chunks.put(pos, chunkHash(p));
+                    if (entities == null && step == 0) {
+                        if (lowerSkyPads) padPackets.putIfAbsent(pos, p);
+                        layers.putIfAbsent(pos, lowerSkyPads ? lowerSkyPad(p) : lightLayers(p));
+                    }
                     lastChunk = now;
                     int px = (int) Math.floor(position.position().x) >> 4;
                     int pz = (int) Math.floor(position.position().z) >> 4;
-                    if (p.x() == px && p.z() == pz && !respawning) chunkParts(p);
+                    if (p.x() == px && p.z() == pz && !respawning && !lowerSkyPads) chunkParts(p);
                     if (p.x() == px && p.z() == pz && respawnAt != null) respawnChunk = true;
                 } else if (packet instanceof net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket p
                     && furnaceWindow > 0 && p.containerId() == furnaceWindow) {
@@ -739,8 +757,10 @@ public final class VanillaProtocolClient {
             }
             // Once the chunks stop coming: chat, then /list, then leave.
             if (entities == null && loaded && lastChunk > 0 && now - lastChunk > 3000 && step == 0) {
-                record("play-chunks", chunks.size() + " " + chunks);
-                BLOCK_ENTITIES.forEach((k, v) -> record("play-block-entities", k + " " + v));
+                if (!lowerSkyPads) {
+                    record("play-chunks", chunks.size() + " " + chunks);
+                    BLOCK_ENTITIES.forEach((k, v) -> record("play-block-entities", k + " " + v));
+                }
                 if (chunkCacheCenter == null || chunkCacheRadius < 0) {
                     throw new IllegalStateException("no initial chunk cache position or radius");
                 }
@@ -754,6 +774,10 @@ public final class VanillaProtocolClient {
                     var unexpected = new TreeSet<>(layers.keySet());
                     unexpected.removeAll(expected);
                     throw new IllegalStateException("incomplete initial chunk view: missing " + missing + ", unexpected " + unexpected);
+                }
+                if (lowerSkyPads) {
+                    recordVisiblePads(layers, padPackets);
+                    return;
                 }
                 record("play-light-layers", layers.size() + " " + layers);
                 step = 1;
@@ -1038,6 +1062,50 @@ public final class VanillaProtocolClient {
         if (entities.length() > 0) BLOCK_ENTITIES.put(p.x() + "," + p.z(), entities.toString());
         return "c" + sha(content.toString().getBytes()).substring(0, 8) + "s" + sha(sections).substring(0, 8) + "h" + sha(heightmaps.toString().getBytes()).substring(0, 8) + "e"
             + sha(entities.toString().getBytes()).substring(0, 8);
+    }
+
+    /** Replay the first view's sky arrays and terrain status in vanilla client light storage. */
+    private void recordVisiblePads(Map<String, String> layers, Map<String, ClientboundLevelChunkWithLightPacket> packets) {
+        var engine = VanillaLightStorageOracle.engine(true, null);
+        var factory = PalettedContainerFactory.create(ParityData.access);
+        int minLight = engine.getMinLightSection();
+        for (var packet : packets.values()) {
+            var pos = new ChunkPos(packet.x(), packet.z());
+            var data = packet.lightData();
+            var arrays = data.skyUpdates().iterator();
+            // ClientPacketListener applies the light data, then reports status from the chunk.
+            for (int i = 0; i < engine.getLightSectionCount(); i++) {
+                DataLayer layer = data.skyYMask().get(i) ? new DataLayer(arrays.next().clone())
+                    : data.emptySkyYMask().get(i) ? new DataLayer() : null;
+                if (layer != null) engine.queueSectionData(LightLayer.SKY, SectionPos.of(pos, minLight + i), layer);
+            }
+            var sections = packet.chunkData().getReadBuffer();
+            for (int y = minLight + 1; y < engine.getMaxLightSection() - 1; y++) {
+                var section = new LevelChunkSection(factory);
+                section.read(sections);
+                engine.updateSectionStatus(SectionPos.of(pos, y), section.hasOnlyAir());
+            }
+            if (sections.isReadable() || arrays.hasNext()) throw new IllegalStateException("unexpected light column height");
+        }
+        engine.runLightUpdates();
+        for (var entry : packets.entrySet()) {
+            var packet = entry.getValue();
+            String state = VanillaLightStorageOracle.visibleLowerSkyPad(engine,
+                new ChunkPos(packet.x(), packet.z()), layers.get(entry.getKey()));
+            record("lower-sky-pad", entry.getKey() + " " + state);
+        }
+    }
+
+    /** Bit zero is the lower sky pad. An absent layer is not evidence of zero light. */
+    private static String lowerSkyPad(ClientboundLevelChunkWithLightPacket p) {
+        var data = p.lightData();
+        boolean packed = data.skyYMask().get(0), empty = data.emptySkyYMask().get(0);
+        if (packed && empty) throw new IllegalStateException("conflicting lower sky pad masks");
+        if (!packed) return empty ? "empty" : "absent";
+        byte[] values = data.skyUpdates().getFirst();
+        if (values.length != 2048) throw new IllegalStateException("wrong lower sky pad length");
+        for (byte b : values) if (b != 0) return "packed-nonzero";
+        return "packed-zero";
     }
 
     /** Compare both data and empty masks and every byte of each sent layer. */

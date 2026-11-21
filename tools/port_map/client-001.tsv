@@ -81,9 +81,9 @@ ClientHandshakePacketListenerImpl.onDisconnect	port	crates/sunrise-client/src/ne
 ClientHandshakePacketListenerImpl.handleCompression	port	crates/sunrise-client/src/net.rs::run	sets the compression threshold
 ClientHandshakePacketListenerImpl.handleCustomQuery	port	crates/sunrise-client/src/net.rs::run	answers an unknown custom query with no data
 ClientHandshakePacketListenerImpl.fillListenerSpecificCrashDetails	skip:debug		crash report details only
-ClientLevel.handleBlockChangedAck	port	crates/sunrise-client/src/game/network/remote/mod.rs::Game::end_predictions	settles the predicted block actions up to the sequence
+ClientLevel.handleBlockChangedAck	port	crates/sunrise-client/src/game/network/remote/break_prediction.rs::Game::end_predictions	settles the predicted block actions up to the sequence
 ClientLevel.onBlockEntityAdded	port	crates/sunrise-client/src/game.rs::Game::entity_geometry	off-screen block entities (beacon, end gateway, structure and test blocks) are drawn without a view test
-ClientLevel.syncBlockState	port	crates/sunrise-client/src/game/network/remote/mod.rs::Game::end_predictions	gap: minor: writes the server's state but does not move the player out when the block would sit on them (absSnapTo)
+ClientLevel.syncBlockState	port	crates/sunrise-client/src/game/network/remote/break_prediction.rs::Game::end_predictions	gap: minor: writes the server's state but does not move the player out when the block would sit on them (absSnapTo)
 ClientLevel.setBlock	port	crates/sunrise-client/src/game/network/remote/mod.rs::Game::set_block	gap: minor: the prediction bookkeeping is in Game::server_block
 ClientLevel.<init>	port	crates/sunrise-client/src/game/network/remote/session.rs::Game::enter_remote_dimension	gap: minor: the environment layers are applied in Game::render
 ClientLevel.addEnvironmentAttributeLayers	port	crates/sunrise-client/src/game.rs::Game::render	sky colour and sky light move during a lightning flash

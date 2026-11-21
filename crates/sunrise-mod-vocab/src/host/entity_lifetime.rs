@@ -22,8 +22,8 @@ pub trait EntityLifetimeBackend {
     #[access(WorldOnly)]
     fn entity_portal_cooldown(&self, entity: EntityRef) -> Option<i32>;
     /// Side: server.
-    /// Ticks the entity has lived (`Entity.tickCount`): mobs, item entities,
-    /// experience orbs and minecarts. Wraps as vanilla's `int` does.
+    /// Ticks the entity has lived (`Entity.tickCount`): players, mobs, item
+    /// entities, experience orbs and minecarts. Wraps as vanilla's `int` does.
     #[access(WorldOnly)]
     fn entity_tick_count(&self, entity: EntityRef) -> Option<i32>;
 }

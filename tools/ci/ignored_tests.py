@@ -106,8 +106,9 @@ LEG = re.compile(r"^(?P<package>[^#]+)#(?P<number>\d+)of(?P<count>\d+)$")
 LISTED = re.compile(r"^(\S+): test$")
 # A daily row's TARGET: the library, or one binary or integration test (cargo's --bin NAME, --test NAME).
 DAILY_TARGET = re.compile(r"^(?:lib|(?:bin|test):[\w-]+)$")
-# Why a test is a daily test (CONTRIBUTING.md "CI tiers"): slower than 2 s, or what it needs.
-DAILY_REASONS = ("slow", "game-boot", "resources", "child-process", "network", "windows", "own-sdk")
+# Why a test is a daily test (CONTRIBUTING.md "CI tiers"): slower than 2 s, or what it needs. `stable-line` is a check
+# `verify` runs too, repeated in the daily because a stable release needs a green daily of its commit to hold it.
+DAILY_REASONS = ("slow", "game-boot", "resources", "child-process", "network", "windows", "own-sdk", "stable-line")
 # A test that needs the daily head's SDK in book-quickstart.yml, not a previous Nightly.
 OWN_SDK_REASON = "own-sdk"
 # A daily reason for a test whose target compiles only on Windows (`#![cfg(windows)]`): no Linux shard or `daily-rows`

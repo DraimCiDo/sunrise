@@ -61,10 +61,10 @@ mod transient_entities {
         with_server(|game| {
             let display = display(game);
             game.save_entities(true).unwrap();
-            assert_eq!(game.save.load_entities(0, 0).len(), 1);
+            assert_eq!(game.save.load_entities(0, 0).unwrap().len(), 1);
             assert_eq!(display.set_persistent(game, false), Ok(true));
             assert_eq!(
-                game.save.load_entities(0, 0).len(),
+                game.save.load_entities(0, 0).unwrap().len(),
                 1,
                 "setting the flag does not rewrite an old snapshot"
             );
@@ -73,7 +73,7 @@ mod transient_entities {
             game.unload_entities(std::slice::from_ref(&chunk));
             game.save.flush().unwrap();
             assert_eq!(game.entity(display.id()), None);
-            let records = game.save.load_entities(0, 0);
+            let records = game.save.load_entities(0, 0).unwrap();
             assert!(records.is_empty());
             game.world.chunks.insert((0, 0), chunk);
             game.world.queue_entity_nbt((0, 0), records);

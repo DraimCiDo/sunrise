@@ -455,7 +455,11 @@ fn clone_tree(root: &Tag, java_copy: bool) -> Tag {
 
 /// Release a boundary-owned tag without recursive list/compound drops.
 pub fn discard_tag(root: Tag) {
-    let mut pending = vec![root];
+    let mut pending: Vec<_> = match root {
+        Tag::List(values) => values,
+        Tag::Compound(values) => values.into_values().collect(),
+        _ => return,
+    };
     while let Some(tag) = pending.pop() {
         match tag {
             Tag::List(values) => pending.extend(values),

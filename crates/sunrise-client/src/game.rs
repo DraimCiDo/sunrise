@@ -1198,6 +1198,9 @@ struct Game<'a> {
     /// A client mod asked to clear the particles (`clear_particles`), done before
     /// the next frame or particle tick (`apply_mod_particle_clear`).
     mod_clear_particles: std::cell::Cell<bool>,
+    /// The level random a block part's `animate_tick` holds as `event.random`, while it runs:
+    /// the game's own draws during the call go through it (`with_lent_level_random`).
+    lent_level_random: Option<std::rc::Rc<std::cell::RefCell<mod_api::LegacyRandomSource>>>,
     /// The shader pack's entity and block entity ids, while one draws entities.
     pack_ids: Option<shader_packs::PackIds>,
     started: Instant,
@@ -8835,8 +8838,8 @@ impl Game<'_> {
             self.dragon_fireball_geometry(camera, alpha, &mut entities);
         }
         pr.lap("pr_dragon_fireballs_bolts");
-        let (celestial, stars) = if title {
-            (Vec::new(), None)
+        let (celestial, celestial_bodies, stars) = if title {
+            (Vec::new(), Vec::new(), None)
         } else if self.overworld_skybox()
             && self.potions.effects.get("darkness").is_none()
             && self.potions.effects.get("blindness").is_none()
@@ -8844,9 +8847,10 @@ impl Game<'_> {
             // Camera.doesMobEffectBlockSky: no sun, moon or stars.
             self.celestial_geometry(&sky, rain)
         } else if self.end_skybox() && self.settings.sunrise.sky {
-            (self.end_flash_geometry(), None)
+            let (flash, bodies) = self.end_flash_geometry();
+            (flash, bodies, None)
         } else {
-            (Vec::new(), None)
+            (Vec::new(), Vec::new(), None)
         };
         self.custom_sky_frame([camera.x, camera.y, camera.z], &sky, (rain, thunder), title);
         pr.lap("pr_celestial");
@@ -9051,6 +9055,8 @@ impl Game<'_> {
             } else {
                 &[]
             },
+            // With `celestial` left empty, these have no quad to draw.
+            celestial_bodies: &celestial_bodies,
             stars: stars.filter(|_| self.settings.sunrise.sky || title),
             hand: &hand,
             hand_items: &hand_items,
@@ -11020,6 +11026,7 @@ impl<'a> Game<'a> {
             glowing_vertices: Default::default(),
             mod_sounds: Default::default(),
             mod_clear_particles: Default::default(),
+            lent_level_random: None,
             pack_ids: None,
             health_hud: hud_layout::HealthHud::default(),
             started: now,

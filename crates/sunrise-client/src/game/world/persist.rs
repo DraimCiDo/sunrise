@@ -1034,6 +1034,8 @@ impl Game<'_> {
             if let Some(state) = transferred {
                 self.adopt_transferred_entity_state(a.id, state);
             }
+            // Entity.<init>: its own random's first draws, saved UUID or not.
+            let uuid = with_constructor_uuid(uuid);
             let id = a.id;
             self.remember(id, uuid, tag);
             self.bind_saved_entity_attachments(id, &mut a.attachment_lifetime);
@@ -1440,12 +1442,43 @@ impl Game<'_> {
     /// The compound of an entity Sunrise does not simulate, with its current
     /// position, rotation and UUID.
     pub(super) fn other_to_nbt(&self, o: &super::commands::OtherEntity, uuid: [i32; 4]) -> Tag {
+        self.other_tag(o, uuid, true)
+    }
+
+    pub(super) fn other_tag(
+        &self,
+        o: &super::commands::OtherEntity,
+        uuid: [i32; 4],
+        include_id: bool,
+    ) -> Tag {
         let mut tag = self
             .persist
             .raw
             .get(&o.id)
             .cloned()
             .unwrap_or_else(|| Tag::Compound(Default::default()));
+        let marker = matches!(o.kind.as_str(), "minecraft:marker" | "marker");
+        if marker || o.interaction.is_some() {
+            if !marker {
+                write_static_entity_fields(&mut tag);
+            }
+            let base = entity_nbt::Base {
+                id: &o.kind,
+                uuid,
+                position: o.position,
+                motion: entity_nbt::motion(&tag),
+                rotation: [o.yaw, o.pitch],
+                on_ground: entity_nbt::flag(&tag, "OnGround"),
+                fall_distance: sunrise_client::save::float(tag.get("fall_distance")).unwrap_or(0.0),
+            };
+            let mut out = entity_nbt::EntityTagWriter::from_saved(tag);
+            base.write(&mut out, include_id);
+            // Marker.addAdditionalSaveData is empty.
+            if let Some(state) = &o.interaction {
+                state.write(&mut out);
+            }
+            return out.finish();
+        }
         if let Tag::Compound(c) = &mut tag {
             // Display.addAdditionalSaveData omits the transient start delay.
             if matches!(
@@ -1454,7 +1487,11 @@ impl Game<'_> {
             ) {
                 c.remove(&"start_interpolation".into());
             }
-            c.insert("id".into(), Tag::String(o.kind.as_str().into()));
+            if include_id {
+                c.insert("id".into(), Tag::String(o.kind.as_str().into()));
+            } else {
+                c.remove(&"id".into());
+            }
             c.insert(
                 "Pos".into(),
                 Tag::List(
@@ -1482,11 +1519,6 @@ impl Game<'_> {
         if display {
             self.write_display_nbt(o, &mut tag);
         }
-        if let Some(state) = &o.interaction
-            && let Tag::Compound(fields) = &mut tag
-        {
-            state.write(fields);
-        }
         if let Some(eye) = o.eye
             && let Tag::Compound(c) = &mut tag
         {
@@ -1498,14 +1530,9 @@ impl Game<'_> {
             );
             c.entry("Fire".into()).or_insert(Tag::Short(0));
         }
-        // Marker, LeashFenceKnotEntity and EyeOfEnder still use
-        // Entity.saveWithoutId's common fields, which their own saves leave out.
-        if o.eye.is_some()
-            || matches!(
-                o.kind.as_str(),
-                "minecraft:marker" | "marker" | "minecraft:leash_knot"
-            )
-        {
+        // LeashFenceKnotEntity and EyeOfEnder still use the common fields
+        // of Entity.saveWithoutId, which their own saves leave out.
+        if o.eye.is_some() || o.kind == "minecraft:leash_knot" {
             entity_nbt::fill_common_defaults(&mut tag);
         }
         with_raw(tag, None) // Entity.saveWithoutId's flags, as booleans.
@@ -1741,6 +1768,13 @@ impl Game<'_> {
     /// A mob's entity tag with the mobs riding it under `Passengers`.
     pub(super) fn mob_tree_nbt(&mut self, i: usize) -> Tag {
         self.mob_object_tree_nbt(MobObject::Resident(i), false)
+    }
+
+    pub(super) fn mob_tree_tag_without_id(&mut self, i: usize) -> Tag {
+        let id = self.mobs[i].id;
+        let mut tag = self.mob_object_tag(MobObject::Resident(i), false);
+        self.put_passengers(&mut tag, id);
+        tag
     }
     /// A hive stores just its entering bee, not its riding tree.
     pub(super) fn mob_own_nbt(&mut self, i: usize) -> Tag {

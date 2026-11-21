@@ -1,5 +1,6 @@
 """Break-glass stable patch releases (docs/release-flow.md "Break-glass patch releases"): the legs a patch's changes
 select, the rules never waived, the two approvals, and how the workflows hold to them."""
+import ast
 import contextlib
 import io
 import json
@@ -15,6 +16,8 @@ from tests.test_release_branches import REPO, git_in, workflow
 from tools import release_train as train
 from tools.ci import daily_summary as summary
 from tools.ci import nightly
+
+PUBLISHED = train.github_time("2026-11-01T00:00:00Z")
 
 ALWAYS = sorted(train.BREAK_GLASS_ALWAYS)
 CRATES = ["cargo-sunrise-mod", "parity", "shards", "windows-runtime-leases"]
@@ -114,7 +117,19 @@ class LegsTests(unittest.TestCase):
                     ("crates/testonly/src/lib.rs", "fix\n", False), ("crates/sunrise-world/src/lib.rs", "fix\n", False),
                     ("Cargo.toml", root() + "# a comment\n", False), ("Cargo.toml", root(other="3"), False),
                     ("Cargo.toml", root(serde="1.1"), True),
-                    ("Cargo.lock", lock(rand="0.8.1"), False), ("Cargo.lock", lock(serde="1.0.2"), True)):
+                    # What the root sets for every crate: debug-assertions in a release build, say, turns on
+                    # sunrise-release-sign's developer key.
+                    ("Cargo.toml", root() + "[profile.release]\ndebug-assertions = true\n", True),
+                    ("Cargo.toml", root() + "[profile.release.package.sunrise-release-sign]\nopt-level = 0\n", True),
+                    ("Cargo.toml", root() + "[workspace.lints.rust]\nunsafe_code = 'allow'\n", True),
+                    ("Cargo.toml", root().replace("[workspace.dependencies]", "[workspace.package]\nedition = '2021'\n"
+                                                  "[workspace.dependencies]"), True),
+                    ("Cargo.toml", root().replace("[workspace.dependencies]", "[workspace]\nresolver = '3'\n"
+                                                  "[workspace.dependencies]"), True),
+                    ("Cargo.lock", lock(rand="0.8.1"), False), ("Cargo.lock", lock(serde="1.0.2"), True),
+                    # The judge's `serde` no longer names one package: nothing to compare, so it is a change.
+                    ("Cargo.lock", lock() + '[[package]]\nname = "serde"\nversion = "1.0.1"\nsource = "git+y#1"\n',
+                     True)):
                 with self.subTest(path=path, content=content):
                     git_in(Path(folder))("checkout", "-q", parent)
                     sha = write_commit(folder, {path: content})
@@ -128,6 +143,44 @@ class LegsTests(unittest.TestCase):
             with mock.patch.object(train, "ROOT", Path(folder)):
                 plain, special = train.changed_since(parent, sha)
             self.assertEqual((sorted(special), plain), (["Cargo.toml", "crates/evil/Cargo.toml", "crates/evil/src/lib.rs"], []))
+
+    def test_a_judges_locked_graph_is_compared_by_the_packages_its_selectors_name(self):
+        # `a 1.0.0` locked three times, as Cargo writes it (checked against `cargo generate-lockfile`): a path
+        # package, which has no source, and two git ones, whose sources carry the locked commit and whose selectors
+        # don't.
+        git_a, git_b = "git+https://example.com/a?branch=main", "git+https://example.com/b"
+
+        def closure(judge, a=("local", git_a, git_b), commit="1111", b=()):
+            sources = {"local": None, git_a: f"{git_a}#{commit}", git_b: f"{git_b}#2222"}
+            packages = [("sunrise-mod-api-gen", None, judge), *(("a", sources[name], ()) for name in a),
+                        ("b", "registry+x", b),
+                        # A registry package of the judge's own name: never where the judge's closure starts.
+                        ("sunrise-mod-api-gen", "registry+x", ())]
+            lock = {"package": [{"name": name, "version": "1.0.0", **({"source": source} if source else {}),
+                                 "dependencies": list(dependencies)} for name, source, dependencies in packages]}
+            with mock.patch.object(train, "manifest", lambda sha, path: lock):
+                return train.locked_closure("sha", ["sunrise-mod-api-gen"])
+
+        def linked(found):
+            return {(name, source) for name, _, source, *_ in found}
+
+        self.assertEqual(linked(closure([f"a 1.0.0 ({git_a})"])),
+                         {("sunrise-mod-api-gen", ""), ("a", f"{git_a}#1111")}, "the git package, by its commit")
+        self.assertNotEqual(closure([f"a 1.0.0 ({git_a})"]), closure([f"a 1.0.0 ({git_a})"], commit="3333"),
+                            "the same git package moved to another commit")
+        self.assertEqual(linked(closure(["a 1.0.0"])), {("sunrise-mod-api-gen", ""), ("a", "")},
+                         "an unqualified version among several is the path package")
+        self.assertNotEqual(closure(["a 1.0.0"]), closure([f"a 1.0.0 ({git_b})"]))
+        # The same packages reached, but the judge now links `a` itself and not only through `b`.
+        self.assertNotEqual(closure([f"a 1.0.0 ({git_a})", "b"], b=[f"a 1.0.0 ({git_a})"]),
+                            closure(["b"], b=[f"a 1.0.0 ({git_a})"]))
+        # Cargo qualifies a selector only once another `a` is locked: the same package, spelled out, is no change.
+        self.assertEqual(closure([f"a 1.0.0 ({git_a})"]), closure(["a"], a=(git_a,)))
+        # A selector naming no entry or more than one: nothing to compare, so the caller fails closed.
+        for judge, a in (([f"a 1.0.0 (git+https://example.com/c)"], ("local", git_a)), (["a"], ("local", git_a)),
+                         (["a 1.0.0"], (git_a, git_b)), (["a 2.0.0"], ("local",))):
+            with self.subTest(judge=judge, a=a):
+                self.assertIsNone(closure(judge, a))
 
     def test_every_selected_leg_is_a_daily_leg(self):
         legs = set(train.BREAK_GLASS_ALWAYS).union(*(selected or () for _, selected in train.BREAK_GLASS_LEGS))
@@ -202,8 +255,17 @@ class EvidenceTests(unittest.TestCase):
         moved = run_record(5, head="e" * 40)
         self.assertEqual(train.newest_full_daily(self.SHA, [(moved, full(self.SHA))]), (moved["html_url"], True))
         self.assertIsNone(train.newest_full_daily(self.SHA, [(moved, full("e" * 40))]))
-        self.assertIsNone(train.newest_full_daily(self.SHA, [(green, full(self.SHA))], since="2026-11-20T00:00:00Z"),
+        self.assertIsNone(train.newest_full_daily(self.SHA, [(green, full(self.SHA))], since=train.github_time("2026-11-20T00:00:00Z")),
                           "a break-glass parent's follow-up runs after its publication")
+        self.assertIsNone(train.newest_full_daily(self.SHA, [(green, full(self.SHA))], since=train.github_time(green["created_at"])),
+                          "a run created in the publication's second is not after it")
+        # Compared as times, not text: the same instant in another zone is not after it, a fraction of a second is.
+        since = train.github_time("2026-11-20T00:00:00Z")
+        self.assertIsNone(train.newest_full_daily(self.SHA, [(run_record(8, "2026-11-20T01:00:00+01:00"),
+                                                              full(self.SHA))], since=since))
+        later = run_record(9, "2026-11-20T00:00:00.5+00:00")
+        self.assertEqual(train.newest_full_daily(self.SHA, [(later, full(self.SHA))], since=since),
+                         (later["html_url"], True))
         # The run's own conclusion decides too: a failed run is red whatever its green job says, a cancelled one no
         # verdict.
         failed, cancelled = run_record(6, conclusion="failure"), run_record(7, conclusion="cancelled")
@@ -232,14 +294,14 @@ class ProblemsTests(unittest.TestCase):
     def test_a_patch_whose_legs_gate_and_parent_daily_passed_may_ship(self):
         with tempfile.TemporaryDirectory() as folder:
             parent, sha = history(folder, ("docs/modding/src/a.md", "file"))
-            release = train.Release(PARENT_TAG, parent, "2026-11-18T00:00:00Z")
+            release = train.Release(PARENT_TAG, parent, train.github_time("2026-11-18T00:00:00Z"))
             found = self.problems(folder, sha, release, runs=self.evidence(sha, parent))
         self.assertEqual(found, ([], sorted(ALWAYS + ["book-quickstart"])))
 
     def test_each_rule_refuses_on_its_own(self):
         with tempfile.TemporaryDirectory() as folder:
             parent, sha = history(folder, ("crates/sunrise-world/src/lib.rs", "file"))
-            release = train.Release(PARENT_TAG, parent, "2026-11-18T00:00:00Z")
+            release = train.Release(PARENT_TAG, parent, train.github_time("2026-11-18T00:00:00Z"))
             good = self.evidence(sha, parent, CRATES)
             own_red = [(run_record(3, "2026-11-20T13:00:00Z"), full(sha, green=False))]
             for change, reason in (
@@ -261,7 +323,7 @@ class ProblemsTests(unittest.TestCase):
         # one after it, and the newest one after it decides.
         with tempfile.TemporaryDirectory() as folder:
             parent, sha = history(folder, ("docs/a.md", "file"))
-            release = train.Release(PARENT_TAG, parent, "2026-11-20T00:00:00Z")
+            release = train.Release(PARENT_TAG, parent, train.github_time("2026-11-20T00:00:00Z"))
             legs = (run_record(2), legs_jobs(sha, ALWAYS))
             green_before = (run_record(1, "2026-11-19T09:00:00Z"), full(parent))
             green_after = (run_record(3, "2026-11-20T05:00:00Z"), full(parent))
@@ -280,7 +342,7 @@ class ProblemsTests(unittest.TestCase):
     def test_an_unmapped_or_special_path_a_foreign_parent_or_no_parent_refuses(self):
         with tempfile.TemporaryDirectory() as folder:
             parent, sha = history(folder, ("docs/a.md", "file"), (".github/workflows/release.yml", "file"))
-            release = train.Release(PARENT_TAG, parent, "")
+            release = train.Release(PARENT_TAG, parent, PUBLISHED)
             problems, legs = self.problems(folder, sha, release, runs=self.evidence(sha, parent, ()))
             self.assertIn("'.github/workflows/release.yml'", problems[0])
             other = git_in(Path(folder))("commit-tree", "-m", "elsewhere", "4b825dc642cb6eb9a060e54bf8d69288fbee4904")
@@ -292,7 +354,7 @@ class ProblemsTests(unittest.TestCase):
             self.assertIn("no published stable release on 26.3", self.problems(folder, sha, None, tag=PARENT_TAG)[0][0])
         with tempfile.TemporaryDirectory() as folder:
             parent, sha = history(folder, ("docs/modding/link.md", "link"))
-            problems, _ = self.problems(folder, sha, train.Release(PARENT_TAG, parent, ""),
+            problems, _ = self.problems(folder, sha, train.Release(PARENT_TAG, parent, PUBLISHED),
                                         runs=self.evidence(sha, parent))
             self.assertIn("'docs/modding/link.md'", problems[0])
 
@@ -382,7 +444,7 @@ class NotesTests(unittest.TestCase):
 
 class ReserveTests(unittest.TestCase):
     SHA = "c" * 40
-    PARENT = train.Release(PARENT_TAG, "a" * 40, "")
+    PARENT = train.Release(PARENT_TAG, "a" * 40, PUBLISHED)
 
     def reserve(self, parent, problems=()):
         env = {"GITHUB_REF": f"refs/heads/{train.RELEASE_BRANCH}", "GITHUB_REPOSITORY": REPO, "BREAK_GLASS": "true",
@@ -412,7 +474,7 @@ class ReserveTests(unittest.TestCase):
 
 class PickTests(unittest.TestCase):
     SHA = "c" * 40
-    PARENT = train.Release(PARENT_TAG, "a" * 40, "")
+    PARENT = train.Release(PARENT_TAG, "a" * 40, PUBLISHED)
 
     def pick(self, parent=PARENT, **env):
         """pick_stable for a break-glass patch of `parent` (a Release, or an exception stable_parent raises): its
@@ -573,11 +635,19 @@ class WorkflowTests(unittest.TestCase):
         # The checkout is the candidate: its .cargo/config.toml, [patch] or build scripts would run. Signatures are
         # checked with OpenSSL (nightly.py verify-sums); the only build is the parent's sunrise-stage, from the
         # parent's own tree (nightly.parent_stage).
-        jobs = workflow("nightly-build.yml")["jobs"]
-        for name in ("pick", "break-glass", "sign", "publish", "musl-attach"):
-            for step in jobs[name]["steps"]:
-                with self.subTest(job=name, step=step.get("name", step.get("uses"))):
-                    self.assertNotRegex(step.get("run", ""), r"(^|\s)cargo\s")
+        # The SDK's and the mod tool's signing, checking and publishing jobs build nothing either.
+        for file, names in (("nightly-build.yml", ("pick", "break-glass", "sign", "publish", "musl-attach")),
+                            ("sdk-publish.yml", ("sign", "publish")), ("mod-tool.yml", ("sign", "verify", "publish"))):
+            jobs = workflow(file)["jobs"]
+            for name in names:
+                for step in jobs[name]["steps"]:
+                    with self.subTest(workflow=file, job=name, step=step.get("name", step.get("uses"))):
+                        self.assertNotRegex(step.get("run", ""), r"(^|\s)cargo\s")
+        # And nightly.py, which those jobs run, starts cargo in one place: parent_stage, on the parent's tree.
+        tree = ast.parse(Path(nightly.__file__).read_text())
+        starts = {function.name for function in ast.walk(tree) if isinstance(function, ast.FunctionDef)
+                  for node in ast.walk(function) if isinstance(node, ast.Constant) and node.value == "cargo"}
+        self.assertEqual(starts, {"parent_stage"})
 
     def test_the_full_daily_follows_every_published_stable_release(self):
         full_daily = workflow("nightly-build.yml")["jobs"]["full-daily"]

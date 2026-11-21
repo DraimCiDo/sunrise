@@ -654,7 +654,7 @@ pub fn anim(m: &Mob, s: &State, p: &mut Poses, animations: &HashMap<String, Anim
 }
 /// `TamableAnimal.addAdditionalSaveData`: owner and ordered Sitting, plus
 /// the saddle, the zombie's variant and the brain's attack cooldown.
-pub fn to_nbt(m: &Mob, map: &mut sunrise_core::nbt::Compound) {
+pub fn to_nbt(m: &Mob, map: &mut crate::entity_nbt::EntityTagWriter) {
     use sunrise_core::nbt::Tag;
     if let Some(owner) = m.extra.owner {
         map.insert("Owner".into(), Tag::IntArray(owner.to_vec()));

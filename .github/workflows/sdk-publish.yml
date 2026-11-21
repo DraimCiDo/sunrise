@@ -11,7 +11,7 @@ name: sdk publish
 #   it checks out nothing but tools/ci/sign_release.sh, which hashes the assets and signs SHA256SUMS for the tag
 #   `sdk-<sha>`, so the signature never passes for a game release (sunrise-release-sign: sdk_digest), and refuses a
 #   commit that is not on its branch. Any other run signs with a throwaway key.
-# - `publish` checks the signature as the launcher does (sunrise-release-sign verify) and that the release holds
+# - `publish` checks the signature as the launcher does (tools/ci/nightly.py verify-sums) and that the release holds
 #   exactly the assets a Nightly needs (tools/ci/nightly.py sdk-assets), then creates `sdk-<sha>`: only on main or
 #   release/26.3 with `publish` set. Any other branch's run, or a dry run, publishes nothing.
 on:
@@ -225,8 +225,9 @@ jobs:
       - name: The signature, checked as the launcher checks it
         run: |
           key=(); [[ "$PUBLISH" != true ]] && key=(--key "$(cat key/ephemeral.pub)")
-          cargo run --locked --quiet -p sunrise-release-sign -- verify --repository "$GITHUB_REPOSITORY" --tag "$TAG" \
-            --publishing "${key[@]}" dist
+          # The workflow checkout's Python and the runner's OpenSSL against main's release keys: nothing is compiled, and
+          # no binary of the release runs.
+          python3 tools/ci/nightly.py verify-sums --tag "$TAG" --publishing "${key[@]}" dist
       - name: Exactly the assets a Nightly needs
         run: |
           expected=$(python3 tools/ci/nightly.py sdk-assets | sort)

@@ -661,18 +661,24 @@ impl Game<'_> {
     }
     /// `Entity.isInRain`: rain at the block position or at the top of the box.
     pub(super) fn in_rain(&mut self, at: Vec3, top: f64) -> bool {
-        let p = BlockPos::new(
-            at.x.floor() as i32,
-            at.y.floor() as i32,
-            at.z.floor() as i32,
-        );
-        let up = BlockPos::new(p.x, top.floor() as i32, p.z);
         // A server's client has no live biome features to ask: it answers from
         // the chunks and the weather it was sent.
         if self.remote.is_some() {
+            return self.rain_falls_on(at, top);
+        }
+        let (p, up) = rain_positions(at, top);
+        self.with_level(|b, level, _| b.is_raining_at(level, p) || b.is_raining_at(level, up))
+    }
+    /// [`Self::in_rain`] read without the level access (no snapshot, no flushes): a server's
+    /// client asks the chunks and weather it was sent, single player the side's read-only
+    /// `Level.isRainingAt`.
+    pub(super) fn rain_falls_on(&self, at: Vec3, top: f64) -> bool {
+        use sunrise_client::motion::SideLevel;
+        let (p, up) = rain_positions(at, top);
+        if self.remote.is_some() {
             return self.raining_at(p) || self.raining_at(up);
         }
-        self.with_level(|b, level, _| b.is_raining_at(level, p) || b.is_raining_at(level, up))
+        self.is_raining_at(&self.world, p) || self.is_raining_at(&self.world, up)
     }
     /// `ConduitBlockEntity.updateAndAttackTarget`: while the conduit hunts
     /// (42 frame blocks) its target stays until it dies or leaves the 8
@@ -956,6 +962,16 @@ impl Game<'_> {
         }
         Some(skin.fallback.to_owned())
     }
+}
+
+/// `Entity.isInRain`'s two positions: `blockPosition()` and the same column at the box's top.
+fn rain_positions(at: Vec3, top: f64) -> (BlockPos, BlockPos) {
+    let p = BlockPos::new(
+        at.x.floor() as i32,
+        at.y.floor() as i32,
+        at.z.floor() as i32,
+    );
+    (p, BlockPos::new(p.x, top.floor() as i32, p.z))
 }
 
 #[cfg(test)]

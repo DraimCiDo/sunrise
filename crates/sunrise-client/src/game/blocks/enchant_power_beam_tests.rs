@@ -76,6 +76,7 @@ pub(in crate::game) fn enchant_particles(game: &Game<'_>) -> usize {
         gateway_particles: &|_, _| 0,
         thundering: false,
         ultrawarm: false,
+        block_parts: None,
     };
     for _ in 0..4096 {
         animate_tick(game.res.animate(), &mut engine, &ctx, TABLE);

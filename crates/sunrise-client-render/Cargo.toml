@@ -26,7 +26,7 @@ sunrise-java-properties = { path = "../sunrise-java-properties" }
 sunrise-mod-package = { path = "../sunrise-mod-package" }
 # The narrator option's status and whether the narrator is there (Options.narrator).
 sunrise-narrator = { path = "../sunrise-narrator" }
-# OptiFine-format pack files: random entity textures (hud/atlas.rs), connected textures
+# OptiFine-format pack files: random entity textures (hud/atlas_pack.rs), connected textures
 # (connected.rs) and custom item texture rules (cit.rs).
 sunrise-connected = { path = "../sunrise-connected" }
 sunrise-optifine = { path = "../sunrise-optifine" }

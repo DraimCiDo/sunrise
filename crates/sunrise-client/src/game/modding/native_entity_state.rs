@@ -6,7 +6,7 @@
 //! and `None` for the rest, as for a stale handle. Secondary use also reads
 //! the local client's live semantic sneak state; fire and underwater reads also
 //! use the client's own cached state.
-//! Ticks lived (`Entity.tickCount`) are read for mobs, items, orbs and minecarts.
+//! Ticks lived (`Entity.tickCount`) are read for players, mobs, items, orbs and minecarts.
 use super::{Game, commands::Target};
 use mod_api::EntityRef;
 use sunrise_client::mobs::{Mob, Species, sync};
@@ -618,10 +618,20 @@ impl Game<'_> {
             _ => None,
         }
     }
-    /// Ticks the entity has lived (`Entity.tickCount`): mobs, item entities,
-    /// experience orbs and minecarts. Wraps as vanilla's `int` does.
+    /// Ticks the entity has lived (`Entity.tickCount`): players, mobs, item
+    /// entities, experience orbs and minecarts. Wraps as vanilla's `int` does.
     pub(super) fn entity_tick_count(&self, entity: EntityRef) -> Option<i32> {
         Some(match self.native_entity_target(entity)? {
+            Target::Player => self.player.as_ref()?.health.tick_count,
+            Target::Guest(conn) => {
+                let guest = self.command_guest(conn)?;
+                guest
+                    .motion
+                    .as_deref()
+                    .map(|motion| motion.health.tick_count)
+                    .or(guest.carried_tick_count)
+                    .unwrap_or(0)
+            }
             Target::Mob(id) => self.mobs.iter().find(|m| m.id == id)?.age as i32,
             Target::Item(id) => self.dropped.iter().find(|i| i.id == id)?.ticks as i32,
             Target::Orb(id) => self.orbs.iter().find(|o| o.id == id)?.ticks as i32,
@@ -922,13 +932,36 @@ mod tests {
     #[ignore = "daily"]
     fn tick_count_reads_supported_entities_and_refuses_others() {
         use super::super::minecarts::{CartKind, Minecart};
+        use super::super::native_entity_refs::tests::bind_local_player;
+        use super::super::native_guest_turn_tests::with_guests;
         use mod_api::WorldEpoch;
         use sunrise_client::entities::ExperienceOrb;
         use sunrise_client::items::ItemStack;
+        use sunrise_client::motion::PlayerMotion;
         use sunrise_core::geometry::Vec3;
 
-        with_player(|game, player| {
-            assert_eq!(player.tick_count(game), None);
+        with_guests(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            bind_local_player(game, 20, 123);
+            let player = game.entity(20).unwrap();
+            game.player.as_mut().unwrap().health.tick_count = i32::MAX;
+            game.player.as_mut().unwrap().health.advance_entity_clock();
+            assert_eq!(player.tick_count(game), Some(i32::MIN));
+
+            let acting_guest = game.entity(12).unwrap();
+            let parked_guest = game.entity(13).unwrap();
+            assert_eq!(parked_guest.tick_count(game), Some(0));
+            game.as_guest(13, |game| {
+                game.player.as_mut().unwrap().health.tick_count = 314;
+            })
+            .unwrap();
+            assert_eq!(parked_guest.tick_count(game), Some(314));
+
+            game.as_guest(12, |game| {
+                game.player.as_mut().unwrap().health.tick_count = 2718;
+                assert_eq!(acting_guest.tick_count(game), Some(2718));
+            })
+            .unwrap();
 
             let kind = game
                 .res

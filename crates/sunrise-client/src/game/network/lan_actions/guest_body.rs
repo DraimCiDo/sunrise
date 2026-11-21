@@ -33,6 +33,10 @@ pub(super) fn initialize(resources: &MotionResources, guest: &mut Guest) -> bool
     let Ok(motion) = PlayerMotion::new(resources, p) else {
         return false;
     };
+    let mut motion = motion;
+    if let Some(tick_count) = guest.carried_tick_count.take() {
+        motion.health.tick_count = tick_count;
+    }
     guest.motion = Some(Box::new(motion));
     let entity_id = guest.entity_id as u32;
     let accepted_hit = guest.carried_hit.take();

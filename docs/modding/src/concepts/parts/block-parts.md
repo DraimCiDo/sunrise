@@ -29,6 +29,16 @@ never a panic. Existing render-distance and block-overlay eligibility filters
 still apply. Overlapping cracks use the highest stage for each cell. The callback
 changes neither break speed nor which blocks break, and never runs on a server.
 
+## Random display ticks
+
+`BlockPart::animate_tick(host, event)` is vanilla's `Block.animateTick`, with a mutable
+`ClientHost`. It runs when the client's ambient sampling (`ClientLevel.animateTick`, 667 random
+positions within 16 blocks and 667 within 32 each tick) picks a position whose block has the part.
+It runs inside the pick: after the block's own vanilla effects, before its fluid's. The event has the client `level`, `pos`, `state`
+and the level's `random`. Add particles with `host.add_particle` and play sounds with
+`host.play_local_sound`. A block without the method costs the sampler one table lookup, and the
+hook never runs on a server. See [Random display ticks for blocks](../../how-to/client/block-animate-ticks.md).
+
 ## Light emission
 
 `BlockPart::light_emission` supplies positional light for blocks that declare

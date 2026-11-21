@@ -10,19 +10,19 @@ import pathlib
 import re
 
 SKIP_FILES = {
-    "crates/sunrise-client-render/src/hud/tests.rs",
     "crates/sunrise-client-render/src/hud/gui_sprite.rs",
     "crates/sunrise-client-render/src/hud/sprite_modifiers.rs",
     "crates/sunrise-client-render/src/hud/menu_pictures.rs",
     "crates/sunrise-client-render/src/atlas_sources.rs",
 }
+SKIP_DIRS = ("crates/sunrise-client-render/src/hud/tests/",)
 SKIP_LINE = re.compile(r"starts_with\(|strip_prefix\(|textures/|\.mcmeta")
 WHOLE = re.compile(r'"gui/sprites/')
 NAMESPACED = re.compile(r'"([a-z0-9_.-]+):gui/sprites/')
 
 changed = 0
 for path in sorted(pathlib.Path("crates").rglob("*.rs")):
-    if str(path) in SKIP_FILES:
+    if str(path) in SKIP_FILES or str(path).startswith(SKIP_DIRS):
         continue
     text = path.read_text(encoding="utf-8", errors="surrogateescape")
     if "gui/sprites/" not in text:

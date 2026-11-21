@@ -151,6 +151,16 @@ pub struct PlayerStatus {
     pub invisible: bool,
     pub sneaking: bool,
     pub sprinting: bool,
+    /// `LivingEntity.isAlive`: not removed and health above 0.
+    pub alive: bool,
+    /// `Entity.isCurrentlyGlowing` as a client reads it.
+    pub glowing: bool,
+    /// `Entity.isInLava`.
+    pub in_lava: bool,
+    /// `Entity.isVehicle`: something rides the player.
+    pub ridden: bool,
+    /// `Entity.isInWaterOrRain`.
+    pub wet: bool,
 }
 
 /// `maxPlayerHunger`, `maxPlayerAir` and `maxPlayerArmor`: Minecraft's own maximums.
@@ -338,6 +348,14 @@ pub const NAMES: &[&str] = &[
     "is_invisible",
     "is_sneaking",
     "is_sprinting",
+    "is_alive",
+    "is_child",
+    "is_glowing",
+    "is_in_lava",
+    "is_in_water",
+    "is_ridden",
+    "is_riding",
+    "is_wet",
     "endFlashIntensity",
     "endFlashPosition",
     "ambientLight",
@@ -1118,6 +1136,17 @@ fn status_value(name: &str, inputs: &PackInputs) -> Option<Value> {
         "is_invisible" => flag(status.invisible || status.spectator),
         "is_sneaking" => flag(status.sneaking),
         "is_sprinting" => flag(status.sprinting),
+        "is_alive" => flag(status.alive),
+        // `Player` keeps `LivingEntity.isBaby`, which is always false.
+        "is_child" => flag(false),
+        "is_glowing" => flag(status.glowing),
+        "is_in_lava" => flag(status.in_lava),
+        // `Entity.isInWater` is `wasTouchingWater`, which `feetInWater` reads too.
+        "is_in_water" => flag(status.feet_in_water),
+        "is_ridden" => flag(status.ridden),
+        // `Entity.isPassenger`, as `isRiding`.
+        "is_riding" => flag(status.riding),
+        "is_wet" => flag(status.wet),
         "endFlashIntensity" => Value::f(&[inputs.end_flash]),
         _ => return None,
     })
@@ -1181,11 +1210,28 @@ pub fn index(name: &str) -> Option<usize> {
     NAMES.iter().position(|n| *n == name)
 }
 
-/// The position in [`NAMES`] of the value a program reads as `name`; `geometry`: the program
-/// draws the game's geometry (gbuffers, shadow), which reads its own fog mode and shape and no
-/// centre depth.
+/// The player booleans of [`NAMES`] that only custom uniforms read: spec 3.4 says `[IR]` also
+/// exposes six of the fourteen as uniforms, and its uniform table (5.2) lists only those six.
+/// A program that declares one gets no built-in value for it: it reads 0, unless the pack
+/// defines a custom uniform of that name, which binds instead. Recorded as decision D-2
+/// (`docs/cleanroom/decisions.md`).
+const EXPRESSION_ONLY: [&str; 8] = [
+    "is_alive",
+    "is_child",
+    "is_glowing",
+    "is_in_lava",
+    "is_in_water",
+    "is_ridden",
+    "is_riding",
+    "is_wet",
+];
+
+/// The position in [`NAMES`] of the value a program reads as `name`, none for
+/// [`EXPRESSION_ONLY`]; `geometry`: the program draws the game's geometry (gbuffers, shadow),
+/// which reads its own fog mode and shape and no centre depth.
 pub fn index_in(name: &str, geometry: bool) -> Option<usize> {
     match name {
+        n if EXPRESSION_ONLY.contains(&n) => None,
         "fogMode" if geometry => index(GBUFFERS_FOG_MODE),
         "fogShape" if geometry => index(GBUFFERS_FOG_SHAPE),
         "centerDepthSmooth" if geometry => index(GBUFFERS_CENTER_DEPTH),
@@ -1349,7 +1395,7 @@ mod tests {
                 .iter()
                 .filter(|n| status_value(n, &inputs).is_some())
                 .count()
-                == 18
+                == 26
         );
     }
 
@@ -2558,6 +2604,130 @@ pub(super) mod initial_history_tests {
         }
     }
 
+    /// Spec 3.4's player booleans: custom uniforms know all fourteen, before the first frame
+    /// and on a frame, and each of the eight only they read follows its own field.
+    #[test]
+    fn custom_uniforms_read_every_player_boolean() {
+        let properties = sunrise_shaders::Properties::parse(
+            "uniform.bool.a = is_alive
+             uniform.bool.b = is_child
+             uniform.bool.c = is_glowing
+             uniform.bool.d = is_in_lava
+             uniform.bool.e = is_in_water
+             uniform.bool.f = is_ridden
+             uniform.bool.g = is_riding
+             uniform.bool.h = is_wet
+             uniform.bool.i = is_burning || is_hurt || is_invisible || is_on_ground || is_sneaking || is_sprinting
+",
+            &sunrise_shaders::Macros::standard(),
+        );
+        let mut custom = sunrise_shaders::Custom::parse(&properties);
+        custom.eval(0.0, &zero);
+        assert!(custom.notes.is_empty(), "{:?}", custom.notes);
+        let hud = HudBatch::scratch([800, 450]);
+        let f = frame(&hud);
+        let mut u = FrameUniforms::default();
+        let mut read = |status: PlayerStatus| -> [f32; 9] {
+            let input = PackInputs {
+                status,
+                ..Default::default()
+            };
+            u.update(&f, &input, [800, 450]);
+            u.eval_custom(&mut custom);
+            std::array::from_fn(|i| match u.values[NAMES.len() + i] {
+                Value::F(v) => v[0],
+                _ => panic!("float uniform expected"),
+            })
+        };
+        let off = PlayerStatus::default();
+        for (status, want) in [
+            (off, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            (
+                PlayerStatus { alive: true, ..off },
+                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ),
+            (
+                PlayerStatus {
+                    glowing: true,
+                    ..off
+                },
+                [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ),
+            (
+                PlayerStatus {
+                    in_lava: true,
+                    ..off
+                },
+                [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ),
+            (
+                PlayerStatus {
+                    feet_in_water: true,
+                    ..off
+                },
+                [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+            ),
+            (
+                PlayerStatus {
+                    ridden: true,
+                    ..off
+                },
+                [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+            ),
+            (
+                PlayerStatus {
+                    riding: true,
+                    ..off
+                },
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            ),
+            (
+                PlayerStatus { wet: true, ..off },
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+            ),
+            (
+                PlayerStatus {
+                    sneaking: true,
+                    ..off
+                },
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+            ),
+        ] {
+            assert_eq!(read(status), want, "{status:?}");
+        }
+    }
+
+    /// Programs read only the six player booleans of the uniform table (spec 3.4, 5.2; D-2): a
+    /// program that declares one of the other eight gets no built-in index for it.
+    #[test]
+    fn programs_read_only_six_player_booleans() {
+        for name in [
+            "is_alive",
+            "is_child",
+            "is_glowing",
+            "is_in_lava",
+            "is_in_water",
+            "is_ridden",
+            "is_riding",
+            "is_wet",
+        ] {
+            assert!(index(name).is_some(), "{name} reaches custom uniforms");
+            assert_eq!(index_in(name, false), None, "{name}");
+            assert_eq!(index_in(name, true), None, "{name}");
+        }
+        for name in [
+            "is_burning",
+            "is_hurt",
+            "is_invisible",
+            "is_on_ground",
+            "is_sneaking",
+            "is_sprinting",
+        ] {
+            assert_eq!(index_in(name, false), index(name), "{name}");
+            assert!(index(name).is_some(), "{name}");
+        }
+    }
+
     /// Custom uniforms start over on a scripted clock's frame 1 and carry their smoothing
     /// and randoms through the frames after it, so a sequence drawn again repeats.
     #[test]
@@ -2768,6 +2938,7 @@ pub(super) mod initial_history_tests {
             see_through: &[],
             world_primitives: Default::default(),
             celestial: &[],
+            celestial_bodies: &[],
             stars: None,
             hand: &[],
             hand_items: &[],

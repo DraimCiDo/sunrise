@@ -286,6 +286,7 @@ cargo = [
   { package = "sunrise-world", target = "lib", filter = "nbt_path::" },
   { package = "sunrise-client", target = "lib", filter = "game::commands::" },
   { package = "sunrise-client", target = "lib", filter = "game::server_reload::" },
+  { package = "sunrise-client", target = "lib", filter = "game::mob_discard_tests::" },
 ]
 harnesses = [
   "command_*", "function_*", "tick_function_time", "macro_source_type", "scoreboard", "entity_scores", "selector_*",

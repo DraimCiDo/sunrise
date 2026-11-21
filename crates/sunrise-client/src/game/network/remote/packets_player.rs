@@ -39,6 +39,7 @@ impl Game<'_> {
             r.sequence = 0;
             r.own_invisible = false;
             r.own_on_fire = false;
+            r.glowing.remove(&p.player_id);
             r.online_mode = p.online_mode;
             r.levels.clone_from(&p.levels);
             r.enforces_secure_chat = p.enforces_secure_chat;
@@ -120,6 +121,7 @@ impl Game<'_> {
             if let Some(r) = self.remote.as_mut() {
                 r.own_invisible = false;
                 r.own_on_fire = false;
+                r.glowing.remove(&r.entity_id);
                 r.local_entity_silent = false;
             }
         }

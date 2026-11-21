@@ -1057,6 +1057,12 @@ def tool(target: str) -> Path:
     folder = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve() / "release"
     if not (folder / TOOL_PROGRAM).is_file():
         sys.exit(f"cargo built no {folder / TOOL_PROGRAM}")
+    # Only a debug-assertions build reads SUNRISE_SDK_TRUSTED_KEY (sunrise-release-sign's sdk_keys_for), and the
+    # variable's name is in the binary exactly when it does: a tool that ships never trusts a key from the
+    # environment, whatever a profile, a per-package override or the environment turned on.
+    if b"SUNRISE_SDK_TRUSTED_KEY" in (folder / TOOL_PROGRAM).read_bytes():
+        sys.exit(f"{folder / TOOL_PROGRAM} was built with debug assertions: it would trust an SDK key from "
+                 "SUNRISE_SDK_TRUSTED_KEY")
     return folder
 
 

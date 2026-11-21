@@ -144,7 +144,7 @@ upstream: horizon-rust/horizon keeps `native_mod_image`.
 - `hud::dynamic_textures::tests`: the slot and budget decisions with no GPU (classes, a full class, a freed slot and
   budget coming back, an update in the same slot and in place), every refusal and that it changes nothing, and a
   rebuilt atlas getting every kept image again.
-- `hud::tests::the_dynamic_texture_pool_exists_only_when_a_mod_is_loaded`: no pool and no growth without a mod; with
+- `hud::tests::atlas::the_dynamic_texture_pool_exists_only_when_a_mod_is_loaded`: no pool and no growth without a mod; with
   one, every slot whole, apart from the others and out of the sprite table.
 - `game::native_dynamic_textures_tests::the_pool_follows_the_loaded_client_mods`.
 - Historical: the removed `wire_loopback::dynamic_textures` fixture covered calls and refusals across the guest boundary.

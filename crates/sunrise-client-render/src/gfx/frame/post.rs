@@ -200,7 +200,8 @@ impl Renderer {
             // Both strokes of a high contrast outline, the black one first.
             post.set_lines(pack_draws_outline.then(|| pack_post::Lines {
                 edges: self.outline.clone(),
-                count: outline_edges as u32 * if frame.outline_high_contrast { 2 } else { 1 },
+                count: outline_edges as u32,
+                strokes: if frame.outline_high_contrast { 2 } else { 1 },
             }));
             post.set_clouds(pack_draws_clouds.then(|| pack_post::Clouds {
                 vertices: self.cloud_buffer.clone(),

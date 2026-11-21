@@ -40,6 +40,9 @@ mod world_target_tests;
 mod celestial_blend_tests;
 
 #[cfg(test)]
+mod sky_switch_tests;
+
+#[cfg(test)]
 mod higher_shadowcolor_tests;
 
 #[cfg(test)]
@@ -56,6 +59,12 @@ mod sky_disc_blend_tests;
 
 #[cfg(test)]
 mod undrawn_terrain_tests;
+
+#[cfg(test)]
+mod line_side_tests;
+
+#[cfg(test)]
+mod geometry_input_tests;
 
 mod image_formats;
 use image_formats::{image_format, storage_formats_of};
@@ -99,6 +108,9 @@ mod translucent_color_tests;
 
 #[cfg(test)]
 mod noise_resolution_tests;
+
+#[cfg(test)]
+mod player_boolean_tests;
 
 /// The texture behind a pack sampler name.
 #[derive(Clone, Copy, PartialEq)]
@@ -605,10 +617,12 @@ pub(super) struct World<'a> {
 }
 
 /// This frame's block outline, when the pack draws it: the outline buffer (one instance per
-/// edge, pack_lines.rs) and the edges in it.
+/// edge, pack_lines.rs), the edges of a stroke and the strokes in it, each drawn over the one
+/// before (a high contrast outline's black stroke, then its bright one).
 pub(super) struct Lines {
     pub edges: wgpu::Buffer,
     pub count: u32,
+    pub strokes: u32,
 }
 
 /// This frame's clouds, when the pack draws them: their vertices, uniform, quad indices and
@@ -690,6 +704,9 @@ pub struct PackPost {
     /// program: vanilla's stays hidden even when the program writes nothing.
     hides_sky: bool,
     hides_celestial: bool,
+    /// `sky`, `stars`, `sun` and `moon`: the parts of the vanilla sky left out, by the pack's sky
+    /// programs and by the game's sky alike.
+    sky_switches: sunrise_shaders::SkySwitches,
     /// `colortex0ClearColor`, when the pack sets it.
     sky_clear: Option<[f32; 4]>,
     /// What draws rain and snow (the same program, each with its kind's sprite as `texture`),
@@ -2269,7 +2286,7 @@ fn build_compute(
     pack: &Resources<'_>,
 ) -> Option<Pass> {
     let index = |name: &str, ty: &str| {
-        pack_uniforms::index(name).or_else(|| custom_index(custom, name, ty))
+        pack_uniforms::index_in(name, false).or_else(|| custom_index(custom, name, ty))
     };
     let interface = &c.interface;
     let (entries, samplers, slots, reads, shadow_reads, images) = bindings(
@@ -2832,6 +2849,7 @@ impl PackPost {
         });
         let water_unpatched = unpatched_name.filter(|_| shadow_water.is_some());
         let (hides_sky, hides_celestial) = (post.sky.is_some(), post.sky_textured.is_some());
+        let sky_switches = post.sky_switches;
         let sky = (post.sky.is_some() || post.sky_textured.is_some()).then(|| {
             let geometry = PackSky::new(device);
             let basic = Geometry {
@@ -3007,7 +3025,10 @@ impl PackPost {
             .clouds
             .zip(cloud_geometry.as_ref())
             .and_then(|(p, g)| build(p, Some(g)));
-        let line_buffers = [Some(super::pack_lines::layout())];
+        let line_buffers = [
+            Some(super::pack_lines::layout()),
+            Some(super::pack_lines::over_layout()),
+        ];
         let line_geometry = Geometry {
             buffers: &line_buffers,
             table: None,
@@ -3423,6 +3444,7 @@ impl PackPost {
             hides_clouds,
             hides_sky,
             hides_celestial,
+            sky_switches,
             sky_clear,
             weather,
             weather_draw: None,
@@ -4134,9 +4156,12 @@ impl PackPost {
         let Some(mut sky) = self.sky.take() else {
             return;
         };
-        let parts = sky
-            .geometry
-            .prepare(queue, frame, self.uniforms.shadow.sun_path_rotation);
+        let parts = sky.geometry.prepare(
+            queue,
+            frame,
+            self.uniforms.shadow.sun_path_rotation,
+            self.sky_switches,
+        );
         let mut groups = [None, None];
         for (i, pass) in [&mut sky.basic, &mut sky.textured].into_iter().enumerate() {
             if let Some(pass) = pass {
@@ -4650,7 +4675,19 @@ impl PackPost {
                 self.draws.bind(&mut rp, "OUTLINE");
             }
             rp.set_vertex_buffer(0, lines.edges.slice(..));
-            rp.draw(0..6, 0..lines.count);
+            // Each edge reads the width of the stroke drawn over it from the second buffer: the
+            // next stroke's edge (the outline buffer from that stroke's first edge on, as this
+            // stroke's edges are instances from its own first edge on), or the last stroke's own.
+            let stroke_bytes = u64::from(lines.count) * 32;
+            for stroke in 0..lines.strokes {
+                let over = if stroke + 1 < lines.strokes {
+                    stroke_bytes
+                } else {
+                    0
+                };
+                rp.set_vertex_buffer(1, lines.edges.slice(over..));
+                rp.draw(0..6, stroke * lines.count..(stroke + 1) * lines.count);
+            }
         }
         self.mips_valid &= !pass.written;
         self.lines = Some(pass);
@@ -4895,6 +4932,12 @@ impl PackPost {
     /// Whether the pack has the sun and moon's program, drawing or not.
     pub fn has_celestial(&self) -> bool {
         self.hides_celestial
+    }
+
+    /// `sky`, `stars`, `sun` and `moon`: the parts of the vanilla sky the pack leaves out, which
+    /// the game's sky leaves out too when the pack has no program for them.
+    pub fn sky_switches(&self) -> sunrise_shaders::SkySwitches {
+        self.sky_switches
     }
 
     /// Whether the pack draws translucent terrain itself.
