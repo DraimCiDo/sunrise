@@ -1,5 +1,5 @@
 //! The on-disk managed mod selection and its validation boundary.
-use crate::config::{ModId, Mods};
+use crate::input::{ModId, Mods};
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use std::{
     collections::BTreeSet,
@@ -12,7 +12,7 @@ use sunrise_mod_package::manifest::version_from_str;
 pub const LOCK: &str = "mods.lock";
 pub const MAX_LOCK: u64 = 1 << 20;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModLock {
     format: Format,
@@ -46,14 +46,14 @@ impl From<Format> for u32 {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LockedMod {
     pub id: ModId,
     #[serde(deserialize_with = "version_from_str")]
     pub version: semver::Version,
     pub sha256: Sha256,
-    url: HttpsUrl,
+    pub(crate) url: HttpsUrl,
     pub file: PackagePath,
     pub reason: Reason,
     #[serde(default)]
@@ -63,7 +63,7 @@ pub struct LockedMod {
     pub native: Option<Native>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Reason {
     Requested,
@@ -71,7 +71,7 @@ pub enum Reason {
     Required,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Native {
     Prebuilt(Sha256),
@@ -156,7 +156,7 @@ impl fmt::Display for ReleaseTag {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "String", into = "String")]
-struct HttpsUrl(url::Url);
+pub(crate) struct HttpsUrl(url::Url);
 
 impl TryFrom<String> for HttpsUrl {
     type Error = String;
@@ -239,6 +239,21 @@ fn lock_rows<'de, D: Deserializer<'de>>(de: D) -> Result<Vec<LockedMod>, D::Erro
 }
 
 impl ModLock {
+    pub(crate) fn new(
+        sunrise: BuildId,
+        release: Option<ReleaseTag>,
+        input: Mods,
+        mods: Vec<LockedMod>,
+    ) -> Self {
+        Self {
+            format: Format,
+            sunrise,
+            release,
+            input,
+            mods,
+        }
+    }
+
     /// Read and validate the lock in the canonical server folder `root`.
     pub fn read(root: &Path) -> Result<Self, String> {
         let path = local_file(root, Path::new(LOCK))?;

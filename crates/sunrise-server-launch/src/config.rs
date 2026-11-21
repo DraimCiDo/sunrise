@@ -182,8 +182,7 @@ pub struct Config {
     pub mods: Option<Mods>,
 }
 
-mod mods;
-pub use mods::{ModId, ModRequest, Mods, Pack, Spelled};
+pub use sunrise_mod_install::input::{ModId, ModRequest, Mods, Pack, Spelled};
 
 const EVENTS: [&str; 6] = ["chat", "join", "leave", "death", "kick", "announce"];
 

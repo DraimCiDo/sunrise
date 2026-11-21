@@ -48,6 +48,9 @@ pub const MIXINS_TOOL_RELEASES: &str = "https://github.com/sunrise-org/sunrise/r
 /// overrides it.
 pub const SDK_RELEASES: &str = "https://github.com/sunrise-org/sunrise/releases/download";
 
+/// The reviewed mod registry's package/version index. `SUNRISE_MOD_INDEX` overrides it.
+pub const MOD_INDEX: &str = "https://sunrise-org.github.io/sunrise-mods/index.json";
+
 /// A file of the game's source at one commit; the commit and the file's path follow. `native-lock`
 /// reads the pinned build's `Cargo.lock` from it.
 pub const GAME_SOURCE_FILES: &str = "https://raw.githubusercontent.com/sunrise-org/sunrise";

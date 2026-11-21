@@ -232,6 +232,7 @@ pub fn check_start(
     let root = fs::canonicalize(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let lock = Lock::read(&root)?;
     check_files(&lock, &root, input)?;
+    sunrise_mod_install::selection::check_enabled(&root, &lock).map_err(Refusal)?;
     let program = launch::program_in(config, dir, install)
         .map_err(|cause| Refusal::new(cause, Repair::Engine))?;
     if let Some(expected) = &lock.release {
@@ -260,22 +261,33 @@ pub fn check_start(
         }
     }
     check_native(&lock, &root, &program)?;
+    warn_takedowns(&root, &lock);
     Ok(Some(program))
 }
 
-pub fn command(dir: &Path, args: &[String]) -> Result<(), String> {
-    let as_json = match args {
-        [cmd] if cmd == "list" => false,
-        [cmd, flag] if cmd == "list" && flag == "--json" => true,
-        _ => return Err("use: sunrise-server mods list [--json]".into()),
+mod manage;
+pub use manage::{command, init};
+
+pub fn read_lease(dir: &Path) -> Result<Option<fs::File>, Refusal> {
+    sunrise_mod_install::transaction::read_lease(dir).map_err(|error| {
+        Refusal(format!(
+            "{error}\n  If interrupted: sunrise-server mods rollback"
+        ))
+    })
+}
+
+fn warn_takedowns(root: &Path, lock: &Lock) {
+    let Ok(Some(index)) = sunrise_mod_install::registry::cached(root) else {
+        return;
     };
-    if !dir.join(launch::config::FILE).is_file() {
-        return Err(
-            "no server.toml here: run it in your server's folder, or add --dir FOLDER".into(),
-        );
+    for row in &lock.mods {
+        if let Some(revoked) = index.revoked(row.id.as_str(), row.sha256.as_str()) {
+            eprintln!(
+                "{} {} was taken down ({}). Remove it: sunrise-server mods remove {}",
+                row.id, row.version, revoked.reason, row.id
+            );
+        }
     }
-    let root = fs::canonicalize(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    write_list(&Lock::read(&root)?, std::io::stdout().lock(), as_json).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

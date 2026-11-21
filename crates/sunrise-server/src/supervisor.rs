@@ -193,6 +193,7 @@ struct Watch {
 
 pub fn run(dir: &Path) -> Result<(), StartError> {
     signals::install();
+    let mut lease = mods::read_lease(dir)?;
     let config = Config::load(dir)?;
     let install = launch::Install::find();
     let program = match mods::check_start(dir, &config, install.as_ref())? {
@@ -249,6 +250,7 @@ pub fn run(dir: &Path) -> Result<(), StartError> {
             config
         } else {
             // Edits to server.toml and a switch to another release apply on the next restart.
+            lease = mods::read_lease(dir)?;
             let config = Config::load(dir)?;
             if let Some(w) = apply_queued(&shared, dir, &config) {
                 watch = Some(w);
@@ -311,6 +313,7 @@ pub fn run(dir: &Path) -> Result<(), StartError> {
             transfers.as_deref(),
         )
         .map_err(|e| format!("{}: {e}", program.display()))?;
+        drop(lease.take());
         {
             let mut state = shared.state.lock().unwrap();
             state.engine_pid = Some(child.id());

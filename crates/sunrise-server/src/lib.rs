@@ -52,7 +52,7 @@ Usage: sunrise-server [--dir DIR] <command>
 
   init        Set up a server here: the EULA, the world, the port, who may join (asks, or takes flags:
               --eula --world NAME --seed SEED --port N --whitelist/--no-whitelist --player NAME... --op NAME
-              --offline --yes)
+              --offline --yes --mods ID[@RANGE],... --pack ID|FILE|URL --json)
   run         Run the server in the foreground; type console commands, Ctrl-C stops it cleanly. It
               restarts the game if it crashes.
   start       Run the server in the background, or resume a stopped supervisor (output goes to logs/supervisor.log)
@@ -88,8 +88,8 @@ Usage: sunrise-server [--dir DIR] <command>
               restart on it; goes back by itself if the game isn't up within the timeout (300 s).
               --archive FILE --version NAME installs an archive you have
   rollback    Back to the release used before the update
-  mods list [--json]
-              Show the mods recorded in mods.lock; never fetches or changes anything
+  mods <command> [--json]
+              Manage registry content and packs. `sunrise-server mods --help` lists the commands
   config [--json]
               The settings in server.toml
   config set KEY=VALUE... [--json]
@@ -176,6 +176,12 @@ pub fn main() -> ExitCode {
         }
         Some("version" | "-V" | "--version") => {
             println!("sunrise-server {VERSION}");
+            Ok(())
+        }
+        Some("init") if args[1..] == ["--help"] || args[1..] == ["-h"] => {
+            println!(
+                "Usage: sunrise-server init [--eula] [--world NAME] [--seed SEED] [--port N]\n  [--whitelist|--no-whitelist] [--player NAME] [--op NAME] [--offline] [--yes]\n  [--mods ID[@RANGE],…] [--pack ID|FILE.spack|URL] [--json]"
+            );
             Ok(())
         }
         Some("init") => init_answers(&args[1..]).and_then(|a| init::run(&dir, a)),
@@ -277,6 +283,21 @@ fn init_answers(args: &[String]) -> Result<init::Answers, String> {
             "--player" => answers.players.push(value(arg)?),
             "--op" => answers.op = Some(value(arg)?),
             "--offline" => answers.online = Some(false),
+            "--json" => answers.json = true,
+            "--mods" => {
+                for id in value(arg)?.split(',') {
+                    answers
+                        .mods
+                        .push(sunrise_mod_install::input::ModRequest::try_from(
+                            id.to_owned(),
+                        )?);
+                }
+            }
+            "--pack" if answers.pack.is_none() => {
+                answers.pack = Some(sunrise_mod_install::selection::PackSource::try_from(
+                    value(arg)?,
+                )?);
+            }
             other => return Err(format!("init: unknown option {other}")),
         }
     }

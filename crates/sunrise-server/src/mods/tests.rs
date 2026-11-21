@@ -158,6 +158,7 @@ fn release_drift_refuses_only_a_known_selected_release() {
     let text = fs::read_to_string(&path).unwrap();
     fs::write(&path, format!("release = '26.3-0.1.0'\n{text}")).unwrap();
     fs::write(root.join("rails.smod"), b"abc").unwrap();
+    fs::write(root.join("sunrise-mods.txt"), "mod.rails:false\n").unwrap();
     let installation = tempfile::tempdir().unwrap();
     let install = launch::Install {
         root: installation.path().into(),

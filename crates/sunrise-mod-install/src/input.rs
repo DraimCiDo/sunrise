@@ -170,7 +170,6 @@ impl From<ModRequest> for String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
 
     #[test]
     fn pack_can_have_extras_and_disabled_members() {
@@ -181,7 +180,8 @@ list = ["rails@^2, <3", "windows"]
 off = ["pack_member"]
 trust_native_code = true
 "#;
-        let mods = Config::parse(source).unwrap().mods.unwrap();
+        let original: toml::Table = toml::from_str(source).unwrap();
+        let mods: Mods = original["mods"].clone().try_into().unwrap();
         let Some(Pack::Registry { id, version }) = &mods.pack else {
             panic!("expected a registry pack");
         };
@@ -201,19 +201,18 @@ trust_native_code = true
             .unwrap()
             .parse::<toml::Table>()
             .unwrap();
-        let original = source.parse::<toml::Table>().unwrap();
         assert_eq!(&saved, original["mods"].as_table().unwrap());
         let restyled = source
             .replace("cozy@1.0", "cozy@1.0.0")
             .replace("^2, <3", "^2,<3");
-        assert_eq!(Config::parse(&restyled).unwrap().mods, Some(mods));
+        let restyled: toml::Table = toml::from_str(&restyled).unwrap();
+        let reparsed: Mods = restyled["mods"].clone().try_into().unwrap();
+        assert_eq!(reparsed, mods);
 
-        let local = Config::parse("[mods]\npack = './local.sp aces.spack'").unwrap();
+        let local: Mods = toml::from_str("pack = './local.sp aces.spack'").unwrap();
         assert!(
-            matches!(local.mods.unwrap().pack, Some(Pack::File(path)) if path == std::path::Path::new("./local.sp aces.spack"))
+            matches!(local.pack, Some(Pack::File(path)) if path == std::path::Path::new("./local.sp aces.spack"))
         );
-        assert!(Config::parse("[mods]").unwrap().mods.is_some());
-        assert!(Config::parse("").unwrap().mods.is_none());
     }
 
     #[test]
@@ -239,7 +238,7 @@ trust_native_code = true
             ("off = ['rails@2']", "mods.off \"rails@2\": not a mod ID"),
             ("trust_native_code = 'true'", "expected a boolean"),
         ] {
-            let error = Config::parse(&format!("[mods]\n{field}")).unwrap_err();
+            let error = toml::from_str::<Mods>(field).unwrap_err().to_string();
             assert!(error.contains(message), "{error}");
         }
     }

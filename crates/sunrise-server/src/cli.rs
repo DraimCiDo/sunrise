@@ -20,6 +20,7 @@ fn running(dir: &Path) -> Result<Client, String> {
 
 /// `start`: `run` in the background, its output in logs/supervisor.log; returns once the game is up.
 pub fn start(dir: &Path) -> Result<(), StartError> {
+    let _mods = mods::read_lease(dir)?;
     let config = config::Config::load(dir);
     // Client::open can create the supervisor lock file. Refuse managed drift before that write.
     if let Ok(config) = &config
